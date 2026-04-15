@@ -1,6 +1,6 @@
 [Unit]
 Description=PACS — cold-archive mirror (Tier 2, dormant on dev)
-Documentation=file:/home/perecanals/pacs/stanford-stroke-pacs/documentation/operations/backup_strategy.md
+Documentation=file:/home/perecanals/ssc-pacs/stanford-stroke-pacs/documentation/operations/backup_strategy.md
 Wants=network-online.target
 After=network-online.target
 
@@ -18,6 +18,6 @@ IOSchedulingClass=idle
 #
 # Without that env file, the script no-ops with a notice (exit 0).
 EnvironmentFile=-/etc/default/pacs-cold-mirror
-ExecStart=/home/perecanals/pacs/stanford-stroke-pacs/scripts/mirror_cold_archive.sh
+ExecStart=/home/perecanals/ssc-pacs/stanford-stroke-pacs/scripts/mirror_cold_archive.sh
 StandardOutput=journal
 StandardError=journal
