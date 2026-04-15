@@ -28,6 +28,9 @@ companion/dist/
 # Migration/backup dumps
 migration_backups/
 
+# Local maintenance notes (not part of shipped repo)
+maintenance/
+
 # Integration protocol logs
 image_integration_protocols/*.log
 image_integration_protocols/error_log_*.json
