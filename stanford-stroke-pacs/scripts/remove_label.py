@@ -11,6 +11,8 @@ import psycopg2
 from dotenv import load_dotenv
 from psycopg2 import sql
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "companion"))
+
 from labelled_table_sync import LEVEL_CONFIGS, sanitize_label_column
 
 ENV_PATH = Path(__file__).resolve().parent / "../.env"
