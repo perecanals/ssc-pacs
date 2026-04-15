@@ -1,0 +1,92 @@
+@reference "../app.css";
+
+.sidebar {
+  @apply w-60 bg-surface border-r border-border p-4 flex flex-col gap-3 fixed top-12 bottom-0 overflow-y-auto;
+}
+
+.sidebar__section-title {
+  @apply text-xs font-semibold text-text-muted uppercase tracking-wide;
+}
+
+.sidebar__clear-filter {
+  @apply text-xs text-primary bg-transparent border-none cursor-pointer p-0 mt-1;
+}
+
+.sidebar__empty-msg {
+  @apply text-xs text-text-muted px-2 py-1 mt-1;
+}
+
+.sidebar__level-group {
+  @apply mt-1.5;
+}
+
+.sidebar__level-heading {
+  @apply px-2 text-[10px] font-semibold text-text-muted uppercase tracking-wide;
+}
+
+.sidebar__label-list {
+  @apply mt-0.5 flex flex-col gap-0.5 list-none;
+}
+
+.sidebar__label-item {
+  @apply relative flex items-center gap-2 px-2 py-1 rounded-md cursor-pointer text-xs;
+}
+
+.sidebar__label-text {
+  @apply min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap;
+}
+
+.sidebar__label-item::after {
+  content: attr(data-full-label);
+  position: absolute;
+  left: 0.5rem;
+  top: calc(100% + 0.125rem);
+  z-index: 20;
+  width: max-content;
+  max-width: min(24rem, calc(100vw - 2rem));
+  padding: 0.25rem 0.5rem;
+  border: 1px solid var(--color-border);
+  border-radius: 0.375rem;
+  background: var(--color-surface);
+  color: var(--color-text);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+  white-space: normal;
+  word-break: break-word;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-2px);
+  transition: opacity 80ms ease, transform 80ms ease;
+}
+
+.sidebar__label-item:hover::after {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.sidebar__label-item--active {
+  @apply bg-pill-bg text-pill-text;
+}
+
+.sidebar__label-item--inactive {
+  @apply hover:bg-pill-bg hover:text-pill-text;
+}
+
+.sidebar__label-count {
+  @apply shrink-0 text-xs text-text-muted;
+}
+
+.sidebar__quick-filters {
+  @apply mt-auto pt-3 border-t border-border;
+}
+
+.sidebar__filter-group {
+  @apply flex flex-col gap-1 mt-1;
+}
+
+.sidebar__filter-label {
+  @apply text-[10px] font-medium text-text-muted px-0.5;
+}
+
+.sidebar__modality-select {
+  @apply text-xs px-1.5 py-1 border border-border rounded-md bg-surface;
+}

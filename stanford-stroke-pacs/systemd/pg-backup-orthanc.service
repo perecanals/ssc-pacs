@@ -1,0 +1,16 @@
+[Unit]
+Description=PACS — pg_dump backup of orthanc_db
+Documentation=file:/home/perecanals/pacs/stanford-stroke-pacs/documentation/operations/backup_strategy.md
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=perecanals
+Group=perecanals
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
+ExecStart=/home/perecanals/pacs/stanford-stroke-pacs/scripts/backup_pg_db.sh orthanc_db
+StandardOutput=journal
+StandardError=journal

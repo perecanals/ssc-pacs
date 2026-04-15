@@ -1,0 +1,12 @@
+# Storage paths (cold_archive_root, legacy DICOM root) come from repo-root
+# config.toml automatically. Do not duplicate them here unless you intend to
+# override on a per-run basis. The script will warn if you do.
+#
+# env_path defaults to <repo>/.env. Override if you need a different file.
+
+database: stanford-stroke
+src_dir: /DATA2/perecanals/datasets/praneeta_cytof_data
+overwrite_if_exists: false
+anonymize_files: false
+delete_originals_after_verification: true
+import_label: praneeta_cytof_data

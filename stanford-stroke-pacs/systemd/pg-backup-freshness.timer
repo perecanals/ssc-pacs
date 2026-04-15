@@ -1,0 +1,12 @@
+[Unit]
+Description=PACS — hourly backup freshness check
+Documentation=file:/home/perecanals/pacs/stanford-stroke-pacs/documentation/operations/backup_strategy.md
+
+[Timer]
+OnCalendar=hourly
+RandomizedDelaySec=5m
+Persistent=true
+Unit=pg-backup-freshness.service
+
+[Install]
+WantedBy=timers.target

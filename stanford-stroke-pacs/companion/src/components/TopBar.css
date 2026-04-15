@@ -1,0 +1,57 @@
+@reference "../app.css";
+
+.topbar {
+  @apply fixed top-0 left-0 right-0 h-12 bg-surface border-b border-border flex items-center gap-4 px-4 z-50 text-sm;
+}
+
+.topbar__brand {
+  @apply flex items-center gap-3 shrink-0;
+}
+
+.topbar__title {
+  @apply font-semibold text-sm;
+}
+
+.topbar__home-link {
+  @apply text-primary text-xs hover:underline;
+}
+
+.topbar__levels {
+  @apply flex flex-1 items-center justify-center gap-1 min-w-0;
+}
+
+.topbar__tools {
+  @apply flex items-center gap-2 shrink-0;
+}
+
+.topbar__level-btn {
+  @apply px-3 py-1 rounded-md border border-transparent text-xs font-medium text-text-muted bg-transparent transition-colors cursor-pointer hover:text-text hover:border-border;
+}
+
+.topbar__level-btn--active {
+  @apply border-primary/30 bg-primary/10 text-primary;
+}
+
+.topbar__actions {
+  @apply flex items-center gap-2 shrink-0;
+}
+
+.topbar__user-info {
+  @apply text-xs text-text-muted;
+}
+
+.topbar__user-name {
+  @apply text-text;
+}
+
+.topbar__login-form {
+  @apply flex items-center gap-2;
+}
+
+.topbar__login-input {
+  @apply px-2 py-1 border border-border rounded-md text-xs w-28 outline-none focus:border-primary;
+}
+
+.topbar__error {
+  @apply text-xs text-danger;
+}

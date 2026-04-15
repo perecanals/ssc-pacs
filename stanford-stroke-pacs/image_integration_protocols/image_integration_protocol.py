@@ -1,0 +1,1223 @@
+import json
+import os
+import shutil
+import sys
+import tarfile
+import time
+from datetime import datetime
+from pathlib import Path
+
+import numpy as np
+import pandas as pd
+import pydicom
+import zstandard as zstd
+from sqlalchemy import MetaData, Table, func, inspect, select, text
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+from utils import (
+    anonymize_dicom_slice,
+    convert_dicom_to_nifti,
+    identify_study_type,
+    identify_series_type,
+    name_sanity_check,
+    should_create_nifti,
+)
+
+# Pull canonical paths from repo-root config.toml (same source of truth the
+# Companion uses). Avoids hardcoding /DATA2/pacs_imaging_data here.
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+_COMPANION_DIR = _REPO_ROOT / "companion"
+if str(_COMPANION_DIR) not in sys.path:
+    sys.path.insert(0, str(_COMPANION_DIR))
+from config import COLD_ARCHIVE_ROOT, LEGACY_DICOM_ROOT, STORAGE_MODE  # noqa: E402
+
+import warnings
+warnings.filterwarnings(
+    "ignore",
+    message=r"The value length .* exceeds the maximum length of .* allowed for VR LO\.",
+)
+
+
+class ImageIntegrationProtocol:
+    def __init__(
+        self,
+        case_dir,
+        postgres_engine,
+        anonymize_files=False,
+        delete_originals_after_verification=False,
+        import_id=None,
+        import_label=None,
+        cold_archive_root=None,
+    ):
+        self.case_dir = case_dir
+        self.postgres_engine = postgres_engine
+        self.anonymize_files = anonymize_files
+        self.delete_originals_after_verification = delete_originals_after_verification
+        self.import_id = import_id
+        self.import_label = import_label
+        self.cold_archive_root = cold_archive_root
+
+        self.case_series_table = None
+        self.case_study_table = None
+        self.case_series_verification_table = None
+
+        self.image_study = None
+        self.image_series = None
+        self.clinical_data = None
+
+        # Canonical destination for loose DICOMs. Read from repo-root config.toml
+        # (companion/config.py LEGACY_DICOM_ROOT) so the protocol always agrees
+        # with the running stack about where files live.
+        self.base_dir = str(LEGACY_DICOM_ROOT)
+
+    def execute_image_integration_protocol(self, overwrite_if_exists=False):
+        case_name = os.path.basename(os.path.normpath(self.case_dir))
+        protocol_start = time.perf_counter()
+        print(f"Starting image integration for case {case_name}")
+
+        step_started = time.perf_counter()
+        self.create_series_table()
+        print(
+            f"Scanned case {case_name}: discovered {len(self.case_series_table)} readable series "
+            f"in {time.perf_counter() - step_started:.2f}s"
+        )
+        if self.case_series_table is None or self.case_series_table.empty:
+            print(f"No readable DICOM series found under case_dir ({self.case_dir})")
+            return {"studyinstanceuids": [], "seriesinstanceuids": []}
+
+        step_started = time.perf_counter()
+        self.create_study_table()
+        print(
+            f"Grouped case {case_name} into {len(self.case_study_table)} study rows "
+            f"in {time.perf_counter() - step_started:.2f}s"
+        )
+        if self.case_study_table is None or self.case_study_table.empty:
+            print(f"No valid studies could be created from case_dir ({self.case_dir})")
+            return {"studyinstanceuids": [], "seriesinstanceuids": []}
+
+        initial_study_count = len(self.case_study_table)
+        step_started = time.perf_counter()
+        self.filter_existing_studies(overwrite_if_exists=overwrite_if_exists)
+        print(
+            f"Checked existing studies for case {case_name} in "
+            f"{time.perf_counter() - step_started:.2f}s"
+        )
+        if self.case_study_table.empty:
+            if initial_study_count == 0:
+                print(f"No valid studies could be created from case_dir ({self.case_dir})")
+            else:
+                print(f"All studies are already in the database for case_dir ({self.case_dir})")
+            return {"studyinstanceuids": [], "seriesinstanceuids": []}
+
+        step_started = time.perf_counter()
+        self.load_clinical_data_table()
+        print(f"Loaded clinical data in {time.perf_counter() - step_started:.2f}s")
+
+        step_started = time.perf_counter()
+        self.validate_studies_against_clinical_data()
+        print(f"Validated clinical matches in {time.perf_counter() - step_started:.2f}s")
+
+        step_started = time.perf_counter()
+        self.assign_import_id()
+        print(
+            f"Assigned import_id={self.case_study_table['import_id'].iloc[0]} "
+            f"in {time.perf_counter() - step_started:.2f}s"
+        )
+        self.assign_import_label()
+
+        step_started = time.perf_counter()
+        self.add_paths_and_copy_dicom_files()
+        print(f"Copied DICOM files in {time.perf_counter() - step_started:.2f}s")
+
+        if self.cold_archive_root:
+            step_started = time.perf_counter()
+            self.compress_cold_archives()
+            print(f"Compressed cold archives in {time.perf_counter() - step_started:.2f}s")
+
+        if STORAGE_MODE == "cold_path_cache":
+            print(
+                "Skipping NIFTI generation in cold_path_cache mode "
+                "(use scripts/dicom_to_nifti.py to generate on demand)."
+            )
+            # Initialize an empty nifti_path column so downstream upserts have it.
+            if "nifti_path" not in self.case_series_table.columns:
+                self.case_series_table["nifti_path"] = ""
+        else:
+            step_started = time.perf_counter()
+            self.create_nifti_files()
+            print(f"Generated NIFTI files in {time.perf_counter() - step_started:.2f}s")
+
+        self.case_series_verification_table = self.case_series_table[
+            ["src_dicom_dir_path", "dicom_dir_path"]
+        ].copy()
+        self.format_column_names()
+
+        step_started = time.perf_counter()
+        self._require_import_id_columns()
+        self._require_import_label_columns()
+        self._require_number_of_slices_column()
+        if self.cold_archive_root:
+            self._require_dicom_archive_path_column()
+        self.update_postgres_tables()
+        print(f"Updated PostgreSQL tables in {time.perf_counter() - step_started:.2f}s")
+
+        if self.delete_originals_after_verification:
+            step_started = time.perf_counter()
+            self.verify_integrated_case()
+            self.delete_original_case_dir()
+            print(
+                f"Verified integrated files and deleted originals in "
+                f"{time.perf_counter() - step_started:.2f}s"
+            )
+        print(
+            f"Completed image integration for case {case_name} in "
+            f"{time.perf_counter() - protocol_start:.2f}s"
+        )
+        return {
+            "studyinstanceuids": sorted(
+                self.case_study_table["studyinstanceuid"].dropna().astype(str).unique().tolist()
+            ),
+            "seriesinstanceuids": sorted(
+                self.case_series_table["seriesinstanceuid"].dropna().astype(str).unique().tolist()
+            ),
+        }
+
+    def load_image_tables(self):
+        self.image_study = pd.read_sql_table("image_study", self.postgres_engine)
+        self.image_series = pd.read_sql_table("image_series", self.postgres_engine)
+
+    def _load_case_rows_from_db(self, study_uids, include_series=False):
+        study_uids = [str(study_uid).strip() for study_uid in study_uids if str(study_uid).strip()]
+        if not study_uids:
+            self.image_study = pd.DataFrame()
+            self.image_series = pd.DataFrame()
+            return
+
+        metadata = MetaData()
+        image_study_table = Table("image_study", metadata, autoload_with=self.postgres_engine)
+        study_columns = [
+            image_study_table.c[column_name]
+            for column_name in ("studyinstanceuid", "patient_id", "study_path")
+            if column_name in image_study_table.c
+        ]
+
+        with self.postgres_engine.begin() as connection:
+            study_rows = connection.execute(
+                select(*study_columns).where(image_study_table.c.studyinstanceuid.in_(study_uids))
+            ).mappings().all()
+
+            series_rows = []
+            if include_series:
+                image_series_table = Table(
+                    "image_series", metadata, autoload_with=self.postgres_engine
+                )
+                series_columns = [
+                    image_series_table.c[column_name]
+                    for column_name in ("studyinstanceuid", "seriesinstanceuid", "dicom_dir_path")
+                    if column_name in image_series_table.c
+                ]
+                series_rows = connection.execute(
+                    select(*series_columns).where(image_series_table.c.studyinstanceuid.in_(study_uids))
+                ).mappings().all()
+
+        self.image_study = pd.DataFrame(study_rows, columns=[column.key for column in study_columns])
+        self.image_series = pd.DataFrame(
+            series_rows,
+            columns=[column.key for column in series_columns] if include_series else [],
+        )
+
+    def load_clinical_data_table(self):
+        self.clinical_data = pd.read_sql_table("lvo_clinical_data", self.postgres_engine)
+        if "study_id" in self.clinical_data.columns:
+            self.clinical_data["study_id"] = self.clinical_data["study_id"].apply(
+                lambda value: str(value).strip() if pd.notna(value) else None
+            )
+        if "stroke_date" in self.clinical_data.columns:
+            self.clinical_data["stroke_date"] = pd.to_datetime(
+                self.clinical_data["stroke_date"], errors="coerce"
+            ).dt.normalize()
+
+    @staticmethod
+    def _empty_series_table():
+        return pd.DataFrame(
+            columns=[
+                "patient_id",
+                "acquisitiondatetime",
+                "studydescription",
+                "seriesdescription",
+                "studyinstanceuid",
+                "seriesinstanceuid",
+                "number_of_slices",
+                "src_dicom_dir_path",
+                "protocolname",
+                "seriesnumber",
+                "instancenumber",
+                "manufacturer",
+                "pixelspacing",
+                "slicethickness",
+                "imageshape",
+                "scanaxialcoverage_mm",
+                "seriesdescription_",
+                "series_type",
+                "modality",
+                "import_id",
+                "import_label",
+            ]
+        )
+
+    @staticmethod
+    def _empty_study_table():
+        return pd.DataFrame(
+            columns=[
+                "patient_id",
+                "acquisitiondatetime",
+                "study_type",
+                "studydescription",
+                "studyinstanceuid",
+                "study_path",
+                "protocolname",
+                "manufacturer",
+                "predicted_study_type",
+                "stroke_date",
+                "clinical_match_found",
+                "import_id",
+                "import_label",
+            ]
+        )
+
+    @staticmethod
+    def _safe_text(value):
+        if value is None:
+            return None
+        if isinstance(value, float) and pd.isna(value):
+            return None
+        text = str(value).strip()
+        return text if text else None
+
+    @staticmethod
+    def _safe_int(value):
+        if value is None:
+            return None
+        if isinstance(value, float) and pd.isna(value):
+            return None
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return None
+
+    @staticmethod
+    def _safe_float(value):
+        if value is None:
+            return None
+        if isinstance(value, float) and pd.isna(value):
+            return None
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None
+
+    @classmethod
+    def _safe_float_array(cls, value):
+        if value is None or (isinstance(value, float) and pd.isna(value)):
+            return None
+        if not isinstance(value, (list, tuple)):
+            value = [value]
+        result = [cls._safe_float(item) for item in value]
+        return result if any(item is not None for item in result) else None
+
+    @staticmethod
+    def _dicom_value(dataset, tag_name):
+        if tag_name not in dataset:
+            return None
+        value = dataset[tag_name].value
+        if isinstance(value, bytes):
+            value = value.decode(errors="ignore")
+        return value
+
+    @classmethod
+    def _parse_datetime(cls, dataset):
+        candidates = [
+            ("AcquisitionDateTime", None),
+            ("AcquisitionDate", "AcquisitionTime"),
+            ("StudyDate", "StudyTime"),
+        ]
+        for date_tag, time_tag in candidates:
+            if time_tag is None:
+                value = cls._safe_text(cls._dicom_value(dataset, date_tag))
+                if value:
+                    parsed = pd.to_datetime(value.split(".")[0], errors="coerce")
+                    if pd.notna(parsed):
+                        return parsed
+                continue
+
+            date_value = cls._safe_text(cls._dicom_value(dataset, date_tag))
+            time_value = cls._safe_text(cls._dicom_value(dataset, time_tag))
+            if date_value:
+                if time_value is None:
+                    time_value = "000000"
+                parsed = pd.to_datetime(
+                    f"{date_value}{time_value.split('.')[0]}",
+                    format="%Y%m%d%H%M%S",
+                    errors="coerce",
+                )
+                if pd.notna(parsed):
+                    return parsed
+        return pd.NaT
+
+    @staticmethod
+    def _iter_series_directories(root_dir):
+        if not os.path.isdir(root_dir):
+            return []
+
+        series_dirs = []
+        for root, _, files in os.walk(root_dir):
+            visible_files = sorted(
+                filename for filename in files if not filename.startswith(".")
+            )
+            if visible_files:
+                series_dirs.append(root)
+        return sorted(series_dirs)
+
+    @staticmethod
+    def _read_series_headers(series_dir):
+        headers = []
+        for filename in sorted(os.listdir(series_dir)):
+            if filename.startswith("."):
+                continue
+            filepath = os.path.join(series_dir, filename)
+            if not os.path.isfile(filepath):
+                continue
+            try:
+                headers.append(pydicom.dcmread(filepath, stop_before_pixels=True))
+            except Exception as exc:
+                print(f"Skipping unreadable file {filepath}: {exc}")
+        return headers
+
+    @classmethod
+    def _series_geometry(cls, headers):
+        if not headers:
+            return None, None, None
+
+        first = headers[0]
+        rows = cls._safe_int(cls._dicom_value(first, "Rows"))
+        cols = cls._safe_int(cls._dicom_value(first, "Columns"))
+        image_shape = [rows, cols, len(headers)] if rows and cols else None
+
+        slice_thickness = cls._safe_float(cls._dicom_value(first, "SliceThickness"))
+        spacing_between_slices = cls._safe_float(
+            cls._dicom_value(first, "SpacingBetweenSlices")
+        )
+
+        z_positions = []
+        for dcm in headers:
+            position = cls._dicom_value(dcm, "ImagePositionPatient")
+            if isinstance(position, (list, tuple)) and len(position) >= 3:
+                z_value = cls._safe_float(position[2])
+                if z_value is not None:
+                    z_positions.append(z_value)
+
+        scan_axial_coverage_mm = None
+        if len(z_positions) > 1 and slice_thickness is not None:
+            scan_axial_coverage_mm = (
+                max(z_positions) - min(z_positions) + slice_thickness
+            )
+        elif spacing_between_slices is not None and len(headers) > 1:
+            scan_axial_coverage_mm = spacing_between_slices * (len(headers) - 1)
+            if slice_thickness is not None:
+                scan_axial_coverage_mm += slice_thickness
+        elif slice_thickness is not None:
+            scan_axial_coverage_mm = slice_thickness * len(headers)
+
+        return image_shape, slice_thickness, scan_axial_coverage_mm
+
+    def create_series_table(self):
+        data_series_list = []
+
+        for series_dir in self._iter_series_directories(self.case_dir):
+            headers = self._read_series_headers(series_dir)
+            if not headers:
+                continue
+
+            dcm = headers[0]
+            patient_id = self._safe_text(self._dicom_value(dcm, "PatientID"))
+            if patient_id is None:
+                print(
+                    f"Skipping series without PatientID in {series_dir}. "
+                    "Stanford integration requires PatientID to contain study_id."
+                )
+                continue
+
+            study_instance_uid = self._safe_text(
+                self._dicom_value(dcm, "StudyInstanceUID")
+            )
+            series_instance_uid = self._safe_text(
+                self._dicom_value(dcm, "SeriesInstanceUID")
+            )
+            if study_instance_uid is None or series_instance_uid is None:
+                print(f"Skipping series without UIDs in {series_dir}")
+                continue
+
+            image_shape, slice_thickness, scan_axial_coverage_mm = self._series_geometry(
+                headers
+            )
+
+            data_series_list.append(
+                pd.DataFrame(
+                    [
+                        {
+                            "patient_id": patient_id,
+                            "acquisitiondatetime": self._parse_datetime(dcm),
+                            "studydescription": self._safe_text(
+                                self._dicom_value(dcm, "StudyDescription")
+                            ),
+                            "seriesdescription": self._safe_text(
+                                self._dicom_value(dcm, "SeriesDescription")
+                            ),
+                            "studyinstanceuid": study_instance_uid,
+                            "seriesinstanceuid": series_instance_uid,
+                            "number_of_slices": len(headers),
+                            "src_dicom_dir_path": series_dir,
+                            "protocolname": self._safe_text(
+                                self._dicom_value(dcm, "ProtocolName")
+                            ),
+                            "seriesnumber": self._safe_int(
+                                self._dicom_value(dcm, "SeriesNumber")
+                            ),
+                            "instancenumber": self._safe_int(
+                                self._dicom_value(dcm, "InstanceNumber")
+                            ),
+                            "manufacturer": self._safe_text(
+                                self._dicom_value(dcm, "Manufacturer")
+                            ),
+                            "pixelspacing": self._safe_float_array(
+                                self._dicom_value(dcm, "PixelSpacing")
+                            ),
+                            "slicethickness": slice_thickness,
+                            "imageshape": image_shape,
+                            "scanaxialcoverage_mm": scan_axial_coverage_mm,
+                            "seriesdescription_": name_sanity_check(
+                                self._safe_text(self._dicom_value(dcm, "SeriesDescription"))
+                                or "UNNAMED_SERIES"
+                            ),
+                            "series_type": identify_series_type(
+                                self._safe_text(self._dicom_value(dcm, "SeriesDescription"))
+                            ),
+                            "modality": self._safe_text(
+                                self._dicom_value(dcm, "Modality")
+                            ),
+                        }
+                    ]
+                )
+            )
+
+        if not data_series_list:
+            self.case_series_table = self._empty_series_table()
+            self.case_study_table = self._empty_study_table()
+            return
+
+        self.case_series_table = pd.concat(data_series_list, ignore_index=True)
+        self.case_series_table = self.case_series_table.sort_values(
+            by=["patient_id", "acquisitiondatetime", "studyinstanceuid", "seriesinstanceuid"],
+            na_position="last",
+        ).reset_index(drop=True)
+
+    def create_study_table(self):
+        if self.case_series_table is None or self.case_series_table.empty:
+            self.case_study_table = self._empty_study_table()
+            return
+
+        study_rows = []
+        for study_instance_uid, study_series in self.case_series_table.groupby("studyinstanceuid"):
+            study_series = study_series.sort_values(
+                by=["acquisitiondatetime", "seriesnumber", "instancenumber"],
+                na_position="last",
+            ).reset_index(drop=True)
+            first_row = study_series.iloc[0]
+            stroke_date = self._lookup_stroke_date(first_row["patient_id"])
+            predicted_study_type = self._predict_study_type(study_series, stroke_date)
+
+            study_rows.append(
+                {
+                    "patient_id": first_row["patient_id"],
+                    "acquisitiondatetime": first_row["acquisitiondatetime"],
+                    "study_type": "",
+                    "studydescription": first_row["studydescription"],
+                    "studyinstanceuid": study_instance_uid,
+                    "study_path": "",
+                    "protocolname": first_row["protocolname"],
+                    "manufacturer": first_row["manufacturer"],
+                    "predicted_study_type": predicted_study_type,
+                    "stroke_date": stroke_date,
+                    "clinical_match_found": False,
+                }
+            )
+
+        self.case_study_table = pd.DataFrame(study_rows)
+
+        # Study-type detection is intentionally kept for future activation, but the
+        # active Stanford pipeline must currently leave `study_type` empty.
+        self.case_series_table["study_type"] = ""
+
+    def _lookup_stroke_date(self, patient_id):
+        if self.clinical_data is None or self.clinical_data.empty:
+            return pd.NaT
+        matches = self.clinical_data[self.clinical_data["study_id"] == str(patient_id)]
+        if matches.empty or "stroke_date" not in matches.columns:
+            return pd.NaT
+        return matches["stroke_date"].dropna().iloc[0] if matches["stroke_date"].notna().any() else pd.NaT
+
+    def _predict_study_type(self, study_series, stroke_date):
+        predicted_study_type = identify_study_type(study_series)
+
+        # Future hook: if study_type activation is re-enabled, stroke_date should be
+        # the clinical anchor for BASELINE / THROMBECTOMY / FOLLOW_UP assignment.
+        if pd.isna(stroke_date):
+            return predicted_study_type
+
+        acquisition_datetime = study_series["acquisitiondatetime"].dropna()
+        if acquisition_datetime.empty:
+            return predicted_study_type
+
+        acquisition_date = acquisition_datetime.iloc[0].normalize()
+        if acquisition_date < stroke_date - pd.Timedelta(days=1):
+            return None
+        return predicted_study_type
+
+    def filter_existing_studies(self, overwrite_if_exists=False):
+        study_uids = self.case_study_table["studyinstanceuid"].dropna().astype(str).unique().tolist()
+        print(
+            f"Checking {len(study_uids)} study UID(s) against image_study"
+            + (" and image_series" if overwrite_if_exists else "")
+        )
+        self._load_case_rows_from_db(study_uids, include_series=overwrite_if_exists)
+
+        existing_study_uids = set(self.image_study["studyinstanceuid"].astype(str))
+        study_uids_to_drop = []
+        print(
+            f"Found {len(existing_study_uids)} existing study UID(s) for current case"
+        )
+
+        for idx, row in self.case_study_table.iterrows():
+            study_uid = str(row["studyinstanceuid"])
+            if study_uid not in existing_study_uids:
+                continue
+
+            print(f"Study row {idx} already in database (StudyInstanceUID: {study_uid})")
+            if overwrite_if_exists:
+                self.overwrite_existing_study(study_uid)
+            else:
+                study_uids_to_drop.append(study_uid)
+
+        if study_uids_to_drop:
+            self.case_study_table = self.case_study_table[
+                ~self.case_study_table["studyinstanceuid"].isin(study_uids_to_drop)
+            ].reset_index(drop=True)
+            self.case_series_table = self.case_series_table[
+                ~self.case_series_table["studyinstanceuid"].isin(study_uids_to_drop)
+            ].reset_index(drop=True)
+        print(
+            f"Retained {len(self.case_study_table)} new study row(s) after filtering existing entries"
+        )
+
+    def overwrite_existing_study(self, study_instance_uid):
+        if self.image_study is None or self.image_series is None:
+            self._load_case_rows_from_db([study_instance_uid], include_series=True)
+
+        study_rows = self.image_study[
+            self.image_study["studyinstanceuid"].astype(str) == str(study_instance_uid)
+        ]
+        series_rows = self.image_series[
+            self.image_series["studyinstanceuid"].astype(str) == str(study_instance_uid)
+        ]
+
+        paths_to_remove = []
+        if "study_path" in study_rows.columns:
+            paths_to_remove.extend(
+                path for path in study_rows["study_path"].dropna().unique() if path
+            )
+        if "dicom_dir_path" in series_rows.columns:
+            paths_to_remove.extend(
+                path for path in series_rows["dicom_dir_path"].dropna().unique() if path
+            )
+
+        for path in sorted(set(paths_to_remove), key=len, reverse=True):
+            if os.path.isdir(path):
+                print(f"Removing directory: {path}")
+                shutil.rmtree(path, ignore_errors=True)
+
+        if not study_rows.empty:
+            patient_id = self._safe_text(study_rows.iloc[0].get("patient_id"))
+            if patient_id is not None:
+                self._remove_empty_parent_dirs(
+                    os.path.join(self.base_dir, patient_id, str(study_instance_uid))
+                )
+
+        self.image_study = self.image_study[
+            self.image_study["studyinstanceuid"].astype(str) != str(study_instance_uid)
+        ].reset_index(drop=True)
+        self.image_series = self.image_series[
+            self.image_series["studyinstanceuid"].astype(str) != str(study_instance_uid)
+        ].reset_index(drop=True)
+
+    def _remove_empty_parent_dirs(self, path):
+        current_path = os.path.dirname(path)
+        base_dir_abs = os.path.abspath(self.base_dir)
+        while os.path.abspath(current_path).startswith(base_dir_abs) and current_path != base_dir_abs:
+            if not os.path.isdir(current_path):
+                current_path = os.path.dirname(current_path)
+                continue
+            if os.listdir(current_path):
+                break
+            print(f"Removing empty directory: {current_path}")
+            os.rmdir(current_path)
+            current_path = os.path.dirname(current_path)
+
+    def validate_studies_against_clinical_data(self):
+        if self.clinical_data is None:
+            self.load_clinical_data_table()
+
+        if self.case_study_table.empty:
+            return
+
+        clinical_study_ids = set(self.clinical_data["study_id"].dropna().astype(str))
+        self.case_study_table["clinical_match_found"] = self.case_study_table["patient_id"].astype(str).isin(
+            clinical_study_ids
+        )
+
+        for idx, row in self.case_study_table.iterrows():
+            patient_id = str(row["patient_id"])
+            if row["clinical_match_found"]:
+                matches = self.clinical_data[self.clinical_data["study_id"] == patient_id]
+                if "stroke_date" in matches.columns and matches["stroke_date"].notna().any():
+                    self.case_study_table.loc[idx, "stroke_date"] = matches["stroke_date"].dropna().iloc[0]
+                continue
+
+            print(
+                f"Warning: study_id {patient_id} is not present in lvo_clinical_data. "
+                "The study will still be integrated, but remains clinically unmatched."
+            )
+
+    @staticmethod
+    def _visible_files(directory):
+        if not os.path.isdir(directory):
+            return []
+        return sorted(
+            filename
+            for filename in os.listdir(directory)
+            if not filename.startswith(".") and os.path.isfile(os.path.join(directory, filename))
+        )
+
+    @staticmethod
+    def _table_max_import_id(dataframe):
+        if dataframe is None or dataframe.empty or "import_id" not in dataframe.columns:
+            return None
+        values = pd.to_numeric(dataframe["import_id"], errors="coerce").dropna()
+        if values.empty:
+            return None
+        return int(values.max())
+
+    def _require_import_id_columns(self):
+        missing_tables = []
+        db_inspector = inspect(self.postgres_engine)
+        image_series_columns = {
+            column["name"] for column in db_inspector.get_columns("image_series")
+        }
+        image_study_columns = {
+            column["name"] for column in db_inspector.get_columns("image_study")
+        }
+        if "import_id" not in image_series_columns:
+            missing_tables.append("image_series")
+        if "import_id" not in image_study_columns:
+            missing_tables.append("image_study")
+        if missing_tables:
+            raise ValueError(
+                "Missing required import_id column in "
+                f"{', '.join(missing_tables)}. "
+                "Run the import_id rename migration before executing the protocol."
+            )
+
+    def _require_import_label_columns(self):
+        missing_tables = []
+        db_inspector = inspect(self.postgres_engine)
+        image_series_columns = {
+            column["name"] for column in db_inspector.get_columns("image_series")
+        }
+        image_study_columns = {
+            column["name"] for column in db_inspector.get_columns("image_study")
+        }
+        if "import_label" not in image_series_columns:
+            missing_tables.append("image_series")
+        if "import_label" not in image_study_columns:
+            missing_tables.append("image_study")
+        if missing_tables:
+            raise ValueError(
+                "Missing required import_label column in "
+                f"{', '.join(missing_tables)}. "
+                "Run the import_label migration before executing the protocol."
+            )
+
+    def _require_number_of_slices_column(self):
+        db_inspector = inspect(self.postgres_engine)
+        image_series_columns = {
+            column["name"] for column in db_inspector.get_columns("image_series")
+        }
+        if "number_of_slices" not in image_series_columns:
+            raise ValueError(
+                "Missing required number_of_slices column in image_series. "
+                "Run: ALTER TABLE image_series ADD COLUMN IF NOT EXISTS number_of_slices INTEGER;"
+            )
+
+    @staticmethod
+    def get_next_import_id(postgres_engine):
+        db_inspector = inspect(postgres_engine)
+        image_series_columns = {
+            column["name"] for column in db_inspector.get_columns("image_series")
+        }
+        image_study_columns = {
+            column["name"] for column in db_inspector.get_columns("image_study")
+        }
+        missing_tables = []
+        if "import_id" not in image_series_columns:
+            missing_tables.append("image_series")
+        if "import_id" not in image_study_columns:
+            missing_tables.append("image_study")
+        if missing_tables:
+            raise ValueError(
+                "Missing required import_id column in "
+                f"{', '.join(missing_tables)}. "
+                "Run the import_id rename migration before executing the protocol."
+            )
+
+        metadata = MetaData()
+        image_series_table = Table("image_series", metadata, autoload_with=postgres_engine)
+        image_study_table = Table("image_study", metadata, autoload_with=postgres_engine)
+        with postgres_engine.begin() as connection:
+            series_max = connection.execute(
+                select(func.max(image_series_table.c.import_id))
+            ).scalar()
+            study_max = connection.execute(
+                select(func.max(image_study_table.c.import_id))
+            ).scalar()
+
+        max_import_id = max(
+            value for value in [series_max, study_max, -1] if value is not None
+        )
+        return int(max_import_id) + 1
+
+    def assign_import_id(self):
+        self._require_import_id_columns()
+        next_import_id = (
+            int(self.import_id)
+            if self.import_id is not None
+            else self.get_next_import_id(self.postgres_engine)
+        )
+        self.case_series_table["import_id"] = next_import_id
+        self.case_study_table["import_id"] = next_import_id
+
+    def assign_import_label(self):
+        self._require_import_label_columns()
+        self.case_series_table["import_label"] = self.import_label
+        self.case_study_table["import_label"] = self.import_label
+
+    def _copy_dicom_file(self, source_path, destination_path, patient_id):
+        if self.anonymize_files:
+            dcm = pydicom.dcmread(source_path)
+            dcm = anonymize_dicom_slice(dcm, study_id=patient_id)
+            dcm.save_as(destination_path)
+            return
+        shutil.copy2(source_path, destination_path)
+
+    def add_paths_and_copy_dicom_files(self):
+        self.case_series_table["dicom_dir_path"] = ""
+        self.case_study_table["study_path"] = ""
+
+        for idx, row in self.case_series_table.iterrows():
+            action = "Copying and anonymizing" if self.anonymize_files else "Copying"
+            print(
+                f"{action} DICOM {row['seriesdescription']} for study_id "
+                f"{row['patient_id']} (series {idx + 1} of {len(self.case_series_table)})"
+            )
+
+            study_path = os.path.join(
+                self.base_dir, str(row["patient_id"]), row["studyinstanceuid"]
+            )
+            dicom_dir_path = os.path.join(
+                study_path,
+                row["seriesdescription_"],
+                row["seriesinstanceuid"],
+                "DICOM",
+            )
+            os.makedirs(dicom_dir_path, exist_ok=True)
+
+            src_dicom_dir_path = row["src_dicom_dir_path"]
+            for filename in self._visible_files(src_dicom_dir_path):
+                source_path = os.path.join(src_dicom_dir_path, filename)
+                self._copy_dicom_file(
+                    source_path,
+                    os.path.join(dicom_dir_path, filename),
+                    row["patient_id"],
+                )
+
+            self.case_series_table.loc[idx, "dicom_dir_path"] = dicom_dir_path
+            self.case_study_table.loc[
+                self.case_study_table["studyinstanceuid"] == row["studyinstanceuid"],
+                "study_path",
+            ] = study_path
+
+    def verify_integrated_case(self):
+        verification_table = self.case_series_verification_table
+        if verification_table is None:
+            verification_table = self.case_series_table
+
+        if verification_table is None or verification_table.empty:
+            return
+
+        for _, row in verification_table.iterrows():
+            src_dicom_dir_path = row["src_dicom_dir_path"]
+            dicom_dir_path = row["dicom_dir_path"]
+            source_files = self._visible_files(src_dicom_dir_path)
+            destination_files = self._visible_files(dicom_dir_path)
+
+            if len(source_files) != len(destination_files):
+                raise ValueError(
+                    f"Verification failed for {dicom_dir_path}: "
+                    f"source has {len(source_files)} files, destination has {len(destination_files)}."
+                )
+
+            for filename in source_files:
+                source_path = os.path.join(src_dicom_dir_path, filename)
+                destination_path = os.path.join(dicom_dir_path, filename)
+
+                if not os.path.exists(destination_path):
+                    raise ValueError(
+                        f"Verification failed for {dicom_dir_path}: missing file {filename}."
+                    )
+
+                if not self.anonymize_files:
+                    source_size = os.path.getsize(source_path)
+                    destination_size = os.path.getsize(destination_path)
+                    if source_size != destination_size:
+                        raise ValueError(
+                            f"Verification failed for {dicom_dir_path}: "
+                            f"size mismatch for {filename} ({source_size} != {destination_size})."
+                        )
+
+                try:
+                    pydicom.dcmread(destination_path, stop_before_pixels=True)
+                except Exception as exc:
+                    raise ValueError(
+                        f"Verification failed for {destination_path}: unreadable DICOM ({exc})."
+                    ) from exc
+
+    def delete_original_case_dir(self):
+        case_dir_abs = os.path.abspath(self.case_dir)
+        base_dir_abs = os.path.abspath(self.base_dir)
+        if not os.path.isdir(case_dir_abs):
+            return
+        if case_dir_abs == base_dir_abs or case_dir_abs.startswith(f"{base_dir_abs}{os.sep}"):
+            raise ValueError(
+                f"Refusing to delete source directory inside integration base_dir: {case_dir_abs}"
+            )
+        print(f"Deleting original case directory after verification: {case_dir_abs}")
+        shutil.rmtree(case_dir_abs)
+
+    def create_nifti_files(self):
+        self.case_series_table["nifti_path"] = ""
+
+        for idx, row in self.case_series_table.iterrows():
+            dicom_dir_path = row["dicom_dir_path"]
+            nifti_path = os.path.join(
+                os.path.dirname(dicom_dir_path), "NIFTI", "image.nii.gz"
+            )
+
+            if os.path.exists(dicom_dir_path) and should_create_nifti(row["series_type"]):
+                os.makedirs(os.path.dirname(nifti_path), exist_ok=True)
+                print(f"Converting {dicom_dir_path} to {nifti_path}")
+                try:
+                    convert_dicom_to_nifti(dicom_dir_path, nifti_path)
+                except Exception as exc:
+                    print(f"Error converting {dicom_dir_path} to {nifti_path}: {exc}")
+
+            if os.path.exists(nifti_path):
+                self.case_series_table.loc[idx, "nifti_path"] = nifti_path
+
+        return self.case_series_table
+
+    def format_column_names(self):
+        if self.case_series_table is None:
+            self.case_series_table = self._empty_series_table()
+        if self.case_study_table is None:
+            self.case_study_table = self._empty_study_table()
+
+        if "dicom_archive_path" not in self.case_series_table.columns:
+            self.case_series_table["dicom_archive_path"] = None
+
+        self.case_series_table = self.case_series_table[
+            [
+                "patient_id",
+                "acquisitiondatetime",
+                "studydescription",
+                "seriesdescription",
+                "series_type",
+                "modality",
+                "studyinstanceuid",
+                "seriesinstanceuid",
+                "number_of_slices",
+                "dicom_dir_path",
+                "dicom_archive_path",
+                "nifti_path",
+                "import_id",
+                "import_label",
+                "protocolname",
+                "seriesnumber",
+                "instancenumber",
+                "manufacturer",
+                "pixelspacing",
+                "slicethickness",
+                "imageshape",
+                "scanaxialcoverage_mm",
+            ]
+        ].copy()
+
+        self.case_study_table = self.case_study_table[
+            [
+                "patient_id",
+                "acquisitiondatetime",
+                "study_type",
+                "studydescription",
+                "studyinstanceuid",
+                "study_path",
+                "import_id",
+                "import_label",
+                "protocolname",
+                "manufacturer",
+            ]
+        ].copy()
+
+    @staticmethod
+    def _normalize_for_sql(value):
+        if value is None:
+            return None
+        if isinstance(value, pd.Timestamp):
+            return None if pd.isna(value) else value.to_pydatetime()
+        if isinstance(value, np.generic):
+            return value.item()
+        if isinstance(value, float) and pd.isna(value):
+            return None
+        if isinstance(value, list):
+            return [ImageIntegrationProtocol._normalize_for_sql(item) for item in value]
+        return value
+
+    def _upsert_dataframe(self, table_name, key_column, dataframe):
+        if dataframe.empty:
+            return
+
+        metadata = MetaData()
+        table = Table(table_name, metadata, autoload_with=self.postgres_engine)
+        records = [
+            {column: self._normalize_for_sql(value) for column, value in row.items()}
+            for row in dataframe.to_dict(orient="records")
+        ]
+
+        insert_stmt = pg_insert(table).values(records)
+        update_columns = {
+            column.name: insert_stmt.excluded[column.name]
+            for column in table.columns
+            if column.name != key_column
+        }
+        upsert_stmt = insert_stmt.on_conflict_do_update(
+            index_elements=[key_column],
+            set_=update_columns,
+        )
+
+        with self.postgres_engine.begin() as connection:
+            connection.execute(upsert_stmt)
+
+    def update_postgres_tables(self):
+        self._upsert_dataframe("image_series", "seriesinstanceuid", self.case_series_table)
+        self._upsert_dataframe("image_study", "studyinstanceuid", self.case_study_table)
+
+    def _require_dicom_archive_path_column(self):
+        """Add dicom_archive_path column to image_series if it does not exist."""
+        with self.postgres_engine.begin() as conn:
+            conn.execute(text(
+                "ALTER TABLE image_series ADD COLUMN IF NOT EXISTS dicom_archive_path TEXT"
+            ))
+
+    def _compress_series_dir(self, dicom_dir_path: str):
+        """Compress a series DICOM directory to a tar.zst archive.
+
+        Returns the archive path (str). Idempotent: skips compression if a
+        valid archive already exists, but always re-verifies the archive
+        before returning. Raises on any failure (missing source dir,
+        empty source, write failure, count mismatch after compression).
+        """
+        dicom_dir = os.path.realpath(dicom_dir_path)
+        base_dir = os.path.realpath(self.base_dir)
+        cold_root = os.path.realpath(self.cold_archive_root)
+
+        if not os.path.isdir(dicom_dir):
+            raise FileNotFoundError(f"dicom_dir_path does not exist: {dicom_dir_path}")
+
+        # Compute relative path from base_dir.
+        rel = os.path.relpath(dicom_dir, base_dir)
+        if rel.startswith(".."):
+            raise ValueError(
+                f"dicom_dir_path {dicom_dir_path!r} is not under base_dir {self.base_dir!r}"
+            )
+
+        rel_parent = os.path.dirname(rel)
+        series_name = os.path.basename(rel)
+        archive = os.path.join(cold_root, rel_parent, f"{series_name}.tar.zst")
+
+        # Source file count for verification.
+        src_files = sorted(p for p in Path(dicom_dir).rglob("*") if p.is_file())
+        expected_count = len(src_files)
+        if expected_count == 0:
+            raise ValueError(f"dicom_dir_path is empty: {dicom_dir_path}")
+
+        # Idempotent path: if an archive already exists, verify it matches the
+        # source count. If it doesn't, treat it as corrupt and rebuild.
+        if os.path.isfile(archive) and os.path.getsize(archive) > 0:
+            try:
+                self._verify_archive(archive, expected_count)
+                return archive
+            except Exception as exc:
+                print(
+                    f"Existing archive {archive} failed verification "
+                    f"({exc}); rebuilding."
+                )
+                os.remove(archive)
+
+        os.makedirs(os.path.dirname(archive), exist_ok=True)
+
+        # Flat format: files stored at archive root (relative to dicom_dir),
+        # matching the layout produced by scripts/archive_all_series.py.
+        tmp_archive = archive + ".tmp"
+        try:
+            cctx = zstd.ZstdCompressor(level=3)
+            with open(tmp_archive, "wb") as f_out:
+                with cctx.stream_writer(f_out) as z_out:
+                    with tarfile.open(fileobj=z_out, mode="w|") as tf:
+                        for f in src_files:
+                            tf.add(str(f), arcname=str(f.relative_to(dicom_dir)))
+
+            # Verify before publishing the final filename.
+            self._verify_archive(tmp_archive, expected_count)
+            os.replace(tmp_archive, archive)
+        except Exception:
+            # Don't leave a partial .tmp file behind.
+            if os.path.exists(tmp_archive):
+                try:
+                    os.remove(tmp_archive)
+                except OSError:
+                    pass
+            raise
+
+        return archive
+
+    @staticmethod
+    def _verify_archive(archive_path: str, expected_count: int) -> None:
+        """Open the tar.zst archive and confirm it contains exactly
+        `expected_count` regular files. Raises on any mismatch."""
+        if not os.path.isfile(archive_path):
+            raise FileNotFoundError(f"archive missing: {archive_path}")
+        if os.path.getsize(archive_path) == 0:
+            raise ValueError(f"archive is empty: {archive_path}")
+
+        dctx = zstd.ZstdDecompressor()
+        actual = 0
+        with open(archive_path, "rb") as f_in:
+            with dctx.stream_reader(f_in) as z_in:
+                with tarfile.open(fileobj=z_in, mode="r|") as tf:
+                    for member in tf:
+                        if member.isfile():
+                            actual += 1
+        if actual != expected_count:
+            raise ValueError(
+                f"archive {archive_path} has {actual} files; expected {expected_count}"
+            )
+
+    def compress_cold_archives(self):
+        """Compress each series DICOM directory to a cold tar.zst archive.
+
+        Called after add_paths_and_copy_dicom_files() when cold_archive_root
+        is set. Per-series failures are non-fatal: the loop continues, the
+        failed row keeps `dicom_archive_path = None`, and a JSON failure
+        report is written to `image_integration_protocols/logs/`. Each
+        successful archive is verified (file count match) before being
+        published, courtesy of `_compress_series_dir`.
+
+        Loose DICOM files are NOT deleted — they remain for the Orthanc
+        Folder Indexer. See `scripts/cleanup_loose_dicoms.py` for the
+        opt-in cleanup pass once the new files have been indexed. Failed
+        series are skipped by cleanup (it requires
+        `dicom_archive_path IS NOT NULL`).
+        """
+        if not self.cold_archive_root:
+            return
+
+        if "dicom_archive_path" not in self.case_series_table.columns:
+            self.case_series_table["dicom_archive_path"] = None
+
+        failures = []  # list[dict]
+        successes = 0
+        for idx, row in self.case_series_table.iterrows():
+            dicom_dir_path = row.get("dicom_dir_path")
+            if not dicom_dir_path:
+                failures.append(
+                    {
+                        "row_index": int(idx),
+                        "seriesinstanceuid": row.get("seriesinstanceuid"),
+                        "studyinstanceuid": row.get("studyinstanceuid"),
+                        "dicom_dir_path": None,
+                        "error": "missing dicom_dir_path",
+                    }
+                )
+                continue
+            try:
+                archive = self._compress_series_dir(dicom_dir_path)
+                self.case_series_table.loc[idx, "dicom_archive_path"] = str(archive)
+                successes += 1
+                print(f"Compressed {dicom_dir_path} -> {archive}")
+            except Exception as exc:
+                failures.append(
+                    {
+                        "row_index": int(idx),
+                        "seriesinstanceuid": row.get("seriesinstanceuid"),
+                        "studyinstanceuid": row.get("studyinstanceuid"),
+                        "dicom_dir_path": dicom_dir_path,
+                        "error": f"{type(exc).__name__}: {exc}",
+                    }
+                )
+                print(f"WARNING: compression failed for {dicom_dir_path}: {exc}")
+
+        if failures:
+            log_path = self._write_compression_failure_log(failures)
+            total = successes + len(failures)
+            print(
+                f"WARNING: {len(failures)}/{total} series failed to compress for "
+                f"case {os.path.basename(os.path.normpath(self.case_dir))}. "
+                f"Failed rows kept dicom_archive_path = NULL. "
+                f"See {log_path}. Retry with: "
+                f"`python scripts/archive_all_series.py --patient <patient_id>`"
+            )
+
+    def _write_compression_failure_log(self, failures: list[dict]) -> str:
+        """Write a JSON failure report and return its path."""
+        logs_dir = Path(__file__).resolve().parent / "logs"
+        logs_dir.mkdir(parents=True, exist_ok=True)
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        log_path = logs_dir / f"compression_failures_{ts}.json"
+        payload = {
+            "case_dir": str(self.case_dir),
+            "case_name": os.path.basename(os.path.normpath(self.case_dir)),
+            "import_id": self.import_id,
+            "import_label": self.import_label,
+            "cold_archive_root": str(self.cold_archive_root) if self.cold_archive_root else None,
+            "timestamp": datetime.now().isoformat(),
+            "failures": failures,
+        }
+        with log_path.open("w", encoding="utf-8") as f:
+            json.dump(payload, f, indent=2, default=str)
+        return str(log_path)

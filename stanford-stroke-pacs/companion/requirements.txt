@@ -1,0 +1,9 @@
+fastapi
+uvicorn
+psycopg2-binary
+requests
+PyJWT
+bcrypt
+python-dotenv
+zipstream-ng
+zstandard

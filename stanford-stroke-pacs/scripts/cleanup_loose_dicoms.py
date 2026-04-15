@@ -1,0 +1,257 @@
+#!/usr/bin/env python3
+"""
+Delete loose DICOM directories that are safe to remove because:
+  1. The series has a populated `dicom_archive_path` in `image_series`
+  2. The archive file exists on disk and is non-empty
+  3. The archive's file count matches the loose dir's file count
+  4. The series is present in Orthanc's index (queried via orthanc_db PostgreSQL)
+
+Without `--execute` the script is dry-run only and prints what it would do.
+
+Designed to be re-runnable safely (idempotent) and suitable for cron.
+
+Usage:
+  # See what would be cleaned (default)
+  python scripts/cleanup_loose_dicoms.py
+
+  # Actually delete
+  python scripts/cleanup_loose_dicoms.py --execute
+
+  # Limit to one patient
+  python scripts/cleanup_loose_dicoms.py --execute --patient 4-0551
+
+  # Skip the (slow) per-archive integrity check
+  python scripts/cleanup_loose_dicoms.py --execute --no-deep-verify
+
+The NIFTI sibling directory ({seriesUID}/NIFTI/) is preserved.
+"""
+
+from __future__ import annotations
+
+import argparse
+import os
+import shutil
+import sys
+import tarfile
+import time
+from pathlib import Path
+from typing import Any
+
+import psycopg2
+import psycopg2.extras
+import zstandard as zstd
+from dotenv import load_dotenv
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+load_dotenv(REPO_ROOT / ".env")
+
+# Read paths from companion/config.py so cleanup matches the running stack.
+sys.path.insert(0, str(REPO_ROOT / "companion"))
+from config import LEGACY_DICOM_ROOT, STORAGE_MODE  # noqa: E402
+
+DB_CONFIG = dict(
+    host=os.getenv("DB_HOST", "localhost"),
+    port=os.getenv("DB_PORT", "5432"),
+    dbname=os.getenv("DB_NAME", "stanford-stroke"),
+    user=os.getenv("DB_USER"),
+    password=os.getenv("DB_PASSWORD"),
+)
+
+ORTHANC_DB_CONFIG = dict(
+    host=os.getenv("DB_HOST", "localhost"),
+    port=os.getenv("DB_PORT", "5432"),
+    dbname=os.getenv("PG_ORTHANC_DB", "orthanc"),
+    user=os.getenv("PG_ORTHANC_USER"),
+    password=os.getenv("PG_ORTHANC_PASSWORD"),
+)
+
+# DICOM tag for SeriesInstanceUID = (0x0020, 0x000e) = (32, 14)
+SERIES_UID_TAG_GROUP = 32
+SERIES_UID_TAG_ELEMENT = 14
+
+
+def fetch_candidate_series(patient: str | None, study: str | None) -> list[dict]:
+    """Series with both an archive path and an existing loose dir."""
+    q = (
+        "SELECT seriesinstanceuid, studyinstanceuid, patient_id, "
+        "       dicom_dir_path, dicom_archive_path "
+        "FROM image_series "
+        "WHERE dicom_archive_path IS NOT NULL "
+        "  AND dicom_archive_path <> '' "
+        "  AND dicom_dir_path IS NOT NULL "
+        "  AND dicom_dir_path <> ''"
+    )
+    params: list[Any] = []
+    if patient:
+        q += " AND patient_id = %s"
+        params.append(patient)
+    if study:
+        q += " AND studyinstanceuid = %s"
+        params.append(study)
+
+    with psycopg2.connect(**DB_CONFIG) as conn:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute(q, params)
+            return list(cur.fetchall())
+
+
+def fetch_orthanc_series_uids() -> set[str]:
+    """One query to grab every SeriesInstanceUID Orthanc currently knows."""
+    with psycopg2.connect(**ORTHANC_DB_CONFIG) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT value FROM dicomidentifiers "
+                "WHERE taggroup = %s AND tagelement = %s",
+                (SERIES_UID_TAG_GROUP, SERIES_UID_TAG_ELEMENT),
+            )
+            return {row[0] for row in cur.fetchall()}
+
+
+def count_loose_files(dicom_dir: Path) -> int:
+    if not dicom_dir.is_dir():
+        return 0
+    return sum(1 for p in dicom_dir.rglob("*") if p.is_file())
+
+
+def count_archive_files(archive_path: Path) -> int:
+    """Open the tar.zst and count regular file members. Slow — guarded by --no-deep-verify."""
+    dctx = zstd.ZstdDecompressor()
+    n = 0
+    with archive_path.open("rb") as f_in:
+        with dctx.stream_reader(f_in) as z_in:
+            with tarfile.open(fileobj=z_in, mode="r|") as tf:
+                for m in tf:
+                    if m.isfile():
+                        n += 1
+    return n
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--execute", action="store_true", help="Actually delete (default: dry-run)")
+    ap.add_argument("--patient", help="Limit to a single patient_id")
+    ap.add_argument("--study", help="Limit to a single studyinstanceuid")
+    ap.add_argument("--limit", type=int, help="Stop after this many series")
+    ap.add_argument("--no-deep-verify", action="store_true",
+                    help="Skip per-archive file count comparison (faster)")
+    ap.add_argument("--quiet", action="store_true", help="Only print summary")
+    args = ap.parse_args()
+
+    if STORAGE_MODE != "cold_path_cache":
+        print(f"WARNING: STORAGE_MODE is '{STORAGE_MODE}' (not 'cold_path_cache'). "
+              f"Loose DICOMs are still the canonical store; cleanup is unsafe. Aborting.",
+              file=sys.stderr)
+        return 2
+
+    if not DB_CONFIG.get("user") or not ORTHANC_DB_CONFIG.get("user"):
+        print("DB credentials missing in .env (DB_USER / PG_ORTHANC_USER)", file=sys.stderr)
+        return 1
+
+    print(f"Mode: {'EXECUTE' if args.execute else 'DRY RUN'}")
+    print(f"Legacy root: {LEGACY_DICOM_ROOT}")
+
+    print("Fetching candidate series from image_series ...")
+    candidates = fetch_candidate_series(args.patient, args.study)
+    print(f"  {len(candidates)} candidate series")
+
+    print("Fetching indexed SeriesInstanceUIDs from Orthanc DB ...")
+    orthanc_uids = fetch_orthanc_series_uids()
+    print(f"  {len(orthanc_uids)} series in Orthanc index")
+
+    cleaned = 0
+    skipped_already_clean = 0
+    skipped_not_in_orthanc = 0
+    skipped_no_archive = 0
+    skipped_count_mismatch = 0
+    bytes_freed = 0
+    errors: list[str] = []
+
+    t0 = time.perf_counter()
+    processed = 0
+
+    for row in candidates:
+        if args.limit and processed >= args.limit:
+            break
+        processed += 1
+
+        series_uid = row["seriesinstanceuid"]
+        dicom_dir = Path(row["dicom_dir_path"])
+        archive = Path(row["dicom_archive_path"])
+
+        # Already cleaned: dir gone or empty.
+        if not dicom_dir.is_dir():
+            skipped_already_clean += 1
+            continue
+        loose_count = count_loose_files(dicom_dir)
+        if loose_count == 0:
+            # Empty dir — remove the empty shell so future runs don't re-check.
+            if args.execute:
+                try:
+                    dicom_dir.rmdir()
+                except OSError:
+                    pass
+            skipped_already_clean += 1
+            continue
+
+        # Archive must exist and be non-empty.
+        if not archive.is_file() or archive.stat().st_size == 0:
+            skipped_no_archive += 1
+            errors.append(f"{series_uid}: archive missing or empty at {archive}")
+            continue
+
+        # Series must be in Orthanc's index. If it isn't, the patched indexer
+        # hasn't picked it up yet (or never will) — refusing to delete.
+        if series_uid not in orthanc_uids:
+            skipped_not_in_orthanc += 1
+            continue
+
+        # Deep verify: archive file count must match loose file count.
+        if not args.no_deep_verify:
+            try:
+                archive_count = count_archive_files(archive)
+            except Exception as exc:
+                errors.append(f"{series_uid}: archive verification raised {exc}")
+                skipped_no_archive += 1
+                continue
+            if archive_count != loose_count:
+                skipped_count_mismatch += 1
+                errors.append(
+                    f"{series_uid}: archive has {archive_count} files; "
+                    f"loose dir has {loose_count} files at {dicom_dir}"
+                )
+                continue
+
+        # Safe to delete.
+        size = sum(p.stat().st_size for p in dicom_dir.rglob("*") if p.is_file())
+        if not args.quiet:
+            verb = "Would delete" if not args.execute else "Deleting"
+            print(f"  {verb} ({loose_count} files, {size/1e6:.1f} MB) {dicom_dir}")
+        if args.execute:
+            shutil.rmtree(dicom_dir, ignore_errors=False)
+        cleaned += 1
+        bytes_freed += size
+
+    elapsed = time.perf_counter() - t0
+    print()
+    print("=" * 60)
+    print(f"Processed: {processed}")
+    print(f"Cleaned (loose dirs deletable): {cleaned}")
+    print(f"Already clean: {skipped_already_clean}")
+    print(f"Pending Orthanc index: {skipped_not_in_orthanc}")
+    print(f"Archive missing/unreadable: {skipped_no_archive}")
+    print(f"Archive/loose count mismatch: {skipped_count_mismatch}")
+    print(f"Bytes that would be freed: {bytes_freed/1e9:.2f} GB")
+    print(f"Elapsed: {elapsed:.1f}s")
+    if errors:
+        print(f"\nErrors ({len(errors)}):")
+        for e in errors[:50]:
+            print(f"  {e}")
+        if len(errors) > 50:
+            print(f"  ... and {len(errors) - 50} more")
+    if not args.execute:
+        print("\nDRY RUN — no files were deleted. Re-run with --execute to apply.")
+    return 0 if not errors else 3
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

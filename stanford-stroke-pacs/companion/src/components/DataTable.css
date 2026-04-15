@@ -1,0 +1,370 @@
+@reference "../app.css";
+
+/* Toolbar */
+.dt__panel {
+  @apply flex-1 min-h-0 flex flex-col;
+}
+
+.dt__refresh-btn--disabled {
+  @apply opacity-50 pointer-events-none;
+}
+
+.dt__summary-bar {
+  @apply flex items-center justify-between gap-2 mb-0.5;
+}
+
+.dt__summary {
+  @apply text-[11px] leading-tight text-text-muted;
+}
+
+.dt__summary-actions {
+  @apply flex items-center gap-3;
+}
+
+.dt__summary-action {
+  @apply text-[10px] leading-tight text-primary bg-transparent border-none cursor-pointer px-0 py-0 hover:underline;
+}
+
+.dt__scroll {
+  @apply flex-1 min-h-0 overflow-auto rounded-md;
+}
+
+/* Main table */
+.dt {
+  @apply w-full border-separate border-spacing-0 bg-surface;
+}
+
+.dt__head {
+  @apply bg-table-header-bg sticky top-0 z-20;
+}
+
+.dt__th {
+  @apply px-3 py-1 text-left border-b border-border text-sm font-semibold whitespace-nowrap select-none;
+}
+
+.dt__th--sortable {
+  @apply cursor-pointer hover:text-primary;
+}
+
+.dt__th[draggable="true"] {
+  cursor: grab;
+}
+.dt__th--dragging {
+  @apply opacity-40;
+}
+.dt__th--drop-before {
+  box-shadow: inset 3px 0 0 0 var(--color-primary);
+}
+.dt__th--drop-after {
+  box-shadow: inset -3px 0 0 0 var(--color-primary);
+}
+
+.dt__th--expand {
+  @apply w-8 px-2 py-1 border-b border-border;
+}
+
+.dt__sort-arrow {
+  @apply ml-1 text-primary;
+}
+
+.dt__datatype-hint {
+  @apply font-normal text-text-muted text-[10px] ml-1;
+}
+
+.dt__level-hint {
+  @apply ml-0.5 opacity-60;
+}
+
+.dt__bool-filter {
+  @apply mx-auto flex items-center justify-center w-full py-0.5 rounded text-[10px] leading-none
+         bg-transparent border border-border text-text-muted cursor-pointer hover:border-primary hover:text-primary;
+}
+
+.dt__bool-filter--active {
+  @apply border-primary text-primary bg-primary/10;
+}
+
+.dt__filter-th {
+  @apply px-1.5 py-1 border-b border-border;
+}
+
+.dt__filter-input {
+  @apply w-full px-1.5 py-0.5 text-xs font-normal border border-border rounded bg-white outline-none focus:border-primary;
+}
+
+.dt__select-filter {
+  @apply relative;
+}
+
+.dt__select-filter-trigger {
+  @apply flex w-full items-center gap-1 rounded border border-border bg-white px-1.5 py-0.5 text-xs text-left font-normal outline-none hover:border-primary;
+}
+
+.dt__select-filter-trigger--active {
+  @apply border-primary text-primary bg-primary/5;
+}
+
+.dt__select-filter-label {
+  @apply min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap;
+}
+
+.dt__select-filter-caret {
+  @apply shrink-0 text-[9px] text-text-muted;
+}
+
+.dt__select-filter-menu {
+  @apply absolute left-0 top-full z-30 mt-1 flex max-h-[240px] min-w-[180px] max-w-[240px] flex-col overflow-hidden rounded-md border border-border bg-surface shadow-lg;
+}
+
+.dt__select-filter-menu-head {
+  @apply flex justify-end border-b border-border px-2 py-1;
+}
+
+.dt__select-filter-clear {
+  @apply border-none bg-transparent px-0 py-0 text-[10px] text-primary cursor-pointer disabled:cursor-default disabled:opacity-40;
+}
+
+.dt__select-filter-options {
+  @apply overflow-y-auto py-1;
+}
+
+.dt__select-filter-option {
+  @apply flex cursor-pointer items-center gap-1.5 px-2 py-1 text-xs hover:bg-dropdown-hover;
+}
+
+.dt__select-filter-checkbox {
+  @apply h-3.5 w-3.5 cursor-pointer accent-primary;
+}
+
+.dt__select-filter-option-label {
+  @apply min-w-0 flex-1 break-words;
+}
+
+.dt__select-filter-empty {
+  @apply px-2 py-2 text-xs text-text-muted;
+}
+
+.dt__empty-cell {
+  @apply text-center text-text-muted py-10;
+}
+
+/* Parent rows */
+.dt__row {
+  @apply hover:bg-table-row-hover transition-colors duration-100;
+}
+
+.dt__row--expandable {
+  @apply cursor-pointer select-none;
+}
+
+.dt__row--previewable {
+  @apply cursor-pointer;
+}
+
+.dt__row--active {
+  @apply bg-primary/20 ring-1 ring-inset ring-primary/35;
+}
+
+.dt__expand-cell {
+  @apply w-8 px-2 py-1 border-b border-border text-center text-text-muted;
+}
+
+.dt__expand-arrow {
+  @apply inline-block transition-transform;
+}
+
+.dt__td {
+  @apply px-3 py-1 border-b border-border text-sm;
+}
+
+.dt__td--actions {
+  @apply px-3 py-1 border-b border-border text-sm whitespace-nowrap flex items-center gap-2;
+}
+
+/* Child rows (depth 1) */
+.dt__child-empty {
+  @apply pl-10 py-1 text-xs text-text-muted border-b border-border bg-child-bg;
+}
+
+.dt__child-wrapper {
+  @apply p-0 border-b border-border;
+}
+
+.dt__child-scroll {
+  @apply max-h-[280px] overflow-y-auto;
+}
+
+.dt__child-table {
+  @apply w-full border-collapse bg-child-bg;
+}
+
+.dt__child-thead {
+  @apply sticky top-0 z-10;
+}
+
+.dt__child-head-row {
+  @apply bg-child-header-bg;
+}
+
+.dt__child-th {
+  @apply px-3 py-1 text-left text-[11px] font-semibold text-text-muted border-b border-border whitespace-nowrap;
+}
+
+.dt__child-th--expand {
+  @apply w-7 px-1 py-1 border-b border-border;
+}
+
+.dt__child-datatype-hint {
+  @apply font-normal text-[9px] ml-0.5 opacity-60;
+}
+
+.dt__child-row {
+  @apply hover:bg-child-row-hover transition-colors duration-100;
+}
+
+.dt__child-row--expandable {
+  @apply cursor-pointer select-none;
+}
+
+.dt__child-row--previewable {
+  @apply cursor-pointer;
+}
+
+.dt__child-row--active {
+  @apply bg-primary/20 ring-1 ring-inset ring-primary/35;
+}
+
+.dt__child-expand-cell {
+  @apply w-7 px-1 py-1 border-b border-border/60 text-center text-text-muted;
+}
+
+.dt__child-expand-arrow {
+  @apply inline-block transition-transform text-[10px];
+}
+
+.dt__child-td {
+  @apply px-3 py-1 border-b border-border/60 text-xs;
+}
+
+.dt__child-td--actions {
+  @apply px-3 py-1 border-b border-border/60 text-xs whitespace-nowrap flex items-center gap-2;
+}
+
+/* Grandchild rows (depth 2) */
+.dt__gc-empty {
+  @apply pl-10 py-1 text-xs text-text-muted border-b border-border/60 bg-grandchild-empty-bg;
+}
+
+.dt__gc-wrapper {
+  @apply p-0 border-b border-border/60;
+}
+
+.dt__gc-scroll {
+  @apply max-h-[280px] overflow-y-auto;
+}
+
+.dt__gc-table {
+  @apply w-full border-collapse bg-grandchild-bg;
+}
+
+.dt__gc-thead {
+  @apply sticky top-0 z-10;
+}
+
+.dt__gc-head-row {
+  @apply bg-grandchild-header-bg;
+}
+
+.dt__gc-th {
+  @apply px-3 py-0.5 text-left text-[10px] font-semibold text-text-muted border-b border-border/40 whitespace-nowrap;
+}
+
+.dt__gc-row {
+  @apply hover:bg-grandchild-row-hover transition-colors duration-100;
+}
+
+.dt__gc-row--previewable {
+  @apply cursor-pointer;
+}
+
+.dt__gc-row--active {
+  @apply bg-primary/20 ring-1 ring-inset ring-primary/35;
+}
+
+.dt__gc-td {
+  @apply px-3 py-0.5 border-b border-border/30 text-[11px];
+}
+
+.dt__gc-td--actions {
+  @apply px-3 py-0.5 border-b border-border/30 text-[11px] whitespace-nowrap flex items-center gap-1.5;
+}
+
+.dt__gc-link-btn {
+  @apply text-primary text-[11px] font-medium bg-transparent border-none cursor-pointer hover:underline;
+}
+
+/* Frozen expand column */
+.dt__th--expand-frozen {
+  @apply sticky left-0 z-10 bg-table-header-bg;
+}
+.dt__filter-th--expand-frozen {
+  @apply sticky left-0 z-10 bg-table-header-bg;
+}
+.dt__expand-cell--frozen {
+  @apply sticky left-0 z-10 bg-surface;
+}
+
+/* First data column frozen (no expand col) */
+.dt__th--frozen-first {
+  @apply sticky left-0 z-10 bg-table-header-bg shadow-[2px_0_4px_-2px_rgba(0,0,0,0.08)];
+}
+.dt__td--frozen-first {
+  @apply sticky left-0 z-10 bg-surface shadow-[2px_0_4px_-2px_rgba(0,0,0,0.08)];
+}
+.dt__filter-th--frozen-first {
+  @apply sticky left-0 z-10 bg-table-header-bg shadow-[2px_0_4px_-2px_rgba(0,0,0,0.08)];
+}
+
+/* First data column frozen (with expand col, offset by expand width) */
+.dt__th--frozen-first-offset {
+  @apply sticky z-10 bg-table-header-bg;
+  left: 2rem;
+  box-shadow: -6px 0 0 0 var(--color-table-header-bg), 2px 0 4px -2px rgba(0,0,0,0.08);
+}
+.dt__td--frozen-first-offset {
+  @apply sticky z-10 bg-surface;
+  left: 2rem;
+  box-shadow: -6px 0 0 0 var(--color-surface), 2px 0 4px -2px rgba(0,0,0,0.08);
+}
+.dt__filter-th--frozen-first-offset {
+  @apply sticky z-10 bg-table-header-bg;
+  left: 2rem;
+  box-shadow: -6px 0 0 0 var(--color-table-header-bg), 2px 0 4px -2px rgba(0,0,0,0.08);
+}
+
+/* Hover overrides for frozen cells */
+.dt__row:hover .dt__td--frozen-first,
+.dt__row:hover .dt__expand-cell--frozen {
+  @apply bg-table-row-hover;
+}
+.dt__row:hover .dt__td--frozen-first-offset {
+  @apply bg-table-row-hover;
+  box-shadow: -6px 0 0 0 var(--color-table-row-hover), 2px 0 4px -2px rgba(0,0,0,0.08);
+}
+.dt__row--active .dt__td--frozen-first,
+.dt__row--active .dt__expand-cell--frozen {
+  @apply bg-primary/20;
+}
+.dt__row--active .dt__td--frozen-first-offset {
+  @apply bg-primary/20;
+  box-shadow: -6px 0 0 0 color-mix(in srgb, var(--color-primary) 20%, transparent), 2px 0 4px -2px rgba(0,0,0,0.08);
+}
+
+/* Pin toggle button */
+.dt__pin-btn {
+  @apply ml-1 inline-flex items-center text-text-muted opacity-40 hover:opacity-100
+         bg-transparent border-none cursor-pointer text-[11px] p-0 align-middle;
+}
+.dt__pin-btn--active {
+  @apply opacity-100 text-primary;
+}

@@ -1,0 +1,41 @@
+{
+    "2-610": {
+        "error": "'src_dicom_dir_path'",
+        "traceback": [
+            "Traceback (most recent call last):",
+            "  File \"/home/perecanals/miniconda3/envs/pacs/lib/python3.14/site-packages/pandas/core/indexes/base.py\", line 3641, in get_loc",
+            "    return self._engine.get_loc(casted_key)",
+            "           ~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^",
+            "  File \"pandas/_libs/index.pyx\", line 168, in pandas._libs.index.IndexEngine.get_loc",
+            "  File \"pandas/_libs/index.pyx\", line 197, in pandas._libs.index.IndexEngine.get_loc",
+            "  File \"pandas/_libs/hashtable_class_helper.pxi\", line 7668, in pandas._libs.hashtable.PyObjectHashTable.get_item",
+            "  File \"pandas/_libs/hashtable_class_helper.pxi\", line 7676, in pandas._libs.hashtable.PyObjectHashTable.get_item",
+            "KeyError: 'src_dicom_dir_path'",
+            "",
+            "The above exception was the direct cause of the following exception:",
+            "",
+            "Traceback (most recent call last):",
+            "  File \"/home/perecanals/pacs/stanford-stroke-pacs/image_integration_protocols/execute_image_integration_protocol.py\", line 189, in <module>",
+            "    result = execute_image_integration_protocol(",
+            "        case_dir,",
+            "    ...<4 lines>...",
+            "        delete_originals_after_verification=config[\"delete_originals_after_verification\"],",
+            "    )",
+            "  File \"/home/perecanals/pacs/stanford-stroke-pacs/image_integration_protocols/execute_image_integration_protocol.py\", line 95, in execute_image_integration_protocol",
+            "    return protocol.execute_image_integration_protocol(overwrite_if_exists=overwrite_if_exists)",
+            "           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^",
+            "  File \"/home/perecanals/pacs/stanford-stroke-pacs/image_integration_protocols/image_integration_protocol.py\", line 72, in execute_image_integration_protocol",
+            "    step_started = time.perf_counter()",
+            "        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^",
+            "  File \"/home/perecanals/pacs/stanford-stroke-pacs/image_integration_protocols/image_integration_protocol.py\", line 646, in verify_integrated_case",
+            "  File \"/home/perecanals/miniconda3/envs/pacs/lib/python3.14/site-packages/pandas/core/series.py\", line 959, in __getitem__",
+            "    return self._get_value(key)",
+            "           ~~~~~~~~~~~~~~~^^^^^",
+            "  File \"/home/perecanals/miniconda3/envs/pacs/lib/python3.14/site-packages/pandas/core/series.py\", line 1046, in _get_value",
+            "    loc = self.index.get_loc(label)",
+            "  File \"/home/perecanals/miniconda3/envs/pacs/lib/python3.14/site-packages/pandas/core/indexes/base.py\", line 3648, in get_loc",
+            "    raise KeyError(key) from err",
+            "KeyError: 'src_dicom_dir_path'"
+        ]
+    }
+}

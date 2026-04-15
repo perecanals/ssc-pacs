@@ -1,0 +1,33 @@
+@reference "../app.css";
+
+.col-selector {
+  @apply relative inline-block;
+}
+
+.col-selector__trigger {
+  @apply px-3 py-1 border border-border rounded-md bg-surface text-xs whitespace-nowrap cursor-pointer hover:border-primary hover:text-primary;
+}
+
+.col-selector__dropdown {
+  @apply absolute top-full left-0 mt-1 bg-surface border border-border rounded-md shadow-lg z-30 min-w-[220px] max-h-[360px] overflow-y-auto py-1.5;
+}
+
+.col-selector__section-title {
+  @apply px-3 py-1 text-[11px] font-semibold text-text-muted uppercase;
+}
+
+.col-selector__subgroup-title {
+  @apply px-3 pt-1.5 pb-0.5 text-[10px] font-medium text-text-muted/80;
+}
+
+.col-selector__item {
+  @apply flex items-center gap-1.5 px-3 py-1 text-xs cursor-pointer whitespace-nowrap hover:bg-pill-bg;
+}
+
+.col-selector__divider {
+  @apply border-t border-border my-1;
+}
+
+.col-selector__datatype {
+  @apply text-text-muted text-[11px];
+}

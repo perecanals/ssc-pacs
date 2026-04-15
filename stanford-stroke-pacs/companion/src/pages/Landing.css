@@ -1,0 +1,45 @@
+@reference "../app.css";
+
+.landing {
+  @apply min-h-screen flex flex-col items-center justify-center bg-bg p-6;
+}
+
+.landing__header {
+  @apply text-center mb-10;
+}
+
+.landing__title {
+  @apply text-3xl font-bold text-text;
+}
+
+.landing__subtitle {
+  @apply text-sm text-text-muted mt-1;
+}
+
+.landing__grid {
+  @apply grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5 max-w-[820px] w-full;
+}
+
+.landing__card {
+  @apply flex flex-col gap-2 bg-surface border border-border rounded-lg p-7 no-underline text-text transition-shadow hover:border-primary hover:shadow-md;
+}
+
+.landing__card-icon {
+  @apply text-3xl;
+}
+
+.landing__card-title {
+  @apply text-lg font-semibold;
+}
+
+.landing__card-desc {
+  @apply text-sm text-text-muted leading-snug;
+}
+
+.landing__card-hint {
+  @apply mt-auto pt-2 text-xs font-medium text-primary;
+}
+
+.landing__footer {
+  @apply mt-12 text-xs text-text-muted text-center;
+}

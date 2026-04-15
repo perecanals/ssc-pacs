@@ -1,0 +1,1168 @@
+{
+  "host": "stroke",
+  "ts": "2026-04-13 12:52:02 -0700",
+  "cold_root": "/DATA2/pacs_imaging_data_compressed",
+  "loose_root": "/DATA2/pacs_imaging_data_loose_backup",
+  "patient_filter": null,
+  "archives_scanned": 13801,
+  "bytes_read": 624919863000,
+  "elapsed_s": 2047.943500738591,
+  "workers": 8,
+  "corrupt": [
+    {
+      "archive": "/DATA2/pacs_imaging_data_compressed/4-0117/1.2.826.0.1.3680043.8.498.31268272334649851546348278680022572163/rs-fMRI SAGE/1.2.826.0.1.3680043.8.498.13276406407746971730377476862050725133/DICOM.tar.zst",
+      "ok": false,
+      "bytes_read": 182743046,
+      "members": 11313,
+      "elapsed_s": 5.869425564073026,
+      "error": "ReadError: unexpected end of data"
+    },
+    {
+      "archive": "/DATA2/pacs_imaging_data_compressed/4-0121/1.2.826.0.1.3680043.8.498.25257506469178384152338961504363829174/AX PWI INJ 15 SEC W_GAD/1.2.826.0.1.3680043.8.498.36622827910964336014175944915114487004/DICOM.tar.zst",
+      "ok": false,
+      "bytes_read": 36468944,
+      "members": 1043,
+      "elapsed_s": 0.7618168834596872,
+      "error": "ReadError: unexpected end of data"
+    },
+    {
+      "archive": "/DATA2/pacs_imaging_data_compressed/4-0127/1.2.826.0.1.3680043.8.498.12375470165159325595103782731622279023/H_N ANGIO 1.25MM/1.2.826.0.1.3680043.8.498.10586586288174411957691734693913395829/DICOM.tar.zst",
+      "ok": false,
+      "bytes_read": 41605152,
+      "members": 80,
+      "elapsed_s": 0.39970696344971657,
+      "error": "ReadError: unexpected end of data"
+    },
+    {
+      "archive": "/DATA2/pacs_imaging_data_compressed/4-0127/1.2.826.0.1.3680043.8.498.12375470165159325595103782731622279023/perf 2nd run 4 cm above/1.2.826.0.1.3680043.8.498.22030233114273038213984683906844851665/DICOM.tar.zst",
+      "ok": false,
+      "bytes_read": 57920352,
+      "members": 111,
+      "elapsed_s": 0.7378747016191483,
+      "error": "ReadError: unexpected end of data"
+    },
+    {
+      "archive": "/DATA2/pacs_imaging_data_compressed/4-0137/1.2.826.0.1.3680043.8.498.12920168068714443006766461196020340019/3D Saved State - 3dlab-cpr s/1.2.826.0.1.3680043.8.498.83946387649767662457553342245461499110/DICOM.tar.zst",
+      "ok": false,
+      "bytes_read": 2878696,
+      "members": 5,
+      "elapsed_s": 0.03847387619316578,
+      "error": "ReadError: unexpected end of data"
+    },
+    {
+      "archive": "/DATA2/pacs_imaging_data_compressed/4-0137/1.2.826.0.1.3680043.8.498.12920168068714443006766461196020340019/3dlab-SAG MIP BATCH/1.2.826.0.1.3680043.8.498.98802938296341957996354069603711953541/DICOM.tar.zst",
+      "ok": false,
+      "bytes_read": 1439392,
+      "members": 3,
+      "elapsed_s": 0.46682209614664316,
+      "error": "ReadError: unexpected end of data"
+    },
+    {
+      "archive": "/DATA2/pacs_imaging_data_compressed/4-0137/1.2.826.0.1.3680043.8.498.12920168068714443006766461196020340019/3dlab-rcca_rica loop cpr/1.2.826.0.1.3680043.8.498.59927286431012167404717541067665627491/DICOM.tar.zst",
+      "ok": false,
+      "bytes_read": 0,
+      "members": 1,
+      "elapsed_s": 0.37440077401697636,
+      "error": "ReadError: unexpected end of data"
+    },
+    {
+      "archive": "/DATA2/pacs_imaging_data_compressed/4-0137/1.2.826.0.1.3680043.8.498.12920168068714443006766461196020340019/H_N ANGIO 0.625MM/1.2.826.0.1.3680043.8.498.49245102083981283618867198373753658803/DICOM.tar.zst",
+      "ok": false,
+      "bytes_read": 0,
+      "members": 1,
+      "elapsed_s": 0.010308939963579178,
+      "error": "ReadError: unexpected end of data"
+    },
+    {
+      "archive": "/DATA2/pacs_imaging_data_compressed/4-0137/1.2.826.0.1.3680043.8.498.12920168068714443006766461196020340019/ENHANCED BRAIN/1.2.826.0.1.3680043.8.498.72435872996514135812938796383743647492/DICOM.tar.zst",
+      "ok": false,
+      "bytes_read": 526542,
+      "members": 2,
+      "elapsed_s": 0.10057974327355623,
+      "error": "ReadError: unexpected end of data"
+    },
+    {
+      "archive": "/DATA2/pacs_imaging_data_compressed/4-0137/1.2.826.0.1.3680043.8.498.12920168068714443006766461196020340019/H_N ANGIO 2.5MM/1.2.826.0.1.3680043.8.498.71144748482750281382021189880566721680/DICOM.tar.zst",
+      "ok": false,
+      "bytes_read": 0,
+      "members": 1,
+      "elapsed_s": 0.01792041677981615,
+      "error": "ReadError: unexpected end of data"
+    },
+    {
+      "archive": "/DATA2/pacs_imaging_data_compressed/4-0137/1.2.826.0.1.3680043.8.498.12920168068714443006766461196020340019/CORONAL 2MM/1.2.826.0.1.3680043.8.498.27005558226026731913010288578582271270/DICOM.tar.zst",
+      "ok": false,
+      "bytes_read": 38419396,
+      "members": 74,
+      "elapsed_s": 0.40706721413880587,
+      "error": "ReadError: unexpected end of data"
+    },
+    {
+      "archive": "/DATA2/pacs_imaging_data_compressed/4-0137/1.2.826.0.1.3680043.8.498.12920168068714443006766461196020340019/SAGITTAL 2MM/1.2.826.0.1.3680043.8.498.74606121175779694521838219623376914148/DICOM.tar.zst",
+      "ok": false,
+      "bytes_read": 0,
+      "members": 1,
+      "elapsed_s": 0.010813535191118717,
+      "error": "ReadError: unexpected end of data"
+    },
+    {
+      "archive": "/DATA2/pacs_imaging_data_compressed/4-0137/1.2.826.0.1.3680043.8.498.12920168068714443006766461196020340019/H_N ANGIO 1.25MM/1.2.826.0.1.3680043.8.498.13093105170553928750771455235792851575/DICOM.tar.zst",
+      "ok": false,
+      "bytes_read": 73203862,
+      "members": 140,
+      "elapsed_s": 1.5376201448962092,
+      "error": "ReadError: unexpected end of data"
+    },
+    {
+      "archive": "/DATA2/pacs_imaging_data_compressed/4-0137/1.2.826.0.1.3680043.8.498.12920168068714443006766461196020340019/perf 2nd run 4 cm above/1.2.826.0.1.3680043.8.498.66849116129731167658032666071834382815/DICOM.tar.zst",
+      "ok": false,
+      "bytes_read": 59500126,
+      "members": 114,
+      "elapsed_s": 1.303758512251079,
+      "error": "ReadError: unexpected end of data"
+    },
+    {
+      "archive": "/DATA2/pacs_imaging_data_compressed/4-0137/1.2.826.0.1.3680043.8.498.93876673889410481046363949014215605038/3PL SSFSE LOC/1.2.826.0.1.3680043.8.498.10385677963023841142313277509201643080/DICOM.tar.zst",
+      "ok": false,
+      "bytes_read": 0,
+      "members": 1,
+      "elapsed_s": 0.0011226832866668701,
+      "error": "ReadError: unexpected end of data"
+    },
+    {
+      "archive": "/DATA2/pacs_imaging_data_compressed/4-0137/1.2.826.0.1.3680043.8.498.12920168068714443006766461196020340019/perf 1st run 40 cc/1.2.826.0.1.3680043.8.498.24561329424000018847494126548173975110/DICOM.tar.zst",
+      "ok": false,
+      "bytes_read": 138480482,
+      "members": 264,
+      "elapsed_s": 3.1469030482694507,
+      "error": "ReadError: unexpected end of data"
+    },
+    {
+      "archive": "/DATA2/pacs_imaging_data_compressed/4-0468/1.2.826.0.1.3680043.8.498.84152358397553503651854483929992384786/rs-fMRI 6 min/1.2.826.0.1.3680043.8.498.17805390417589394250881248999504016148/DICOM.tar.zst",
+      "ok": false,
+      "bytes_read": 23773670,
+      "members": 681,
+      "elapsed_s": 0.5869456771761179,
+      "error": "ReadError: unexpected end of data"
+    },
+    {
+      "archive": "/DATA2/pacs_imaging_data_compressed/4-0478/1.2.826.0.1.3680043.8.498.18993757629343021412554827126913041445/Head_Neck CTA  1.0  I26f  2/1.2.826.0.1.3680043.8.498.32603962002442270651576718016970541777/DICOM.tar.zst",
+      "ok": false,
+      "bytes_read": 62712920,
+      "members": 120,
+      "elapsed_s": 1.4729954097419977,
+      "error": "ReadError: unexpected end of data"
+    },
+    {
+      "archive": "/DATA2/pacs_imaging_data_compressed/4-0478/1.2.826.0.1.3680043.8.498.18993757629343021412554827126913041445/Head_Neck CTA  0.75  I30f  2/1.2.826.0.1.3680043.8.498.83888870169908672942065662911856796135/DICOM.tar.zst",
+      "ok": false,
+      "bytes_read": 66402512,
+      "members": 127,
+      "elapsed_s": 2.2393802274018526,
+      "error": "ReadError: unexpected end of data"
+    },
+    {
+      "archive": "/DATA2/pacs_imaging_data_compressed/4-0601/1.2.826.0.1.3680043.8.498.29554555633644160841491518901382441992/Ax rs-fMRI 6 min/1.2.826.0.1.3680043.8.498.12590988918088067756178995486856846361/DICOM.tar.zst",
+      "ok": false,
+      "bytes_read": 103595926,
+      "members": 2951,
+      "elapsed_s": 3.4351764488965273,
+      "error": "ReadError: unexpected end of data"
+    },
+    {
+      "archive": "/DATA2/pacs_imaging_data_compressed/4-0629/1.2.826.0.1.3680043.8.498.73371812041019949350181791340821896271/Head W_O  2.0  MPR  cor/1.2.826.0.1.3680043.8.498.11196372380130115474730403904850823180/DICOM.tar.zst",
+      "ok": false,
+      "bytes_read": 24581152,
+      "members": 35,
+      "elapsed_s": 0.2648342428728938,
+      "error": "ReadError: unexpected end of data"
+    },
+    {
+      "archive": "/DATA2/pacs_imaging_data_compressed/4-0629/1.2.826.0.1.3680043.8.498.73371812041019949350181791340821896271/Head W_O  2.0  MPR  sag/1.2.826.0.1.3680043.8.498.42140899966644624603282144130754301873/DICOM.tar.zst",
+      "ok": false,
+      "bytes_read": 7437568,
+      "members": 9,
+      "elapsed_s": 0.1260377299040556,
+      "error": "ReadError: unexpected end of data"
+    },
+    {
+      "archive": "/DATA2/pacs_imaging_data_compressed/4-0629/1.2.826.0.1.3680043.8.498.87077242471201594886635219795260005813/LICA/1.2.826.0.1.3680043.8.498.73612079337456084753023659309918734754/DICOM.tar.zst",
+      "ok": false,
+      "bytes_read": 24139272,
+      "members": 12,
+      "elapsed_s": 0.3936564680188894,
+      "error": "ReadError: unexpected end of data"
+    },
+    {
+      "archive": "/DATA2/pacs_imaging_data_compressed/4-0813/1.2.826.0.1.3680043.8.498.66775345204847521193142920261906820710/PERFUSION 1_2 dose/1.2.826.0.1.3680043.8.498.85351964978567289505885575791212306878/DICOM.tar.zst",
+      "ok": false,
+      "bytes_read": 23882520,
+      "members": 680,
+      "elapsed_s": 0.6387401930987835,
+      "error": "ReadError: unexpected end of data"
+    },
+    {
+      "archive": "/DATA2/pacs_imaging_data_compressed/4-0900/1.2.826.0.1.3680043.8.498.12710560770840555463104612219570320125/VPCT  Perfusion (2) 10.0  Hr36/1.2.826.0.1.3680043.8.498.89779039003743520694504475472471674750/DICOM.tar.zst",
+      "ok": false,
+      "bytes_read": 65862934,
+      "members": 126,
+      "elapsed_s": 1.330051020719111,
+      "error": "ReadError: unexpected end of data"
+    },
+    {
+      "archive": "/DATA2/pacs_imaging_data_compressed/4-0956/1.2.826.0.1.3680043.8.498.60431177807324248763173810421223859231/RCFA/1.2.826.0.1.3680043.8.498.61016437442081736398713117452442161383/DICOM.tar.zst",
+      "ok": false,
+      "bytes_read": 3145728,
+      "members": 1,
+      "elapsed_s": 0.06307094171643257,
+      "error": "ReadError: unexpected end of data"
+    },
+    {
+      "archive": "/DATA2/pacs_imaging_data_compressed/4-0956/1.2.826.0.1.3680043.8.498.60431177807324248763173810421223859231/RICA/1.2.826.0.1.3680043.8.498.51301461373446708720869985207923045848/DICOM.tar.zst",
+      "ok": false,
+      "bytes_read": 49283072,
+      "members": 1,
+      "elapsed_s": 1.3327880259603262,
+      "error": "ReadError: unexpected end of data"
+    },
+    {
+      "archive": "/DATA2/pacs_imaging_data_compressed/4-0956/1.2.826.0.1.3680043.8.498.60431177807324248763173810421223859231/Fluoroscopy - stored/1.2.826.0.1.3680043.8.498.53564681861071940760723598109347195178/DICOM.tar.zst",
+      "ok": false,
+      "bytes_read": 99614720,
+      "members": 1,
+      "elapsed_s": 3.252294374629855,
+      "error": "ReadError: unexpected end of data"
+    },
+    {
+      "archive": "/DATA2/pacs_imaging_data_compressed/4-0956/1.2.826.0.1.3680043.8.498.69277703861473060737221067392621536432/0.625MM Water (Iodine) Stnd AR50/1.2.826.0.1.3680043.8.498.90739441108589662721472731940041792349/DICOM.tar.zst",
+      "ok": false,
+      "bytes_read": 258831312,
+      "members": 492,
+      "elapsed_s": 4.003827822394669,
+      "error": "ReadError: unexpected end of data"
+    },
+    {
+      "archive": "/DATA2/pacs_imaging_data_compressed/4-1106/1.2.826.0.1.3680043.8.498.11210257886426094654404588134764273967/rs-fMRI/1.2.826.0.1.3680043.8.498.11864929606774129030789171012093945239/DICOM.tar.zst",
+      "ok": false,
+      "bytes_read": 127094822,
+      "members": 3633,
+      "elapsed_s": 3.8598173409700394,
+      "error": "ReadError: unexpected end of data"
+    },
+    {
+      "archive": "/DATA2/pacs_imaging_data_compressed/4-1109/1.2.826.0.1.3680043.8.498.50865533442371618398793066460272973995/DE_Head  0.75  Hr64  3  F_0.5/1.2.826.0.1.3680043.8.498.10384671910238931338434946016968304865/DICOM.tar.zst",
+      "ok": false,
+      "bytes_read": 7835168,
+      "members": 15,
+      "elapsed_s": 1.4741477761417627,
+      "error": "ReadError: unexpected end of data"
+    },
+    {
+      "archive": "/DATA2/pacs_imaging_data_compressed/4-1109/1.2.826.0.1.3680043.8.498.50865533442371618398793066460272973995/DE_Head  3.0  MPR  Ax  F_0.5/1.2.826.0.1.3680043.8.498.95693691899486028557481191812937667716/DICOM.tar.zst",
+      "ok": false,
+      "bytes_read": 25817402,
+      "members": 39,
+      "elapsed_s": 0.5174338482320309,
+      "error": "ReadError: unexpected end of data"
+    },
+    {
+      "archive": "/DATA2/pacs_imaging_data_compressed/4-1109/1.2.826.0.1.3680043.8.498.50865533442371618398793066460272973995/VUE (Neuro) VNC MPR tra 3mm Range (Auto)/1.2.826.0.1.3680043.8.498.98765825903979847612330292247332036296/DICOM.tar.zst",
+      "ok": false,
+      "bytes_read": 16320152,
+      "members": 32,
+      "elapsed_s": 0.7406045878306031,
+      "error": "ReadError: unexpected end of data"
+    },
+    {
+      "archive": "/DATA2/pacs_imaging_data_compressed/4-1230/1.2.826.0.1.3680043.8.498.68087960593078626225381023432456560393/CTA 0.5 CE/1.2.826.0.1.3680043.8.498.30279893735169636438706619908304365462/DICOM.tar.zst",
+      "ok": false,
+      "bytes_read": 532812186,
+      "members": 1013,
+      "elapsed_s": 11.96315202023834,
+      "error": "ReadError: unexpected end of data"
+    },
+    {
+      "archive": "/DATA2/pacs_imaging_data_compressed/4-1238/1.2.826.0.1.3680043.8.498.90808778045944187941304329734494242930/DE_Head  0.6 Hr32 MPR  Ax  F_0.5/1.2.826.0.1.3680043.8.498.10943286730812290973793889915644840380/DICOM.tar.zst",
+      "ok": false,
+      "bytes_read": 3645538,
+      "members": 7,
+      "elapsed_s": 0.12964399624615908,
+      "error": "ReadError: unexpected end of data"
+    },
+    {
+      "archive": "/DATA2/pacs_imaging_data_compressed/4-1238/1.2.826.0.1.3680043.8.498.90808778045944187941304329734494242930/DE_Head  0.75  Hr32  3  F_0.5/1.2.826.0.1.3680043.8.498.11618998700698312471881958359628983401/DICOM.tar.zst",
+      "ok": false,
+      "bytes_read": 0,
+      "members": 1,
+      "elapsed_s": 0.03258516080677509,
+      "error": "ReadError: unexpected end of data"
+    },
+    {
+      "archive": "/DATA2/pacs_imaging_data_compressed/4-1238/1.2.826.0.1.3680043.8.498.90808778045944187941304329734494242930/Brain Iodine Overlay MPR tra 3mm Range (Auto)/1.2.826.0.1.3680043.8.498.82193355178698770182706316565126398460/DICOM.tar.zst",
+      "ok": false,
+      "bytes_read": 5518196,
+      "members": 8,
+      "elapsed_s": 0.26990728825330734,
+      "error": "ReadError: unexpected end of data"
+    },
+    {
+      "archive": "/DATA2/pacs_imaging_data_compressed/4-1238/1.2.826.0.1.3680043.8.498.90808778045944187941304329734494242930/DE_Head  3.0  MPR  Ax  F_0.5/1.2.826.0.1.3680043.8.498.31772469838552427667671336992556974320/DICOM.tar.zst",
+      "ok": false,
+      "bytes_read": 2430328,
+      "members": 5,
+      "elapsed_s": 0.07142987940460443,
+      "error": "ReadError: unexpected end of data"
+    },
+    {
+      "archive": "/DATA2/pacs_imaging_data_compressed/4-1238/1.2.826.0.1.3680043.8.498.90808778045944187941304329734494242930/Iodine Map IMD MPR tra 3mm Range (Auto)/1.2.826.0.1.3680043.8.498.75114491839114791731613842605180223593/DICOM.tar.zst",
+      "ok": false,
+      "bytes_read": 2632334,
+      "members": 6,
+      "elapsed_s": 0.008203670382499695,
+      "error": "ReadError: unexpected end of data"
+    },
+    {
+      "archive": "/DATA2/pacs_imaging_data_compressed/4-1238/1.2.826.0.1.3680043.8.498.90808778045944187941304329734494242930/DE_Head  1.5  Qr32  3  B_Sn150kV/1.2.826.0.1.3680043.8.498.66945486374063364645085485471892773274/DICOM.tar.zst",
+      "ok": false,
+      "bytes_read": 20547222,
+      "members": 40,
+      "elapsed_s": 0.20197860524058342,
+      "error": "ReadError: unexpected end of data"
+    },
+    {
+      "archive": "/DATA2/pacs_imaging_data_compressed/4-1238/1.2.826.0.1.3680043.8.498.90808778045944187941304329734494242930/DE_Head  0.75  MPR  Ax  F_0.5/1.2.826.0.1.3680043.8.498.94781008871787890929762628776228635673/DICOM.tar.zst",
+      "ok": false,
+      "bytes_read": 1822762,
+      "members": 4,
+      "elapsed_s": 0.26939368806779385,
+      "error": "ReadError: unexpected end of data"
+    },
+    {
+      "archive": "/DATA2/pacs_imaging_data_compressed/4-1238/1.2.826.0.1.3680043.8.498.90808778045944187941304329734494242930/Iodine Map MPR tra 3mm Range (Auto)/1.2.826.0.1.3680043.8.498.91203273677671762811527317053206028036/DICOM.tar.zst",
+      "ok": false,
+      "bytes_read": 2364912,
+      "members": 4,
+      "elapsed_s": 0.17885779682546854,
+      "error": "ReadError: unexpected end of data"
+    },
+    {
+      "archive": "/DATA2/pacs_imaging_data_compressed/4-1238/1.2.826.0.1.3680043.8.498.90808778045944187941304329734494242930/DE_Head  3.0  MPR  Sag  F_0.5/1.2.826.0.1.3680043.8.498.67506564394736410380590838935046991302/DICOM.tar.zst",
+      "ok": false,
+      "bytes_read": 42209840,
+      "members": 64,
+      "elapsed_s": 0.35080537758767605,
+      "error": "ReadError: unexpected end of data"
+    },
+    {
+      "archive": "/DATA2/pacs_imaging_data_compressed/4-1238/1.2.826.0.1.3680043.8.498.90808778045944187941304329734494242930/DE_Head  3.0  MPR  Cor  F_0.5/1.2.826.0.1.3680043.8.498.96146439542021740289051724450318796429/DICOM.tar.zst",
+      "ok": false,
+      "bytes_read": 3097750,
+      "members": 6,
+      "elapsed_s": 0.5150054097175598,
+      "error": "ReadError: unexpected end of data"
+    },
+    {
+      "archive": "/DATA2/pacs_imaging_data_compressed/4-1238/1.2.826.0.1.3680043.8.498.90808778045944187941304329734494242930/DE_Head  1.5  Qr32  3  A_80kV/1.2.826.0.1.3680043.8.498.10657213750607903816695868325052771659/DICOM.tar.zst",
+      "ok": false,
+      "bytes_read": 3687938,
+      "members": 8,
+      "elapsed_s": 1.719249026849866,
+      "error": "ReadError: unexpected end of data"
+    },
+    {
+      "archive": "/DATA2/pacs_imaging_data_compressed/4-1238/1.2.826.0.1.3680043.8.498.90808778045944187941304329734494242930/VUE (Neuro) VNC MPR tra 3mm Range (Auto)/1.2.826.0.1.3680043.8.498.68871659824356369601672656240400619817/DICOM.tar.zst",
+      "ok": false,
+      "bytes_read": 100767476,
+      "members": 49,
+      "elapsed_s": 1.45132068824023,
+      "error": "ReadError: unexpected end of data"
+    }
+  ],
+  "repair_plan": [
+    {
+      "archive": "/DATA2/pacs_imaging_data_compressed/4-0117/1.2.826.0.1.3680043.8.498.31268272334649851546348278680022572163/rs-fMRI SAGE/1.2.826.0.1.3680043.8.498.13276406407746971730377476862050725133/DICOM.tar.zst",
+      "loose_dir": "/DATA2/pacs_imaging_data_loose_backup/4-0117/1.2.826.0.1.3680043.8.498.31268272334649851546348278680022572163/rs-fMRI SAGE/1.2.826.0.1.3680043.8.498.13276406407746971730377476862050725133/DICOM",
+      "loose_present": true,
+      "error": "ReadError: unexpected end of data"
+    },
+    {
+      "archive": "/DATA2/pacs_imaging_data_compressed/4-0121/1.2.826.0.1.3680043.8.498.25257506469178384152338961504363829174/AX PWI INJ 15 SEC W_GAD/1.2.826.0.1.3680043.8.498.36622827910964336014175944915114487004/DICOM.tar.zst",
+      "loose_dir": "/DATA2/pacs_imaging_data_loose_backup/4-0121/1.2.826.0.1.3680043.8.498.25257506469178384152338961504363829174/AX PWI INJ 15 SEC W_GAD/1.2.826.0.1.3680043.8.498.36622827910964336014175944915114487004/DICOM",
+      "loose_present": true,
+      "error": "ReadError: unexpected end of data"
+    },
+    {
+      "archive": "/DATA2/pacs_imaging_data_compressed/4-0127/1.2.826.0.1.3680043.8.498.12375470165159325595103782731622279023/H_N ANGIO 1.25MM/1.2.826.0.1.3680043.8.498.10586586288174411957691734693913395829/DICOM.tar.zst",
+      "loose_dir": "/DATA2/pacs_imaging_data_loose_backup/4-0127/1.2.826.0.1.3680043.8.498.12375470165159325595103782731622279023/H_N ANGIO 1.25MM/1.2.826.0.1.3680043.8.498.10586586288174411957691734693913395829/DICOM",
+      "loose_present": true,
+      "error": "ReadError: unexpected end of data"
+    },
+    {
+      "archive": "/DATA2/pacs_imaging_data_compressed/4-0127/1.2.826.0.1.3680043.8.498.12375470165159325595103782731622279023/perf 2nd run 4 cm above/1.2.826.0.1.3680043.8.498.22030233114273038213984683906844851665/DICOM.tar.zst",
+      "loose_dir": "/DATA2/pacs_imaging_data_loose_backup/4-0127/1.2.826.0.1.3680043.8.498.12375470165159325595103782731622279023/perf 2nd run 4 cm above/1.2.826.0.1.3680043.8.498.22030233114273038213984683906844851665/DICOM",
+      "loose_present": true,
+      "error": "ReadError: unexpected end of data"
+    },
+    {
+      "archive": "/DATA2/pacs_imaging_data_compressed/4-0137/1.2.826.0.1.3680043.8.498.12920168068714443006766461196020340019/3D Saved State - 3dlab-cpr s/1.2.826.0.1.3680043.8.498.83946387649767662457553342245461499110/DICOM.tar.zst",
+      "loose_dir": "/DATA2/pacs_imaging_data_loose_backup/4-0137/1.2.826.0.1.3680043.8.498.12920168068714443006766461196020340019/3D Saved State - 3dlab-cpr s/1.2.826.0.1.3680043.8.498.83946387649767662457553342245461499110/DICOM",
+      "loose_present": true,
+      "error": "ReadError: unexpected end of data"
+    },
+    {
+      "archive": "/DATA2/pacs_imaging_data_compressed/4-0137/1.2.826.0.1.3680043.8.498.12920168068714443006766461196020340019/3dlab-SAG MIP BATCH/1.2.826.0.1.3680043.8.498.98802938296341957996354069603711953541/DICOM.tar.zst",
+      "loose_dir": "/DATA2/pacs_imaging_data_loose_backup/4-0137/1.2.826.0.1.3680043.8.498.12920168068714443006766461196020340019/3dlab-SAG MIP BATCH/1.2.826.0.1.3680043.8.498.98802938296341957996354069603711953541/DICOM",
+      "loose_present": true,
+      "error": "ReadError: unexpected end of data"
+    },
+    {
+      "archive": "/DATA2/pacs_imaging_data_compressed/4-0137/1.2.826.0.1.3680043.8.498.12920168068714443006766461196020340019/3dlab-rcca_rica loop cpr/1.2.826.0.1.3680043.8.498.59927286431012167404717541067665627491/DICOM.tar.zst",
+      "loose_dir": "/DATA2/pacs_imaging_data_loose_backup/4-0137/1.2.826.0.1.3680043.8.498.12920168068714443006766461196020340019/3dlab-rcca_rica loop cpr/1.2.826.0.1.3680043.8.498.59927286431012167404717541067665627491/DICOM",
+      "loose_present": true,
+      "error": "ReadError: unexpected end of data"
+    },
+    {
+      "archive": "/DATA2/pacs_imaging_data_compressed/4-0137/1.2.826.0.1.3680043.8.498.12920168068714443006766461196020340019/H_N ANGIO 0.625MM/1.2.826.0.1.3680043.8.498.49245102083981283618867198373753658803/DICOM.tar.zst",
+      "loose_dir": "/DATA2/pacs_imaging_data_loose_backup/4-0137/1.2.826.0.1.3680043.8.498.12920168068714443006766461196020340019/H_N ANGIO 0.625MM/1.2.826.0.1.3680043.8.498.49245102083981283618867198373753658803/DICOM",
+      "loose_present": true,
+      "error": "ReadError: unexpected end of data"
+    },
+    {
+      "archive": "/DATA2/pacs_imaging_data_compressed/4-0137/1.2.826.0.1.3680043.8.498.12920168068714443006766461196020340019/ENHANCED BRAIN/1.2.826.0.1.3680043.8.498.72435872996514135812938796383743647492/DICOM.tar.zst",
+      "loose_dir": "/DATA2/pacs_imaging_data_loose_backup/4-0137/1.2.826.0.1.3680043.8.498.12920168068714443006766461196020340019/ENHANCED BRAIN/1.2.826.0.1.3680043.8.498.72435872996514135812938796383743647492/DICOM",
+      "loose_present": true,
+      "error": "ReadError: unexpected end of data"
+    },
+    {
+      "archive": "/DATA2/pacs_imaging_data_compressed/4-0137/1.2.826.0.1.3680043.8.498.12920168068714443006766461196020340019/H_N ANGIO 2.5MM/1.2.826.0.1.3680043.8.498.71144748482750281382021189880566721680/DICOM.tar.zst",
+      "loose_dir": "/DATA2/pacs_imaging_data_loose_backup/4-0137/1.2.826.0.1.3680043.8.498.12920168068714443006766461196020340019/H_N ANGIO 2.5MM/1.2.826.0.1.3680043.8.498.71144748482750281382021189880566721680/DICOM",
+      "loose_present": true,
+      "error": "ReadError: unexpected end of data"
+    },
+    {
+      "archive": "/DATA2/pacs_imaging_data_compressed/4-0137/1.2.826.0.1.3680043.8.498.12920168068714443006766461196020340019/CORONAL 2MM/1.2.826.0.1.3680043.8.498.27005558226026731913010288578582271270/DICOM.tar.zst",
+      "loose_dir": "/DATA2/pacs_imaging_data_loose_backup/4-0137/1.2.826.0.1.3680043.8.498.12920168068714443006766461196020340019/CORONAL 2MM/1.2.826.0.1.3680043.8.498.27005558226026731913010288578582271270/DICOM",
+      "loose_present": true,
+      "error": "ReadError: unexpected end of data"
+    },
+    {
+      "archive": "/DATA2/pacs_imaging_data_compressed/4-0137/1.2.826.0.1.3680043.8.498.12920168068714443006766461196020340019/SAGITTAL 2MM/1.2.826.0.1.3680043.8.498.74606121175779694521838219623376914148/DICOM.tar.zst",
+      "loose_dir": "/DATA2/pacs_imaging_data_loose_backup/4-0137/1.2.826.0.1.3680043.8.498.12920168068714443006766461196020340019/SAGITTAL 2MM/1.2.826.0.1.3680043.8.498.74606121175779694521838219623376914148/DICOM",
+      "loose_present": true,
+      "error": "ReadError: unexpected end of data"
+    },
+    {
+      "archive": "/DATA2/pacs_imaging_data_compressed/4-0137/1.2.826.0.1.3680043.8.498.12920168068714443006766461196020340019/H_N ANGIO 1.25MM/1.2.826.0.1.3680043.8.498.13093105170553928750771455235792851575/DICOM.tar.zst",
+      "loose_dir": "/DATA2/pacs_imaging_data_loose_backup/4-0137/1.2.826.0.1.3680043.8.498.12920168068714443006766461196020340019/H_N ANGIO 1.25MM/1.2.826.0.1.3680043.8.498.13093105170553928750771455235792851575/DICOM",
+      "loose_present": true,
+      "error": "ReadError: unexpected end of data"
+    },
+    {
+      "archive": "/DATA2/pacs_imaging_data_compressed/4-0137/1.2.826.0.1.3680043.8.498.12920168068714443006766461196020340019/perf 2nd run 4 cm above/1.2.826.0.1.3680043.8.498.66849116129731167658032666071834382815/DICOM.tar.zst",
+      "loose_dir": "/DATA2/pacs_imaging_data_loose_backup/4-0137/1.2.826.0.1.3680043.8.498.12920168068714443006766461196020340019/perf 2nd run 4 cm above/1.2.826.0.1.3680043.8.498.66849116129731167658032666071834382815/DICOM",
+      "loose_present": true,
+      "error": "ReadError: unexpected end of data"
+    },
+    {
+      "archive": "/DATA2/pacs_imaging_data_compressed/4-0137/1.2.826.0.1.3680043.8.498.93876673889410481046363949014215605038/3PL SSFSE LOC/1.2.826.0.1.3680043.8.498.10385677963023841142313277509201643080/DICOM.tar.zst",
+      "loose_dir": "/DATA2/pacs_imaging_data_loose_backup/4-0137/1.2.826.0.1.3680043.8.498.93876673889410481046363949014215605038/3PL SSFSE LOC/1.2.826.0.1.3680043.8.498.10385677963023841142313277509201643080/DICOM",
+      "loose_present": true,
+      "error": "ReadError: unexpected end of data"
+    },
+    {
+      "archive": "/DATA2/pacs_imaging_data_compressed/4-0137/1.2.826.0.1.3680043.8.498.12920168068714443006766461196020340019/perf 1st run 40 cc/1.2.826.0.1.3680043.8.498.24561329424000018847494126548173975110/DICOM.tar.zst",
+      "loose_dir": "/DATA2/pacs_imaging_data_loose_backup/4-0137/1.2.826.0.1.3680043.8.498.12920168068714443006766461196020340019/perf 1st run 40 cc/1.2.826.0.1.3680043.8.498.24561329424000018847494126548173975110/DICOM",
+      "loose_present": true,
+      "error": "ReadError: unexpected end of data"
+    },
+    {
+      "archive": "/DATA2/pacs_imaging_data_compressed/4-0468/1.2.826.0.1.3680043.8.498.84152358397553503651854483929992384786/rs-fMRI 6 min/1.2.826.0.1.3680043.8.498.17805390417589394250881248999504016148/DICOM.tar.zst",
+      "loose_dir": "/DATA2/pacs_imaging_data_loose_backup/4-0468/1.2.826.0.1.3680043.8.498.84152358397553503651854483929992384786/rs-fMRI 6 min/1.2.826.0.1.3680043.8.498.17805390417589394250881248999504016148/DICOM",
+      "loose_present": true,
+      "error": "ReadError: unexpected end of data"
+    },
+    {
+      "archive": "/DATA2/pacs_imaging_data_compressed/4-0478/1.2.826.0.1.3680043.8.498.18993757629343021412554827126913041445/Head_Neck CTA  1.0  I26f  2/1.2.826.0.1.3680043.8.498.32603962002442270651576718016970541777/DICOM.tar.zst",
+      "loose_dir": "/DATA2/pacs_imaging_data_loose_backup/4-0478/1.2.826.0.1.3680043.8.498.18993757629343021412554827126913041445/Head_Neck CTA  1.0  I26f  2/1.2.826.0.1.3680043.8.498.32603962002442270651576718016970541777/DICOM",
+      "loose_present": true,
+      "error": "ReadError: unexpected end of data"
+    },
+    {
+      "archive": "/DATA2/pacs_imaging_data_compressed/4-0478/1.2.826.0.1.3680043.8.498.18993757629343021412554827126913041445/Head_Neck CTA  0.75  I30f  2/1.2.826.0.1.3680043.8.498.83888870169908672942065662911856796135/DICOM.tar.zst",
+      "loose_dir": "/DATA2/pacs_imaging_data_loose_backup/4-0478/1.2.826.0.1.3680043.8.498.18993757629343021412554827126913041445/Head_Neck CTA  0.75  I30f  2/1.2.826.0.1.3680043.8.498.83888870169908672942065662911856796135/DICOM",
+      "loose_present": true,
+      "error": "ReadError: unexpected end of data"
+    },
+    {
+      "archive": "/DATA2/pacs_imaging_data_compressed/4-0601/1.2.826.0.1.3680043.8.498.29554555633644160841491518901382441992/Ax rs-fMRI 6 min/1.2.826.0.1.3680043.8.498.12590988918088067756178995486856846361/DICOM.tar.zst",
+      "loose_dir": "/DATA2/pacs_imaging_data_loose_backup/4-0601/1.2.826.0.1.3680043.8.498.29554555633644160841491518901382441992/Ax rs-fMRI 6 min/1.2.826.0.1.3680043.8.498.12590988918088067756178995486856846361/DICOM",
+      "loose_present": true,
+      "error": "ReadError: unexpected end of data"
+    },
+    {
+      "archive": "/DATA2/pacs_imaging_data_compressed/4-0629/1.2.826.0.1.3680043.8.498.73371812041019949350181791340821896271/Head W_O  2.0  MPR  cor/1.2.826.0.1.3680043.8.498.11196372380130115474730403904850823180/DICOM.tar.zst",
+      "loose_dir": "/DATA2/pacs_imaging_data_loose_backup/4-0629/1.2.826.0.1.3680043.8.498.73371812041019949350181791340821896271/Head W_O  2.0  MPR  cor/1.2.826.0.1.3680043.8.498.11196372380130115474730403904850823180/DICOM",
+      "loose_present": true,
+      "error": "ReadError: unexpected end of data"
+    },
+    {
+      "archive": "/DATA2/pacs_imaging_data_compressed/4-0629/1.2.826.0.1.3680043.8.498.73371812041019949350181791340821896271/Head W_O  2.0  MPR  sag/1.2.826.0.1.3680043.8.498.42140899966644624603282144130754301873/DICOM.tar.zst",
+      "loose_dir": "/DATA2/pacs_imaging_data_loose_backup/4-0629/1.2.826.0.1.3680043.8.498.73371812041019949350181791340821896271/Head W_O  2.0  MPR  sag/1.2.826.0.1.3680043.8.498.42140899966644624603282144130754301873/DICOM",
+      "loose_present": true,
+      "error": "ReadError: unexpected end of data"
+    },
+    {
+      "archive": "/DATA2/pacs_imaging_data_compressed/4-0629/1.2.826.0.1.3680043.8.498.87077242471201594886635219795260005813/LICA/1.2.826.0.1.3680043.8.498.73612079337456084753023659309918734754/DICOM.tar.zst",
+      "loose_dir": "/DATA2/pacs_imaging_data_loose_backup/4-0629/1.2.826.0.1.3680043.8.498.87077242471201594886635219795260005813/LICA/1.2.826.0.1.3680043.8.498.73612079337456084753023659309918734754/DICOM",
+      "loose_present": true,
+      "error": "ReadError: unexpected end of data"
+    },
+    {
+      "archive": "/DATA2/pacs_imaging_data_compressed/4-0813/1.2.826.0.1.3680043.8.498.66775345204847521193142920261906820710/PERFUSION 1_2 dose/1.2.826.0.1.3680043.8.498.85351964978567289505885575791212306878/DICOM.tar.zst",
+      "loose_dir": "/DATA2/pacs_imaging_data_loose_backup/4-0813/1.2.826.0.1.3680043.8.498.66775345204847521193142920261906820710/PERFUSION 1_2 dose/1.2.826.0.1.3680043.8.498.85351964978567289505885575791212306878/DICOM",
+      "loose_present": true,
+      "error": "ReadError: unexpected end of data"
+    },
+    {
+      "archive": "/DATA2/pacs_imaging_data_compressed/4-0900/1.2.826.0.1.3680043.8.498.12710560770840555463104612219570320125/VPCT  Perfusion (2) 10.0  Hr36/1.2.826.0.1.3680043.8.498.89779039003743520694504475472471674750/DICOM.tar.zst",
+      "loose_dir": "/DATA2/pacs_imaging_data_loose_backup/4-0900/1.2.826.0.1.3680043.8.498.12710560770840555463104612219570320125/VPCT  Perfusion (2) 10.0  Hr36/1.2.826.0.1.3680043.8.498.89779039003743520694504475472471674750/DICOM",
+      "loose_present": true,
+      "error": "ReadError: unexpected end of data"
+    },
+    {
+      "archive": "/DATA2/pacs_imaging_data_compressed/4-0956/1.2.826.0.1.3680043.8.498.60431177807324248763173810421223859231/RCFA/1.2.826.0.1.3680043.8.498.61016437442081736398713117452442161383/DICOM.tar.zst",
+      "loose_dir": "/DATA2/pacs_imaging_data_loose_backup/4-0956/1.2.826.0.1.3680043.8.498.60431177807324248763173810421223859231/RCFA/1.2.826.0.1.3680043.8.498.61016437442081736398713117452442161383/DICOM",
+      "loose_present": true,
+      "error": "ReadError: unexpected end of data"
+    },
+    {
+      "archive": "/DATA2/pacs_imaging_data_compressed/4-0956/1.2.826.0.1.3680043.8.498.60431177807324248763173810421223859231/RICA/1.2.826.0.1.3680043.8.498.51301461373446708720869985207923045848/DICOM.tar.zst",
+      "loose_dir": "/DATA2/pacs_imaging_data_loose_backup/4-0956/1.2.826.0.1.3680043.8.498.60431177807324248763173810421223859231/RICA/1.2.826.0.1.3680043.8.498.51301461373446708720869985207923045848/DICOM",
+      "loose_present": true,
+      "error": "ReadError: unexpected end of data"
+    },
+    {
+      "archive": "/DATA2/pacs_imaging_data_compressed/4-0956/1.2.826.0.1.3680043.8.498.60431177807324248763173810421223859231/Fluoroscopy - stored/1.2.826.0.1.3680043.8.498.53564681861071940760723598109347195178/DICOM.tar.zst",
+      "loose_dir": "/DATA2/pacs_imaging_data_loose_backup/4-0956/1.2.826.0.1.3680043.8.498.60431177807324248763173810421223859231/Fluoroscopy - stored/1.2.826.0.1.3680043.8.498.53564681861071940760723598109347195178/DICOM",
+      "loose_present": true,
+      "error": "ReadError: unexpected end of data"
+    },
+    {
+      "archive": "/DATA2/pacs_imaging_data_compressed/4-0956/1.2.826.0.1.3680043.8.498.69277703861473060737221067392621536432/0.625MM Water (Iodine) Stnd AR50/1.2.826.0.1.3680043.8.498.90739441108589662721472731940041792349/DICOM.tar.zst",
+      "loose_dir": "/DATA2/pacs_imaging_data_loose_backup/4-0956/1.2.826.0.1.3680043.8.498.69277703861473060737221067392621536432/0.625MM Water (Iodine) Stnd AR50/1.2.826.0.1.3680043.8.498.90739441108589662721472731940041792349/DICOM",
+      "loose_present": true,
+      "error": "ReadError: unexpected end of data"
+    },
+    {
+      "archive": "/DATA2/pacs_imaging_data_compressed/4-1106/1.2.826.0.1.3680043.8.498.11210257886426094654404588134764273967/rs-fMRI/1.2.826.0.1.3680043.8.498.11864929606774129030789171012093945239/DICOM.tar.zst",
+      "loose_dir": "/DATA2/pacs_imaging_data_loose_backup/4-1106/1.2.826.0.1.3680043.8.498.11210257886426094654404588134764273967/rs-fMRI/1.2.826.0.1.3680043.8.498.11864929606774129030789171012093945239/DICOM",
+      "loose_present": true,
+      "error": "ReadError: unexpected end of data"
+    },
+    {
+      "archive": "/DATA2/pacs_imaging_data_compressed/4-1109/1.2.826.0.1.3680043.8.498.50865533442371618398793066460272973995/DE_Head  0.75  Hr64  3  F_0.5/1.2.826.0.1.3680043.8.498.10384671910238931338434946016968304865/DICOM.tar.zst",
+      "loose_dir": "/DATA2/pacs_imaging_data_loose_backup/4-1109/1.2.826.0.1.3680043.8.498.50865533442371618398793066460272973995/DE_Head  0.75  Hr64  3  F_0.5/1.2.826.0.1.3680043.8.498.10384671910238931338434946016968304865/DICOM",
+      "loose_present": true,
+      "error": "ReadError: unexpected end of data"
+    },
+    {
+      "archive": "/DATA2/pacs_imaging_data_compressed/4-1109/1.2.826.0.1.3680043.8.498.50865533442371618398793066460272973995/DE_Head  3.0  MPR  Ax  F_0.5/1.2.826.0.1.3680043.8.498.95693691899486028557481191812937667716/DICOM.tar.zst",
+      "loose_dir": "/DATA2/pacs_imaging_data_loose_backup/4-1109/1.2.826.0.1.3680043.8.498.50865533442371618398793066460272973995/DE_Head  3.0  MPR  Ax  F_0.5/1.2.826.0.1.3680043.8.498.95693691899486028557481191812937667716/DICOM",
+      "loose_present": true,
+      "error": "ReadError: unexpected end of data"
+    },
+    {
+      "archive": "/DATA2/pacs_imaging_data_compressed/4-1109/1.2.826.0.1.3680043.8.498.50865533442371618398793066460272973995/VUE (Neuro) VNC MPR tra 3mm Range (Auto)/1.2.826.0.1.3680043.8.498.98765825903979847612330292247332036296/DICOM.tar.zst",
+      "loose_dir": "/DATA2/pacs_imaging_data_loose_backup/4-1109/1.2.826.0.1.3680043.8.498.50865533442371618398793066460272973995/VUE (Neuro) VNC MPR tra 3mm Range (Auto)/1.2.826.0.1.3680043.8.498.98765825903979847612330292247332036296/DICOM",
+      "loose_present": true,
+      "error": "ReadError: unexpected end of data"
+    },
+    {
+      "archive": "/DATA2/pacs_imaging_data_compressed/4-1230/1.2.826.0.1.3680043.8.498.68087960593078626225381023432456560393/CTA 0.5 CE/1.2.826.0.1.3680043.8.498.30279893735169636438706619908304365462/DICOM.tar.zst",
+      "loose_dir": "/DATA2/pacs_imaging_data_loose_backup/4-1230/1.2.826.0.1.3680043.8.498.68087960593078626225381023432456560393/CTA 0.5 CE/1.2.826.0.1.3680043.8.498.30279893735169636438706619908304365462/DICOM",
+      "loose_present": true,
+      "error": "ReadError: unexpected end of data"
+    },
+    {
+      "archive": "/DATA2/pacs_imaging_data_compressed/4-1238/1.2.826.0.1.3680043.8.498.90808778045944187941304329734494242930/DE_Head  0.6 Hr32 MPR  Ax  F_0.5/1.2.826.0.1.3680043.8.498.10943286730812290973793889915644840380/DICOM.tar.zst",
+      "loose_dir": "/DATA2/pacs_imaging_data_loose_backup/4-1238/1.2.826.0.1.3680043.8.498.90808778045944187941304329734494242930/DE_Head  0.6 Hr32 MPR  Ax  F_0.5/1.2.826.0.1.3680043.8.498.10943286730812290973793889915644840380/DICOM",
+      "loose_present": true,
+      "error": "ReadError: unexpected end of data"
+    },
+    {
+      "archive": "/DATA2/pacs_imaging_data_compressed/4-1238/1.2.826.0.1.3680043.8.498.90808778045944187941304329734494242930/DE_Head  0.75  Hr32  3  F_0.5/1.2.826.0.1.3680043.8.498.11618998700698312471881958359628983401/DICOM.tar.zst",
+      "loose_dir": "/DATA2/pacs_imaging_data_loose_backup/4-1238/1.2.826.0.1.3680043.8.498.90808778045944187941304329734494242930/DE_Head  0.75  Hr32  3  F_0.5/1.2.826.0.1.3680043.8.498.11618998700698312471881958359628983401/DICOM",
+      "loose_present": true,
+      "error": "ReadError: unexpected end of data"
+    },
+    {
+      "archive": "/DATA2/pacs_imaging_data_compressed/4-1238/1.2.826.0.1.3680043.8.498.90808778045944187941304329734494242930/Brain Iodine Overlay MPR tra 3mm Range (Auto)/1.2.826.0.1.3680043.8.498.82193355178698770182706316565126398460/DICOM.tar.zst",
+      "loose_dir": "/DATA2/pacs_imaging_data_loose_backup/4-1238/1.2.826.0.1.3680043.8.498.90808778045944187941304329734494242930/Brain Iodine Overlay MPR tra 3mm Range (Auto)/1.2.826.0.1.3680043.8.498.82193355178698770182706316565126398460/DICOM",
+      "loose_present": true,
+      "error": "ReadError: unexpected end of data"
+    },
+    {
+      "archive": "/DATA2/pacs_imaging_data_compressed/4-1238/1.2.826.0.1.3680043.8.498.90808778045944187941304329734494242930/DE_Head  3.0  MPR  Ax  F_0.5/1.2.826.0.1.3680043.8.498.31772469838552427667671336992556974320/DICOM.tar.zst",
+      "loose_dir": "/DATA2/pacs_imaging_data_loose_backup/4-1238/1.2.826.0.1.3680043.8.498.90808778045944187941304329734494242930/DE_Head  3.0  MPR  Ax  F_0.5/1.2.826.0.1.3680043.8.498.31772469838552427667671336992556974320/DICOM",
+      "loose_present": true,
+      "error": "ReadError: unexpected end of data"
+    },
+    {
+      "archive": "/DATA2/pacs_imaging_data_compressed/4-1238/1.2.826.0.1.3680043.8.498.90808778045944187941304329734494242930/Iodine Map IMD MPR tra 3mm Range (Auto)/1.2.826.0.1.3680043.8.498.75114491839114791731613842605180223593/DICOM.tar.zst",
+      "loose_dir": "/DATA2/pacs_imaging_data_loose_backup/4-1238/1.2.826.0.1.3680043.8.498.90808778045944187941304329734494242930/Iodine Map IMD MPR tra 3mm Range (Auto)/1.2.826.0.1.3680043.8.498.75114491839114791731613842605180223593/DICOM",
+      "loose_present": true,
+      "error": "ReadError: unexpected end of data"
+    },
+    {
+      "archive": "/DATA2/pacs_imaging_data_compressed/4-1238/1.2.826.0.1.3680043.8.498.90808778045944187941304329734494242930/DE_Head  1.5  Qr32  3  B_Sn150kV/1.2.826.0.1.3680043.8.498.66945486374063364645085485471892773274/DICOM.tar.zst",
+      "loose_dir": "/DATA2/pacs_imaging_data_loose_backup/4-1238/1.2.826.0.1.3680043.8.498.90808778045944187941304329734494242930/DE_Head  1.5  Qr32  3  B_Sn150kV/1.2.826.0.1.3680043.8.498.66945486374063364645085485471892773274/DICOM",
+      "loose_present": true,
+      "error": "ReadError: unexpected end of data"
+    },
+    {
+      "archive": "/DATA2/pacs_imaging_data_compressed/4-1238/1.2.826.0.1.3680043.8.498.90808778045944187941304329734494242930/DE_Head  0.75  MPR  Ax  F_0.5/1.2.826.0.1.3680043.8.498.94781008871787890929762628776228635673/DICOM.tar.zst",
+      "loose_dir": "/DATA2/pacs_imaging_data_loose_backup/4-1238/1.2.826.0.1.3680043.8.498.90808778045944187941304329734494242930/DE_Head  0.75  MPR  Ax  F_0.5/1.2.826.0.1.3680043.8.498.94781008871787890929762628776228635673/DICOM",
+      "loose_present": true,
+      "error": "ReadError: unexpected end of data"
+    },
+    {
+      "archive": "/DATA2/pacs_imaging_data_compressed/4-1238/1.2.826.0.1.3680043.8.498.90808778045944187941304329734494242930/Iodine Map MPR tra 3mm Range (Auto)/1.2.826.0.1.3680043.8.498.91203273677671762811527317053206028036/DICOM.tar.zst",
+      "loose_dir": "/DATA2/pacs_imaging_data_loose_backup/4-1238/1.2.826.0.1.3680043.8.498.90808778045944187941304329734494242930/Iodine Map MPR tra 3mm Range (Auto)/1.2.826.0.1.3680043.8.498.91203273677671762811527317053206028036/DICOM",
+      "loose_present": true,
+      "error": "ReadError: unexpected end of data"
+    },
+    {
+      "archive": "/DATA2/pacs_imaging_data_compressed/4-1238/1.2.826.0.1.3680043.8.498.90808778045944187941304329734494242930/DE_Head  3.0  MPR  Sag  F_0.5/1.2.826.0.1.3680043.8.498.67506564394736410380590838935046991302/DICOM.tar.zst",
+      "loose_dir": "/DATA2/pacs_imaging_data_loose_backup/4-1238/1.2.826.0.1.3680043.8.498.90808778045944187941304329734494242930/DE_Head  3.0  MPR  Sag  F_0.5/1.2.826.0.1.3680043.8.498.67506564394736410380590838935046991302/DICOM",
+      "loose_present": true,
+      "error": "ReadError: unexpected end of data"
+    },
+    {
+      "archive": "/DATA2/pacs_imaging_data_compressed/4-1238/1.2.826.0.1.3680043.8.498.90808778045944187941304329734494242930/DE_Head  3.0  MPR  Cor  F_0.5/1.2.826.0.1.3680043.8.498.96146439542021740289051724450318796429/DICOM.tar.zst",
+      "loose_dir": "/DATA2/pacs_imaging_data_loose_backup/4-1238/1.2.826.0.1.3680043.8.498.90808778045944187941304329734494242930/DE_Head  3.0  MPR  Cor  F_0.5/1.2.826.0.1.3680043.8.498.96146439542021740289051724450318796429/DICOM",
+      "loose_present": true,
+      "error": "ReadError: unexpected end of data"
+    },
+    {
+      "archive": "/DATA2/pacs_imaging_data_compressed/4-1238/1.2.826.0.1.3680043.8.498.90808778045944187941304329734494242930/DE_Head  1.5  Qr32  3  A_80kV/1.2.826.0.1.3680043.8.498.10657213750607903816695868325052771659/DICOM.tar.zst",
+      "loose_dir": "/DATA2/pacs_imaging_data_loose_backup/4-1238/1.2.826.0.1.3680043.8.498.90808778045944187941304329734494242930/DE_Head  1.5  Qr32  3  A_80kV/1.2.826.0.1.3680043.8.498.10657213750607903816695868325052771659/DICOM",
+      "loose_present": true,
+      "error": "ReadError: unexpected end of data"
+    },
+    {
+      "archive": "/DATA2/pacs_imaging_data_compressed/4-1238/1.2.826.0.1.3680043.8.498.90808778045944187941304329734494242930/VUE (Neuro) VNC MPR tra 3mm Range (Auto)/1.2.826.0.1.3680043.8.498.68871659824356369601672656240400619817/DICOM.tar.zst",
+      "loose_dir": "/DATA2/pacs_imaging_data_loose_backup/4-1238/1.2.826.0.1.3680043.8.498.90808778045944187941304329734494242930/VUE (Neuro) VNC MPR tra 3mm Range (Auto)/1.2.826.0.1.3680043.8.498.68871659824356369601672656240400619817/DICOM",
+      "loose_present": true,
+      "error": "ReadError: unexpected end of data"
+    }
+  ],
+  "repair_executed": true,
+  "repair_results": [
+    {
+      "archive": "/DATA2/pacs_imaging_data_compressed/4-0117/1.2.826.0.1.3680043.8.498.31268272334649851546348278680022572163/rs-fMRI SAGE/1.2.826.0.1.3680043.8.498.13276406407746971730377476862050725133/DICOM.tar.zst",
+      "loose_dir": "/DATA2/pacs_imaging_data_loose_backup/4-0117/1.2.826.0.1.3680043.8.498.31268272334649851546348278680022572163/rs-fMRI SAGE/1.2.826.0.1.3680043.8.498.13276406407746971730377476862050725133/DICOM",
+      "loose_present": true,
+      "error": "ReadError: unexpected end of data",
+      "repaired": true,
+      "new_bytes": 129711240,
+      "rebuild_s": 101.3451442765072,
+      "verify_s": 1.0255699316039681,
+      "members": 14400
+    },
+    {
+      "archive": "/DATA2/pacs_imaging_data_compressed/4-0121/1.2.826.0.1.3680043.8.498.25257506469178384152338961504363829174/AX PWI INJ 15 SEC W_GAD/1.2.826.0.1.3680043.8.498.36622827910964336014175944915114487004/DICOM.tar.zst",
+      "loose_dir": "/DATA2/pacs_imaging_data_loose_backup/4-0121/1.2.826.0.1.3680043.8.498.25257506469178384152338961504363829174/AX PWI INJ 15 SEC W_GAD/1.2.826.0.1.3680043.8.498.36622827910964336014175944915114487004/DICOM",
+      "loose_present": true,
+      "error": "ReadError: unexpected end of data",
+      "repaired": true,
+      "new_bytes": 22474845,
+      "rebuild_s": 6.052604781463742,
+      "verify_s": 0.14953939523547888,
+      "members": 1280
+    },
+    {
+      "archive": "/DATA2/pacs_imaging_data_compressed/4-0127/1.2.826.0.1.3680043.8.498.12375470165159325595103782731622279023/H_N ANGIO 1.25MM/1.2.826.0.1.3680043.8.498.10586586288174411957691734693913395829/DICOM.tar.zst",
+      "loose_dir": "/DATA2/pacs_imaging_data_loose_backup/4-0127/1.2.826.0.1.3680043.8.498.12375470165159325595103782731622279023/H_N ANGIO 1.25MM/1.2.826.0.1.3680043.8.498.10586586288174411957691734693913395829/DICOM",
+      "loose_present": true,
+      "error": "ReadError: unexpected end of data",
+      "repaired": true,
+      "new_bytes": 68531590,
+      "rebuild_s": 3.74522393476218,
+      "verify_s": 0.23275715485215187,
+      "members": 286
+    },
+    {
+      "archive": "/DATA2/pacs_imaging_data_compressed/4-0127/1.2.826.0.1.3680043.8.498.12375470165159325595103782731622279023/perf 2nd run 4 cm above/1.2.826.0.1.3680043.8.498.22030233114273038213984683906844851665/DICOM.tar.zst",
+      "loose_dir": "/DATA2/pacs_imaging_data_loose_backup/4-0127/1.2.826.0.1.3680043.8.498.12375470165159325595103782731622279023/perf 2nd run 4 cm above/1.2.826.0.1.3680043.8.498.22030233114273038213984683906844851665/DICOM",
+      "loose_present": true,
+      "error": "ReadError: unexpected end of data",
+      "repaired": true,
+      "new_bytes": 92542973,
+      "rebuild_s": 5.499047124758363,
+      "verify_s": 0.30359303392469883,
+      "members": 400
+    },
+    {
+      "archive": "/DATA2/pacs_imaging_data_compressed/4-0137/1.2.826.0.1.3680043.8.498.12920168068714443006766461196020340019/3D Saved State - 3dlab-cpr s/1.2.826.0.1.3680043.8.498.83946387649767662457553342245461499110/DICOM.tar.zst",
+      "loose_dir": "/DATA2/pacs_imaging_data_loose_backup/4-0137/1.2.826.0.1.3680043.8.498.12920168068714443006766461196020340019/3D Saved State - 3dlab-cpr s/1.2.826.0.1.3680043.8.498.83946387649767662457553342245461499110/DICOM",
+      "loose_present": true,
+      "error": "ReadError: unexpected end of data",
+      "repaired": true,
+      "new_bytes": 2547995,
+      "rebuild_s": 0.4180400064215064,
+      "verify_s": 0.020650407299399376,
+      "members": 9
+    },
+    {
+      "archive": "/DATA2/pacs_imaging_data_compressed/4-0137/1.2.826.0.1.3680043.8.498.12920168068714443006766461196020340019/3dlab-SAG MIP BATCH/1.2.826.0.1.3680043.8.498.98802938296341957996354069603711953541/DICOM.tar.zst",
+      "loose_dir": "/DATA2/pacs_imaging_data_loose_backup/4-0137/1.2.826.0.1.3680043.8.498.12920168068714443006766461196020340019/3dlab-SAG MIP BATCH/1.2.826.0.1.3680043.8.498.98802938296341957996354069603711953541/DICOM",
+      "loose_present": true,
+      "error": "ReadError: unexpected end of data",
+      "repaired": true,
+      "new_bytes": 9714370,
+      "rebuild_s": 0.5644319038838148,
+      "verify_s": 0.05448166932910681,
+      "members": 34
+    },
+    {
+      "archive": "/DATA2/pacs_imaging_data_compressed/4-0137/1.2.826.0.1.3680043.8.498.12920168068714443006766461196020340019/3dlab-rcca_rica loop cpr/1.2.826.0.1.3680043.8.498.59927286431012167404717541067665627491/DICOM.tar.zst",
+      "loose_dir": "/DATA2/pacs_imaging_data_loose_backup/4-0137/1.2.826.0.1.3680043.8.498.12920168068714443006766461196020340019/3dlab-rcca_rica loop cpr/1.2.826.0.1.3680043.8.498.59927286431012167404717541067665627491/DICOM",
+      "loose_present": true,
+      "error": "ReadError: unexpected end of data",
+      "repaired": true,
+      "new_bytes": 8916689,
+      "rebuild_s": 0.6470361649990082,
+      "verify_s": 0.052189757116138935,
+      "members": 36
+    },
+    {
+      "archive": "/DATA2/pacs_imaging_data_compressed/4-0137/1.2.826.0.1.3680043.8.498.12920168068714443006766461196020340019/H_N ANGIO 0.625MM/1.2.826.0.1.3680043.8.498.49245102083981283618867198373753658803/DICOM.tar.zst",
+      "loose_dir": "/DATA2/pacs_imaging_data_loose_backup/4-0137/1.2.826.0.1.3680043.8.498.12920168068714443006766461196020340019/H_N ANGIO 0.625MM/1.2.826.0.1.3680043.8.498.49245102083981283618867198373753658803/DICOM",
+      "loose_present": true,
+      "error": "ReadError: unexpected end of data",
+      "repaired": true,
+      "new_bytes": 136724979,
+      "rebuild_s": 6.544829582795501,
+      "verify_s": 0.40873475279659033,
+      "members": 536
+    },
+    {
+      "archive": "/DATA2/pacs_imaging_data_compressed/4-0137/1.2.826.0.1.3680043.8.498.12920168068714443006766461196020340019/ENHANCED BRAIN/1.2.826.0.1.3680043.8.498.72435872996514135812938796383743647492/DICOM.tar.zst",
+      "loose_dir": "/DATA2/pacs_imaging_data_loose_backup/4-0137/1.2.826.0.1.3680043.8.498.12920168068714443006766461196020340019/ENHANCED BRAIN/1.2.826.0.1.3680043.8.498.72435872996514135812938796383743647492/DICOM",
+      "loose_present": true,
+      "error": "ReadError: unexpected end of data",
+      "repaired": true,
+      "new_bytes": 8888576,
+      "rebuild_s": 0.7948200898244977,
+      "verify_s": 0.05320274271070957,
+      "members": 40
+    },
+    {
+      "archive": "/DATA2/pacs_imaging_data_compressed/4-0137/1.2.826.0.1.3680043.8.498.12920168068714443006766461196020340019/H_N ANGIO 2.5MM/1.2.826.0.1.3680043.8.498.71144748482750281382021189880566721680/DICOM.tar.zst",
+      "loose_dir": "/DATA2/pacs_imaging_data_loose_backup/4-0137/1.2.826.0.1.3680043.8.498.12920168068714443006766461196020340019/H_N ANGIO 2.5MM/1.2.826.0.1.3680043.8.498.71144748482750281382021189880566721680/DICOM",
+      "loose_present": true,
+      "error": "ReadError: unexpected end of data",
+      "repaired": true,
+      "new_bytes": 33269044,
+      "rebuild_s": 1.9639526642858982,
+      "verify_s": 0.12429789081215858,
+      "members": 134
+    },
+    {
+      "archive": "/DATA2/pacs_imaging_data_compressed/4-0137/1.2.826.0.1.3680043.8.498.12920168068714443006766461196020340019/CORONAL 2MM/1.2.826.0.1.3680043.8.498.27005558226026731913010288578582271270/DICOM.tar.zst",
+      "loose_dir": "/DATA2/pacs_imaging_data_loose_backup/4-0137/1.2.826.0.1.3680043.8.498.12920168068714443006766461196020340019/CORONAL 2MM/1.2.826.0.1.3680043.8.498.27005558226026731913010288578582271270/DICOM",
+      "loose_present": true,
+      "error": "ReadError: unexpected end of data",
+      "repaired": true,
+      "new_bytes": 19495746,
+      "rebuild_s": 1.4065052084624767,
+      "verify_s": 0.09014958050101995,
+      "members": 112
+    },
+    {
+      "archive": "/DATA2/pacs_imaging_data_compressed/4-0137/1.2.826.0.1.3680043.8.498.12920168068714443006766461196020340019/SAGITTAL 2MM/1.2.826.0.1.3680043.8.498.74606121175779694521838219623376914148/DICOM.tar.zst",
+      "loose_dir": "/DATA2/pacs_imaging_data_loose_backup/4-0137/1.2.826.0.1.3680043.8.498.12920168068714443006766461196020340019/SAGITTAL 2MM/1.2.826.0.1.3680043.8.498.74606121175779694521838219623376914148/DICOM",
+      "loose_present": true,
+      "error": "ReadError: unexpected end of data",
+      "repaired": true,
+      "new_bytes": 19355562,
+      "rebuild_s": 1.1610013004392385,
+      "verify_s": 0.0840045977383852,
+      "members": 109
+    },
+    {
+      "archive": "/DATA2/pacs_imaging_data_compressed/4-0137/1.2.826.0.1.3680043.8.498.12920168068714443006766461196020340019/H_N ANGIO 1.25MM/1.2.826.0.1.3680043.8.498.13093105170553928750771455235792851575/DICOM.tar.zst",
+      "loose_dir": "/DATA2/pacs_imaging_data_loose_backup/4-0137/1.2.826.0.1.3680043.8.498.12920168068714443006766461196020340019/H_N ANGIO 1.25MM/1.2.826.0.1.3680043.8.498.13093105170553928750771455235792851575/DICOM",
+      "loose_present": true,
+      "error": "ReadError: unexpected end of data",
+      "repaired": true,
+      "new_bytes": 68080350,
+      "rebuild_s": 3.2942999778315425,
+      "verify_s": 0.21432214695960283,
+      "members": 268
+    },
+    {
+      "archive": "/DATA2/pacs_imaging_data_compressed/4-0137/1.2.826.0.1.3680043.8.498.12920168068714443006766461196020340019/perf 2nd run 4 cm above/1.2.826.0.1.3680043.8.498.66849116129731167658032666071834382815/DICOM.tar.zst",
+      "loose_dir": "/DATA2/pacs_imaging_data_loose_backup/4-0137/1.2.826.0.1.3680043.8.498.12920168068714443006766461196020340019/perf 2nd run 4 cm above/1.2.826.0.1.3680043.8.498.66849116129731167658032666071834382815/DICOM",
+      "loose_present": true,
+      "error": "ReadError: unexpected end of data",
+      "repaired": true,
+      "new_bytes": 98790290,
+      "rebuild_s": 5.384888734668493,
+      "verify_s": 0.3301726747304201,
+      "members": 400
+    },
+    {
+      "archive": "/DATA2/pacs_imaging_data_compressed/4-0137/1.2.826.0.1.3680043.8.498.93876673889410481046363949014215605038/3PL SSFSE LOC/1.2.826.0.1.3680043.8.498.10385677963023841142313277509201643080/DICOM.tar.zst",
+      "loose_dir": "/DATA2/pacs_imaging_data_loose_backup/4-0137/1.2.826.0.1.3680043.8.498.93876673889410481046363949014215605038/3PL SSFSE LOC/1.2.826.0.1.3680043.8.498.10385677963023841142313277509201643080/DICOM",
+      "loose_present": true,
+      "error": "ReadError: unexpected end of data",
+      "repaired": true,
+      "new_bytes": 2685529,
+      "rebuild_s": 0.5007292972877622,
+      "verify_s": 0.024619901552796364,
+      "members": 45
+    },
+    {
+      "archive": "/DATA2/pacs_imaging_data_compressed/4-0137/1.2.826.0.1.3680043.8.498.12920168068714443006766461196020340019/perf 1st run 40 cc/1.2.826.0.1.3680043.8.498.24561329424000018847494126548173975110/DICOM.tar.zst",
+      "loose_dir": "/DATA2/pacs_imaging_data_loose_backup/4-0137/1.2.826.0.1.3680043.8.498.12920168068714443006766461196020340019/perf 1st run 40 cc/1.2.826.0.1.3680043.8.498.24561329424000018847494126548173975110/DICOM",
+      "loose_present": true,
+      "error": "ReadError: unexpected end of data",
+      "repaired": true,
+      "new_bytes": 99461325,
+      "rebuild_s": 4.76771467924118,
+      "verify_s": 0.3262720350176096,
+      "members": 400
+    },
+    {
+      "archive": "/DATA2/pacs_imaging_data_compressed/4-0468/1.2.826.0.1.3680043.8.498.84152358397553503651854483929992384786/rs-fMRI 6 min/1.2.826.0.1.3680043.8.498.17805390417589394250881248999504016148/DICOM.tar.zst",
+      "loose_dir": "/DATA2/pacs_imaging_data_loose_backup/4-0468/1.2.826.0.1.3680043.8.498.84152358397553503651854483929992384786/rs-fMRI 6 min/1.2.826.0.1.3680043.8.498.17805390417589394250881248999504016148/DICOM",
+      "loose_present": true,
+      "error": "ReadError: unexpected end of data",
+      "repaired": true,
+      "new_bytes": 77017439,
+      "rebuild_s": 27.601790569722652,
+      "verify_s": 0.44379599392414093,
+      "members": 4212
+    },
+    {
+      "archive": "/DATA2/pacs_imaging_data_compressed/4-0478/1.2.826.0.1.3680043.8.498.18993757629343021412554827126913041445/Head_Neck CTA  1.0  I26f  2/1.2.826.0.1.3680043.8.498.32603962002442270651576718016970541777/DICOM.tar.zst",
+      "loose_dir": "/DATA2/pacs_imaging_data_loose_backup/4-0478/1.2.826.0.1.3680043.8.498.18993757629343021412554827126913041445/Head_Neck CTA  1.0  I26f  2/1.2.826.0.1.3680043.8.498.32603962002442270651576718016970541777/DICOM",
+      "loose_present": true,
+      "error": "ReadError: unexpected end of data",
+      "repaired": true,
+      "new_bytes": 77515581,
+      "rebuild_s": 3.793156017549336,
+      "verify_s": 0.2955195400863886,
+      "members": 308
+    },
+    {
+      "archive": "/DATA2/pacs_imaging_data_compressed/4-0478/1.2.826.0.1.3680043.8.498.18993757629343021412554827126913041445/Head_Neck CTA  0.75  I30f  2/1.2.826.0.1.3680043.8.498.83888870169908672942065662911856796135/DICOM.tar.zst",
+      "loose_dir": "/DATA2/pacs_imaging_data_loose_backup/4-0478/1.2.826.0.1.3680043.8.498.18993757629343021412554827126913041445/Head_Neck CTA  0.75  I30f  2/1.2.826.0.1.3680043.8.498.83888870169908672942065662911856796135/DICOM",
+      "loose_present": true,
+      "error": "ReadError: unexpected end of data",
+      "repaired": true,
+      "new_bytes": 112545424,
+      "rebuild_s": 4.940242415294051,
+      "verify_s": 0.39245976228266954,
+      "members": 439
+    },
+    {
+      "archive": "/DATA2/pacs_imaging_data_compressed/4-0601/1.2.826.0.1.3680043.8.498.29554555633644160841491518901382441992/Ax rs-fMRI 6 min/1.2.826.0.1.3680043.8.498.12590988918088067756178995486856846361/DICOM.tar.zst",
+      "loose_dir": "/DATA2/pacs_imaging_data_loose_backup/4-0601/1.2.826.0.1.3680043.8.498.29554555633644160841491518901382441992/Ax rs-fMRI 6 min/1.2.826.0.1.3680043.8.498.12590988918088067756178995486856846361/DICOM",
+      "loose_present": true,
+      "error": "ReadError: unexpected end of data",
+      "repaired": true,
+      "new_bytes": 79991567,
+      "rebuild_s": 24.392437798902392,
+      "verify_s": 0.43724246975034475,
+      "members": 4212
+    },
+    {
+      "archive": "/DATA2/pacs_imaging_data_compressed/4-0629/1.2.826.0.1.3680043.8.498.73371812041019949350181791340821896271/Head W_O  2.0  MPR  cor/1.2.826.0.1.3680043.8.498.11196372380130115474730403904850823180/DICOM.tar.zst",
+      "loose_dir": "/DATA2/pacs_imaging_data_loose_backup/4-0629/1.2.826.0.1.3680043.8.498.73371812041019949350181791340821896271/Head W_O  2.0  MPR  cor/1.2.826.0.1.3680043.8.498.11196372380130115474730403904850823180/DICOM",
+      "loose_present": true,
+      "error": "ReadError: unexpected end of data",
+      "repaired": true,
+      "new_bytes": 30688276,
+      "rebuild_s": 1.4949325192719698,
+      "verify_s": 0.12802869081497192,
+      "members": 106
+    },
+    {
+      "archive": "/DATA2/pacs_imaging_data_compressed/4-0629/1.2.826.0.1.3680043.8.498.73371812041019949350181791340821896271/Head W_O  2.0  MPR  sag/1.2.826.0.1.3680043.8.498.42140899966644624603282144130754301873/DICOM.tar.zst",
+      "loose_dir": "/DATA2/pacs_imaging_data_loose_backup/4-0629/1.2.826.0.1.3680043.8.498.73371812041019949350181791340821896271/Head W_O  2.0  MPR  sag/1.2.826.0.1.3680043.8.498.42140899966644624603282144130754301873/DICOM",
+      "loose_present": true,
+      "error": "ReadError: unexpected end of data",
+      "repaired": true,
+      "new_bytes": 36570448,
+      "rebuild_s": 1.690281281247735,
+      "verify_s": 0.14926568046212196,
+      "members": 102
+    },
+    {
+      "archive": "/DATA2/pacs_imaging_data_compressed/4-0629/1.2.826.0.1.3680043.8.498.87077242471201594886635219795260005813/LICA/1.2.826.0.1.3680043.8.498.73612079337456084753023659309918734754/DICOM.tar.zst",
+      "loose_dir": "/DATA2/pacs_imaging_data_loose_backup/4-0629/1.2.826.0.1.3680043.8.498.87077242471201594886635219795260005813/LICA/1.2.826.0.1.3680043.8.498.73612079337456084753023659309918734754/DICOM",
+      "loose_present": true,
+      "error": "ReadError: unexpected end of data",
+      "repaired": true,
+      "new_bytes": 40555039,
+      "rebuild_s": 1.0859412383288145,
+      "verify_s": 0.14016894716769457,
+      "members": 39
+    },
+    {
+      "archive": "/DATA2/pacs_imaging_data_compressed/4-0813/1.2.826.0.1.3680043.8.498.66775345204847521193142920261906820710/PERFUSION 1_2 dose/1.2.826.0.1.3680043.8.498.85351964978567289505885575791212306878/DICOM.tar.zst",
+      "loose_dir": "/DATA2/pacs_imaging_data_loose_backup/4-0813/1.2.826.0.1.3680043.8.498.66775345204847521193142920261906820710/PERFUSION 1_2 dose/1.2.826.0.1.3680043.8.498.85351964978567289505885575791212306878/DICOM",
+      "loose_present": true,
+      "error": "ReadError: unexpected end of data",
+      "repaired": true,
+      "new_bytes": 27723300,
+      "rebuild_s": 4.328741098754108,
+      "verify_s": 0.1583740757778287,
+      "members": 1440
+    },
+    {
+      "archive": "/DATA2/pacs_imaging_data_compressed/4-0900/1.2.826.0.1.3680043.8.498.12710560770840555463104612219570320125/VPCT  Perfusion (2) 10.0  Hr36/1.2.826.0.1.3680043.8.498.89779039003743520694504475472471674750/DICOM.tar.zst",
+      "loose_dir": "/DATA2/pacs_imaging_data_loose_backup/4-0900/1.2.826.0.1.3680043.8.498.12710560770840555463104612219570320125/VPCT  Perfusion (2) 10.0  Hr36/1.2.826.0.1.3680043.8.498.89779039003743520694504475472471674750/DICOM",
+      "loose_present": true,
+      "error": "ReadError: unexpected end of data",
+      "repaired": true,
+      "new_bytes": 99872250,
+      "rebuild_s": 5.656642009504139,
+      "verify_s": 0.3361819451674819,
+      "members": 396
+    },
+    {
+      "archive": "/DATA2/pacs_imaging_data_compressed/4-0956/1.2.826.0.1.3680043.8.498.60431177807324248763173810421223859231/RCFA/1.2.826.0.1.3680043.8.498.61016437442081736398713117452442161383/DICOM.tar.zst",
+      "loose_dir": "/DATA2/pacs_imaging_data_loose_backup/4-0956/1.2.826.0.1.3680043.8.498.60431177807324248763173810421223859231/RCFA/1.2.826.0.1.3680043.8.498.61016437442081736398713117452442161383/DICOM",
+      "loose_present": true,
+      "error": "ReadError: unexpected end of data",
+      "repaired": true,
+      "new_bytes": 10292475,
+      "rebuild_s": 0.2800206569954753,
+      "verify_s": 0.04797117877751589,
+      "members": 1
+    },
+    {
+      "archive": "/DATA2/pacs_imaging_data_compressed/4-0956/1.2.826.0.1.3680043.8.498.60431177807324248763173810421223859231/RICA/1.2.826.0.1.3680043.8.498.51301461373446708720869985207923045848/DICOM.tar.zst",
+      "loose_dir": "/DATA2/pacs_imaging_data_loose_backup/4-0956/1.2.826.0.1.3680043.8.498.60431177807324248763173810421223859231/RICA/1.2.826.0.1.3680043.8.498.51301461373446708720869985207923045848/DICOM",
+      "loose_present": true,
+      "error": "ReadError: unexpected end of data",
+      "repaired": true,
+      "new_bytes": 114230070,
+      "rebuild_s": 1.2754569929093122,
+      "verify_s": 0.28590944688767195,
+      "members": 2
+    },
+    {
+      "archive": "/DATA2/pacs_imaging_data_compressed/4-0956/1.2.826.0.1.3680043.8.498.60431177807324248763173810421223859231/Fluoroscopy - stored/1.2.826.0.1.3680043.8.498.53564681861071940760723598109347195178/DICOM.tar.zst",
+      "loose_dir": "/DATA2/pacs_imaging_data_loose_backup/4-0956/1.2.826.0.1.3680043.8.498.60431177807324248763173810421223859231/Fluoroscopy - stored/1.2.826.0.1.3680043.8.498.53564681861071940760723598109347195178/DICOM",
+      "loose_present": true,
+      "error": "ReadError: unexpected end of data",
+      "repaired": true,
+      "new_bytes": 539798641,
+      "rebuild_s": 5.76132230181247,
+      "verify_s": 1.1551583856344223,
+      "members": 2
+    },
+    {
+      "archive": "/DATA2/pacs_imaging_data_compressed/4-0956/1.2.826.0.1.3680043.8.498.69277703861473060737221067392621536432/0.625MM Water (Iodine) Stnd AR50/1.2.826.0.1.3680043.8.498.90739441108589662721472731940041792349/DICOM.tar.zst",
+      "loose_dir": "/DATA2/pacs_imaging_data_loose_backup/4-0956/1.2.826.0.1.3680043.8.498.69277703861473060737221067392621536432/0.625MM Water (Iodine) Stnd AR50/1.2.826.0.1.3680043.8.498.90739441108589662721472731940041792349/DICOM",
+      "loose_present": true,
+      "error": "ReadError: unexpected end of data",
+      "repaired": true,
+      "new_bytes": 102417743,
+      "rebuild_s": 8.703954351134598,
+      "verify_s": 0.3976372228935361,
+      "members": 529
+    },
+    {
+      "archive": "/DATA2/pacs_imaging_data_compressed/4-1106/1.2.826.0.1.3680043.8.498.11210257886426094654404588134764273967/rs-fMRI/1.2.826.0.1.3680043.8.498.11864929606774129030789171012093945239/DICOM.tar.zst",
+      "loose_dir": "/DATA2/pacs_imaging_data_loose_backup/4-1106/1.2.826.0.1.3680043.8.498.11210257886426094654404588134764273967/rs-fMRI/1.2.826.0.1.3680043.8.498.11864929606774129030789171012093945239/DICOM",
+      "loose_present": true,
+      "error": "ReadError: unexpected end of data",
+      "repaired": true,
+      "new_bytes": 84669289,
+      "rebuild_s": 23.92029043007642,
+      "verify_s": 0.46311677247285843,
+      "members": 4200
+    },
+    {
+      "archive": "/DATA2/pacs_imaging_data_compressed/4-1109/1.2.826.0.1.3680043.8.498.50865533442371618398793066460272973995/DE_Head  0.75  Hr64  3  F_0.5/1.2.826.0.1.3680043.8.498.10384671910238931338434946016968304865/DICOM.tar.zst",
+      "loose_dir": "/DATA2/pacs_imaging_data_loose_backup/4-1109/1.2.826.0.1.3680043.8.498.50865533442371618398793066460272973995/DE_Head  0.75  Hr64  3  F_0.5/1.2.826.0.1.3680043.8.498.10384671910238931338434946016968304865/DICOM",
+      "loose_present": true,
+      "error": "ReadError: unexpected end of data",
+      "repaired": true,
+      "new_bytes": 66350398,
+      "rebuild_s": 3.1836108844727278,
+      "verify_s": 0.22451392095535994,
+      "members": 217
+    },
+    {
+      "archive": "/DATA2/pacs_imaging_data_compressed/4-1109/1.2.826.0.1.3680043.8.498.50865533442371618398793066460272973995/DE_Head  3.0  MPR  Ax  F_0.5/1.2.826.0.1.3680043.8.498.95693691899486028557481191812937667716/DICOM.tar.zst",
+      "loose_dir": "/DATA2/pacs_imaging_data_loose_backup/4-1109/1.2.826.0.1.3680043.8.498.50865533442371618398793066460272973995/DE_Head  3.0  MPR  Ax  F_0.5/1.2.826.0.1.3680043.8.498.95693691899486028557481191812937667716/DICOM",
+      "loose_present": true,
+      "error": "ReadError: unexpected end of data",
+      "repaired": true,
+      "new_bytes": 16184754,
+      "rebuild_s": 0.939399192109704,
+      "verify_s": 0.07770757470279932,
+      "members": 65
+    },
+    {
+      "archive": "/DATA2/pacs_imaging_data_compressed/4-1109/1.2.826.0.1.3680043.8.498.50865533442371618398793066460272973995/VUE (Neuro) VNC MPR tra 3mm Range (Auto)/1.2.826.0.1.3680043.8.498.98765825903979847612330292247332036296/DICOM.tar.zst",
+      "loose_dir": "/DATA2/pacs_imaging_data_loose_backup/4-1109/1.2.826.0.1.3680043.8.498.50865533442371618398793066460272973995/VUE (Neuro) VNC MPR tra 3mm Range (Auto)/1.2.826.0.1.3680043.8.498.98765825903979847612330292247332036296/DICOM",
+      "loose_present": true,
+      "error": "ReadError: unexpected end of data",
+      "repaired": true,
+      "new_bytes": 9605025,
+      "rebuild_s": 0.6381391519680619,
+      "verify_s": 0.058701710775494576,
+      "members": 51
+    },
+    {
+      "archive": "/DATA2/pacs_imaging_data_compressed/4-1230/1.2.826.0.1.3680043.8.498.68087960593078626225381023432456560393/CTA 0.5 CE/1.2.826.0.1.3680043.8.498.30279893735169636438706619908304365462/DICOM.tar.zst",
+      "loose_dir": "/DATA2/pacs_imaging_data_loose_backup/4-1230/1.2.826.0.1.3680043.8.498.68087960593078626225381023432456560393/CTA 0.5 CE/1.2.826.0.1.3680043.8.498.30279893735169636438706619908304365462/DICOM",
+      "loose_present": true,
+      "error": "ReadError: unexpected end of data",
+      "repaired": true,
+      "new_bytes": 285034780,
+      "rebuild_s": 21.19926739577204,
+      "verify_s": 0.9463347839191556,
+      "members": 1201
+    },
+    {
+      "archive": "/DATA2/pacs_imaging_data_compressed/4-1238/1.2.826.0.1.3680043.8.498.90808778045944187941304329734494242930/DE_Head  0.6 Hr32 MPR  Ax  F_0.5/1.2.826.0.1.3680043.8.498.10943286730812290973793889915644840380/DICOM.tar.zst",
+      "loose_dir": "/DATA2/pacs_imaging_data_loose_backup/4-1238/1.2.826.0.1.3680043.8.498.90808778045944187941304329734494242930/DE_Head  0.6 Hr32 MPR  Ax  F_0.5/1.2.826.0.1.3680043.8.498.10943286730812290973793889915644840380/DICOM",
+      "loose_present": true,
+      "error": "ReadError: unexpected end of data",
+      "repaired": true,
+      "new_bytes": 61824673,
+      "rebuild_s": 4.103566727600992,
+      "verify_s": 0.2305144164711237,
+      "members": 284
+    },
+    {
+      "archive": "/DATA2/pacs_imaging_data_compressed/4-1238/1.2.826.0.1.3680043.8.498.90808778045944187941304329734494242930/DE_Head  0.75  Hr32  3  F_0.5/1.2.826.0.1.3680043.8.498.11618998700698312471881958359628983401/DICOM.tar.zst",
+      "loose_dir": "/DATA2/pacs_imaging_data_loose_backup/4-1238/1.2.826.0.1.3680043.8.498.90808778045944187941304329734494242930/DE_Head  0.75  Hr32  3  F_0.5/1.2.826.0.1.3680043.8.498.11618998700698312471881958359628983401/DICOM",
+      "loose_present": true,
+      "error": "ReadError: unexpected end of data",
+      "repaired": true,
+      "new_bytes": 50864286,
+      "rebuild_s": 3.1943735787644982,
+      "verify_s": 0.19480997323989868,
+      "members": 231
+    },
+    {
+      "archive": "/DATA2/pacs_imaging_data_compressed/4-1238/1.2.826.0.1.3680043.8.498.90808778045944187941304329734494242930/Brain Iodine Overlay MPR tra 3mm Range (Auto)/1.2.826.0.1.3680043.8.498.82193355178698770182706316565126398460/DICOM.tar.zst",
+      "loose_dir": "/DATA2/pacs_imaging_data_loose_backup/4-1238/1.2.826.0.1.3680043.8.498.90808778045944187941304329734494242930/Brain Iodine Overlay MPR tra 3mm Range (Auto)/1.2.826.0.1.3680043.8.498.82193355178698770182706316565126398460/DICOM",
+      "loose_present": true,
+      "error": "ReadError: unexpected end of data",
+      "repaired": true,
+      "new_bytes": 9795771,
+      "rebuild_s": 1.5759119484573603,
+      "verify_s": 0.06684598606079817,
+      "members": 79
+    },
+    {
+      "archive": "/DATA2/pacs_imaging_data_compressed/4-1238/1.2.826.0.1.3680043.8.498.90808778045944187941304329734494242930/DE_Head  3.0  MPR  Ax  F_0.5/1.2.826.0.1.3680043.8.498.31772469838552427667671336992556974320/DICOM.tar.zst",
+      "loose_dir": "/DATA2/pacs_imaging_data_loose_backup/4-1238/1.2.826.0.1.3680043.8.498.90808778045944187941304329734494242930/DE_Head  3.0  MPR  Ax  F_0.5/1.2.826.0.1.3680043.8.498.31772469838552427667671336992556974320/DICOM",
+      "loose_present": true,
+      "error": "ReadError: unexpected end of data",
+      "repaired": true,
+      "new_bytes": 15575835,
+      "rebuild_s": 1.0983961131423712,
+      "verify_s": 0.08010547887533903,
+      "members": 69
+    },
+    {
+      "archive": "/DATA2/pacs_imaging_data_compressed/4-1238/1.2.826.0.1.3680043.8.498.90808778045944187941304329734494242930/Iodine Map IMD MPR tra 3mm Range (Auto)/1.2.826.0.1.3680043.8.498.75114491839114791731613842605180223593/DICOM.tar.zst",
+      "loose_dir": "/DATA2/pacs_imaging_data_loose_backup/4-1238/1.2.826.0.1.3680043.8.498.90808778045944187941304329734494242930/Iodine Map IMD MPR tra 3mm Range (Auto)/1.2.826.0.1.3680043.8.498.75114491839114791731613842605180223593/DICOM",
+      "loose_present": true,
+      "error": "ReadError: unexpected end of data",
+      "repaired": true,
+      "new_bytes": 5681894,
+      "rebuild_s": 0.7330197207629681,
+      "verify_s": 0.05951516982167959,
+      "members": 53
+    },
+    {
+      "archive": "/DATA2/pacs_imaging_data_compressed/4-1238/1.2.826.0.1.3680043.8.498.90808778045944187941304329734494242930/DE_Head  1.5  Qr32  3  B_Sn150kV/1.2.826.0.1.3680043.8.498.66945486374063364645085485471892773274/DICOM.tar.zst",
+      "loose_dir": "/DATA2/pacs_imaging_data_loose_backup/4-1238/1.2.826.0.1.3680043.8.498.90808778045944187941304329734494242930/DE_Head  1.5  Qr32  3  B_Sn150kV/1.2.826.0.1.3680043.8.498.66945486374063364645085485471892773274/DICOM",
+      "loose_present": true,
+      "error": "ReadError: unexpected end of data",
+      "repaired": true,
+      "new_bytes": 22771939,
+      "rebuild_s": 1.5511451344937086,
+      "verify_s": 0.1010393975302577,
+      "members": 108
+    },
+    {
+      "archive": "/DATA2/pacs_imaging_data_compressed/4-1238/1.2.826.0.1.3680043.8.498.90808778045944187941304329734494242930/DE_Head  0.75  MPR  Ax  F_0.5/1.2.826.0.1.3680043.8.498.94781008871787890929762628776228635673/DICOM.tar.zst",
+      "loose_dir": "/DATA2/pacs_imaging_data_loose_backup/4-1238/1.2.826.0.1.3680043.8.498.90808778045944187941304329734494242930/DE_Head  0.75  MPR  Ax  F_0.5/1.2.826.0.1.3680043.8.498.94781008871787890929762628776228635673/DICOM",
+      "loose_present": true,
+      "error": "ReadError: unexpected end of data",
+      "repaired": true,
+      "new_bytes": 73366633,
+      "rebuild_s": 3.211967211216688,
+      "verify_s": 0.24979637376964092,
+      "members": 243
+    },
+    {
+      "archive": "/DATA2/pacs_imaging_data_compressed/4-1238/1.2.826.0.1.3680043.8.498.90808778045944187941304329734494242930/Iodine Map MPR tra 3mm Range (Auto)/1.2.826.0.1.3680043.8.498.91203273677671762811527317053206028036/DICOM.tar.zst",
+      "loose_dir": "/DATA2/pacs_imaging_data_loose_backup/4-1238/1.2.826.0.1.3680043.8.498.90808778045944187941304329734494242930/Iodine Map MPR tra 3mm Range (Auto)/1.2.826.0.1.3680043.8.498.91203273677671762811527317053206028036/DICOM",
+      "loose_present": true,
+      "error": "ReadError: unexpected end of data",
+      "repaired": true,
+      "new_bytes": 8258664,
+      "rebuild_s": 0.9807383827865124,
+      "verify_s": 0.06529406271874905,
+      "members": 53
+    },
+    {
+      "archive": "/DATA2/pacs_imaging_data_compressed/4-1238/1.2.826.0.1.3680043.8.498.90808778045944187941304329734494242930/DE_Head  3.0  MPR  Sag  F_0.5/1.2.826.0.1.3680043.8.498.67506564394736410380590838935046991302/DICOM.tar.zst",
+      "loose_dir": "/DATA2/pacs_imaging_data_loose_backup/4-1238/1.2.826.0.1.3680043.8.498.90808778045944187941304329734494242930/DE_Head  3.0  MPR  Sag  F_0.5/1.2.826.0.1.3680043.8.498.67506564394736410380590838935046991302/DICOM",
+      "loose_present": true,
+      "error": "ReadError: unexpected end of data",
+      "repaired": true,
+      "new_bytes": 17306802,
+      "rebuild_s": 1.2107708202674985,
+      "verify_s": 0.0851180125027895,
+      "members": 72
+    },
+    {
+      "archive": "/DATA2/pacs_imaging_data_compressed/4-1238/1.2.826.0.1.3680043.8.498.90808778045944187941304329734494242930/DE_Head  3.0  MPR  Cor  F_0.5/1.2.826.0.1.3680043.8.498.96146439542021740289051724450318796429/DICOM.tar.zst",
+      "loose_dir": "/DATA2/pacs_imaging_data_loose_backup/4-1238/1.2.826.0.1.3680043.8.498.90808778045944187941304329734494242930/DE_Head  3.0  MPR  Cor  F_0.5/1.2.826.0.1.3680043.8.498.96146439542021740289051724450318796429/DICOM",
+      "loose_present": true,
+      "error": "ReadError: unexpected end of data",
+      "repaired": true,
+      "new_bytes": 18506306,
+      "rebuild_s": 1.4232213413342834,
+      "verify_s": 0.08860812988132238,
+      "members": 83
+    },
+    {
+      "archive": "/DATA2/pacs_imaging_data_compressed/4-1238/1.2.826.0.1.3680043.8.498.90808778045944187941304329734494242930/DE_Head  1.5  Qr32  3  A_80kV/1.2.826.0.1.3680043.8.498.10657213750607903816695868325052771659/DICOM.tar.zst",
+      "loose_dir": "/DATA2/pacs_imaging_data_loose_backup/4-1238/1.2.826.0.1.3680043.8.498.90808778045944187941304329734494242930/DE_Head  1.5  Qr32  3  A_80kV/1.2.826.0.1.3680043.8.498.10657213750607903816695868325052771659/DICOM",
+      "loose_present": true,
+      "error": "ReadError: unexpected end of data",
+      "repaired": true,
+      "new_bytes": 24006147,
+      "rebuild_s": 1.6745414035394788,
+      "verify_s": 0.10110910795629025,
+      "members": 108
+    },
+    {
+      "archive": "/DATA2/pacs_imaging_data_compressed/4-1238/1.2.826.0.1.3680043.8.498.90808778045944187941304329734494242930/VUE (Neuro) VNC MPR tra 3mm Range (Auto)/1.2.826.0.1.3680043.8.498.68871659824356369601672656240400619817/DICOM.tar.zst",
+      "loose_dir": "/DATA2/pacs_imaging_data_loose_backup/4-1238/1.2.826.0.1.3680043.8.498.90808778045944187941304329734494242930/VUE (Neuro) VNC MPR tra 3mm Range (Auto)/1.2.826.0.1.3680043.8.498.68871659824356369601672656240400619817/DICOM",
+      "loose_present": true,
+      "error": "ReadError: unexpected end of data",
+      "repaired": true,
+      "new_bytes": 37666474,
+      "rebuild_s": 1.6958404332399368,
+      "verify_s": 0.27266360726207495,
+      "members": 63
+    }
+  ]
+}

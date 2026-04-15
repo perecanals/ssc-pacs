@@ -1,0 +1,30 @@
+services:
+  orthanc:
+    # Custom image with a patched Folder Indexer plugin that honours
+    # the "RemoveMissingFiles" config flag. See /home/perecanals/pacs/orthanc-indexer-patched
+    image: ssc-orthanc:patched-indexer
+    container_name: ssc-orthanc
+    network_mode: host
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      ORTHANC__POSTGRESQL__ENABLE_INDEX: "true"
+      ORTHANC__POSTGRESQL__ENABLE_STORAGE: "false"
+      ORTHANC__POSTGRESQL__HOST: "${DB_HOST}"
+      ORTHANC__POSTGRESQL__PORT: "${DB_PORT}"
+      ORTHANC__POSTGRESQL__DATABASE: "${PG_ORTHANC_DB}"
+      ORTHANC__POSTGRESQL__USERNAME: "${PG_ORTHANC_USER}"
+      ORTHANC__POSTGRESQL__PASSWORD: "${PG_ORTHANC_PASSWORD}"
+      ORTHANC__POSTGRESQL__LOCK: "false"
+    volumes:
+      # Legacy (full loose DICOM tree):
+      - /DATA2/pacs_imaging_data:/dicom-data:ro
+      # Cold-cache mode: comment the line above and use the hot cache instead
+      # (Companion warms studies into this tree; Orthanc Folder Indexer scans it):
+      # - /DATA2/pacs_hot_cache:/dicom-data:ro
+      - ./orthanc.json:/etc/orthanc/orthanc.json:ro
+      - ./orthanc_users.json:/etc/orthanc/orthanc_users.json:ro
+      - ssc-orthanc-storage:/var/lib/orthanc/db
+
+volumes:
+  ssc-orthanc-storage:

@@ -1,0 +1,14 @@
+[Unit]
+Description=PACS — nightly cold-archive mirror (Tier 2, dormant on dev)
+Documentation=file:/home/perecanals/pacs/stanford-stroke-pacs/documentation/operations/backup_strategy.md
+
+[Timer]
+# Daily at 03:30. Stays inactive on dev — the unit ships with
+# [Install] populated but is NOT enabled by default.
+OnCalendar=*-*-* 03:30:00
+RandomizedDelaySec=15m
+Persistent=true
+Unit=cold-archive-mirror.service
+
+[Install]
+WantedBy=timers.target

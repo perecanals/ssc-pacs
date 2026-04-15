@@ -1,0 +1,102 @@
+@reference "../app.css";
+
+/* SelectPill */
+.select-pill {
+  @apply inline-block px-2 py-0.5 rounded-full text-xs font-medium whitespace-nowrap;
+}
+
+.select-pill--clickable {
+  @apply cursor-pointer hover:opacity-80;
+}
+
+/* Read-only views (logged out) */
+.inline-edit__check {
+  @apply text-green-600 font-bold;
+}
+
+.inline-edit__check-count {
+  @apply text-[10px] text-text-muted ml-0.5;
+}
+
+.inline-edit__pill-list {
+  @apply flex flex-wrap gap-1;
+}
+
+/* BoolEdit */
+.bool-edit__checkbox {
+  @apply w-4 h-4 cursor-pointer accent-primary;
+}
+
+.bool-edit__others {
+  @apply text-[10px] text-text-muted ml-0.5 align-super;
+}
+
+/* SelectEdit */
+.select-edit {
+  @apply relative inline-block;
+}
+
+.select-edit__placeholder {
+  @apply px-2 py-0.5 text-xs text-text-muted border border-dashed border-border rounded cursor-pointer hover:border-primary hover:text-primary bg-transparent;
+}
+
+.select-edit__others {
+  @apply text-[10px] text-text-muted ml-0.5 align-super;
+}
+
+.select-edit__dropdown {
+  @apply absolute top-full left-0 mt-1 bg-surface border border-border rounded-md shadow-lg z-40 min-w-[200px] max-h-[260px] overflow-hidden flex flex-col;
+}
+
+.select-edit__search-wrap {
+  @apply px-2 py-1.5 border-b border-border;
+}
+
+.select-edit__search-input {
+  @apply w-full px-1.5 py-0.5 text-xs border border-border rounded outline-none focus:border-primary bg-white;
+}
+
+.select-edit__options {
+  @apply overflow-y-auto py-1;
+}
+
+.select-edit__clear-btn {
+  @apply w-full text-left px-3 py-1 text-xs text-danger hover:bg-red-50 cursor-pointer;
+}
+
+.select-edit__option-btn {
+  @apply w-full text-left px-3 py-1.5 text-xs hover:bg-dropdown-hover flex items-center gap-1.5 cursor-pointer bg-transparent border-none;
+}
+
+.select-edit__check-mark {
+  @apply text-primary ml-auto;
+}
+
+.select-edit__create-btn {
+  @apply w-full text-left px-3 py-1.5 text-xs text-primary hover:bg-dropdown-hover cursor-pointer bg-transparent border-none;
+}
+
+.select-edit__empty {
+  @apply px-3 py-2 text-xs text-text-muted;
+}
+
+/* ValueEdit */
+.value-edit__input {
+  @apply px-1.5 py-0.5 border border-border rounded text-xs bg-surface font-[inherit] outline-none focus:border-primary;
+}
+
+.value-edit__input--saving {
+  @apply opacity-50 pointer-events-none;
+}
+
+.value-edit__input--int {
+  @apply w-[72px];
+}
+
+.value-edit__input--text {
+  @apply w-full min-w-[80px];
+}
+
+.value-edit__others {
+  @apply text-[10px] text-text-muted ml-0.5 align-super;
+}

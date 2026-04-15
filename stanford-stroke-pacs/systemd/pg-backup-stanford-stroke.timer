@@ -1,0 +1,14 @@
+[Unit]
+Description=PACS — nightly pg_dump backup of stanford-stroke
+Documentation=file:/home/perecanals/pacs/stanford-stroke-pacs/documentation/operations/backup_strategy.md
+
+[Timer]
+# Daily at 02:15 local time. Persistent=true so a missed run (host off,
+# laptop asleep) fires on next boot rather than waiting another 24h.
+OnCalendar=*-*-* 02:15:00
+RandomizedDelaySec=10m
+Persistent=true
+Unit=pg-backup-stanford-stroke.service
+
+[Install]
+WantedBy=timers.target

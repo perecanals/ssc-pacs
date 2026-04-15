@@ -1,0 +1,61 @@
+@reference "../app.css";
+
+.label-modal__overlay {
+  @apply fixed inset-0 bg-black/35 z-[100] flex justify-center items-center;
+}
+
+.label-modal {
+  @apply bg-surface rounded-lg p-6 w-[420px] max-w-[90vw] shadow-xl;
+}
+
+.label-modal__title {
+  @apply text-[15px] font-semibold mb-4;
+}
+
+.label-modal__label {
+  @apply block text-xs font-semibold text-text-muted mb-1;
+}
+
+.label-modal__input {
+  @apply w-full px-2.5 py-1.5 border border-border rounded-md text-sm mb-3 font-[inherit] outline-none focus:border-primary;
+}
+
+.label-modal__select {
+  @apply w-full px-2.5 py-1.5 border border-border rounded-md text-sm mb-3 font-[inherit];
+}
+
+.label-modal__options-section {
+  @apply mb-3;
+}
+
+.label-modal__options-hint {
+  @apply text-[11px] text-text-muted mb-1.5;
+}
+
+.label-modal__options-row {
+  @apply flex gap-1.5 mb-2;
+}
+
+.label-modal__option-input {
+  @apply flex-1 px-2 py-1 border border-border rounded-md text-sm font-[inherit] outline-none focus:border-primary;
+}
+
+.label-modal__pills {
+  @apply flex flex-wrap gap-1.5;
+}
+
+.label-modal__pill {
+  @apply inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium;
+}
+
+.label-modal__pill-remove {
+  @apply ml-0.5 leading-none text-current opacity-60 hover:opacity-100 cursor-pointer bg-transparent border-none p-0 text-sm;
+}
+
+.label-modal__error {
+  @apply text-xs text-danger mb-2;
+}
+
+.label-modal__actions {
+  @apply flex gap-2 justify-end;
+}

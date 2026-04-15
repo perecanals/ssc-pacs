@@ -1,0 +1,59 @@
+2026-03-17 21:36:20,098 - INFO - Starting image integration protocol execution
+2026-03-17 21:36:20,098 - INFO - Log file: /home/perecanals/pacs/stanford-stroke-pacs/image_integration_protocols/execute_image_integration_protocol_20260317_213620.log
+2026-03-17 21:36:20,107 - INFO - Source directory: /home/perecanals/pacs/imaging_database_test
+2026-03-17 21:36:20,107 - INFO - Found 5 cases to process
+2026-03-17 21:36:20,107 - INFO - Processing case 1-017
+2026-03-17 21:36:20,124 - WARNING - The value length (90) exceeds the maximum length of 64 allowed for VR LO.
+2026-03-17 21:36:20,125 - ERROR - /home/perecanals/miniconda3/envs/pacs/lib/python3.14/site-packages/pydicom/valuerep.py:440: UserWarning: The value length (90) exceeds the maximum length of 64 allowed for VR LO.
+2026-03-17 21:36:20,125 - ERROR -   warn_and_log(msg)
+2026-03-17 21:36:20,127 - WARNING - The value length (90) exceeds the maximum length of 64 allowed for VR LO.
+2026-03-17 21:36:20,128 - WARNING - The value length (90) exceeds the maximum length of 64 allowed for VR LO.
+2026-03-17 21:36:20,142 - WARNING - The value length (90) exceeds the maximum length of 64 allowed for VR LO.
+2026-03-17 21:36:20,158 - WARNING - The value length (90) exceeds the maximum length of 64 allowed for VR LO.
+2026-03-17 21:36:20,171 - WARNING - The value length (90) exceeds the maximum length of 64 allowed for VR LO.
+2026-03-17 21:36:20,185 - WARNING - The value length (90) exceeds the maximum length of 64 allowed for VR LO.
+2026-03-17 21:36:20,189 - WARNING - The value length (90) exceeds the maximum length of 64 allowed for VR LO.
+2026-03-17 21:36:20,191 - WARNING - The value length (90) exceeds the maximum length of 64 allowed for VR LO.
+2026-03-17 21:36:20,196 - WARNING - The value length (90) exceeds the maximum length of 64 allowed for VR LO.
+2026-03-17 21:36:20,200 - WARNING - The value length (90) exceeds the maximum length of 64 allowed for VR LO.
+2026-03-17 21:36:20,206 - WARNING - The value length (90) exceeds the maximum length of 64 allowed for VR LO.
+2026-03-17 21:36:20,212 - WARNING - The value length (90) exceeds the maximum length of 64 allowed for VR LO.
+2026-03-17 21:36:20,214 - WARNING - The value length (90) exceeds the maximum length of 64 allowed for VR LO.
+2026-03-17 21:36:20,216 - WARNING - The value length (90) exceeds the maximum length of 64 allowed for VR LO.
+2026-03-17 21:36:20,230 - WARNING - The value length (90) exceeds the maximum length of 64 allowed for VR LO.
+2026-03-17 21:36:20,258 - WARNING - The value length (90) exceeds the maximum length of 64 allowed for VR LO.
+2026-03-17 21:36:20,271 - WARNING - The value length (90) exceeds the maximum length of 64 allowed for VR LO.
+2026-03-17 21:36:20,285 - WARNING - The value length (90) exceeds the maximum length of 64 allowed for VR LO.
+2026-03-17 21:36:22,121 - ERROR - Traceback (most recent call last):
+2026-03-17 21:36:22,122 - ERROR -   File "/home/perecanals/pacs/stanford-stroke-pacs/image_integration_protocols/execute_image_integration_protocol.py", line 98, in <module>
+2026-03-17 21:36:22,122 - ERROR -     execute_image_integration_protocol(case_dir, postgres_engine, logger, overwrite_if_exists=False)
+2026-03-17 21:36:22,122 - ERROR -     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+2026-03-17 21:36:22,122 - ERROR -   File "/home/perecanals/pacs/stanford-stroke-pacs/image_integration_protocols/execute_image_integration_protocol.py", line 48, in execute_image_integration_protocol
+2026-03-17 21:36:22,122 - ERROR -     protocol.execute_image_integration_protocol(overwrite_if_exists=overwrite_if_exists)
+2026-03-17 21:36:22,122 - ERROR -     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+2026-03-17 21:36:22,122 - ERROR -   File "/home/perecanals/pacs/stanford-stroke-pacs/image_integration_protocols/image_integration_protocol.py", line 35, in execute_image_integration_protocol
+2026-03-17 21:36:22,122 - ERROR -     self.create_series_table()
+2026-03-17 21:36:22,122 - ERROR -     ~~~~~~~~~~~~~~~~~~~~~~~~^^
+2026-03-17 21:36:22,122 - ERROR -   File "/home/perecanals/pacs/stanford-stroke-pacs/image_integration_protocols/image_integration_protocol.py", line 265, in create_series_table
+2026-03-17 21:36:22,122 - ERROR -     headers = self._read_series_headers(series_dir)
+2026-03-17 21:36:22,122 - ERROR -   File "/home/perecanals/pacs/stanford-stroke-pacs/image_integration_protocols/image_integration_protocol.py", line 219, in _read_series_headers
+2026-03-17 21:36:22,122 - ERROR -     headers.append(pydicom.dcmread(filepath, stop_before_pixels=True))
+2026-03-17 21:36:22,122 - ERROR -                    ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+2026-03-17 21:36:22,122 - ERROR -   File "/home/perecanals/miniconda3/envs/pacs/lib/python3.14/site-packages/pydicom/filereader.py", line 1078, in dcmread
+2026-03-17 21:36:22,122 - ERROR -     dataset = read_partial(
+2026-03-17 21:36:22,122 - ERROR -         fp,
+2026-03-17 21:36:22,122 - ERROR -     ...<3 lines>...
+2026-03-17 21:36:22,122 - ERROR -         specific_tags=specific_tags,
+2026-03-17 21:36:22,122 - ERROR -     )
+2026-03-17 21:36:22,122 - ERROR -   File "/home/perecanals/miniconda3/envs/pacs/lib/python3.14/site-packages/pydicom/filereader.py", line 924, in read_partial
+2026-03-17 21:36:22,122 - ERROR -     dataset = read_dataset(
+2026-03-17 21:36:22,122 - ERROR -         fileobj,
+2026-03-17 21:36:22,123 - ERROR -     ...<4 lines>...
+2026-03-17 21:36:22,123 - ERROR -         specific_tags=specific_tags,
+2026-03-17 21:36:22,123 - ERROR -     )
+2026-03-17 21:36:22,123 - ERROR -   File "/home/perecanals/miniconda3/envs/pacs/lib/python3.14/site-packages/pydicom/filereader.py", line 476, in read_dataset
+2026-03-17 21:36:22,123 - ERROR -     raw_data_elements = {e.tag: e for e in de_gen}
+2026-03-17 21:36:22,123 - ERROR -                                            ^^^^^^
+2026-03-17 21:36:22,123 - ERROR -   File "/home/perecanals/miniconda3/envs/pacs/lib/python3.14/site-packages/pydicom/filereader.py", line 191, in data_element_generator
+2026-03-17 21:36:22,123 - ERROR -     value_tell = fp_tell()
+2026-03-17 21:36:22,123 - ERROR - KeyboardInterrupt

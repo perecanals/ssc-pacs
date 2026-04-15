@@ -1,0 +1,14 @@
+[Unit]
+Description=PACS — nightly pg_dump backup of orthanc_db
+Documentation=file:/home/perecanals/pacs/stanford-stroke-pacs/documentation/operations/backup_strategy.md
+
+[Timer]
+# Daily at 02:30 local time, 15min after stanford-stroke so they don't
+# collide on disk.
+OnCalendar=*-*-* 02:30:00
+RandomizedDelaySec=10m
+Persistent=true
+Unit=pg-backup-orthanc.service
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,18 @@
+@reference "../app.css";
+
+.companion {
+  @apply min-h-screen bg-bg text-text text-sm;
+}
+
+.companion__layout {
+  @apply flex pt-12;
+}
+
+.companion__main {
+  @apply ml-60 flex-1 p-4 min-h-0 overflow-hidden;
+  height: calc(100vh - 3rem);
+}
+
+.companion__content {
+  @apply h-full min-h-0 flex flex-col gap-3;
+}

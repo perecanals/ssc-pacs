@@ -1,0 +1,468 @@
+# Installation and Deployment
+
+**Purpose:** Fresh-server runbook only. For packaging facts and config file roles see [`../reference/runtime_and_config.md`](../reference/runtime_and_config.md). For architecture see [`../reference/architecture.md`](../reference/architecture.md).
+
+This document is the operator runbook for deploying the PACS stack on a fresh
+server.
+
+It assumes the target deployment wants the same overall architecture:
+
+- Orthanc + OE2 + OHIF in Docker (**Orthanc only** in `docker-compose.yml`)
+- Companion app as a **native systemd service** on port `8043` (not Docker)
+- PostgreSQL on the host
+- DICOM files kept on disk and indexed read-only (or hot cache when using cold storage)
+
+---
+
+## 1. What must already exist
+
+Before using this repo on another server, decide whether the new environment
+already has the source metadata layer that the companion app expects.
+
+Minimum required inputs:
+
+- a Linux host
+- Docker Engine with `docker compose`
+- PostgreSQL reachable from the host
+- `python3` and `pip`
+- Node.js and npm (for building the Companion frontend)
+- a DICOM directory tree on disk
+- a metadata table equivalent to `image_series` (and `image_study` for study
+  metadata) if you want to use the companion app and the metadata-driven helper
+  scripts
+
+Important:
+
+- this repo does **not** build `image_series` / `image_study` as part of
+  standard PACS deployment
+- `image_integration_protocols/` is legacy/site-specific pipeline code, not the
+  normal bootstrap path for a fresh PACS install
+
+---
+
+## 2. Host prerequisites
+
+The host should satisfy all of the following:
+
+- Linux host compatible with Docker host networking
+- Docker daemon running
+- Docker Compose plugin available
+- PostgreSQL installed and running
+- ability to execute `sudo -u postgres psql` for `init_orthanc_db.sh`
+- free host ports:
+  - `8042` for Orthanc HTTP
+  - `4242` for Orthanc DICOM
+  - `8043` for the companion app
+- writable checkout of this repository
+- filesystem path for the DICOM repository chosen and available
+
+For the helper scripts, install Python packages from the repo root
+`requirements.txt`.
+
+---
+
+## 3. Required environment configuration
+
+Create a local `.env` file in the repo root before first start.
+
+Variables expected by the current codebase:
+
+| Variable | Purpose |
+|----------|---------|
+| `DB_HOST` | Host for the research/app PostgreSQL database |
+| `DB_PORT` | Port for the research/app PostgreSQL database |
+| `DB_NAME` | Database name used by companion and helper scripts, typically `stanford-stroke` |
+| `DB_USER` | Database user for the research/app database |
+| `DB_PASSWORD` | Password for the research/app database |
+| `PG_ORTHANC_DB` | Orthanc index database name |
+| `PG_ORTHANC_USER` | Orthanc index database user |
+| `PG_ORTHANC_PASSWORD` | Orthanc index database password |
+| `ORTHANC_URL` | Base URL used by scripts and companion, typically `http://localhost:8042` |
+| `ORTHANC_ADMIN_USER` | Orthanc service account used by companion and `verify_indexing.py` |
+| `ORTHANC_ADMIN_PASSWORD` | Password for the Orthanc service account |
+| `JWT_SECRET` | Secret used to sign companion JWT cookies |
+
+Non-secret companion tuning (storage paths, storage mode, session length) lives in repo-root `config.toml` (loaded by `companion/config.py`).
+
+---
+
+## 4. Expected source metadata tables
+
+If you want the full companion workflow, the source database should provide
+tables compatible with `image_series` and `image_study`.
+
+At minimum, the current scripts rely on these columns:
+
+**image_series:**
+
+- `patient_id`
+- `studyinstanceuid`
+- `seriesinstanceuid`
+- `seriesdescription`
+- `dicom_dir_path`
+- `modality`
+
+**image_study** (for study-level metadata):
+
+- `study_type` (used by `label_studies.py`)
+- `studydescription` (used by `enrich_orthanc.py`)
+
+How the repo uses these tables:
+
+- companion browsing reads from them
+- `verify_indexing.py` compares `image_series` against Orthanc's index
+- `label_studies.py` reads `study_type` from `image_study` and `modality` from
+  `image_series`
+- `enrich_orthanc.py` uses them for display enrichment
+
+If the new environment does not have equivalent tables yet, the PACS service
+layer can still be deployed, but the companion and metadata-driven scripts will
+not function as documented.
+
+---
+
+## 5. First-time bootstrap sequence
+
+Use this order for a new deployment.
+
+### Step 1. Install root Python dependencies
+
+From the repo root:
+
+```bash
+python3 -m pip install -r requirements.txt
+```
+
+This installs the dependencies needed by root-level helper scripts such as:
+
+- `manage_users.py`
+- `enrich_orthanc.py`
+- `label_studies.py`
+- `verify_indexing.py`
+
+### Step 2. Confirm the DICOM mount path and `env_file` path
+
+The current `docker-compose.yml` mounts this host path into Orthanc:
+
+```text
+/DATA2/pacs_imaging_data:/dicom-data:ro
+```
+
+On a new server you will likely need to edit `docker-compose.yml` so the left
+side matches the real DICOM path on that machine.
+
+Additionally, `docker-compose.yml` contains a hardcoded absolute `env_file` path
+(currently `/home/perecanals/pacs/.env`). Update it to point to the `.env` file
+in the repo root or the correct location for your deployment.
+
+Requirements:
+
+- the DICOM path must exist
+- Orthanc only needs read access
+- the dataset should already be organized on disk before startup
+
+For cold storage / hot cache, follow [`../cold_storage/runbook.md`](../cold_storage/runbook.md) instead of the default legacy mount once you are ready.
+
+### Step 3. Create the Orthanc PostgreSQL database and role
+
+Run:
+
+```bash
+./init_orthanc_db.sh
+```
+
+What it does:
+
+- sources the repo `.env`
+- creates `PG_ORTHANC_USER` if missing
+- creates `PG_ORTHANC_DB` if missing
+- grants privileges on the Orthanc index database
+
+Important caveat:
+
+- the script assumes local PostgreSQL administration via `sudo -u postgres psql`
+- it is not a generic remote-database provisioning script
+
+### Step 4. Create the first PACS user
+
+Run:
+
+```bash
+python manage_users.py add <username> --admin
+```
+
+What this step accomplishes:
+
+- ensures `users` exists in the research/app DB
+- inserts the user with a bcrypt password hash
+- creates or updates `orthanc_users.json`
+- updates `ORTHANC_ADMIN_PASSWORD` in `.env` if the username matches
+  `ORTHANC_ADMIN_USER`
+
+Why this matters before first start:
+
+- Orthanc auth is enabled
+- Orthanc depends on the generated `orthanc_users.json`
+
+### Step 5. Start Orthanc (Docker)
+
+Run:
+
+```bash
+docker compose up -d
+```
+
+This starts **`ssc-orthanc`** only. `docker-compose.yml` does not define a Companion container.
+
+### Step 6. Install Companion Python dependencies
+
+From the repo root (use your preferred env, e.g. conda `pacs`):
+
+```bash
+python3 -m pip install -r companion/requirements.txt
+```
+
+### Step 7. Build the Companion frontend
+
+```bash
+cd companion && npm install && npm run build
+```
+
+### Step 8. Install and start the Companion (systemd)
+
+```bash
+sudo cp ssc-companion.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now ssc-companion
+```
+
+### Step 9. Wait for Orthanc indexing
+
+Orthanc's Folder Indexer scans `/dicom-data` on startup and then periodically.
+
+Depending on dataset size, this may take significant time.
+
+Useful checks while indexing:
+
+```bash
+docker compose logs -f orthanc
+curl -s -u <user>:<pass> http://localhost:8042/statistics | python3 -m json.tool
+```
+
+### Step 10. Run post-index tasks as needed
+
+There are two optional-but-useful post-index tasks.
+
+#### Option A. Display enrichment in Orthanc
+
+Run:
+
+```bash
+python enrich_orthanc.py
+```
+
+Use this when:
+
+- the DICOM headers are anonymized or not operator-friendly
+- you want OE2 to display `patient_id` (mapped to Patient ID/Name),
+  `seriesdescription` (mapped to Series Description), and `studydescription`
+  from `image_study` (mapped to Study Description) in the source metadata
+
+Skip this when:
+
+- the DICOM headers already contain acceptable values for Orthanc/OE2
+- you do not want to mutate Orthanc's PostgreSQL index tables
+- you only need indexing, OHIF, or the companion workflow
+
+#### Option B. Pre-seed Orthanc study labels
+
+Run:
+
+```bash
+python label_studies.py
+```
+
+Use this when:
+
+- `image_study` provides `study_type` and `image_series` provides `modality`
+- you want those values available immediately as Orthanc study labels in OE2
+
+This script is idempotent and safe to re-run after new studies are indexed.
+
+---
+
+## 6. Validation checklist
+
+After startup, validate each layer separately.
+
+### 6.1 Container and API checks
+
+Basic checks:
+
+```bash
+docker compose ps
+docker compose logs -f orthanc
+```
+
+Orthanc system and statistics:
+
+```bash
+curl -s -u <user>:<pass> http://localhost:8042/system | python3 -m json.tool
+curl -s -u <user>:<pass> http://localhost:8042/statistics | python3 -m json.tool
+```
+
+Companion service:
+
+```bash
+sudo systemctl status ssc-companion
+```
+
+Companion read APIs:
+
+```bash
+curl -s http://localhost:8043/api/labels | python3 -m json.tool
+curl -s 'http://localhost:8043/api/series?per_page=5' | python3 -m json.tool
+```
+
+### 6.2 Provided helper checks
+
+The repo includes:
+
+```bash
+./check_status.sh
+python verify_indexing.py
+```
+
+Current caveats:
+
+- `check_status.sh` reads Orthanc credentials from `.env` (no hardcoded values)
+- `check_status.sh` validates the `ssc-orthanc` container and Orthanc only, not
+  the companion
+- `verify_indexing.py` uses `ORTHANC_ADMIN_USER` /
+  `ORTHANC_ADMIN_PASSWORD`
+
+### 6.3 Browser checks
+
+Verify these URLs:
+
+- `http://localhost:8042/ui/app/`
+- `http://localhost:8042/ohif/`
+- `http://localhost:8043/`
+- `http://localhost:8043/app/`
+
+Expected outcomes:
+
+- Orthanc Explorer 2 loads at `/ui/app/`
+- OHIF opens at `/ohif/`
+- the landing page shows links to Orthanc Explorer and OHIF
+- the companion app loads its series browser
+
+### 6.4 Index coverage check
+
+If the source metadata table is present, run:
+
+```bash
+python verify_indexing.py
+```
+
+This compares `SeriesInstanceUID` values between:
+
+- `image_series`
+- Orthanc's indexed series reported via REST API
+
+It is the most useful repo-provided verification that indexing actually matches
+the expected metadata inventory.
+
+---
+
+## 7. SSH tunnel notes
+
+The documented tunnel for interactive use should forward:
+
+- `8042` for Orthanc/OE2/OHIF
+- `8043` for the companion app
+- optionally `4242` if DICOM port forwarding is needed
+
+Example:
+
+```bash
+ssh -N \
+  -L 8042:localhost:8042 \
+  -L 8043:localhost:8043 \
+  -L 4242:localhost:4242 \
+  -o ServerAliveInterval=60 \
+  -o ServerAliveCountMax=3 \
+  <user>@<server>
+```
+
+The repo's `tunnel.sh` forwards all three ports (`8042`, `8043`, `4242`).
+
+---
+
+## 8. Ongoing operations
+
+Common actions after deployment:
+
+Add a user:
+
+```bash
+python manage_users.py add <username>
+docker restart ssc-orthanc
+```
+
+Change a user password:
+
+```bash
+python manage_users.py passwd <username>
+docker restart ssc-orthanc
+```
+
+If the changed user is the Orthanc service account used by the companion:
+
+```bash
+sudo systemctl restart ssc-companion
+```
+
+Rebuild the companion frontend after code changes:
+
+```bash
+cd companion && npm run build
+sudo systemctl restart ssc-companion
+```
+
+---
+
+## 9. What is not part of standard redeployment
+
+Do not treat these as mandatory steps unless the new environment truly needs
+them.
+
+`enrich_orthanc.py`
+
+- optional display-enrichment step
+- specific to deployments where Orthanc's displayed identifiers need replacing
+- directly mutates Orthanc PostgreSQL tables
+
+`image_integration_protocols/`
+
+- legacy Stanford Stroke Center–specific metadata ingestion and correction
+  pipeline
+- not required just to deploy PACS services
+- only relevant if recreating the same upstream metadata-generation workflow
+
+---
+
+## 10. Known repo caveats
+
+These are current implementation mismatches worth remembering during deployment:
+
+- `teardown.sh` is destructive and should not be used casually; it does not
+  stop the companion systemd service
+- `teardown.sh` sources `.env` from two levels above the repo root (`../../.env`),
+  **not** the repo-root `.env` used by companion and helper scripts
+- `docker-compose.yml` uses an absolute `env_file` path that must be updated
+  for a fresh deployment on a different host
+- `check_status.sh` uses the `ssc-orthanc` container name and reads Orthanc
+  credentials from repo-root `.env`
+
+Treat these as current repo caveats, not as recommended design patterns.

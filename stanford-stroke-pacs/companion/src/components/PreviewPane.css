@@ -1,0 +1,33 @@
+@reference "../app.css";
+
+.preview-pane {
+  @apply bg-surface border border-border rounded-md overflow-hidden shrink-0;
+}
+
+.preview-pane--open {
+  @apply h-[52vh] min-h-80;
+}
+
+.preview-pane__body {
+  @apply relative h-full min-h-0 bg-bg;
+}
+
+.preview-pane__state {
+  @apply h-full flex items-center justify-center px-4 text-sm text-text-muted text-center;
+}
+
+.preview-pane__state--error {
+  @apply text-danger;
+}
+
+.preview-pane__frame {
+  @apply w-full h-full border-0 bg-white;
+}
+
+.preview-pane__overlay-actions {
+  @apply absolute top-3 left-1/5 -translate-x-1/2 flex items-center gap-2;
+}
+
+.preview-pane__overlay-btn {
+  @apply px-3 py-1 rounded-md border border-white/30 bg-surface/50 backdrop-blur-sm text-xs font-semibold text-text shadow-sm hover:bg-surface/65;
+}

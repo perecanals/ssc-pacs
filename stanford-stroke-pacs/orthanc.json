@@ -1,0 +1,54 @@
+{
+  "Name": "Stanford Stroke Center PACS",
+
+  "StorageDirectory": "/var/lib/orthanc/db",
+  "IndexDirectory": "/var/lib/orthanc/db",
+  "StorageCompression": false,
+
+  "HttpServerEnabled": true,
+  "HttpPort": 8042,
+  "RemoteAccessAllowed": true,
+  "AuthenticationEnabled": true,
+
+  "DicomServerEnabled": true,
+  "DicomPort": 4242,
+  "DicomAet": "SSC",
+
+  "Indexer": {
+    "Enable": true,
+    "Folders": ["/dicom-data"],
+    "Interval": 60,
+    "RemoveMissingFiles": false
+  },
+
+  "DicomWeb": {
+    "Enable": true,
+    "Root": "/dicom-web/"
+  },
+
+  "Ohif": {
+    "RouterBasename": "/ohif",
+    "DataSource": "dicom-web"
+  },
+
+  "OrthancExplorer2": {
+    "Enable": true,
+    "IsDefaultOrthancUI": true,
+    "UiOptions": {
+      "EnableEditLabels": true,
+      "EnableLabelsCount": true,
+      "EnableStudyList": true,
+      "StudyListColumns": [
+        "PatientID",
+        "PatientName",
+        "StudyDate",
+        "AccessionNumber",
+        "StudyDescription",
+        "modalities",
+        "seriesCount"
+      ],
+      "EnableOpenInOhifViewer3": true,
+      "OhifViewer3PublicRoot": "/ohif/"
+    }
+  }
+}

@@ -1,0 +1,355 @@
+# Stanford Stroke Center PACS Architecture
+
+**Purpose:** High-level deployed architecture — topology, service roles, data flows, auth, and portability. For database detail see [`data_stores.md`](data_stores.md). For packaging and config files see [`runtime_and_config.md`](runtime_and_config.md).
+
+This document explains the deployed architecture of the PACS stack and which
+parts are reusable versus specific to the current Stanford Stroke Center (SSC)
+database.
+
+---
+
+## 1. Topology
+
+The repo deploys one Docker service (Orthanc) and one native host service
+(the Companion), and relies on one existing host PostgreSQL server plus an
+existing DICOM filesystem.
+
+```mermaid
+flowchart TD
+    Browser[BrowserViaSshTunnel] --> Orthanc8042["ssc-orthanc :8042 (Docker)"]
+    Browser --> Companion8043["Companion :8043 (native FastAPI)"]
+    Orthanc8042 --> OrthancDb[OrthancIndexDb]
+    Orthanc8042 --> DicomTree[DicomTreeReadOnly]
+    Companion8043 --> SscDb[stanford-stroke DB]
+    Companion8043 --> Orthanc8042
+    SscDb --> LvoClinicalData[lvo_clinical_data]
+    SscDb --> ImageSeries[image_series]
+    SscDb --> ImageStudy[image_study]
+    SscDb --> AnnotationTables[annotations / label_definitions / users / user_preferences]
+    SscDb --> SnapshotTables[snapshot_patients / snapshot_studies / snapshot_seriess]
+```
+
+User-facing entry points:
+
+- `http://localhost:8042/ui/app/` for Orthanc Explorer 2
+- `http://localhost:8042/ohif/` for OHIF
+- `http://localhost:8043/` for the landing page
+- `http://localhost:8043/app/` for the companion app
+
+The repo does not include a reverse proxy. In the current deployment model,
+users normally reach these ports through an SSH tunnel.
+
+---
+
+## 2. Service roles
+
+### 2.1 Orthanc
+
+The `orthanc` service (container `ssc-orthanc`) is the PACS viewer/indexer layer.
+
+It is responsible for:
+
+- scanning the read-only DICOM tree through the Folder Indexer
+- maintaining an internal PostgreSQL index
+- serving Orthanc Explorer 2
+- serving OHIF
+- exposing DICOMweb and the Orthanc REST API
+- storing study-level shared labels used by Orthanc Explorer 2
+
+It is not responsible for:
+
+- owning the source DICOM files
+- generating the upstream `image_series` and `image_study` metadata tables
+- storing companion annotations
+
+### 2.2 Companion
+
+The companion is a FastAPI application that runs natively on the host (managed
+by systemd), serving a React frontend and a REST API for multi-level
+annotation workflows that Orthanc Explorer 2 does not support.
+
+It is responsible for:
+
+- browsing patients (from `lvo_clinical_data`), studies (from `image_study`),
+  and series (from `image_series`, JOINing `image_study` for `study_type`)
+- storing multi-level annotations (patient, study, series) in `annotations`
+- storing level-aware label definitions in `label_definitions`
+- cross-level label filtering (e.g. filtering patients by a series-level label)
+- inheriting parent-level annotations down to child rows
+- building refreshable snapshot tables for bulk export
+- authenticating users against `users`
+- generating study- and series-aware OHIF links by querying Orthanc
+- embedding OHIF inside the companion UI as a lower preview pane for row-driven
+  image review
+
+It is not responsible for:
+
+- indexing DICOMs
+- owning the main PACS metadata index
+- replacing Orthanc Explorer 2
+
+---
+
+## 3. Dual-database model
+
+The most important architectural feature is the split between two logical
+PostgreSQL databases.
+
+### 3.1 Orthanc index DB
+
+Orthanc uses its own database, typically `orthanc_db`, for internal tables
+managed by the Orthanc PostgreSQL plugin.
+
+Key properties:
+
+- operational infrastructure for Orthanc itself
+- populated by Orthanc's Folder Indexer and plugin logic
+- used for PACS metadata lookup and web UI behavior
+- configured through `ORTHANC__POSTGRESQL__*` environment variables
+- run with `ENABLE_INDEX=true` and `ENABLE_STORAGE=false`
+
+This means:
+
+- Orthanc indexes metadata in PostgreSQL
+- Orthanc does not duplicate the DICOM files into PostgreSQL
+- the canonical image payload stays on disk
+
+### 3.2 Research / app DB
+
+The second logical database is the research/application database, currently
+`stanford-stroke`.
+
+It contains:
+
+- the existing read-only source tables `lvo_clinical_data`, `image_series`,
+  and `image_study`
+- companion-owned tables:
+  - `annotations` — multi-level (patient/study/series) with shared partial
+    unique indexes per level (one value per entity+label; `created_by`
+    tracks who last edited)
+  - `label_definitions` — level-aware label registry supporting bool, int,
+    text, and select datatypes
+  - `users`
+  - `user_preferences` — per-user JSONB table display preferences (column
+    visibility, order, sort, filters, frozen state) keyed by username and
+    level
+- refreshable snapshot tables: `snapshot_patients`, `snapshot_studies`,
+  `snapshot_seriess`
+
+Optional cold-storage support adds columns and tables documented in
+[`data_stores.md`](data_stores.md).
+
+This database is where the companion app gets its patient, study, and series
+listings and where it stores user-generated annotations and label definitions.
+
+### 3.3 Why the split exists
+
+The two-database design keeps responsibilities clean:
+
+- Orthanc's operational index stays isolated from research metadata tables
+- the companion can evolve its own schema without touching Orthanc internals
+- the DICOM tree can remain external and read-only
+- the same host PostgreSQL server can support both layers without mixing roles
+
+---
+
+## 4. Data flow
+
+### 4.1 Imaging data
+
+1. DICOM files exist on the host filesystem at `/DATA2/pacs_imaging_data`.
+2. Docker bind-mounts that tree read-only into the Orthanc container as
+   `/dicom-data`.
+3. Orthanc's Folder Indexer scans the mount and writes its internal metadata
+   index into the Orthanc PostgreSQL database.
+4. OHIF and Orthanc Explorer 2 read through Orthanc, not directly from the
+   research database.
+
+The DICOM Application Entity Title (AE Title) is configured as `SSC`.
+
+**Optional cold storage mode** (`mode = "cold_cache"` under `[storage]` in repo-root `config.toml`):
+canonical series payloads live as `*.tar.zst` under `/DATA2/pacs_imaging_data_compressed`;
+the Companion warms a whole study into `/DATA2/pacs_hot_cache` and POSTs DICOMs to Orthanc;
+Orthanc’s Folder Indexer bind-mount should target the hot cache instead of the legacy tree.
+Legacy loose files under `/DATA2/pacs_imaging_data` remain available when `mode = "legacy"`.
+
+- Design rationale and benchmarks: [`../cold_storage/design.md`](../cold_storage/design.md)
+- Operator steps and component map: [`../cold_storage/runbook.md`](../cold_storage/runbook.md)
+
+### 4.2 Metadata and annotations
+
+1. `lvo_clinical_data`, `image_series`, and `image_study` provide the metadata
+   that drives the companion app.
+2. The companion reads these tables to build patient, study, and series browsers
+   with filtering, sorting, and pagination. Series listings JOIN `image_study`
+   for `study_type`.
+3. Companion writes shared annotations at three levels (patient, study,
+   series) and level-aware label definitions back into the same research/app
+   database. Annotations are global: any user can edit any annotation, and
+   the value is shared across all users (`created_by` tracks the last
+   editor).
+4. Annotations inherit downward: parent-level annotations are attached to child
+   rows as `inherited_annotations`. Cross-level filtering allows filtering any
+   level by annotations at a different level.
+5. When a study or series row is selected in the companion, the backend builds
+   an OHIF viewer URL and the frontend can load it inside an embedded preview
+   pane. Study selections load the study viewer; series selections use a
+   series-specific OHIF URL scoped to that study.
+6. Orthanc study labels are stored inside Orthanc and manipulated via Orthanc's
+   UI or REST API, not through the companion tables.
+
+### 4.3 Optional enrichment layer
+
+`enrich_orthanc.py` is an extra display-enrichment step:
+
+- it reads `patient_id` from `image_series` and `studydescription` from
+  `image_study` (via JOIN)
+- it then mutates Orthanc's PostgreSQL index tables so Orthanc Explorer 2 shows
+  more useful identifiers than the anonymized DICOM headers provide
+- Patient ID and Patient Name are set from `patient_id`
+- Study Description is set from `image_study.studydescription`
+- Series Description is set from `image_series.seriesdescription`
+
+This is important for the current dataset, but it is not fundamental to the
+architecture.
+
+---
+
+## 5. Authentication model
+
+There are two runtime auth systems, coordinated by one provisioning script.
+
+### 5.1 Orthanc auth
+
+Orthanc authenticates incoming UI and API requests with the `RegisteredUsers`
+block in `orthanc_users.json`.
+
+That file:
+
+- contains plaintext passwords because Orthanc requires them
+- is generated and updated by `manage_users.py`
+- should not be edited manually
+
+### 5.2 Companion auth
+
+The companion authenticates against `users`:
+
+- passwords are bcrypt hashes
+- login returns a JWT cookie
+- authenticated writes use the JWT identity as `created_by`
+
+### 5.3 Shared provisioning
+
+`manage_users.py` is the bridge between the two auth models.
+
+It keeps:
+
+- `users` updated for companion login
+- `orthanc_users.json` updated for Orthanc login
+
+When the managed username matches `ORTHANC_ADMIN_USER`, it also updates
+`ORTHANC_ADMIN_PASSWORD` in `.env` so the companion's service-to-service calls
+to Orthanc keep working.
+
+---
+
+## 6. Packaging model
+
+### 6.1 Orthanc packaging
+
+Orthanc uses the upstream image `orthancteam/orthanc:latest`.
+
+The repo provides:
+
+- `docker-compose.yml` for service wiring
+- `orthanc.json` for structural config
+- `orthanc_users.json` as a generated runtime file
+
+### 6.2 Companion packaging
+
+The companion runs natively on the host (no Docker container):
+
+- FastAPI served by uvicorn, managed by a systemd unit (`ssc-companion.service`)
+- Python dependencies installed in the `pacs` conda environment
+- React frontend built with Vite + Tailwind CSS into `companion/dist/`
+- FastAPI serves the built frontend as static files and provides the REST API
+- Node.js and npm are only needed at build time (to run `npm run build`);
+  no Node process runs in production
+
+To rebuild the frontend after changes: `cd companion && npm run build`.
+To restart the service: `sudo systemctl restart ssc-companion`.
+
+---
+
+## 7. Portable versus site-specific parts
+
+### 7.1 Portable core
+
+These parts are broadly reusable on another server if the target deployment will
+follow the same pattern:
+
+- `docker-compose.yml` (Orthanc only)
+- `orthanc.json`
+- `companion/` (FastAPI backend + React frontend)
+- `ssc-companion.service` (systemd unit)
+- `manage_users.py`
+- `init_orthanc_db.sh`
+- `verify_indexing.py`
+
+`label_studies.py` is also fairly portable as long as the source metadata tables
+(`image_series` and `image_study`) still provide:
+
+- `studyinstanceuid`
+- `study_type` (from `image_study`)
+- `modality` (from `image_series`)
+
+### 7.2 Site-specific parts
+
+These parts depend on the SSC metadata conventions or local filesystem
+assumptions.
+
+`enrich_orthanc.py` is specific to deployments where:
+
+- the DICOM headers are too anonymized to be useful in Orthanc Explorer 2
+- you want OE2 columns to show values from `image_series` and `image_study`
+- you are willing to mutate Orthanc's PostgreSQL index tables directly
+
+`image_integration_protocols/` is strongly site-specific:
+
+- it is the legacy pipeline that created and curated `image_series` and
+  `image_study`
+- it assumes SSC-specific directory layouts and metadata rules
+- it contains local path assumptions and dataset-specific heuristics
+- it is not part of standard PACS deployment on a fresh server
+
+### 7.3 Practical guidance for new deployments
+
+If a new server already has:
+
+- a DICOM tree
+- a PostgreSQL server
+- metadata tables equivalent to `lvo_clinical_data`, `image_series`, and
+  `image_study`
+
+then the PACS stack can usually be redeployed without using
+`image_integration_protocols/`. The patient-level table
+(`lvo_clinical_data`) is optional — if absent, the patient tab in the
+companion will have no data, but study and series browsing will work normally.
+
+If the new deployment does not already have equivalent metadata tables, that
+metadata-ingestion problem must be solved separately from the PACS deployment.
+
+---
+
+## 8. Operational caveats
+
+Current repo behavior that matters architecturally:
+
+- `check_status.sh` reads Orthanc credentials from repo-root `.env` (`ORTHANC_ADMIN_USER` / `ORTHANC_ADMIN_PASSWORD`)
+- all Orthanc-facing helper scripts use `ORTHANC_ADMIN_USER` /
+  `ORTHANC_ADMIN_PASSWORD` from `.env`
+- `teardown.sh` is destructive (removes Orthanc resources, not just running
+  containers) and sources `.env` from two levels above the repo root — not the
+  repo-root `.env` used by everything else
+
+These are documentation-relevant caveats, not fundamental design choices.

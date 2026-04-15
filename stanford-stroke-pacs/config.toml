@@ -1,0 +1,13 @@
+# Non-secret operational settings (version-controllable).
+# Secrets stay in `.env` (DB_PASSWORD, JWT_SECRET, Orthanc admin password, etc.).
+
+[storage]
+# "legacy" | "cold_path_cache"
+mode = "cold_path_cache"
+legacy_dicom_root = "/DATA2/pacs_imaging_data"
+cold_archive_root = "/DATA2/pacs_imaging_data_compressed"
+hot_cache_dir = "/DATA2/pacs_hot_cache"
+eviction_ttl_hours = 9999
+
+[companion]
+session_timeout_hours = 0.25

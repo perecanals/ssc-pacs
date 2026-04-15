@@ -1,0 +1,42 @@
+@import "tailwindcss";
+
+@theme {
+  --color-primary: #2563eb;
+  --color-primary-hover: #1d4ed8;
+  --color-danger: #dc2626;
+  --color-surface: #ffffff;
+  --color-bg: #f5f7fa;
+  --color-border: #dde1e6;
+  --color-text: #1a1a2e;
+  --color-text-muted: #6b7280;
+  --color-pill-bg: #e0e7ff;
+  --color-pill-text: #3730a3;
+  --color-table-header-bg: #f0f3f8;
+  --color-table-row-hover: #e8edfa;
+  --color-child-bg: #e8ebf0;
+  --color-child-header-bg: #dfe3ea;
+  --color-child-row-hover: #d5ddef;
+  --color-grandchild-bg: #dfe3ea;
+  --color-grandchild-header-bg: #d4d9e2;
+  --color-grandchild-row-hover: #cad3e4;
+  --color-grandchild-empty-bg: #d8dce4;
+  --color-dropdown-hover: #f5f5f5;
+}
+
+/* Shared component styles */
+
+.btn-outline {
+  @apply px-2 py-1 text-xs border border-border rounded-md bg-surface cursor-pointer hover:border-primary hover:text-primary;
+}
+
+.btn-primary {
+  @apply px-3 py-1.5 text-xs rounded-md bg-primary text-white border border-primary cursor-pointer hover:bg-primary-hover;
+}
+
+.input-field {
+  @apply w-full px-2.5 py-1.5 border border-border rounded-md text-sm outline-none focus:border-primary;
+}
+
+.link-btn {
+  @apply text-primary text-xs font-medium bg-transparent border-none cursor-pointer hover:underline;
+}

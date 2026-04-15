@@ -1,0 +1,7 @@
+pandas
+python-dotenv
+SQLAlchemy
+psycopg2-binary
+numpy
+pydicom
+SimpleITK

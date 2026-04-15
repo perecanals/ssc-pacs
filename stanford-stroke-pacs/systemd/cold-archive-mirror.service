@@ -1,0 +1,23 @@
+[Unit]
+Description=PACS — cold-archive mirror (Tier 2, dormant on dev)
+Documentation=file:/home/perecanals/pacs/stanford-stroke-pacs/documentation/operations/backup_strategy.md
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=perecanals
+Group=perecanals
+Nice=15
+IOSchedulingClass=idle
+# Activation in production:
+#   1. Create /etc/default/pacs-cold-mirror with:
+#        SOURCE_DIR=/DATA2/pacs_imaging_data_compressed
+#        COLD_MIRROR_DEST=/path/to/mirror   # local disk, NFS, or borg/restic repo
+#   2. systemctl enable --now cold-archive-mirror.timer
+#
+# Without that env file, the script no-ops with a notice (exit 0).
+EnvironmentFile=-/etc/default/pacs-cold-mirror
+ExecStart=/home/perecanals/pacs/stanford-stroke-pacs/scripts/mirror_cold_archive.sh
+StandardOutput=journal
+StandardError=journal

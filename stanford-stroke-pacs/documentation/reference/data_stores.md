@@ -1,0 +1,174 @@
+# Data stores (PostgreSQL)
+
+**Purpose:** Authoritative reference for logical databases, source tables, companion-owned tables, and optional cold-storage schema. For query/join behavior at a glance, see also [How the Companion queries the DB](#how-the-companion-queries-the-db). Stack context: [`architecture.md`](architecture.md).
+
+This PACS stack uses **one PostgreSQL server** but **two logical databases** with separate responsibilities:
+
+- **`orthanc_db`**: Orthanc’s internal index database (managed by Orthanc’s PostgreSQL plugin).
+- **`stanford-stroke`**: Research / application database used by the Companion and helper scripts.
+
+---
+
+## `orthanc_db` (Orthanc index DB)
+
+Owned and mutated by Orthanc only.
+
+- **Purpose**: operational indexing for Orthanc Explorer 2, OHIF, DICOMweb, and REST lookups.
+- **Data source**: Orthanc Folder Indexer scans the on-disk DICOM tree and writes metadata into this DB.
+- **Storage model**: the canonical DICOM files remain on disk; Orthanc stores *index/metadata*, not image payloads.
+
+You generally should not query or migrate Orthanc tables directly unless you are doing explicit Orthanc-specific work (e.g. optional enrichment scripts that intentionally mutate Orthanc’s index tables).
+
+Connection is configured via `ORTHANC__POSTGRESQL__*` in `docker-compose.yml` (see [`runtime_and_config.md`](runtime_and_config.md)).
+
+---
+
+## `stanford-stroke` (research / app DB)
+
+This is where the Companion reads metadata and stores annotations and preferences.
+
+### Source metadata tables (upstream-owned)
+
+These tables drive browsing in the Companion UI:
+
+- **`lvo_clinical_data`** (patient-level clinical table)
+  - used fields include: `study_id` (mapped to `patient_id` in the Companion API), `stroke_date`
+- **`image_study`** (study-level imaging metadata)
+  - typical fields: `patient_id`, `studyinstanceuid`, `studydescription`, `study_type`, `study_path`, `acquisitiondatetime`, `import_id`, `import_label`
+- **`image_series`** (series-level imaging metadata)
+  - typical fields: `patient_id`, `studyinstanceuid`, `seriesinstanceuid`, `seriesdescription`, `modality`, `acquisitiondatetime`
+  - file pointers: `dicom_dir_path`, `nifti_path`
+  - optional cold storage: **`dicom_archive_path`** — path to per-series `*.tar.zst` when using `cold_cache` mode
+  - ingestion bookkeeping: `import_id`, `import_label`
+  - geometry-derived: `imageshape`, **`number_of_slices`**
+
+Notes:
+
+- The legacy Stanford ingestion pipeline (`image_integration_protocols/`) upserts into `image_study` and `image_series`.
+- `number_of_slices` is populated during ingest and can be backfilled for existing rows.
+
+### Companion-owned tables (app-managed)
+
+These tables are created/migrated by `companion/app.py` on startup:
+
+- **`users`**: Companion login accounts (bcrypt password hashes).
+- **`annotations`**: multi-level (patient / study / series) annotations.
+- **`label_definitions`**: label registry (level-aware; supports bool/int/text/select).
+- **`user_preferences`**: per-user persisted table layout/state (JSONB).
+- **`snapshot_patients` / `snapshot_studies` / `snapshot_seriess`**: refreshable export-oriented snapshot tables.
+
+Cold storage / hot cache (when enabled):
+
+- **`cache_state`**: per-study warm status and paths for the hot cache.
+- **`orthanc_resource_map`**: Orthanc resource IDs linked to warmed studies (supports eviction).
+
+### `image_series.dicom_archive_path`
+
+Nullable `TEXT`. Populated by the offline archiver (`scripts/archive_all_series.py`) when series are packed to `*.tar.zst`. Used when `[storage].mode = "cold_cache"` in `config.toml`.
+
+### `cache_state`
+
+```text
+studyinstanceuid   TEXT PRIMARY KEY
+status             TEXT NOT NULL DEFAULT 'cold'
+                   CHECK (status IN ('cold', 'warming', 'hot', 'error'))
+cache_path         TEXT
+warmed_at          TIMESTAMPTZ
+last_accessed_at   TIMESTAMPTZ
+error_message      TEXT
+```
+
+Indexes: `idx_cache_state_status`, `idx_cache_state_last_accessed`.
+
+### `orthanc_resource_map`
+
+```text
+orthanc_id         TEXT PRIMARY KEY
+resource_type      TEXT NOT NULL CHECK (resource_type IN ('study', 'series', 'instance'))
+studyinstanceuid   TEXT NOT NULL REFERENCES cache_state(studyinstanceuid) ON DELETE CASCADE
+seriesinstanceuid  TEXT
+created_at         TIMESTAMPTZ DEFAULT now()
+```
+
+Index: `idx_orm_study` on `studyinstanceuid`.
+
+---
+
+## Companion table DDL (logical reference)
+
+Migrations in `companion/app.py` are authoritative; this section mirrors the intended shape for documentation readers.
+
+### `annotations`
+
+```text
+id                  SERIAL PRIMARY KEY
+seriesinstanceuid   TEXT            (nullable, used only for level='series')
+studyinstanceuid    TEXT            (nullable, used for level='study' and 'series')
+patient_id          TEXT            (nullable, used for all levels)
+label               TEXT NOT NULL
+value               TEXT
+level               TEXT NOT NULL DEFAULT 'series'
+                    CHECK (level IN ('patient', 'study', 'series'))
+created_by          TEXT NOT NULL
+created_at          TIMESTAMPTZ DEFAULT now()
+notes               TEXT
+```
+
+Partial unique indexes (shared annotations — one value per entity+label):
+
+- `idx_ann_shared_series` on `(seriesinstanceuid, label) WHERE level = 'series'`
+- `idx_ann_shared_study` on `(studyinstanceuid, label) WHERE level = 'study'`
+- `idx_ann_shared_patient` on `(patient_id, label) WHERE level = 'patient'`
+
+### `label_definitions`
+
+```text
+id          SERIAL PRIMARY KEY
+name        TEXT NOT NULL UNIQUE
+description TEXT
+level       TEXT NOT NULL DEFAULT 'series'
+            CHECK (level IN ('patient', 'study', 'series'))
+datatype    TEXT NOT NULL DEFAULT 'bool'
+            CHECK (datatype IN ('bool', 'int', 'text', 'select'))
+options     TEXT
+created_by  TEXT NOT NULL
+created_at  TIMESTAMPTZ DEFAULT now()
+```
+
+### `users`
+
+```text
+username      TEXT PRIMARY KEY
+password_hash TEXT NOT NULL
+is_admin      BOOLEAN NOT NULL DEFAULT FALSE
+created_at    TIMESTAMPTZ DEFAULT now()
+```
+
+### `user_preferences`
+
+```text
+username   TEXT NOT NULL REFERENCES users(username) ON DELETE CASCADE
+level      TEXT NOT NULL CHECK (level IN ('patient', 'study', 'series', '_global'))
+prefs      JSONB NOT NULL DEFAULT '{}'
+updated_at TIMESTAMPTZ DEFAULT now()
+PRIMARY KEY (username, level)
+```
+
+---
+
+## How the Companion queries the DB
+
+- **Patients**: listed from `lvo_clinical_data` (patient tab).
+- **Studies**: listed from `image_study`, and modality is aggregated from `image_series` by `studyinstanceuid`.
+- **Series**: listed from `image_series` and LEFT JOINs `image_study` to include `study_type`.
+- **Annotations** are joined/attached per row and **inherit downward** (patient → study → series) in API responses.
+
+Connection settings are read from `.env`:
+`DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`.
+
+---
+
+## Related documentation
+
+- Operator procedures for cold storage: [`../cold_storage/runbook.md`](../cold_storage/runbook.md)
+- Design rationale: [`../cold_storage/design.md`](../cold_storage/design.md)

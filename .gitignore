@@ -1,0 +1,44 @@
+# Secrets / auth
+.env
+**/.env
+orthanc_users.json
+**/orthanc_users.json
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# IDE / editor
+.cursor/
+.vscode/
+.claude/
+.idea/
+
+# Frontend build artifacts
+companion/node_modules/
+companion/dist/
+
+# Benchmarks / temp
+.tmp_bench/
+**/.tmp_bench/
+
+# Migration/backup dumps
+migration_backups/
+
+# Integration protocol logs
+image_integration_protocols/*.log
+image_integration_protocols/error_log_*.json
+
+# SQL data dumps (schema only — CSV/raw data stays out)
+ssc-sql-db/tables/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Embedded upstream VCS metadata (orthanc-indexer-patched vendors Mercurial source)
+.hg/
+**/.hg/

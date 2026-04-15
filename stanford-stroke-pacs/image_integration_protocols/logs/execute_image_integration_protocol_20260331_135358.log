@@ -1,0 +1,51 @@
+2026-03-31 13:53:58,879 - INFO - Starting image integration protocol execution
+2026-03-31 13:53:58,879 - INFO - Log file: /home/perecanals/pacs/stanford-stroke-pacs/image_integration_protocols/execute_image_integration_protocol_20260331_135358.log
+2026-03-31 13:53:58,879 - INFO - Config file: /home/perecanals/pacs/stanford-stroke-pacs/image_integration_protocols/execute_image_integration_protocol.yaml
+2026-03-31 13:53:58,879 - INFO - Loaded YAML configuration:
+env_path: /home/perecanals/pacs/.env
+database: stanford-stroke
+src_dir: /DATA2/perecanals/datasets/praneeta_cytof_data
+overwrite_if_exists: false
+anonymize_files: false
+delete_originals_after_verification: true
+import_label: praneeta_cytof_data
+2026-03-31 13:53:58,932 - INFO - Source directory: /DATA2/perecanals/datasets/praneeta_cytof_data
+2026-03-31 13:53:58,932 - INFO - Database: stanford-stroke
+2026-03-31 13:53:58,932 - INFO - Env path: /home/perecanals/pacs/.env
+2026-03-31 13:53:58,932 - INFO - Run import_id: 105
+2026-03-31 13:53:58,932 - INFO - Import label: praneeta_cytof_data
+2026-03-31 13:53:58,932 - INFO - Anonymize files: False
+2026-03-31 13:53:58,932 - INFO - Delete originals after verification: True
+2026-03-31 13:53:58,933 - INFO - Overwrite existing studies: False
+2026-03-31 13:53:58,933 - INFO - Found 11 cases to process
+2026-03-31 13:53:58,933 - INFO - Processing case 4-1226
+2026-03-31 13:53:58,933 - INFO - Starting image integration for case 4-1226
+2026-03-31 13:54:54,962 - ERROR - Traceback (most recent call last):
+2026-03-31 13:54:54,964 - ERROR -   File "/home/perecanals/pacs/stanford-stroke-pacs/image_integration_protocols/execute_image_integration_protocol.py", line 203, in <module>
+2026-03-31 13:54:54,964 - ERROR -     result = execute_image_integration_protocol(
+2026-03-31 13:54:54,964 - ERROR -         case_dir,
+2026-03-31 13:54:54,964 - ERROR -     ...<6 lines>...
+2026-03-31 13:54:54,964 - ERROR -         import_label=config["import_label"],
+2026-03-31 13:54:54,964 - ERROR -     )
+2026-03-31 13:54:54,964 - ERROR -   File "/home/perecanals/pacs/stanford-stroke-pacs/image_integration_protocols/execute_image_integration_protocol.py", line 105, in execute_image_integration_protocol
+2026-03-31 13:54:54,964 - ERROR -     return protocol.execute_image_integration_protocol(overwrite_if_exists=overwrite_if_exists)
+2026-03-31 13:54:54,964 - ERROR -            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+2026-03-31 13:54:54,964 - ERROR -   File "/home/perecanals/pacs/stanford-stroke-pacs/image_integration_protocols/image_integration_protocol.py", line 60, in execute_image_integration_protocol
+2026-03-31 13:54:54,964 - ERROR -     self.create_series_table()
+2026-03-31 13:54:54,964 - ERROR -     ~~~~~~~~~~~~~~~~~~~~~~~~^^
+2026-03-31 13:54:54,964 - ERROR -   File "/home/perecanals/pacs/stanford-stroke-pacs/image_integration_protocols/image_integration_protocol.py", line 400, in create_series_table
+2026-03-31 13:54:54,964 - ERROR -     headers = self._read_series_headers(series_dir)
+2026-03-31 13:54:54,964 - ERROR -   File "/home/perecanals/pacs/stanford-stroke-pacs/image_integration_protocols/image_integration_protocol.py", line 354, in _read_series_headers
+2026-03-31 13:54:54,964 - ERROR -     headers.append(pydicom.dcmread(filepath, stop_before_pixels=True))
+2026-03-31 13:54:54,964 - ERROR -                    ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+2026-03-31 13:54:54,964 - ERROR -   File "/home/perecanals/miniconda3/envs/pacs/lib/python3.14/site-packages/pydicom/filereader.py", line 1078, in dcmread
+2026-03-31 13:54:54,964 - ERROR -     dataset = read_partial(
+2026-03-31 13:54:54,964 - ERROR -         fp,
+2026-03-31 13:54:54,965 - ERROR -     ...<3 lines>...
+2026-03-31 13:54:54,965 - ERROR -         specific_tags=specific_tags,
+2026-03-31 13:54:54,965 - ERROR -     )
+2026-03-31 13:54:54,965 - ERROR -   File "/home/perecanals/miniconda3/envs/pacs/lib/python3.14/site-packages/pydicom/filereader.py", line 839, in read_partial
+2026-03-31 13:54:54,965 - ERROR -     preamble = read_preamble(fileobj, force)
+2026-03-31 13:54:54,965 - ERROR -   File "/home/perecanals/miniconda3/envs/pacs/lib/python3.14/site-packages/pydicom/filereader.py", line 766, in read_preamble
+2026-03-31 13:54:54,965 - ERROR -     preamble = fp.read(128)
+2026-03-31 13:54:54,965 - ERROR - KeyboardInterrupt

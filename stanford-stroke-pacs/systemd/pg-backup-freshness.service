@@ -1,0 +1,15 @@
+[Unit]
+Description=PACS — backup freshness monitor (PostgreSQL only on dev)
+Documentation=file:/home/perecanals/pacs/stanford-stroke-pacs/documentation/operations/backup_strategy.md
+
+[Service]
+Type=oneshot
+User=perecanals
+Group=perecanals
+ExecStart=/home/perecanals/pacs/stanford-stroke-pacs/scripts/check_backup_freshness.sh
+StandardOutput=journal
+StandardError=journal
+# Production: when cold-archive mirror is enabled, swap ExecStart for
+#   ExecStart=/home/.../check_backup_freshness.sh --include-cold-archive
+# and add EnvironmentFile=/etc/default/pacs-cold-mirror so COLD_MIRROR_DEST
+# is exported.

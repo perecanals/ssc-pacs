@@ -1,0 +1,12 @@
+pandas
+python-dotenv
+SQLAlchemy
+psycopg2-binary
+numpy
+pydicom
+SimpleITK
+requests
+bcrypt
+pyyaml
+zipstream-ng
+zstandard
