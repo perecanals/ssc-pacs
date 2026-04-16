@@ -24,7 +24,7 @@ sys.path.insert(0, str(ROOT))
 
 import psycopg2.sql as psql
 
-from app import LABEL_NAME_RE
+from common import LABEL_NAME_RE
 
 
 def test_regex_rejects_malicious_names() -> None:
@@ -75,8 +75,8 @@ def test_composed_ddl_parameterizes_label_name() -> None:
     # psycopg2.sql.Composable.as_string() requires a connection or adapter;
     # use a throwaway cursor from a local connection if available, otherwise
     # adapt manually via a mock.
-    import psycopg2
     import os
+    import psycopg2
     try:
         from dotenv import load_dotenv
         load_dotenv(ROOT / ".env")
