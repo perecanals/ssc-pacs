@@ -6,6 +6,7 @@ All modules that need a database connection should import from here.
 
 from __future__ import annotations
 
+import contextvars
 import logging
 import os
 from pathlib import Path
@@ -18,6 +19,13 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent
 load_dotenv(_REPO_ROOT / ".env")
 
 logger = logging.getLogger(__name__)
+
+# Contextvar populated by the request middleware with the authenticated
+# username.  ``get_conn()`` reads this and issues ``SET LOCAL
+# app.audit_user`` so the audit trigger can attribute changes.
+audit_user_var: contextvars.ContextVar[str] = contextvars.ContextVar(
+    "audit_user", default="",
+)
 
 
 def _require_env(name: str) -> str:
@@ -124,7 +132,22 @@ def get_conn():
 
     When no pool exists (scripts), falls back to a plain
     ``psycopg2.connect()`` — ``close()`` destroys the connection as usual.
+
+    If ``audit_user_var`` is set (by the request middleware), the session
+    variable ``app.audit_user`` is set via ``SET LOCAL`` so the
+    ``annotations_audit`` trigger can attribute changes to the user.
     """
     if _pool is not None:
-        return _PooledConnection(_pool.getconn(), _pool)
-    return psycopg2.connect(**DB_CONFIG)
+        conn = _PooledConnection(_pool.getconn(), _pool)
+    else:
+        conn = psycopg2.connect(**DB_CONFIG)
+    # Propagate the authenticated user into the PG session so the audit
+    # trigger can read it via current_setting('app.audit_user', true).
+    user = audit_user_var.get("")
+    if user:
+        try:
+            with conn.cursor() as cur:
+                cur.execute("SET LOCAL app.audit_user = %s", (user,))
+        except Exception:
+            pass  # non-critical; trigger falls back to 'system'
+    return conn

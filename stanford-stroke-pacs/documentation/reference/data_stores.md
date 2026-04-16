@@ -60,6 +60,10 @@ for the workflow when adding a new revision.
 - **`user_preferences`**: per-user persisted table layout/state (JSONB).
 - **`snapshot_patients` / `snapshot_studies` / `snapshot_seriess`**: refreshable export-oriented snapshot tables.
 
+Audit:
+
+- **`annotations_history`**: append-only audit trail for every annotation change (trigger-captured). See [`../operations/annotation_history.md`](../operations/annotation_history.md).
+
 Cold storage / hot cache (when enabled):
 
 - **`cache_state`**: per-study warm status and paths for the hot cache.
@@ -156,6 +160,28 @@ prefs      JSONB NOT NULL DEFAULT '{}'
 updated_at TIMESTAMPTZ DEFAULT now()
 PRIMARY KEY (username, level)
 ```
+
+### `annotations_history`
+
+```text
+history_id       BIGSERIAL PRIMARY KEY
+operation        CHAR(1) NOT NULL           -- I | U | D
+operation_at     TIMESTAMPTZ DEFAULT now()
+operation_by     TEXT DEFAULT 'system'
+annotation_id    INTEGER NOT NULL
+level            TEXT NOT NULL
+entity_id        TEXT NOT NULL
+label            TEXT NOT NULL
+value_before     TEXT                       -- NULL on INSERT
+value_after      TEXT                       -- NULL on DELETE
+notes_before     TEXT                       -- NULL on INSERT
+notes_after      TEXT                       -- NULL on DELETE
+created_by       TEXT
+```
+
+Indexes: `annotations_history_annotation_id_idx` `(annotation_id, operation_at DESC)`, `annotations_history_entity_id_idx` `(entity_id, operation_at DESC)`.
+
+Populated by `annotations_audit_trg` trigger (PL/pgSQL). See [`../operations/annotation_history.md`](../operations/annotation_history.md).
 
 ---
 

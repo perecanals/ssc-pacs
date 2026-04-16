@@ -17,7 +17,7 @@ from slowapi.util import get_remote_address
 import auth as _auth
 from auth import create_jwt, decode_jwt
 from config import LOGIN_RATE_LIMIT_PER_5MIN, STORAGE_MODE
-from db import close_pool, get_conn, init_pool
+from db import audit_user_var, close_pool, get_conn, init_pool
 from logging_config import configure_logging, request_id_ctx, user_ctx
 from metrics import http_request_duration_seconds, http_requests_total
 from routes import admin, annotations, cold_storage, labels, preferences, static, studies
@@ -162,6 +162,7 @@ async def request_id_middleware(request: Request, call_next):
     rid_token = request_id_ctx.set(req_id)
 
     user_token = None
+    audit_token = None
     auth_cookie = request.cookies.get("auth_token")
     if auth_cookie:
         try:
@@ -169,7 +170,9 @@ async def request_id_middleware(request: Request, call_next):
         except Exception:
             payload = None
         if payload and payload.get("sub"):
-            user_token = user_ctx.set(str(payload["sub"]))
+            username = str(payload["sub"])
+            user_token = user_ctx.set(username)
+            audit_token = audit_user_var.set(username)
 
     start = time.perf_counter()
     status_code = 500
@@ -205,6 +208,8 @@ async def request_id_middleware(request: Request, call_next):
                 },
             )
         request_id_ctx.reset(rid_token)
+        if audit_token is not None:
+            audit_user_var.reset(audit_token)
         if user_token is not None:
             user_ctx.reset(user_token)
 

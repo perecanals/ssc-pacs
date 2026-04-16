@@ -1,9 +1,9 @@
-"""Annotation CRUD endpoints."""
+"""Annotation CRUD and history endpoints."""
 
 from __future__ import annotations
 
 import psycopg2.extras
-from fastapi import APIRouter, Cookie, HTTPException
+from fastapi import APIRouter, Cookie, Depends, HTTPException
 from pydantic import BaseModel
 
 from auth import get_current_user
@@ -143,3 +143,45 @@ def delete_annotation(annotation_id: int, auth_token: str | None = Cookie(None))
         conn.commit()
     finally:
         conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Annotation history (admin-only)
+# ---------------------------------------------------------------------------
+
+def _require_admin(username: str) -> None:
+    """Raise 403 if the user is not an admin."""
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT is_admin FROM users WHERE username = %s", (username,))
+            row = cur.fetchone()
+    finally:
+        conn.close()
+    if not row or not row[0]:
+        raise HTTPException(status_code=403, detail="Admin access required")
+
+
+@router.get("/api/annotations/{annotation_id}/history")
+def annotation_history(annotation_id: int, user: str = Depends(get_current_user)):
+    """Return the audit history for a single annotation, newest first."""
+    _require_admin(user)
+    conn = get_conn()
+    try:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute(
+                "SELECT history_id, operation, operation_at, operation_by, "
+                "annotation_id, level, entity_id, label, "
+                "value_before, value_after, notes_before, notes_after, created_by "
+                "FROM annotations_history "
+                "WHERE annotation_id = %s "
+                "ORDER BY operation_at DESC, history_id DESC",
+                (annotation_id,),
+            )
+            rows = cur.fetchall()
+    finally:
+        conn.close()
+    for r in rows:
+        if r["operation_at"]:
+            r["operation_at"] = r["operation_at"].isoformat()
+    return rows

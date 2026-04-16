@@ -40,6 +40,7 @@ EXPECTED_ROUTES = {
     ("GET", "/api/series/{seriesinstanceuid}/annotations"),
     ("POST", "/api/annotations"),
     ("DELETE", "/api/annotations/{annotation_id}"),
+    ("GET", "/api/annotations/{annotation_id}/history"),
     ("GET", "/api/labels"),
     ("GET", "/api/labels/summary"),
     ("GET", "/api/labels/{label_name}/values"),

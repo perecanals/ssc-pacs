@@ -182,7 +182,7 @@ The stack has two services and two databases.
 
 **Companion backend modules** (under `companion/`):
 - `app.py` — entry point: lifespan (pool + migrations), middleware (sliding JWT, request-ID/metrics), rate limiter, router registration (~230 lines).
-- `db.py` — **single source of truth** for `DB_CONFIG` and the `ThreadedConnectionPool`. All modules import `get_conn` from here.
+- `db.py` — **single source of truth** for `DB_CONFIG` and the `ThreadedConnectionPool`. All modules import `get_conn` from here. Also exposes `audit_user_var` (contextvar) — when set by middleware, `get_conn()` auto-sets `SET LOCAL app.audit_user` so the annotation audit trigger can attribute changes.
 - `auth.py` — JWT utilities (`create_jwt`, `decode_jwt`, `get_current_user`).
 - `orthanc_client.py` — thin wrappers around Orthanc REST calls.
 - `common.py` — shared SQL builders (`build_label_filter_sql`), annotation helpers, constants.
@@ -193,7 +193,7 @@ The stack has two services and two databases.
 
 **Two-database model:**
 - `orthanc_db` — Orthanc's internal index; do not query or mutate unless doing explicit Orthanc enrichment work.
-- `stanford-stroke` — upstream read-only tables (`lvo_clinical_data`, `image_study`, `image_series`) plus Companion-owned tables (`annotations`, `label_definitions`, `users`, `user_preferences`, snapshot tables). Connection from `.env`: `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`.
+- `stanford-stroke` — upstream read-only tables (`lvo_clinical_data`, `image_study`, `image_series`) plus Companion-owned tables (`annotations`, `annotations_history`, `label_definitions`, `users`, `user_preferences`, snapshot tables). Connection from `.env`: `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`.
 
 **Companion-owned tables** are created/migrated by `companion/app.py` on startup (via Alembic).
 
@@ -202,6 +202,7 @@ The stack has two services and two databases.
 - Annotations are shared (one value per entity+label across all users; `created_by` tracks last editor).
 - Parent-level annotations inherit downward to child rows in API responses.
 - Cross-level filtering: e.g., filter patients by a series-level label.
+- **Audit trail:** every INSERT/UPDATE/DELETE on `annotations` is captured in `annotations_history` by a PL/pgSQL trigger. See `documentation/operations/annotation_history.md`.
 
 **Storage modes** (set in `config.toml` `[storage].mode`):
 - `legacy` — Orthanc Folder Indexer reads loose DICOM files from `legacy_dicom_root`.
@@ -319,5 +320,6 @@ All canonical docs are under `stanford-stroke-pacs/documentation/`. Start with `
 - `documentation/reference/image_integration_protocol.md` — ingesting new data, YAML config, per-mode behavior
 - `documentation/operations/commands.md` — day-2 operations cheat sheet
 - `documentation/operations/reconciliation.md` — two-DB reconciliation (image_series vs Orthanc), mismatch categories, admin endpoint
+- `documentation/operations/annotation_history.md` — annotation audit trail: trigger, session-variable coupling, history API, backfill, retention
 - `documentation/cold_storage/` — cold storage design and runbook
 - `documentation/recipes/dicom_processing.md` — DICOM → NIFTI, archive inspection, cleanup scripts
