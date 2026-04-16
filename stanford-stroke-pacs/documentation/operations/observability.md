@@ -4,9 +4,8 @@ The companion service emits JSON-structured logs, exposes a dependency
 health probe at `/healthz`, and serves Prometheus metrics at `/metrics`.
 This document is the operator-facing reference for all three.
 
-Everything here is _in-process_. Provisioning a Prometheus server and a
-Grafana instance is out of scope for WS 06 — §3 below documents how to
-wire the exporters up when the infra team is ready.
+Prometheus and Grafana run as a Docker Compose stack at
+`~/monitoring/`. See §6 for management commands and access URLs.
 
 ---
 
@@ -189,22 +188,20 @@ gauge refresh is skipped due to a transient DB error.
 
 ### Prometheus scrape config
 
-Add to `prometheus.yml`:
+The live config is at `~/monitoring/prometheus.yml`. It scrapes
+`host.docker.internal:8043` (the companion, as seen from inside the
+Prometheus container) every 30 s. If you move Prometheus to a
+different host, adjust the target:
 
 ```yaml
 scrape_configs:
   - job_name: ssc-companion
     metrics_path: /metrics
     static_configs:
-      - targets: ['localhost:8043']
+      - targets: ['host.docker.internal:8043']
     scrape_interval: 30s
     scrape_timeout: 10s
 ```
-
-If the companion is only reachable via SSH tunnel from the observability
-host, use Prometheus' `blackbox_exporter` with a `socks5` proxy, or
-terminate the tunnel on the Prometheus host and point at
-`127.0.0.1:8043`.
 
 ### Recommended alert rules (pseudo-PromQL)
 
@@ -245,25 +242,104 @@ groups:
 
 ## 4. Grafana dashboard
 
-A starter dashboard lives at
-[`operations/grafana_dashboard.json`](grafana_dashboard.json). It has
-five panels — request rate, p50/p95 latency, warm/evict success rate,
-cold-storage disk free, and `warming_rows` over time.
+The **SSC Companion** dashboard is auto-provisioned when Grafana starts
+— no manual import needed. It lives in two places:
 
-Import:
+| Copy | Purpose |
+|------|---------|
+| `documentation/operations/grafana_dashboard.json` | Portable template with `${DS_PROMETHEUS}` variable (for manual import into a different Grafana) |
+| `~/monitoring/dashboards/ssc-companion.json` | Provisioned copy with the datasource UID hard-coded to `ssc-prometheus` (loaded automatically) |
 
-1. Grafana → _Dashboards_ → _New_ → _Import_.
-2. Upload `grafana_dashboard.json` (or paste its contents).
-3. Pick the Prometheus datasource that scrapes the companion.
-4. Save.
+**Panels:** request rate, p50/p95 latency, warm/evict success rate,
+cold-storage disk free, warming rows over time.
 
-The dashboard declares the datasource as a variable
-(`${DS_PROMETHEUS}`), so you can rename or rebind it without editing
-panel queries.
+If you edit the dashboard in the Grafana UI and want to persist the
+changes, export the JSON and overwrite both copies above.
 
 ---
 
-## 5. Frontend correlation
+## 5. Monitoring stack (`~/monitoring/`)
+
+Prometheus and Grafana run as Docker containers managed by
+`~/monitoring/docker-compose.yml`.
+
+### Access
+
+| Service    | URL                        | Credentials        |
+|------------|----------------------------|---------------------|
+| Grafana    | `http://localhost:3000`    | `admin` / `admin` (change on first login) |
+| Prometheus | `http://localhost:9090`    | no auth             |
+| Companion `/healthz` | `http://localhost:8043/healthz` | no auth |
+| Companion `/metrics`  | `http://localhost:8043/metrics`  | no auth |
+
+**Via SSH tunnel** (from a laptop):
+
+```bash
+ssh -L 3000:localhost:3000 -L 9090:localhost:9090 -L 8043:localhost:8043 <host>
+```
+
+Then open `http://localhost:3000` in your browser, go to
+_Dashboards_ > _SSC Companion_.
+
+### Directory layout
+
+```
+~/monitoring/
+├── docker-compose.yml          # Prometheus + Grafana services
+├── prometheus.yml              # Scrape config (companion on :8043)
+├── provisioning/
+│   ├── datasources/
+│   │   └── prometheus.yml      # Auto-wires Prometheus datasource in Grafana
+│   └── dashboards/
+│       └── default.yml         # Tells Grafana to load from /dashboards/
+└── dashboards/
+    └── ssc-companion.json      # Auto-provisioned dashboard
+```
+
+### Common operations
+
+```bash
+cd ~/monitoring
+
+# Start / stop
+docker compose up -d
+docker compose down
+
+# View logs
+docker compose logs -f prometheus
+docker compose logs -f grafana
+
+# Restart after editing prometheus.yml (hot-reload)
+curl -X POST http://localhost:9090/-/reload
+
+# Check Prometheus is scraping the companion
+curl -s http://localhost:9090/api/v1/targets | python3 -m json.tool
+
+# Check companion target health
+curl -s http://localhost:9090/api/v1/query?query=up | python3 -m json.tool
+```
+
+### Data retention
+
+Prometheus keeps 30 days of time-series data (set via
+`--storage.tsdb.retention.time=30d` in docker-compose.yml). Data is
+stored in a Docker volume (`monitoring_prometheus_data`). To wipe and
+start fresh:
+
+```bash
+cd ~/monitoring && docker compose down -v && docker compose up -d
+```
+
+### If the companion restarts
+
+Prometheus will show a brief gap in the time series (the scrape returns
+an error until the companion is back). Counters reset to zero on
+restart; Prometheus' `rate()` handles resets gracefully. No operator
+action needed.
+
+---
+
+## 6. Frontend correlation
 
 The request-ID middleware writes `X-Request-ID` on every response. The
 frontend's `api/client.js` wrapper should surface this header in error
