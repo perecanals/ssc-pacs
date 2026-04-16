@@ -13,6 +13,7 @@ One **Orthanc** container (`ssc-orthanc`), one **Companion** service on the host
 | Companion product + UI model | [`reference/companion.md`](reference/companion.md) |
 | Companion React / `DataTable` detail | [`reference/companion_frontend.md`](reference/companion_frontend.md) |
 | Image integration protocol (ingesting new data) | [`reference/image_integration_protocol.md`](reference/image_integration_protocol.md) |
+| Testing, linting, CI (developer setup) | [`guides/installation_and_deployment.md` §8](guides/installation_and_deployment.md) |
 | Fresh install | [`guides/installation_and_deployment.md`](guides/installation_and_deployment.md) |
 | Day-2 commands | [`operations/commands.md`](operations/commands.md) |
 | Upgrading dependencies (pinned packages) | [`operations/upgrading_dependencies.md`](operations/upgrading_dependencies.md) |

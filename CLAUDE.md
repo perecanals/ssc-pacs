@@ -63,6 +63,15 @@ cd companion && npm run dev
 # Browse at http://localhost:5173
 ```
 
+### Testing and linting (run from repo root)
+```bash
+make install-dev               # one-time: install Python+Node dev deps + pre-commit hooks
+make test                      # run all tests (backend + frontend)
+make test-backend              # pytest only (needs local Postgres)
+make test-frontend             # vitest only
+make lint                      # ruff check on companion/
+```
+
 ### Rebuild frontend
 ```bash
 cd companion && npm run build

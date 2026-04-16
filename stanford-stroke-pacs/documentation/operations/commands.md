@@ -235,6 +235,39 @@ Orthanc is unaffected.
 
 ---
 
+## Testing and code quality
+
+Run from the **repo root** with `conda activate pacs`.
+
+```bash
+# One-time dev setup (Python deps, Node deps, pre-commit hooks)
+make install-dev
+
+# Run all tests (backend + frontend)
+make test
+
+# Backend only (pytest — needs local Postgres; creates scratch DB)
+make test-backend
+
+# Frontend only (vitest — no Postgres needed)
+make test-frontend
+
+# Lint (ruff on companion/)
+make lint
+```
+
+**CI:** GitHub Actions runs on every push to `main` and every PR
+(`.github/workflows/ci.yml`). Required jobs: lint, backend-tests,
+frontend-tests, frontend-build. The mypy job is advisory (non-blocking).
+
+**Pre-commit hooks:** Installed by `make install-dev`. Runs ruff and prettier
+on `companion/` files automatically before each `git commit`.
+
+For full developer setup details see
+[`../guides/installation_and_deployment.md` §8](../guides/installation_and_deployment.md).
+
+---
+
 ## Quick Orthanc REST examples
 
 ```bash
