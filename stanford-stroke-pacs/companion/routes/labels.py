@@ -1,0 +1,291 @@
+"""Label definitions, label listing, and label summary endpoints."""
+
+from __future__ import annotations
+
+import json
+
+import psycopg2
+import psycopg2.extras
+import psycopg2.sql as psql
+from fastapi import APIRouter, Cookie, HTTPException, Query
+from pydantic import BaseModel
+
+from auth import get_current_user
+from common import LABEL_NAME_RE, PATIENT_ID_COL, VALID_LEVELS
+from db import get_conn
+from labelled_table_sync import (
+    find_label_column_conflict,
+    rebuild_labelled_tables,
+    sync_labelled_schema,
+)
+
+router = APIRouter()
+
+
+# ---------------------------------------------------------------------------
+# Labels (from annotations table)
+# ---------------------------------------------------------------------------
+
+
+@router.get("/api/labels")
+def list_labels(level: str | None = Query(None)):
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            if level and level in VALID_LEVELS:
+                cur.execute(
+                    "SELECT DISTINCT label FROM annotations WHERE level = %s ORDER BY label",
+                    (level,),
+                )
+            else:
+                cur.execute("SELECT DISTINCT label FROM annotations ORDER BY label")
+            return [r[0] for r in cur.fetchall()]
+    finally:
+        conn.close()
+
+
+_SUMMARY_COUNT_COL = {
+    "patient": "patient_id",
+    "study": "studyinstanceuid",
+    "series": "seriesinstanceuid",
+}
+
+
+@router.get("/api/labels/summary")
+def labels_summary(level: str | None = Query(None)):
+    conn = get_conn()
+    try:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            if level and level in VALID_LEVELS:
+                count_col = _SUMMARY_COUNT_COL[level]
+                cur.execute(
+                    f"SELECT label, level, COUNT(DISTINCT {count_col}) AS count "
+                    f"FROM annotations WHERE level = %s GROUP BY label, level ORDER BY label",
+                    (level,),
+                )
+            else:
+                cur.execute(
+                    "SELECT label, level, COUNT(*) AS count "
+                    "FROM annotations GROUP BY label, level ORDER BY label"
+                )
+            return cur.fetchall()
+    finally:
+        conn.close()
+
+
+@router.get("/api/labels/{label_name}/values")
+def get_label_values(label_name: str):
+    """Return the distinct annotation values already used for a label."""
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT DISTINCT value FROM annotations "
+                "WHERE label = %s AND value IS NOT NULL AND value != '' "
+                "ORDER BY value",
+                (label_name,),
+            )
+            return [r[0] for r in cur.fetchall()]
+    finally:
+        conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Label definitions
+# ---------------------------------------------------------------------------
+
+
+class LabelDefinitionCreate(BaseModel):
+    name: str
+    description: str | None = None
+    level: str = "series"
+    datatype: str = "bool"
+    options: list[str] | None = None
+
+
+@router.get("/api/label-definitions")
+def list_label_definitions(level: str | None = Query(None)):
+    conn = get_conn()
+    try:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            if level and level in VALID_LEVELS:
+                cur.execute(
+                    "SELECT id, name, description, level, datatype, options, created_by, created_at "
+                    "FROM label_definitions WHERE level = %s ORDER BY name",
+                    (level,),
+                )
+            else:
+                cur.execute(
+                    "SELECT id, name, description, level, datatype, options, created_by, created_at "
+                    "FROM label_definitions ORDER BY name"
+                )
+            rows = cur.fetchall()
+            for r in rows:
+                if r.get("created_at"):
+                    r["created_at"] = r["created_at"].isoformat()
+                r["options"] = json.loads(r["options"]) if r.get("options") else []
+            return rows
+    finally:
+        conn.close()
+
+
+@router.post("/api/label-definitions", status_code=201)
+def create_label_definition(body: LabelDefinitionCreate, auth_token: str | None = Cookie(None)):
+    username = get_current_user(auth_token)
+    if body.datatype not in ("bool", "int", "text", "select"):
+        raise HTTPException(status_code=400, detail="datatype must be bool, int, text, or select")
+    if body.level not in VALID_LEVELS:
+        raise HTTPException(status_code=400, detail="level must be patient, study, or series")
+    if not LABEL_NAME_RE.match((body.name or "").strip()):
+        raise HTTPException(
+            status_code=400,
+            detail="name must match ^[A-Za-z][A-Za-z0-9_]{0,62}$ (letters, digits, underscores; must start with a letter; max 63 chars)",
+        )
+    options_json = json.dumps(body.options) if body.options else None
+    conn = get_conn()
+    try:
+        conflict = find_label_column_conflict(conn, body.level, body.name.strip())
+        if conflict:
+            raise HTTPException(
+                status_code=409,
+                detail=f"Label name conflicts with existing column generated from '{conflict}'",
+            )
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute(
+                "INSERT INTO label_definitions (name, description, level, datatype, options, created_by) "
+                "VALUES (%s, %s, %s, %s, %s, %s) "
+                "RETURNING id, name, description, level, datatype, options, created_by, created_at",
+                (body.name.strip(), body.description, body.level, body.datatype, options_json, username),
+            )
+            row = cur.fetchone()
+            if row.get("created_at"):
+                row["created_at"] = row["created_at"].isoformat()
+            row["options"] = json.loads(row["options"]) if row.get("options") else []
+        sync_labelled_schema(conn, body.level)
+        conn.commit()
+        return row
+    except psycopg2.errors.UniqueViolation:
+        raise HTTPException(status_code=409, detail="Label with this name already exists")
+    finally:
+        conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Snapshot & labelled-table refresh
+# ---------------------------------------------------------------------------
+
+
+def _rebuild_snapshots(conn):
+    """Rebuild the three snapshot tables from source data + annotations."""
+    with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+        cur.execute(
+            "SELECT name, level, datatype FROM label_definitions ORDER BY level, name"
+        )
+        label_defs = cur.fetchall()
+
+    bad_names = [
+        ld["name"] for ld in label_defs
+        if not ld.get("name") or not LABEL_NAME_RE.match(ld["name"])
+    ]
+    if bad_names:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Refusing to rebuild snapshots; label name(s) violate allowlist {LABEL_NAME_RE.pattern}: {bad_names}",
+        )
+
+    counts = {}
+
+    levels = [
+        ("patient", "lvo_clinical_data", "patient_id",
+         psql.SQL("{pid} AS patient_id, stroke_date").format(
+             pid=psql.Identifier(PATIENT_ID_COL)
+         )),
+        ("study", "image_study", "studyinstanceuid",
+         psql.SQL("patient_id, acquisitiondatetime, study_type, studyinstanceuid")),
+        ("series", "image_series", "seriesinstanceuid",
+         psql.SQL("patient_id, acquisitiondatetime, modality, seriesdescription, seriesinstanceuid")),
+    ]
+
+    for level_name, source_table, id_col, base_cols in levels:
+        snapshot_table = f"snapshot_{level_name}s"
+        snapshot_id = psql.Identifier(snapshot_table)
+        source_id = psql.Identifier(source_table)
+        id_col_id = psql.Identifier(id_col)
+        level_lit = psql.Literal(level_name)
+        level_labels = [ld for ld in label_defs if ld["level"] == level_name]
+
+        pivot_col_parts = []
+        pivot_join_parts = []
+        for i, ld in enumerate(level_labels):
+            alias_id = psql.Identifier(f"a{i}")
+            col_alias_id = psql.Identifier(f"label_{ld['name'].lower()}")
+            label_lit = psql.Literal(ld["name"])
+            pivot_col_parts.append(
+                psql.SQL("{a}.value AS {c}").format(a=alias_id, c=col_alias_id)
+            )
+            pivot_join_parts.append(
+                psql.SQL(
+                    "LEFT JOIN annotations {a} ON {a}.level = {lvl} "
+                    "AND {a}.{idc} = src.{idc} "
+                    "AND {a}.label = {lbl}"
+                ).format(
+                    a=alias_id, lvl=level_lit, idc=id_col_id, lbl=label_lit,
+                )
+            )
+
+        pivot_cols = (
+            psql.SQL(", ") + psql.SQL(", ").join(pivot_col_parts)
+            if pivot_col_parts else psql.SQL("")
+        )
+        pivot_joins = (
+            psql.SQL(" ") + psql.SQL(" ").join(pivot_join_parts)
+            if pivot_join_parts else psql.SQL("")
+        )
+
+        with conn.cursor() as cur:
+            cur.execute(psql.SQL("DROP TABLE IF EXISTS {}").format(snapshot_id))
+            cur.execute(
+                psql.SQL(
+                    "CREATE TABLE {snap} AS "
+                    "SELECT DISTINCT ON (src.{idc}) src.*{pcols} "
+                    "FROM (SELECT {base} FROM {src}) src{pjoins}"
+                ).format(
+                    snap=snapshot_id,
+                    idc=id_col_id,
+                    pcols=pivot_cols,
+                    base=base_cols,
+                    src=source_id,
+                    pjoins=pivot_joins,
+                )
+            )
+            cur.execute(psql.SQL("SELECT COUNT(*) FROM {}").format(snapshot_id))
+            counts[snapshot_table] = cur.fetchone()[0]
+
+    conn.commit()
+    return counts
+
+
+@router.post("/api/snapshots/refresh")
+def refresh_snapshots(auth_token: str | None = Cookie(None)):
+    get_current_user(auth_token)
+    conn = get_conn()
+    try:
+        counts = _rebuild_snapshots(conn)
+        return {"ok": True, "counts": counts}
+    finally:
+        conn.close()
+
+
+@router.post("/api/labelled-tables/refresh")
+def refresh_labelled_tables(
+    auth_token: str | None = Cookie(None),
+    level: list[str] | None = Query(None),
+):
+    get_current_user(auth_token)
+    conn = get_conn()
+    try:
+        counts = rebuild_labelled_tables(conn, levels=level)
+        conn.commit()
+        return {"ok": True, "counts": counts}
+    finally:
+        conn.close()

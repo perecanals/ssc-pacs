@@ -134,5 +134,6 @@ sudo journalctl -u ssc-companion -f
   session durations (`session_timeout_hours`,
   `session_absolute_timeout_hours`) and the `cookie_secure` flag that
   accompanies rotated JWTs.
-- `stanford-stroke-pacs/companion/app.py` — startup helper `_require_env()`
-  enforces that required secrets are non-empty.
+- `stanford-stroke-pacs/companion/db.py` — startup helper `_require_env()`
+  enforces that required secrets (`DB_USER`, `DB_PASSWORD`,
+  `ORTHANC_ADMIN_USER`, `ORTHANC_ADMIN_PASSWORD`, `JWT_SECRET`) are non-empty.

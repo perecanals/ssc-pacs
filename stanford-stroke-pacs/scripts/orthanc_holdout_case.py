@@ -22,6 +22,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -33,21 +34,10 @@ from dotenv import load_dotenv
 REPO_ROOT = Path(__file__).resolve().parent.parent
 load_dotenv(REPO_ROOT / ".env")
 
-DB_CONFIG = dict(
-    host=os.getenv("DB_HOST", "localhost"),
-    port=os.getenv("DB_PORT", "5432"),
-    dbname=os.getenv("DB_NAME", "stanford-stroke"),
-    user=os.getenv("DB_USER"),
-    password=os.getenv("DB_PASSWORD"),
-)
+sys.path.insert(0, str(REPO_ROOT / "companion"))
+from db import DB_CONFIG, get_conn  # noqa: E402
 
 MANIFEST_DIR = REPO_ROOT / "tmp" / "orthanc_holdout"
-
-
-def get_conn():
-    if not DB_CONFIG.get("user"):
-        raise SystemExit("DB_USER not set in .env")
-    return psycopg2.connect(**DB_CONFIG)
 
 
 def utc_stamp() -> str:

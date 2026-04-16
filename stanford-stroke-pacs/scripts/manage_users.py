@@ -23,13 +23,8 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 ORTHANC_USERS_FILE = REPO_ROOT / "orthanc_users.json"
 load_dotenv(REPO_ROOT / ".env")
 
-DB_CONFIG = dict(
-    host=os.getenv("DB_HOST", "localhost"),
-    port=os.getenv("DB_PORT", "5432"),
-    dbname=os.getenv("DB_NAME", "stanford-stroke"),
-    user=os.getenv("DB_USER"),
-    password=os.getenv("DB_PASSWORD"),
-)
+sys.path.insert(0, str(REPO_ROOT / "companion"))
+from db import DB_CONFIG, get_conn  # noqa: E402
 
 USERS_TABLE_SQL = """
 CREATE TABLE IF NOT EXISTS users (
@@ -39,10 +34,6 @@ CREATE TABLE IF NOT EXISTS users (
     created_at    TIMESTAMPTZ DEFAULT now()
 );
 """
-
-
-def get_conn():
-    return psycopg2.connect(**DB_CONFIG)
 
 
 def ensure_table():

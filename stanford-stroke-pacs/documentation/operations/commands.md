@@ -235,6 +235,27 @@ Orthanc is unaffected.
 
 ---
 
+## Backend module structure
+
+The companion backend is split into focused modules under `companion/`:
+
+| Module | Purpose |
+|--------|---------|
+| `app.py` | Entry point: lifespan, middleware, router registration (~230 lines) |
+| `db.py` | Single source of truth for `DB_CONFIG` and `ThreadedConnectionPool` |
+| `auth.py` | JWT utilities (`create_jwt`, `decode_jwt`, `get_current_user`) |
+| `orthanc_client.py` | Orthanc REST wrappers (`orthanc_lookup`, `orthanc_system_check`) |
+| `common.py` | Shared SQL builders, annotation helpers, constants |
+| `config.py` | Loads `config.toml` settings |
+| `cache_manager.py` | Cold-storage warm/evict logic |
+| `routes/*.py` | `APIRouter` submodules (auth, studies, annotations, labels, etc.) |
+
+**Scripts** under `scripts/` import `DB_CONFIG` and `get_conn` from
+`companion/db.py` (via `sys.path` insertion). They no longer define their
+own database config inline.
+
+---
+
 ## Testing and code quality
 
 Run from the **repo root** with `conda activate pacs`.

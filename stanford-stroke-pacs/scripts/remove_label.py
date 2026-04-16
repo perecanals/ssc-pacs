@@ -13,18 +13,11 @@ from psycopg2 import sql
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "companion"))
 
-from labelled_table_sync import LEVEL_CONFIGS, sanitize_label_column
+from labelled_table_sync import LEVEL_CONFIGS, sanitize_label_column  # noqa: E402
+from db import DB_CONFIG, get_conn  # noqa: E402
 
 ENV_PATH = Path(__file__).resolve().parent / "../.env"
 load_dotenv(ENV_PATH)
-
-DB_CONFIG = dict(
-    host=os.getenv("DB_HOST", "localhost"),
-    port=os.getenv("DB_PORT", "5432"),
-    dbname=os.getenv("DB_NAME", "stanford-stroke"),
-    user=os.getenv("DB_USER"),
-    password=os.getenv("DB_PASSWORD"),
-)
 
 
 def main():

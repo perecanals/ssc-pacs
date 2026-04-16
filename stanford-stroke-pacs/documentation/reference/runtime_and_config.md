@@ -142,7 +142,7 @@ Runtime split:
 |------|---------|-------------|
 | `enrich_orthanc.py` | Mutates Orthanc's PostgreSQL index so OE2 shows identifiers from source metadata | Optional; skip if DICOM headers are already usable |
 | `label_studies.py` | Seeds Orthanc study labels from `study_type` + `modality` | Portable if columns exist |
-| `companion/labelled_table_sync.py` | Helpers for maintaining per-level labelled mirror tables | Imported by `companion/app.py` and `scripts/remove_label.py` |
+| `companion/labelled_table_sync.py` | Helpers for maintaining per-level labelled mirror tables | Imported by `companion/routes/labels.py` and `scripts/remove_label.py` |
 | `remove_label.py` / `remove_label.sh` | Remove a label definition + annotation rows from DB | Requires sudo for the shell wrapper |
 | `image_integration_protocols/` | Legacy metadata pipeline | Not part of standard fresh deploy |
 

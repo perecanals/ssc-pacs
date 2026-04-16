@@ -91,7 +91,7 @@ The Companion is one native host service running on port `8043`.
 
 It has two main parts:
 
-- **Backend**: `companion/app.py`
+- **Backend**: `companion/app.py` (entry point), `companion/routes/` (API routers), `companion/db.py` (connection pool), `companion/auth.py` (JWT), `companion/common.py` (shared SQL helpers)
 - **Frontend**: `companion/src/`
 
 At runtime:
@@ -299,7 +299,13 @@ Its responsibility is workflow, annotation, and review support.
 
 The most important Companion files are:
 
-- `companion/app.py` - FastAPI backend, API routes, auth, OHIF link resolution
+- `companion/app.py` - FastAPI entry point (lifespan, middleware, router registration)
+- `companion/routes/` - API route modules (auth, studies, annotations, labels, cold_storage, admin, preferences, static)
+- `companion/db.py` - DB connection pool and `DB_CONFIG` (single source of truth)
+- `companion/auth.py` - JWT utilities and auth dependencies
+- `companion/common.py` - shared label-filter SQL builders and annotation helpers
+- `companion/orthanc_client.py` - Orthanc REST API wrappers
+- `companion/cache_manager.py` - cold-storage warm/evict logic
 - `companion/src/pages/Companion.jsx` - page-level layout and preview state
 - `companion/src/components/DataTable.jsx` - hierarchical table logic
 - `companion/src/components/PreviewPane.jsx` - embedded OHIF pane

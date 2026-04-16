@@ -42,14 +42,7 @@ load_dotenv(REPO_ROOT / ".env")
 
 from utils import convert_dicom_to_nifti  # noqa: E402
 from cache_manager import _is_series_dir_warm, untar_zst, warm_study  # noqa: E402
-
-DB_CONFIG = dict(
-    host=os.getenv("DB_HOST", "localhost"),
-    port=os.getenv("DB_PORT", "5432"),
-    dbname=os.getenv("DB_NAME", "stanford-stroke"),
-    user=os.getenv("DB_USER"),
-    password=os.getenv("DB_PASSWORD"),
-)
+from db import DB_CONFIG, get_conn  # noqa: E402
 
 
 def lookup_series(series_uid: str) -> dict:

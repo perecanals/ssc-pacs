@@ -171,13 +171,23 @@ The stack has two services and two databases.
 
 **Orthanc** indexes the on-disk DICOM tree (read-only bind mount) into `orthanc_db`. It serves Orthanc Explorer 2, OHIF, and DICOMweb. It does not own the DICOM files. The deployment runs a **custom Orthanc image (`ssc-orthanc:patched-indexer`)** with a patched Folder Indexer plugin that honours `RemoveMissingFiles: false` — required for cold_path_cache. Source at `/home/perecanals/pacs/orthanc-indexer-patched/`.
 
-**Companion** (`companion/app.py`) is a FastAPI app that reads research metadata from the `stanford-stroke` PostgreSQL database and stores multi-level annotations. It serves a React frontend built with Vite + Tailwind CSS. In production, a single uvicorn process on `:8043` serves both the API and the pre-built `companion/dist/`. Node.js is only needed at build time.
+**Companion** is a FastAPI app that reads research metadata from the `stanford-stroke` PostgreSQL database and stores multi-level annotations. It serves a React frontend built with Vite + Tailwind CSS. In production, a single uvicorn process on `:8043` serves both the API and the pre-built `companion/dist/`. Node.js is only needed at build time.
+
+**Companion backend modules** (under `companion/`):
+- `app.py` — entry point: lifespan (pool + migrations), middleware (sliding JWT, request-ID/metrics), rate limiter, router registration (~230 lines).
+- `db.py` — **single source of truth** for `DB_CONFIG` and the `ThreadedConnectionPool`. All modules import `get_conn` from here.
+- `auth.py` — JWT utilities (`create_jwt`, `decode_jwt`, `get_current_user`).
+- `orthanc_client.py` — thin wrappers around Orthanc REST calls.
+- `common.py` — shared SQL builders (`build_label_filter_sql`), annotation helpers, constants.
+- `config.py` — loads `config.toml` (storage, companion settings).
+- `cache_manager.py` — cold-storage warm/evict logic.
+- `routes/` — `APIRouter` submodules: `auth`, `preferences`, `studies`, `cold_storage`, `annotations`, `labels`, `admin`, `static`.
 
 **Two-database model:**
 - `orthanc_db` — Orthanc's internal index; do not query or mutate unless doing explicit Orthanc enrichment work.
 - `stanford-stroke` — upstream read-only tables (`lvo_clinical_data`, `image_study`, `image_series`) plus Companion-owned tables (`annotations`, `label_definitions`, `users`, `user_preferences`, snapshot tables). Connection from `.env`: `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`.
 
-**Companion-owned tables** are created/migrated by `companion/app.py` on startup.
+**Companion-owned tables** are created/migrated by `companion/app.py` on startup (via Alembic).
 
 **Annotation model:**
 - Three levels: `patient`, `study`, `series`.

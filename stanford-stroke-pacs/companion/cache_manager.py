@@ -21,7 +21,6 @@ Robustness invariants (see maintenance/workstreams/05-cold-storage-robustness.md
 from __future__ import annotations
 
 import logging
-import os
 import shutil
 import tarfile
 import time
@@ -41,16 +40,11 @@ from config import (
     WARMING_DISK_SAFETY_FACTOR,
     WARMING_TIMEOUT_MINUTES,
 )
+from db import get_conn
 
 logger = logging.getLogger(__name__)
 
-DB_CONFIG = dict(
-    host=os.getenv("DB_HOST", "localhost"),
-    port=os.getenv("DB_PORT", "5432"),
-    dbname=os.getenv("DB_NAME", "stanford-stroke"),
-    user=os.getenv("DB_USER"),
-    password=os.getenv("DB_PASSWORD"),
-)
+_conn = get_conn  # Backward-compat alias used throughout this module.
 
 ADV_LOCK_KEY = 8741002
 
@@ -69,10 +63,6 @@ class InsufficientDiskSpaceError(RuntimeError):
             f"Insufficient disk space at {target}: required≈{required_bytes} bytes, "
             f"available={available_bytes} bytes"
         )
-
-
-def _conn():
-    return psycopg2.connect(**DB_CONFIG)
 
 
 def _log_extra(studyinstanceuid: str) -> dict[str, str]:

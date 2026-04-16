@@ -168,11 +168,10 @@ def db_conn(seeded_db):
 def client(seeded_db):
     """FastAPI TestClient wired to the scratch test DB.
 
-    Patches DB_CONFIG in both app and cache_manager so every get_conn()
-    and _conn() call hits the test DB. Also stubs _require_env and
-    disables the lifespan (init_db already ran via the test_db fixture).
+    Patches DB_CONFIG in db.py (single source of truth) so every
+    get_conn() call hits the test DB.  Also stubs JWT_SECRET and
+    disables the rate limiter and Secure cookies for TestClient compat.
     """
-    # Env vars the app expects at import time.
     env_patch = {
         "DB_USER": seeded_db["user"],
         "DB_PASSWORD": seeded_db["password"],
@@ -185,24 +184,23 @@ def client(seeded_db):
     }
     with patch.dict(os.environ, env_patch):
         import app as app_mod
-        import cache_manager as cm_mod
+        import auth as auth_mod
+        import db as db_mod
 
         # Redirect DB connections to the test DB.
-        original_app_db = app_mod.DB_CONFIG.copy()
-        original_cm_db = cm_mod.DB_CONFIG.copy()
-        app_mod.DB_CONFIG.update(seeded_db)
-        cm_mod.DB_CONFIG.update(seeded_db)
+        original_db_config = db_mod.DB_CONFIG.copy()
+        db_mod.DB_CONFIG.update(seeded_db)
 
         # Override JWT_SECRET used by the already-imported module.
-        original_jwt = app_mod.JWT_SECRET
-        app_mod.JWT_SECRET = "test-jwt-secret-for-ci"
+        original_jwt = auth_mod.JWT_SECRET
+        auth_mod.JWT_SECRET = "test-jwt-secret-for-ci"
 
         # Disable slowapi rate limiting so login-heavy test runs don't 429.
         app_mod.limiter.enabled = False
 
         # TestClient uses http://testserver — Secure cookies won't be sent.
-        original_cookie_secure = app_mod.COOKIE_SECURE
-        app_mod.COOKIE_SECURE = False
+        original_cookie_secure = auth_mod.COOKIE_SECURE
+        auth_mod.COOKIE_SECURE = False
 
         from fastapi.testclient import TestClient
 
@@ -210,10 +208,9 @@ def client(seeded_db):
             yield tc
 
         # Restore originals so module-level state doesn't leak between tests.
-        app_mod.DB_CONFIG.update(original_app_db)
-        cm_mod.DB_CONFIG.update(original_cm_db)
-        app_mod.JWT_SECRET = original_jwt
-        app_mod.COOKIE_SECURE = original_cookie_secure
+        db_mod.DB_CONFIG.update(original_db_config)
+        auth_mod.JWT_SECRET = original_jwt
+        auth_mod.COOKIE_SECURE = original_cookie_secure
         app_mod.limiter.enabled = True
 
 

@@ -55,13 +55,8 @@ except ImportError:
 
 import psycopg2
 
-DB_CONFIG = dict(
-    host=os.getenv("DB_HOST", "localhost"),
-    port=os.getenv("DB_PORT", "5432"),
-    dbname=os.getenv("DB_NAME", "stanford-stroke"),
-    user=os.getenv("DB_USER"),
-    password=os.getenv("DB_PASSWORD"),
-)
+sys.path.insert(0, str(REPO_ROOT / "companion"))
+from db import DB_CONFIG, get_conn  # noqa: E402
 
 ORTHANC_URL = os.getenv("ORTHANC_URL", "http://localhost:8042").rstrip("/")
 ORTHANC_USER = os.getenv("ORTHANC_ADMIN_USER")

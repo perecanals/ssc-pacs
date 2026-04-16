@@ -6,9 +6,9 @@
 
 ## Backend summary (for context)
 
-`companion/app.py` is a FastAPI service that:
+The companion backend (`companion/app.py` + `companion/routes/`) is a FastAPI service that:
 
-- creates its app-owned tables on startup (`INIT_SQL`)
+- creates its app-owned tables on startup (via Alembic migrations)
 - runs schema migrations (`MIGRATE_SQL`) to evolve the schema
 - serves the landing page at `/`
 - serves the companion UI via SPA catch-all for all non-API routes
@@ -178,4 +178,4 @@ label definitions:
 These tables are dropped and recreated on each refresh and are intended for
 bulk export or periodic reporting.
 
-**Table DDL, indexes, and cold-storage columns** are documented in [`data_stores.md`](data_stores.md); migrations remain authoritative in `companion/app.py`.
+**Table DDL, indexes, and cold-storage columns** are documented in [`data_stores.md`](data_stores.md); migrations are managed via Alembic (`companion/alembic/`).

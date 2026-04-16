@@ -51,14 +51,7 @@ from config import (  # noqa: E402
     STORAGE_MODE,
     WARMING_TIMEOUT_MINUTES,
 )
-
-DB_CONFIG = dict(
-    host=os.getenv("DB_HOST", "localhost"),
-    port=os.getenv("DB_PORT", "5432"),
-    dbname=os.getenv("DB_NAME", "stanford-stroke"),
-    user=os.getenv("DB_USER"),
-    password=os.getenv("DB_PASSWORD"),
-)
+from db import DB_CONFIG, get_conn  # noqa: E402
 
 DEFAULT_MIN_FREE_BYTES = 5 * 1024 * 1024 * 1024  # 5 GiB
 

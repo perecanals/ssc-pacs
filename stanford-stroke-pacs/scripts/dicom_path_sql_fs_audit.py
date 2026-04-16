@@ -29,13 +29,8 @@ from dotenv import load_dotenv
 REPO_ROOT = Path(__file__).resolve().parent.parent
 load_dotenv(REPO_ROOT / ".env")
 
-DB_CONFIG = dict(
-    host=os.getenv("DB_HOST", "localhost"),
-    port=os.getenv("DB_PORT", "5432"),
-    dbname=os.getenv("DB_NAME", "stanford-stroke"),
-    user=os.getenv("DB_USER"),
-    password=os.getenv("DB_PASSWORD"),
-)
+sys.path.insert(0, str(REPO_ROOT / "companion"))
+from db import DB_CONFIG, get_conn  # noqa: E402
 
 
 def load_legacy_dicom_root() -> Path:
