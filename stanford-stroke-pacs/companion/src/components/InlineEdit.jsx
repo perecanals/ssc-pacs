@@ -1,30 +1,9 @@
 import { useState, useEffect, useRef } from "react";
+import PropTypes from "prop-types";
 import { useAuth } from "../context/AuthContext";
 import { apiGet, apiPost, apiDelete } from "../api/client";
+import { valueColor } from "../utils/colors";
 import "./InlineEdit.css";
-
-const NOTION_COLORS = [
-  { bg: "#f3e8ff", text: "#7c3aed" },
-  { bg: "#dbeafe", text: "#2563eb" },
-  { bg: "#dcfce7", text: "#16a34a" },
-  { bg: "#fef3c7", text: "#d97706" },
-  { bg: "#ffe4e6", text: "#e11d48" },
-  { bg: "#ffedd5", text: "#ea580c" },
-  { bg: "#e0f2fe", text: "#0284c7" },
-  { bg: "#e0e7ff", text: "#4f46e5" },
-  { bg: "#fce7f3", text: "#be185d" },
-  { bg: "#ccfbf1", text: "#0d9488" },
-];
-
-function hashStr(s) {
-  let h = 0;
-  for (let i = 0; i < s.length; i++) h = ((h << 5) - h + s.charCodeAt(i)) | 0;
-  return Math.abs(h);
-}
-
-function valueColor(value) {
-  return NOTION_COLORS[hashStr(value) % NOTION_COLORS.length];
-}
 
 function SelectPill({ value, onClick, className = "" }) {
   const c = valueColor(value);
@@ -64,6 +43,7 @@ export default function InlineEdit({
   annotations,
   onMutated,
 }) {
+
   const { currentUser } = useAuth();
   const ann = annotations.find((a) => a.label === labelName) || null;
 
@@ -321,3 +301,13 @@ function ValueEdit({
     </span>
   );
 }
+
+InlineEdit.propTypes = {
+  level: PropTypes.oneOf(["patient", "study", "series"]),
+  entity: PropTypes.object.isRequired,
+  labelName: PropTypes.string.isRequired,
+  datatype: PropTypes.oneOf(["bool", "int", "text", "select"]).isRequired,
+  defOptions: PropTypes.arrayOf(PropTypes.string),
+  annotations: PropTypes.array.isRequired,
+  onMutated: PropTypes.func.isRequired,
+};

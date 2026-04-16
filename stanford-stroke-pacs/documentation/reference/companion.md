@@ -307,7 +307,17 @@ The most important Companion files are:
 - `companion/orthanc_client.py` - Orthanc REST API wrappers
 - `companion/cache_manager.py` - cold-storage warm/evict logic
 - `companion/src/pages/Companion.jsx` - page-level layout and preview state
-- `companion/src/components/DataTable.jsx` - hierarchical table logic
+- `companion/src/components/DataTable/` - hierarchical table (split into focused modules):
+  - `index.jsx` - orchestrator, main body rendering
+  - `ChildRows.jsx` - child + grandchild expandable row rendering
+  - `TableHeader.jsx` - column headers, sort carets, filter inputs
+  - `SelectFilterControl.jsx` - dropdown filter for select-type columns
+  - `useTableData.js` - data fetch hook
+  - `usePreferencePersistence.js` - debounced server-side pref save
+  - `useDragColumns.js` - column drag-and-drop reorder
+  - `actions.js` - DICOM download, OHIF link, refresh actions
+- `companion/src/utils/colors.js` - shared color palette (NOTION_COLORS, hashStr, valueColor)
+- `companion/src/utils/table.js` - table constants (LEVEL_CONFIG), formatters, filter helpers
 - `companion/src/components/PreviewPane.jsx` - embedded OHIF pane
 - `companion/src/components/TopBar.jsx` - top navigation and controls host
 - `companion/src/components/Sidebar.jsx` - global filters and labels

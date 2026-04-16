@@ -1,4 +1,5 @@
 import { useState } from "react";
+import PropTypes from "prop-types";
 import { Link } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import "./TopBar.css";
@@ -84,3 +85,10 @@ export default function TopBar({ levels = [], level, onLevelChange, toolbarHostR
     </div>
   );
 }
+
+TopBar.propTypes = {
+  levels: PropTypes.arrayOf(PropTypes.shape({ key: PropTypes.string, label: PropTypes.string })),
+  level: PropTypes.string,
+  onLevelChange: PropTypes.func,
+  toolbarHostRef: PropTypes.func,
+};

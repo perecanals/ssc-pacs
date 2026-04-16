@@ -212,17 +212,29 @@ companion/src/
   api/client.js            Fetch wrapper with 401 handling
   context/                 AuthContext
   pages/                   Landing, Companion (page-level layout + preview state)
+  utils/
+    colors.js              Shared color palette (NOTION_COLORS, hashStr, valueColor)
+    table.js               Table constants (LEVEL_CONFIG), formatters, filter helpers
   components/
-    DataTable.jsx          Core: hierarchical patient→study→series table
+    DataTable/             Core: hierarchical patient→study→series table (split)
+      index.jsx            Orchestrator — wires hooks, renders main body
+      ChildRows.jsx        Child + grandchild expandable row rendering
+      TableHeader.jsx      Column headers, sort carets, filter inputs
+      SelectFilterControl.jsx  Dropdown filter for select-type columns
+      useTableData.js      Data fetch hook (items, pagination, label filters)
+      usePreferencePersistence.js  Debounced server-side pref save
+      useDragColumns.js    Column drag-and-drop reorder
+      actions.js           DICOM download, OHIF link, refresh actions
     PreviewPane.jsx        Embedded OHIF iframe
     TopBar.jsx             Level switcher, column selector, Reset View, auth
     Sidebar.jsx            Search, label filters, modality quick filters
     InlineEdit.jsx         In-table annotation editing
     ColumnSelector.jsx     Column visibility/order control
     LabelDefModal.jsx      Label definition creation UI
+    Pagination.jsx         Page navigation
 ```
 
-The `DataTable` is one generic component used at all three hierarchy levels. Table preferences (column visibility, order, sort, filters, frozen column) are persisted per user and per level in `user_preferences` (server-side JSONB).
+The `DataTable` is one generic component used at all three hierarchy levels. Table preferences (column visibility, order, sort, filters, frozen column) are persisted per user and per level in `user_preferences` (server-side JSONB). All components use `prop-types` for runtime prop validation.
 
 ## Image integration protocol
 

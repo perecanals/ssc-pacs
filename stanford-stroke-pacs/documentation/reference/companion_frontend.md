@@ -69,9 +69,16 @@ The companion page is decomposed into focused React components:
   temporarily forces that label column visible in the data table. Clearing the
   label filter removes that temporary column visibility unless the user had
   already enabled the column in saved preferences.
-- `DataTable` — generic data table supporting all three levels. Configurable
-  per level via `LEVEL_CONFIG` (endpoint, columns, sort, filters, expand
-  behavior). Key features:
+- `DataTable` (`components/DataTable/`) — generic data table supporting all three
+  levels. Split into focused modules: `index.jsx` (orchestrator), `ChildRows.jsx`
+  (child/grandchild rendering), `TableHeader.jsx` (column headers + filter row),
+  `SelectFilterControl.jsx` (dropdown filter), `useTableData.js` (data fetch),
+  `usePreferencePersistence.js` (debounced pref save), `useDragColumns.js`
+  (drag-reorder), `actions.js` (DICOM download, OHIF link, refresh). Shared
+  utilities in `utils/colors.js` and `utils/table.js` (LEVEL_CONFIG, formatters).
+  Configurable per level via `LEVEL_CONFIG` (endpoint, columns, sort, filters,
+  expand behavior). All components use `prop-types` for runtime prop validation.
+  Key features:
   - **Expandable rows**: Patient rows expand to show studies; study rows expand
     to show series. Expansion is triggered by clicking anywhere in the row.
   - **Nested expansion**: When viewing patients, expanded study sub-rows can

@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import PropTypes from "prop-types";
 import { apiGet } from "../api/client";
 import "./Sidebar.css";
 
@@ -166,3 +167,9 @@ export default function Sidebar({ level, filters, onFilterChange }) {
     </aside>
   );
 }
+
+Sidebar.propTypes = {
+  level: PropTypes.oneOf(["patient", "study", "series"]).isRequired,
+  filters: PropTypes.object.isRequired,
+  onFilterChange: PropTypes.func.isRequired,
+};

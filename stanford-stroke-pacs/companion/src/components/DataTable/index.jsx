@@ -1,0 +1,498 @@
+import { useState, useEffect, useCallback, useMemo, useRef, Fragment } from "react";
+import { createPortal } from "react-dom";
+import PropTypes from "prop-types";
+import { apiGet } from "../../api/client";
+import { downloadDicomZip, resolveOhifLink, refreshSnapshots, refreshLabelledTables } from "./actions";
+import { useColumnPrefs } from "../ColumnSelector";
+import ColumnSelector from "../ColumnSelector";
+import Pagination from "../Pagination";
+import InlineEdit from "../InlineEdit";
+import LabelDefModal from "../LabelDefModal";
+import { useAuth } from "../../context/AuthContext";
+import {
+  PER_PAGE,
+  LEVEL_RANK,
+  LEVEL_CONFIG,
+  buildBuiltinColumnCatalog,
+  buildPatientStudiesUrl,
+  formatDatetime,
+  normalizeSelectFilterValues,
+  hasFilterValue,
+} from "../../utils/table";
+import useTableData from "./useTableData";
+import usePreferencePersistence from "./usePreferencePersistence";
+import useDragColumns from "./useDragColumns";
+import TableHeader from "./TableHeader";
+import ChildRows, { DownloadIcon } from "./ChildRows";
+import "../DataTable.css";
+
+function DataTableInner({
+  level,
+  filters,
+  page,
+  onPageChange,
+  onPreviewSelect,
+  activeRowKey,
+  toolbarPortalTarget,
+  serverPrefs,
+}) {
+  const { currentUser } = useAuth();
+  const config = LEVEL_CONFIG[level];
+
+  const [showDefModal, setShowDefModal] = useState(false);
+  const [refreshingSnapshots, setRefreshingSnapshots] = useState(false);
+  const [refreshingLabelledTables, setRefreshingLabelledTables] = useState(false);
+
+  const [sortBy, setSortBy] = useState(serverPrefs.sortBy || config.sortDefault);
+  const [sortDir, setSortDir] = useState(serverPrefs.sortDir || "asc");
+  const [columnFilters, setColumnFilters] = useState(
+    serverPrefs.columnFilters && typeof serverPrefs.columnFilters === "object"
+      ? serverPrefs.columnFilters
+      : {},
+  );
+  const filterTimeout = useRef(null);
+  const [frozenFirstCol, setFrozenFirstCol] = useState(!!serverPrefs.freezeFirstCol);
+
+  const [expanded, setExpanded] = useState({});
+  const [childRowsData, setChildRowsData] = useState({});
+  const [grandExpanded, setGrandExpanded] = useState({});
+  const [grandChildRows, setGrandChildRows] = useState({});
+
+  const builtinCols = useMemo(() => buildBuiltinColumnCatalog(level), [level]);
+
+  const [labelDefs, setLabelDefs] = useState([]);
+  const fetchLabelDefs = useCallback(async () => {
+    try { setLabelDefs(await apiGet("/api/label-definitions")); }
+    catch { setLabelDefs([]); }
+  }, []);
+  useEffect(() => { fetchLabelDefs(); }, [fetchLabelDefs]);
+
+  const forcedVisibleKeys = filters.label ? [`label:${filters.label}`] : [];
+  const { allCols, visibleCols, visibleKeys, columnOrder, effectiveVisibleKeys, toggle, reorder, resetColumns } =
+    useColumnPrefs(labelDefs, builtinCols, level, forcedVisibleKeys, serverPrefs);
+
+  const { items, total, fetchItems } = useTableData({
+    level, config, filters, page, sortBy, sortDir, columnFilters, allCols,
+  });
+
+  const totalPages = Math.ceil(total / PER_PAGE);
+
+  const {
+    dragColKey, dragOverKey, dropSide,
+    handleDragStart, handleDragOver, handleDragLeave, handleDrop, handleDragEnd,
+  } = useDragColumns(reorder);
+
+  usePreferencePersistence({
+    currentUser, level, visibleKeys, columnOrder, sortBy, sortDir, columnFilters, frozenFirstCol,
+  });
+
+  const [downloadingSeries, setDownloadingSeries] = useState(null);
+
+  useEffect(() => {
+    if (level !== "patient") return;
+    setChildRowsData({});
+    setExpanded({});
+  }, [level, filters.studyImportLabel]);
+
+  const childConfig = config.expandable ? LEVEL_CONFIG[config.childLevel] : null;
+  const grandChildConfig = childConfig?.expandable ? LEVEL_CONFIG[childConfig.childLevel] : null;
+
+  const handleMutated = () => {
+    fetchItems();
+    for (const [rowId, isExp] of Object.entries(expanded)) {
+      if (!isExp) continue;
+      const row = items.find((r) => r[config.idCol] === rowId);
+      if (row && config.expandEndpoint) {
+        const url = level === "patient"
+          ? buildPatientStudiesUrl(row, filters.studyImportLabel)
+          : config.expandEndpoint(row);
+        apiGet(url)
+          .then((data) => setChildRowsData((prev) => ({ ...prev, [rowId]: data })))
+          .catch(() => {});
+      }
+    }
+    if (childConfig?.expandEndpoint) {
+      for (const [gcKey, isExp] of Object.entries(grandExpanded)) {
+        if (!isExp) continue;
+        const [parentId, childId] = gcKey.split("::");
+        const parentChildren = childRowsData[parentId];
+        const child = parentChildren?.find((c) => c[childConfig.idCol] === childId);
+        if (child) {
+          apiGet(childConfig.expandEndpoint(child))
+            .then((data) => setGrandChildRows((prev) => ({ ...prev, [gcKey]: data })))
+            .catch(() => {});
+        }
+      }
+    }
+    window.__refreshLabelSidebar?.();
+  };
+
+  const handleSort = (key) => {
+    if (sortBy === key) {
+      setSortDir((prev) => (prev === "asc" ? "desc" : "asc"));
+    } else {
+      setSortBy(key);
+      setSortDir("asc");
+    }
+  };
+
+  const handleColumnFilter = (key, value) => {
+    clearTimeout(filterTimeout.current);
+    filterTimeout.current = setTimeout(() => {
+      setColumnFilters((prev) => ({ ...prev, [key]: value || null }));
+      onPageChange(1);
+    }, 400);
+  };
+
+  const handleBoolFilter = (key) => {
+    clearTimeout(filterTimeout.current);
+    setColumnFilters((prev) => {
+      const cur = prev[key];
+      const next = cur === "true" ? "false" : cur === "false" ? null : "true";
+      return { ...prev, [key]: next };
+    });
+    onPageChange(1);
+  };
+
+  const handleSelectFilterToggle = (key, option) => {
+    clearTimeout(filterTimeout.current);
+    setColumnFilters((prev) => {
+      const current = normalizeSelectFilterValues(prev[key]);
+      const next = current.includes(option)
+        ? current.filter((value) => value !== option)
+        : [...current, option];
+      return { ...prev, [key]: next.length > 0 ? next : null };
+    });
+    onPageChange(1);
+  };
+
+  const handleSelectFilterClear = (key) => {
+    clearTimeout(filterTimeout.current);
+    setColumnFilters((prev) => ({ ...prev, [key]: null }));
+    onPageChange(1);
+  };
+
+  const handleOhifLink = async (studyinstanceuid, seriesinstanceuid = null) => {
+    try { await resolveOhifLink(studyinstanceuid, seriesinstanceuid); }
+    catch (e) { alert(e?.message || "Could not resolve OHIF link"); }
+  };
+
+  const handleRefreshSnapshots = async () => {
+    setRefreshingSnapshots(true);
+    try {
+      const data = await refreshSnapshots();
+      alert(`Snapshots refreshed.\n${Object.entries(data.counts).map(([k, v]) => `${k}: ${v} rows`).join("\n")}`);
+    } catch { alert("Failed to refresh snapshots"); }
+    finally { setRefreshingSnapshots(false); }
+  };
+
+  const handleRefreshLabelledTables = async () => {
+    setRefreshingLabelledTables(true);
+    try {
+      const data = await refreshLabelledTables();
+      alert(`Labelled tables refreshed.\n${Object.entries(data.counts).map(([k, v]) => `${k}: ${v} rows`).join("\n")}`);
+    } catch { alert("Failed to refresh labelled tables"); }
+    finally { setRefreshingLabelledTables(false); }
+  };
+
+  const toggleExpand = async (rowId, row) => {
+    if (expanded[rowId]) { setExpanded((p) => ({ ...p, [rowId]: false })); return; }
+    setExpanded((p) => ({ ...p, [rowId]: true }));
+    if (!childRowsData[rowId]) {
+      const url = level === "patient" ? buildPatientStudiesUrl(row, filters.studyImportLabel) : config.expandEndpoint(row);
+      try { const d = await apiGet(url); setChildRowsData((p) => ({ ...p, [rowId]: d })); }
+      catch { setChildRowsData((p) => ({ ...p, [rowId]: [] })); }
+    }
+  };
+
+  const toggleGrandExpand = async (key, childRow) => {
+    if (grandExpanded[key]) { setGrandExpanded((p) => ({ ...p, [key]: false })); return; }
+    setGrandExpanded((p) => ({ ...p, [key]: true }));
+    if (!grandChildRows[key]) {
+      try { const d = await apiGet(childConfig.expandEndpoint(childRow)); setGrandChildRows((p) => ({ ...p, [key]: d })); }
+      catch { setGrandChildRows((p) => ({ ...p, [key]: [] })); }
+    }
+  };
+
+  const handleDicomDownload = async (seriesinstanceuid) => {
+    setDownloadingSeries(seriesinstanceuid);
+    try { await downloadDicomZip(seriesinstanceuid); }
+    catch (err) { alert(`Download failed: ${err.message}`); }
+    finally { setDownloadingSeries(null); }
+  };
+
+  const allAnnotations = (row) => [...(row.annotations || []), ...(row.inherited_annotations || [])];
+
+  const selectPreview = (row, srcLvl) => {
+    if (!onPreviewSelect || !row?.studyinstanceuid) return;
+    const isSeries = srcLvl === "series";
+    onPreviewSelect({
+      rowKey: isSeries ? `series:${row.seriesinstanceuid}` : `study:${row.studyinstanceuid}`,
+      studyinstanceuid: row.studyinstanceuid,
+      seriesinstanceuid: isSeries ? row.seriesinstanceuid || null : null,
+      sourceLevel: srcLvl,
+      patientId: row.patient_id || null,
+      description: isSeries ? row.seriesdescription || null : row.studydescription || null,
+    });
+  };
+
+  const renderCellValue = (row, col) => {
+    if (col.builtin) {
+      const raw = row[col.sourceKey] ?? "";
+      if (col.sourceKey === "acquisitiondatetime") return formatDatetime(raw);
+      return raw;
+    }
+    const labelName = col.key.replace("label:", "");
+    return (
+      <InlineEdit
+        level={col.level || level}
+        entity={row}
+        labelName={labelName}
+        datatype={col.datatype}
+        defOptions={col.options || []}
+        annotations={allAnnotations(row)}
+        onMutated={handleMutated}
+      />
+    );
+  };
+
+  const renderActions = (row, rowLevel) => {
+    const uid = row.studyinstanceuid;
+    if (uid && (rowLevel === "study" || rowLevel === "series")) {
+      return (
+        <>
+          <button onClick={() => handleOhifLink(uid, rowLevel === "series" ? row.seriesinstanceuid : null)} className="link-btn">OHIF</button>
+          {rowLevel === "series" && row.seriesinstanceuid && (
+            <button onClick={() => handleDicomDownload(row.seriesinstanceuid)} className="link-btn"
+              title="Download DICOM as zip" disabled={downloadingSeries === row.seriesinstanceuid}>
+              {downloadingSeries === row.seriesinstanceuid ? "\u2026" : <DownloadIcon />}
+            </button>
+          )}
+        </>
+      );
+    }
+    return null;
+  };
+
+  const colsForLevel = (targetLevel) => {
+    const builtins = allCols.filter((c) => c.builtin && effectiveVisibleKeys.includes(c.key) && c.level === targetLevel);
+    const labels = visibleCols.filter((c) => !c.builtin && c.level === targetLevel);
+    return [...builtins, ...labels];
+  };
+  const childCols = childConfig ? colsForLevel(config.childLevel) : [];
+  const grandChildCols = grandChildConfig ? colsForLevel(childConfig.childLevel) : [];
+  const mainTableCols = visibleCols.filter(
+    (c) => (c.builtin ? c.level === level : LEVEL_RANK[c.level] <= LEVEL_RANK[level]),
+  );
+  const showActions = level !== "patient";
+  const parentColSpan = mainTableCols.length + (config.expandable ? 1 : 0) + (showActions ? 1 : 0);
+  const childIsExpandable = !!grandChildConfig;
+  const gcColSpan = childCols.length + (childIsExpandable ? 2 : 1);
+
+  const handleMainRowClick = (rowId, row) => {
+    if (level === "study") {
+      if (expanded[rowId]) { toggleExpand(rowId, row); return; }
+      selectPreview(row, "study");
+    } else if (level === "series") {
+      selectPreview(row, "series");
+    }
+    if (config.expandable) toggleExpand(rowId, row);
+  };
+
+  const handleChildRowClick = (gcKey, child) => {
+    if (config.childLevel === "study") {
+      if (grandExpanded[gcKey]) { toggleGrandExpand(gcKey, child); return; }
+      selectPreview(child, "study");
+    } else if (config.childLevel === "series") {
+      selectPreview(child, "series");
+    }
+    if (childIsExpandable) toggleGrandExpand(gcKey, child);
+  };
+
+  const handleGrandChildRowClick = (row) => { selectPreview(row, "series"); };
+
+  const handleResetDefaults = () => {
+    resetColumns();
+    setSortBy(config.sortDefault);
+    setSortDir("asc");
+    setColumnFilters({});
+    setFrozenFirstCol(false);
+    onPageChange(1);
+  };
+
+  const topBarControls = (
+    <>
+      <ColumnSelector allCols={allCols} visibleKeys={visibleKeys} onToggle={toggle} />
+      <button onClick={handleResetDefaults} className="btn-outline">Reset View</button>
+      <button onClick={() => {
+        if (!currentUser) { alert("Please log in to create label types"); return; }
+        setShowDefModal(true);
+      }} className="btn-outline">+ New Label Type</button>
+    </>
+  );
+
+  return (
+    <div className="dt__panel">
+      {toolbarPortalTarget ? createPortal(topBarControls, toolbarPortalTarget) : null}
+
+      <div className="dt__summary-bar">
+        <div className="dt__summary">
+          {total === 0
+            ? `0 ${config.entityLabel}`
+            : `${total.toLocaleString()} ${config.entityLabel} total \u2014 page ${page} of ${totalPages}`}
+        </div>
+        {currentUser && (
+          <div className="dt__summary-actions">
+            <button onClick={handleRefreshLabelledTables} disabled={refreshingLabelledTables}
+              className={`dt__summary-action ${refreshingLabelledTables ? "dt__refresh-btn--disabled" : ""}`}>
+              {refreshingLabelledTables ? "Refreshing..." : "Refresh Labelled Tables"}
+            </button>
+            <button onClick={handleRefreshSnapshots} disabled={refreshingSnapshots}
+              className={`dt__summary-action ${refreshingSnapshots ? "dt__refresh-btn--disabled" : ""}`}>
+              {refreshingSnapshots ? "Refreshing..." : "Refresh Snapshots"}
+            </button>
+          </div>
+        )}
+      </div>
+
+      <div className="dt__scroll">
+        <table className="dt">
+          <TableHeader
+            config={config}
+            level={level}
+            mainTableCols={mainTableCols}
+            showActions={showActions}
+            frozenFirstCol={frozenFirstCol}
+            setFrozenFirstCol={setFrozenFirstCol}
+            sortBy={sortBy}
+            sortDir={sortDir}
+            columnFilters={columnFilters}
+            dragOverKey={dragOverKey}
+            dropSide={dropSide}
+            dragColKeyRef={dragColKey}
+            onSort={handleSort}
+            onColumnFilter={handleColumnFilter}
+            onBoolFilter={handleBoolFilter}
+            onSelectFilterToggle={handleSelectFilterToggle}
+            onSelectFilterClear={handleSelectFilterClear}
+            onDragStart={handleDragStart}
+            onDragOver={handleDragOver}
+            onDragLeave={handleDragLeave}
+            onDrop={handleDrop}
+            onDragEnd={handleDragEnd}
+          />
+          <tbody>
+            {items.length === 0 ? (
+              <tr>
+                <td colSpan={parentColSpan} className="dt__empty-cell">
+                  No {config.entityLabel} found
+                </td>
+              </tr>
+            ) : (
+              items.map((row) => {
+                const rowId = row[config.idCol];
+                const isExpanded = expanded[rowId];
+                const mainPreviewKey = level === "series"
+                  ? `series:${row.seriesinstanceuid}`
+                  : level === "study" ? `study:${row.studyinstanceuid}` : null;
+                const isActivePreview = mainPreviewKey && activeRowKey === mainPreviewKey;
+                return (
+                  <Fragment key={rowId}>
+                    <tr
+                      className={`dt__row${config.expandable ? " dt__row--expandable" : ""}${
+                        level === "study" || level === "series" ? " dt__row--previewable" : ""
+                      }${isActivePreview ? " dt__row--active" : ""}`}
+                      onClick={() => handleMainRowClick(rowId, row)}
+                    >
+                      {config.expandable && (
+                        <td className={`dt__expand-cell${frozenFirstCol ? " dt__expand-cell--frozen" : ""}`}>
+                          <span className={`dt__expand-arrow ${isExpanded ? "rotate-90" : ""}`}>{"\u25B6"}</span>
+                        </td>
+                      )}
+                      {mainTableCols.map((c, idx) => (
+                        <td key={c.key}
+                          className={`dt__td${frozenFirstCol && idx === 0
+                            ? config.expandable ? " dt__td--frozen-first-offset" : " dt__td--frozen-first" : ""}`}
+                          onClick={!c.builtin && (config.expandable || level === "series") ? (e) => e.stopPropagation() : undefined}
+                        >
+                          {renderCellValue(row, c)}
+                        </td>
+                      ))}
+                      {showActions && (
+                        <td className="dt__td--actions" onClick={(e) => e.stopPropagation()}>
+                          {renderActions(row, level)}
+                        </td>
+                      )}
+                    </tr>
+                    {config.expandable && isExpanded && (
+                      <ChildRows
+                        parentRowId={rowId}
+                        childRows={childRowsData}
+                        childConfig={childConfig}
+                        childCols={childCols}
+                        childIsExpandable={childIsExpandable}
+                        parentColSpan={parentColSpan}
+                        grandExpanded={grandExpanded}
+                        grandChildRows={grandChildRows}
+                        grandChildCols={grandChildCols}
+                        grandChildConfig={grandChildConfig}
+                        gcColSpan={gcColSpan}
+                        activeRowKey={activeRowKey}
+                        downloadingSeries={downloadingSeries}
+                        onChildRowClick={handleChildRowClick}
+                        onGrandChildRowClick={handleGrandChildRowClick}
+                        onResolveOhifLink={handleOhifLink}
+                        onDicomDownload={handleDicomDownload}
+                        onMutated={handleMutated}
+                      />
+                    )}
+                  </Fragment>
+                );
+              })
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      <Pagination page={page} totalPages={totalPages} onPageChange={onPageChange} />
+
+      {showDefModal && (
+        <LabelDefModal
+          defaultLevel={level}
+          onClose={() => setShowDefModal(false)}
+          onCreated={() => { setShowDefModal(false); fetchLabelDefs(); }}
+        />
+      )}
+    </div>
+  );
+}
+
+export default function DataTable(props) {
+  const { currentUser } = useAuth();
+  const [serverPrefs, setServerPrefs] = useState(undefined);
+
+  useEffect(() => {
+    let cancelled = false;
+    setServerPrefs(undefined);
+    apiGet(`/api/preferences/${props.level}`)
+      .then((data) => { if (!cancelled) setServerPrefs(data.prefs || {}); })
+      .catch(() => { if (!cancelled) setServerPrefs({}); });
+    return () => { cancelled = true; };
+  }, [props.level, currentUser]);
+
+  if (serverPrefs === undefined) {
+    return <div className="dt__panel" style={{ padding: "2rem", opacity: 0.5 }}>Loading preferences\u2026</div>;
+  }
+
+  return <DataTableInner {...props} serverPrefs={serverPrefs} />;
+}
+
+DataTable.propTypes = {
+  level: PropTypes.oneOf(["patient", "study", "series"]).isRequired,
+  filters: PropTypes.object.isRequired,
+  page: PropTypes.number.isRequired,
+  onPageChange: PropTypes.func.isRequired,
+  onPreviewSelect: PropTypes.func,
+  activeRowKey: PropTypes.string,
+  toolbarPortalTarget: PropTypes.instanceOf(Element),
+};

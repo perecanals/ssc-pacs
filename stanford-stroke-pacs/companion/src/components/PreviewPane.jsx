@@ -1,3 +1,4 @@
+import PropTypes from "prop-types";
 import "./PreviewPane.css";
 
 function previewDescription(selection) {
@@ -71,3 +72,13 @@ export default function PreviewPane({
     </section>
   );
 }
+
+PreviewPane.propTypes = {
+  selection: PropTypes.object,
+  previewUrl: PropTypes.string,
+  loading: PropTypes.bool,
+  loadingLabel: PropTypes.string,
+  error: PropTypes.string,
+  isOpen: PropTypes.bool,
+  onClose: PropTypes.func,
+};

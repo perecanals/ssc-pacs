@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from "react";
+import PropTypes from "prop-types";
 import "./ColumnSelector.css";
 
 const COLUMN_KEY_MIGRATIONS = {
@@ -199,3 +200,9 @@ export default function ColumnSelector({ allCols, visibleKeys, onToggle }) {
     </div>
   );
 }
+
+ColumnSelector.propTypes = {
+  allCols: PropTypes.array.isRequired,
+  visibleKeys: PropTypes.arrayOf(PropTypes.string).isRequired,
+  onToggle: PropTypes.func.isRequired,
+};
