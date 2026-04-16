@@ -76,6 +76,7 @@ def test_composed_ddl_parameterizes_label_name() -> None:
     # use a throwaway cursor from a local connection if available, otherwise
     # adapt manually via a mock.
     import os
+
     import psycopg2
     try:
         from dotenv import load_dotenv
