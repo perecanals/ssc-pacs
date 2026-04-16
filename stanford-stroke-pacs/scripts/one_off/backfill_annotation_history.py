@@ -15,7 +15,7 @@ import sys
 from pathlib import Path
 
 # Bootstrap imports — repo layout: scripts/ is a sibling of companion/
-_REPO_ROOT = Path(__file__).resolve().parent.parent
+_REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 _COMPANION_DIR = _REPO_ROOT / "companion"
 sys.path.insert(0, str(_COMPANION_DIR))
 sys.path.insert(0, str(_REPO_ROOT))

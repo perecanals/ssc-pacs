@@ -19,7 +19,7 @@ import psycopg2
 import requests
 from dotenv import load_dotenv
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
+REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 load_dotenv(REPO_ROOT / ".env")
 
 sys.path.insert(0, str(REPO_ROOT / "companion"))
@@ -80,7 +80,7 @@ def main():
         print("Error: database credentials not set. Check your .env file.", file=sys.stderr)
         sys.exit(1)
 
-    print(f"Loading .env from: {ENV_PATH}")
+    print(f"Loading .env from: {REPO_ROOT / '.env'}")
     print("Fetching study metadata from image_series / image_study ...")
     study_meta = fetch_study_metadata()
     print(f"  {len(study_meta)} unique studies in source table\n")

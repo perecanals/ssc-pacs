@@ -42,7 +42,7 @@ import psycopg2.extras
 import zstandard as zstd
 from dotenv import load_dotenv
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
+REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 load_dotenv(REPO_ROOT / ".env")
 
 # Read paths from companion/config.py so cleanup matches the running stack.

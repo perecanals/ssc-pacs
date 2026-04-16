@@ -18,6 +18,6 @@ IOSchedulingClass=idle
 #
 # Without that env file, the script no-ops with a notice (exit 0).
 EnvironmentFile=-/etc/default/pacs-cold-mirror
-ExecStart=/home/perecanals/ssc-pacs/stanford-stroke-pacs/scripts/mirror_cold_archive.sh
+ExecStart=/home/perecanals/ssc-pacs/stanford-stroke-pacs/scripts/cold_storage/mirror_cold_archive.sh
 StandardOutput=journal
 StandardError=journal

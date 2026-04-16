@@ -37,7 +37,7 @@ Authorization model:
 - `created_by` is always taken from the authenticated user, never from client
   input
 
-`users.is_admin` exists in the schema and in `manage_users.py`, but the
+`users.is_admin` exists in the schema and in `scripts/admin/manage_users.py`, but the
 current companion backend does not implement admin-only authorization rules.
 
 ---

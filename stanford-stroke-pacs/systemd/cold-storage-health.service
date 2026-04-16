@@ -14,6 +14,6 @@ IOSchedulingPriority=7
 # Run inside the `pacs` conda env so we get the pinned psycopg2/python-dotenv.
 # The script exits non-zero on any critical condition, which surfaces in the
 # unit's ActiveState/Result and in `systemctl list-timers --all`.
-ExecStart=/home/perecanals/miniconda3/envs/pacs/bin/python /home/perecanals/ssc-pacs/stanford-stroke-pacs/scripts/cold_storage_health.py --quiet
+ExecStart=/home/perecanals/miniconda3/envs/pacs/bin/python /home/perecanals/ssc-pacs/stanford-stroke-pacs/scripts/cold_storage/cold_storage_health.py --quiet
 StandardOutput=journal
 StandardError=journal

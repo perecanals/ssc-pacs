@@ -143,13 +143,14 @@ One PostgreSQL server hosts both. Connection params and credentials are in
 ```
 ┌─ orthanc_db ─────────────────────────────────────┐
 │  owned by Orthanc PostgreSQL plugin              │
-│  (do not mutate except via enrich_orthanc.py)    │
+│  (do not mutate except via                       │
+│   scripts/orthanc/enrich_orthanc.py)             │
 │                                                  │
 │  resources, metadata, mainDicomTags,             │
 │  dicomidentifiers, attachedfiles, labels, ...    │
 │                                                  │
 │  → indexed via Folder Indexer scans              │
-│  → queried by cleanup_loose_dicoms.py for        │
+│  → queried by cold_storage/cleanup_loose_dicoms.py│
 │    "is this SeriesInstanceUID indexed?"          │
 └──────────────────────────────────────────────────┘
 
@@ -226,7 +227,7 @@ Controlled by `config.toml` `[storage].mode`. Two values:
 | Orthanc index | populated by routine Folder Indexer scans | **permanent** — never eroded thanks to `RemoveMissingFiles: false` |
 | Warming | N/A | extract archive → `dicom_dir_path` |
 | Eviction | N/A | rmtree `dicom_dir_path`; index unchanged |
-| NIFTI produced by integration protocol | yes (`NIFTI/image.nii.gz` sibling) | no — on-demand via `scripts/dicom_to_nifti.py` |
+| NIFTI produced by integration protocol | yes (`NIFTI/image.nii.gz` sibling) | no — on-demand via `scripts/dicom/dicom_to_nifti.py` |
 | Requires custom Orthanc image | no | yes (`ssc-orthanc:patched-indexer`) |
 
 See [`../cold_storage/design.md`](../cold_storage/design.md) for why
@@ -341,7 +342,7 @@ batch:
   and adds them to Orthanc's index
         │
         ▼
-  (cold_path_cache only, manual step) scripts/cleanup_loose_dicoms.py
+  (cold_path_cache only, manual step) scripts/cold_storage/cleanup_loose_dicoms.py
   removes loose copies once Orthanc has indexed them and the archive
   is verified intact
 ```
@@ -349,7 +350,7 @@ batch:
 Per-series compression failures are **non-fatal**: the case completes with
 its successful rows, failed rows keep `dicom_archive_path = NULL`, and a
 JSON report lands in `image_integration_protocols/logs/compression_failures_*.json`.
-Retry with `scripts/archive_all_series.py --patient <id>`.
+Retry with `scripts/cold_storage/archive_all_series.py --patient <id>`.
 
 Details: [`image_integration_protocol.md`](image_integration_protocol.md).
 
@@ -357,14 +358,14 @@ Details: [`image_integration_protocol.md`](image_integration_protocol.md).
 
 ## 8. Auth model
 
-Two independent auth systems coordinated by one tool (`manage_users.py`):
+Two independent auth systems coordinated by one tool (`scripts/admin/manage_users.py`):
 
 | System | Credential store | Verified against |
 |---|---|---|
 | Orthanc (Explorer 2, OHIF, REST, DICOMweb) | `orthanc_users.json` (plaintext, required by Orthanc) | `RegisteredUsers` block |
 | Companion (`/app`, `/api/*` writes) | `users` table (bcrypt hashes) + JWT cookie | FastAPI dependency |
 
-`manage_users.py`:
+`scripts/admin/manage_users.py`:
 - creates/updates bcrypt rows in `users`
 - regenerates `orthanc_users.json`
 - updates `.env`'s `ORTHANC_ADMIN_PASSWORD` when managing the admin user,
@@ -382,10 +383,10 @@ never hit Orthanc's REST API directly through the Companion.
 | Orthanc + OHIF + Explorer 2 + custom indexer | ✅ | |
 | Companion app (FastAPI + React) | ✅ | |
 | `cold_path_cache` stack (archiver, cleanup, cache_manager) | ✅ | |
-| `manage_users.py`, `init_orthanc_db.sh`, `verify_indexing.py` | ✅ | |
+| `scripts/admin/manage_users.py`, `init_orthanc_db.sh` | ✅ | |
 | `stanford-stroke` schema (expects `lvo_clinical_data`, `image_study`, `image_series`) | schema shape portable | column conventions SSC-ish |
 | `image_integration_protocols/` | | ❌ assumes SSC layout + metadata rules |
-| `enrich_orthanc.py` | | ❌ specific to an anonymised-headers deployment |
+| `scripts/orthanc/enrich_orthanc.py` | | ❌ specific to an anonymised-headers deployment |
 
 For a fresh deployment with an equivalent metadata-ingest pipeline, the
 Companion + Orthanc + cold storage stack drops in cleanly.

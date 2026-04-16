@@ -29,7 +29,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
+REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 # Make companion + integration utilities importable.
 sys.path.insert(0, str(REPO_ROOT / "companion"))
 sys.path.insert(0, str(REPO_ROOT / "image_integration_protocols"))

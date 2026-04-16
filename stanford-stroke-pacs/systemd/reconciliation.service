@@ -11,6 +11,6 @@ Group=perecanals
 Nice=15
 IOSchedulingClass=best-effort
 IOSchedulingPriority=7
-ExecStart=/home/perecanals/miniconda3/envs/pacs/bin/python /home/perecanals/ssc-pacs/stanford-stroke-pacs/scripts/reconcile.py --json --quiet
+ExecStart=/home/perecanals/miniconda3/envs/pacs/bin/python /home/perecanals/ssc-pacs/stanford-stroke-pacs/scripts/data_integrity/reconcile.py --json --quiet
 StandardOutput=journal
 StandardError=journal

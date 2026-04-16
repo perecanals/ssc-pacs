@@ -109,7 +109,7 @@ Each series ends up at:
 `dicom_dir_path` in `image_series` points at the `DICOM/` directory. The
 NIFTI sibling, when present, is at `.../<seriesUID>/NIFTI/image.nii.gz`.
 In `cold_path_cache` mode this sibling is not produced by the protocol —
-generate NIFTIs on demand via `scripts/dicom_to_nifti.py`.
+generate NIFTIs on demand via `scripts/dicom/dicom_to_nifti.py`.
 
 In cold_path_cache mode the archive mirrors the same relative path under the
 archive root, with `DICOM/` replaced by `DICOM.tar.zst`:
@@ -124,7 +124,7 @@ archive root, with `DICOM/` replaced by `DICOM.tar.zst`:
 ```
 
 The archive format is **flat** — instance files are stored at the archive's
-root, no `DICOM/` directory wrapper. This matches `scripts/archive_all_series.py`
+root, no `DICOM/` directory wrapper. This matches `scripts/cold_storage/archive_all_series.py`
 and `cache_manager._compress_series_dir()`. Warm extraction reconstructs
 the `DICOM/` directory from the tree position, not from a prefix inside
 the tar.
@@ -142,8 +142,8 @@ the tar.
 | 5 | `validate_studies_against_clinical_data` | Drops studies whose `patient_id` doesn't match a clinical row or whose `studydate` is outside the allowed stroke-date window |
 | 6 | `assign_import_id` / `assign_import_label` | Tags all rows with the batch import_id/label |
 | 7 | `add_paths_and_copy_dicom_files` | **Copies DICOMs** from source → `{legacy_dicom_root}/{patient_id}/{studyUID}/{seriesDesc}/{seriesUID}/DICOM/`. Optionally anonymizes. Sets `dicom_dir_path` on each row. |
-| 8 | `compress_cold_archives` | **Only if `cold_archive_root` is set.** For each series, creates `{cold_archive_root}/.../DICOM.tar.zst`. Sets `dicom_archive_path` on each row. **Per-series strict, batch soft**: each archive is built to a `.tmp` sibling, member-count verified, and atomically renamed — so a published archive is always valid. A failure on one series does NOT abort the case; the loop continues and failures are collected. After the loop, a WARNING is printed summarizing `N/M` failed, and a JSON report is written to `image_integration_protocols/logs/compression_failures_<timestamp>.json` (includes seriesinstanceuid, studyinstanceuid, dicom_dir_path, error). Failed rows keep `dicom_archive_path = NULL` — retriable via `scripts/archive_all_series.py --patient <id>`. Idempotent: existing archives are re-verified rather than rebuilt; corrupted ones are detected and rebuilt. |
-| 9 | `create_nifti_files` | In `legacy` mode: runs DICOM→NIFTI conversion for select series and writes `{seriesUID}/NIFTI/image.nii.gz`. In `cold_path_cache` mode: **skipped.** NIFTIs would accumulate orphaned once their sibling loose DICOMs are cleaned up. Generate on demand via `scripts/dicom_to_nifti.py` (see [`../recipes/dicom_processing.md`](../recipes/dicom_processing.md)). |
+| 8 | `compress_cold_archives` | **Only if `cold_archive_root` is set.** For each series, creates `{cold_archive_root}/.../DICOM.tar.zst`. Sets `dicom_archive_path` on each row. **Per-series strict, batch soft**: each archive is built to a `.tmp` sibling, member-count verified, and atomically renamed — so a published archive is always valid. A failure on one series does NOT abort the case; the loop continues and failures are collected. After the loop, a WARNING is printed summarizing `N/M` failed, and a JSON report is written to `image_integration_protocols/logs/compression_failures_<timestamp>.json` (includes seriesinstanceuid, studyinstanceuid, dicom_dir_path, error). Failed rows keep `dicom_archive_path = NULL` — retriable via `scripts/cold_storage/archive_all_series.py --patient <id>`. Idempotent: existing archives are re-verified rather than rebuilt; corrupted ones are detected and rebuilt. |
+| 9 | `create_nifti_files` | In `legacy` mode: runs DICOM→NIFTI conversion for select series and writes `{seriesUID}/NIFTI/image.nii.gz`. In `cold_path_cache` mode: **skipped.** NIFTIs would accumulate orphaned once their sibling loose DICOMs are cleaned up. Generate on demand via `scripts/dicom/dicom_to_nifti.py` (see [`../recipes/dicom_processing.md`](../recipes/dicom_processing.md)). |
 | 10 | `format_column_names` | Normalizes DataFrame column names, including adding `dicom_archive_path` to the set of columns to upsert |
 | 11 | `_require_import_id_columns` / `_require_import_label_columns` / `_require_number_of_slices_column` / `_require_dicom_archive_path_column` | Auto-DDL: `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` for any columns the protocol writes that don't yet exist. Safe to run against a fresh DB. |
 | 12 | `update_postgres_tables` | Upserts `image_study` and `image_series` |
@@ -179,7 +179,7 @@ Set `cold_archive_root: /DATA2/pacs_imaging_data_compressed` in the YAML.
 source DICOMs
   → copy to /DATA2/pacs_imaging_data/... (loose files)
   → compress to /DATA2/pacs_imaging_data_compressed/.../DICOM.tar.zst
-  → (NIFTI generation skipped — produce on demand via scripts/dicom_to_nifti.py)
+  → (NIFTI generation skipped — produce on demand via scripts/dicom/dicom_to_nifti.py)
   → upsert image_study / image_series (dicom_archive_path populated)
 ```
 
@@ -191,8 +191,8 @@ At the end of the run, for each successfully compressed series:
 For any series whose compression failed, `dicom_archive_path` stays NULL.
 The case does not abort — other series complete normally. See the failure
 log at `image_integration_protocols/logs/compression_failures_*.json` and
-retry via `scripts/archive_all_series.py --patient <id>` (idempotent).
-Use `scripts/list_unarchived_series.py` to list NULL-archive rows.
+retry via `scripts/cold_storage/archive_all_series.py --patient <id>` (idempotent).
+Use `scripts/cold_storage/list_unarchived_series.py` to list NULL-archive rows.
 
 The **patched Folder Indexer** (`ssc-orthanc:patched-indexer`) picks up the
 loose DICOMs on its next scan and adds them to Orthanc's main DB. Because
@@ -206,7 +206,7 @@ This is intentional: they must stay on disk long enough for Orthanc's Folder
 Indexer to see them. Once Orthanc has indexed the new series, the loose
 files are redundant and can be removed.
 
-Use **`scripts/cleanup_loose_dicoms.py`** to do this safely. The script:
+Use **`scripts/cold_storage/cleanup_loose_dicoms.py`** to do this safely. The script:
 
 1. Pulls every series from `image_series` that has a populated
    `dicom_archive_path`
@@ -225,16 +225,16 @@ cd /home/perecanals/pacs/stanford-stroke-pacs
 conda activate pacs
 
 # Dry-run by default — see what would be cleaned
-python scripts/cleanup_loose_dicoms.py
+python scripts/cold_storage/cleanup_loose_dicoms.py
 
 # Limit to one patient
-python scripts/cleanup_loose_dicoms.py --patient 4-0551
+python scripts/cold_storage/cleanup_loose_dicoms.py --patient 4-0551
 
 # Actually delete
-python scripts/cleanup_loose_dicoms.py --execute
+python scripts/cold_storage/cleanup_loose_dicoms.py --execute
 
 # Faster (skips opening each tar.zst to count members)
-python scripts/cleanup_loose_dicoms.py --execute --no-deep-verify
+python scripts/cold_storage/cleanup_loose_dicoms.py --execute --no-deep-verify
 ```
 
 The script aborts immediately if `STORAGE_MODE != "cold_path_cache"` to
@@ -244,7 +244,7 @@ DICOMs from any new ingestion within 5 minutes:
 
 ```cron
 */5 * * * * cd /home/perecanals/pacs/stanford-stroke-pacs && \
-  /home/perecanals/miniconda3/envs/pacs/bin/python scripts/cleanup_loose_dicoms.py \
+  /home/perecanals/miniconda3/envs/pacs/bin/python scripts/cold_storage/cleanup_loose_dicoms.py \
   --execute --no-deep-verify --quiet >> logs/cleanup_loose_dicoms.log 2>&1
 ```
 
@@ -327,7 +327,7 @@ curl -s -u "${ORTHANC_ADMIN_USER}:${ORTHANC_ADMIN_PASSWORD}" http://localhost:80
   if their files are ever removed; the warm flow creates the row on first
   click.
 - It does **not** clean up loose DICOMs after compression. That's a separate
-  step via `scripts/cleanup_loose_dicoms.py` (runnable manually or via cron).
+  step via `scripts/cold_storage/cleanup_loose_dicoms.py` (runnable manually or via cron).
 - It does **not** run the labelled-table sync by itself — that's done once
   per batch in `execute_image_integration_protocol.py` after all cases are
   processed (via `labelled_table_sync.sync_labelled_rows`).

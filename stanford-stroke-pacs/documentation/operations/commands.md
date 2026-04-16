@@ -21,10 +21,10 @@ docker compose down
 docker compose restart
 
 # Full status check (Docker, API, plugins, stats)
-./check_status.sh
+./scripts/orthanc/check_status.sh
 
 # Full teardown (removes container, volume, DB) — DESTRUCTIVE
-./teardown.sh
+./scripts/admin/teardown.sh
 ```
 
 ### Companion (native systemd service)
@@ -60,23 +60,23 @@ cd companion && uvicorn app:app --port 8043 --reload
 
 Users are stored in the `users` PostgreSQL table (bcrypt hashes) and
 in `orthanc_users.json` (plaintext, required by Orthanc). Both are managed
-atomically by `manage_users.py`. **Never edit `orthanc_users.json` by hand.**
+atomically by `scripts/admin/manage_users.py`. **Never edit `orthanc_users.json` by hand.**
 
 ```bash
 # List all users
-python manage_users.py list
+python scripts/admin/manage_users.py list
 
 # Add a regular user (prompts for password with hidden input + confirmation)
-python manage_users.py add alice
+python scripts/admin/manage_users.py add alice
 
 # Add an admin user
-python manage_users.py add bob --admin
+python scripts/admin/manage_users.py add bob --admin
 
 # Change a user's password
-python manage_users.py passwd alice
+python scripts/admin/manage_users.py passwd alice
 
 # Remove a user
-python manage_users.py remove alice
+python scripts/admin/manage_users.py remove alice
 ```
 
 After any change, restart Orthanc to pick up the updated `orthanc_users.json`:
@@ -149,15 +149,12 @@ sudo journalctl -u ssc-companion --since "5 min ago"
 curl -s -u admin:<password> http://localhost:8042/statistics | python3 -m json.tool
 
 # Two-DB reconciliation (image_series vs Orthanc index + disk checks)
-python scripts/reconcile.py               # human-readable summary
-python scripts/reconcile.py --json        # write JSON report
-python scripts/reconcile.py --json --quiet # cron/timer mode
-
-# Legacy (deprecated — use reconcile.py instead):
-# python scripts/verify_indexing.py
+python scripts/data_integrity/reconcile.py               # human-readable summary
+python scripts/data_integrity/reconcile.py --json        # write JSON report
+python scripts/data_integrity/reconcile.py --json --quiet # cron/timer mode
 
 # Enrich studies/series with patient_id, seriesdescription (re-run after new indexing)
-python enrich_orthanc.py
+python scripts/orthanc/enrich_orthanc.py
 ```
 
 ---
@@ -168,7 +165,7 @@ Labels can be managed through the OE2 web UI or via the REST API.
 
 ```bash
 # Pre-populate labels from source DB (study_type + modality). Idempotent, safe to re-run.
-python label_studies.py
+python scripts/orthanc/label_studies.py
 
 # List all labels in use
 curl -s -u admin:<password> http://localhost:8042/tools/labels
@@ -190,7 +187,7 @@ curl -s -u admin:<password> 'http://localhost:8042/tools/find' \
 
 ### Pre-seeded labels
 
-After running `label_studies.py`, typical labels include:
+After running `scripts/orthanc/label_studies.py`, typical labels include:
 
 - **Study type:** `BASAL`, `THROMBECTOMY`, `FOLLOW_UP`, `OTHER`
 - **Modality:** `CT`, `MR`, etc.
@@ -226,7 +223,7 @@ curl -s -X POST http://localhost:8043/api/annotations \
 curl -s -X DELETE http://localhost:8043/api/annotations/42
 
 # Remove a label entirely (definition + annotation rows) — run from repo root
-sudo ./remove_label.sh "My Label Name"
+sudo ./scripts/admin/remove_label.py "My Label Name"
 ```
 
 ### Removing the companion app
@@ -329,8 +326,8 @@ PostgreSQL backups run nightly via systemd timers. Strategy and rationale in
 
 ```bash
 # On-demand backup (also runs nightly via timer)
-./scripts/backup_pg_db.sh stanford-stroke
-./scripts/backup_pg_db.sh orthanc_db
+./scripts/backup/backup_pg_db.sh stanford-stroke
+./scripts/backup/backup_pg_db.sh orthanc_db
 
 # Inspect latest dumps
 ls -lh /DATA2/pg_backups/stanford-stroke/ /DATA2/pg_backups/orthanc_db/
@@ -346,7 +343,7 @@ sudo journalctl -u pg-backup-stanford-stroke.service -e
 sudo journalctl -u pg-backup-orthanc.service -e
 
 # Run the freshness monitor manually
-./scripts/check_backup_freshness.sh    # exit 0 = fresh, 2 = stale or missing
+./scripts/backup/check_backup_freshness.sh    # exit 0 = fresh, 2 = stale or missing
 ```
 
 The cold-archive mirror (Tier 2) is implemented but **dormant** on the dev

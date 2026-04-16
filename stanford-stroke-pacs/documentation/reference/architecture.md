@@ -200,7 +200,7 @@ Legacy loose files under `/DATA2/pacs_imaging_data` remain available when `mode 
 
 ### 4.3 Optional enrichment layer
 
-`enrich_orthanc.py` is an extra display-enrichment step:
+`scripts/orthanc/enrich_orthanc.py` is an extra display-enrichment step:
 
 - it reads `patient_id` from `image_series` and `studydescription` from
   `image_study` (via JOIN)
@@ -227,7 +227,7 @@ block in `orthanc_users.json`.
 That file:
 
 - contains plaintext passwords because Orthanc requires them
-- is generated and updated by `manage_users.py`
+- is generated and updated by `scripts/admin/manage_users.py`
 - should not be edited manually
 
 ### 5.2 Companion auth
@@ -240,7 +240,7 @@ The companion authenticates against `users`:
 
 ### 5.3 Shared provisioning
 
-`manage_users.py` is the bridge between the two auth models.
+`scripts/admin/manage_users.py` is the bridge between the two auth models.
 
 It keeps:
 
@@ -292,11 +292,10 @@ follow the same pattern:
 - `orthanc.json`
 - `companion/` (FastAPI backend + React frontend)
 - `ssc-companion.service` (systemd unit)
-- `manage_users.py`
+- `scripts/admin/manage_users.py`
 - `init_orthanc_db.sh`
-- `verify_indexing.py`
 
-`label_studies.py` is also fairly portable as long as the source metadata tables
+`scripts/orthanc/label_studies.py` is also fairly portable as long as the source metadata tables
 (`image_series` and `image_study`) still provide:
 
 - `studyinstanceuid`
@@ -308,7 +307,7 @@ follow the same pattern:
 These parts depend on the SSC metadata conventions or local filesystem
 assumptions.
 
-`enrich_orthanc.py` is specific to deployments where:
+`scripts/orthanc/enrich_orthanc.py` is specific to deployments where:
 
 - the DICOM headers are too anonymized to be useful in Orthanc Explorer 2
 - you want OE2 columns to show values from `image_series` and `image_study`
@@ -345,10 +344,10 @@ metadata-ingestion problem must be solved separately from the PACS deployment.
 
 Current repo behavior that matters architecturally:
 
-- `check_status.sh` reads Orthanc credentials from repo-root `.env` (`ORTHANC_ADMIN_USER` / `ORTHANC_ADMIN_PASSWORD`)
+- `scripts/orthanc/check_status.sh` reads Orthanc credentials from repo-root `.env` (`ORTHANC_ADMIN_USER` / `ORTHANC_ADMIN_PASSWORD`)
 - all Orthanc-facing helper scripts use `ORTHANC_ADMIN_USER` /
   `ORTHANC_ADMIN_PASSWORD` from `.env`
-- `teardown.sh` is destructive (removes Orthanc resources, not just running
+- `scripts/admin/teardown.sh` is destructive (removes Orthanc resources, not just running
   containers) and sources `.env` from two levels above the repo root — not the
   repo-root `.env` used by everything else
 

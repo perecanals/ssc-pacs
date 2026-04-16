@@ -22,7 +22,7 @@ from pathlib import Path
 import psycopg2
 from dotenv import load_dotenv
 
-ENV_PATH = Path(__file__).resolve().parent / ".env"
+ENV_PATH = Path(__file__).resolve().parent.parent.parent / ".env"
 load_dotenv(ENV_PATH)
 
 SRC_DB = dict(

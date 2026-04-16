@@ -188,7 +188,7 @@ TTL expires (eviction loop every 15 min) OR user calls POST /api/studies/{uid}/e
 
 - **`image_series.dicom_archive_path`** (TEXT, nullable) — absolute path to
   the `*.tar.zst` archive for this series. Populated by
-  `archive_all_series.py` and by the image integration protocol.
+  `scripts/cold_storage/archive_all_series.py` and by the image integration protocol.
 - **`cache_state`** table — per-study status (`cold` / `warming` / `hot` /
   `error`), `warmed_at`, `last_accessed_at`, `cache_path`, `error_message`.
   Used by `warm_study`, `evict_study`, and `ohif_link`.

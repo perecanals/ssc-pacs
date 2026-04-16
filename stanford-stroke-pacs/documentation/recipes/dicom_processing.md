@@ -13,7 +13,7 @@ cd /home/perecanals/pacs/stanford-stroke-pacs
 ## DICOM → NIFTI
 
 The Companion does **not** generate NIFTIs automatically in
-`cold_path_cache` mode. Use `scripts/dicom_to_nifti.py` to produce them on
+`cold_path_cache` mode. Use `scripts/dicom/dicom_to_nifti.py` to produce them on
 demand. It wraps `image_integration_protocols/utils.convert_dicom_to_nifti`
 (SimpleITK + GDCM) and supports three input modes.
 
@@ -23,7 +23,7 @@ If the DICOM files are sitting on disk at a path you know (e.g. a just-integrate
 series before cleanup, or a sandbox copy):
 
 ```bash
-python scripts/dicom_to_nifti.py \
+python scripts/dicom/dicom_to_nifti.py \
     --dir /DATA2/pacs_imaging_data/4-0551/1.2.../AX_T2_FLAIR/1.2.../DICOM \
     --out /tmp/ax_t2_flair.nii.gz
 ```
@@ -37,7 +37,7 @@ If you only have the `.tar.zst` archive path — e.g. you're running this on
 a backup host with no PostgreSQL or Orthanc available:
 
 ```bash
-python scripts/dicom_to_nifti.py \
+python scripts/dicom/dicom_to_nifti.py \
     --archive /DATA2/pacs_imaging_data_compressed/4-0551/1.2.../AX_T2_FLAIR/1.2.../DICOM.tar.zst \
     --out /tmp/ax_t2_flair.nii.gz
 ```
@@ -52,10 +52,10 @@ The most common case. Gives the series UID, lets the script find the files:
 
 ```bash
 # Error if the study is currently cold
-python scripts/dicom_to_nifti.py --series-uid 1.2.826.0.1.3680043.8.498.28617545145905959508444948339234956099
+python scripts/dicom/dicom_to_nifti.py --series-uid 1.2.826.0.1.3680043.8.498.28617545145905959508444948339234956099
 
 # Warm the study first (study-scoped; sibling series come along for the ride)
-python scripts/dicom_to_nifti.py \
+python scripts/dicom/dicom_to_nifti.py \
     --series-uid 1.2.826.0.1.3680043.8.498.28617545145905959508444948339234956099 \
     --warm-if-cold
 ```
@@ -98,32 +98,32 @@ zstd -dc archive.tar.zst | tar -tf - | wc -l
 
 ## Triage: series with loose files but no archive
 
-`scripts/list_unarchived_series.py` prints `image_series` rows where
+`scripts/cold_storage/list_unarchived_series.py` prints `image_series` rows where
 `dicom_archive_path IS NULL` but `dicom_dir_path IS NOT NULL`. That's
 the set of series whose compression failed during integration (or never
 ran).
 
 ```bash
 # All such series (patient_id, studyinstanceuid, seriesinstanceuid, dicom_dir_path)
-python scripts/list_unarchived_series.py
+python scripts/cold_storage/list_unarchived_series.py
 
 # Just the count
-python scripts/list_unarchived_series.py --count
+python scripts/cold_storage/list_unarchived_series.py --count
 
 # Filter by patient
-python scripts/list_unarchived_series.py --patient 4-0551
+python scripts/cold_storage/list_unarchived_series.py --patient 4-0551
 
 # Filter by import label (the batch tag from execute_image_integration_protocol.yaml)
-python scripts/list_unarchived_series.py --import-label "2026-04-batch"
+python scripts/cold_storage/list_unarchived_series.py --import-label "2026-04-batch"
 ```
 
 Fix: rerun the idempotent archiver against the affected patient(s):
 
 ```bash
-python scripts/archive_all_series.py --patient 4-0551
+python scripts/cold_storage/archive_all_series.py --patient 4-0551
 ```
 
-`archive_all_series.py` filters by `dicom_dir_path IS NOT NULL` (not by
+`scripts/cold_storage/archive_all_series.py` filters by `dicom_dir_path IS NOT NULL` (not by
 `dicom_archive_path IS NULL`), so it will re-attempt every series that has
 loose files — safe to rerun even if most already have archives. It skips
 existing archives.
@@ -132,28 +132,28 @@ existing archives.
 
 ## Triage: loose files on disk that are safe to remove
 
-`scripts/cleanup_loose_dicoms.py` deletes loose `DICOM/` directories only
+`scripts/cold_storage/cleanup_loose_dicoms.py` deletes loose `DICOM/` directories only
 when the series' archive exists on disk, the archive's file count matches
 the loose dir's file count, and the series is present in Orthanc's
 `dicomidentifiers` index. Dry-run by default.
 
 ```bash
 # See what would be removed (no mutation)
-python scripts/cleanup_loose_dicoms.py
+python scripts/cold_storage/cleanup_loose_dicoms.py
 
 # Actually remove
-python scripts/cleanup_loose_dicoms.py --execute
+python scripts/cold_storage/cleanup_loose_dicoms.py --execute
 
 # Scope to one patient
-python scripts/cleanup_loose_dicoms.py --execute --patient 4-0551
+python scripts/cold_storage/cleanup_loose_dicoms.py --execute --patient 4-0551
 
 # Skip the per-archive file-count check (faster; relies on Orthanc presence alone)
-python scripts/cleanup_loose_dicoms.py --execute --no-deep-verify
+python scripts/cold_storage/cleanup_loose_dicoms.py --execute --no-deep-verify
 ```
 
 Suitable for cron:
 
 ```cron
 */15 * * * * cd /home/perecanals/pacs/stanford-stroke-pacs && \
-  /opt/miniconda3/envs/pacs/bin/python scripts/cleanup_loose_dicoms.py --execute
+  /opt/miniconda3/envs/pacs/bin/python scripts/cold_storage/cleanup_loose_dicoms.py --execute
 ```

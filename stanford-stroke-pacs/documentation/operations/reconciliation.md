@@ -18,20 +18,20 @@ The reconciliation job diffs the two sources and surfaces drift.  It is a
 cd stanford-stroke-pacs
 
 # Human-readable summary
-python scripts/reconcile.py
+python scripts/data_integrity/reconcile.py
 
 # JSON report (written to maintenance/reconciliation-reports/)
-python scripts/reconcile.py --json
+python scripts/data_integrity/reconcile.py --json
 
 # JSON, no stdout (cron/timer mode)
-python scripts/reconcile.py --json --quiet
+python scripts/data_integrity/reconcile.py --json --quiet
 ```
 
 ---
 
 ## Scheduled runs (systemd timer)
 
-The timer runs `reconcile.py --json --quiet` every 6 hours.
+The timer runs `scripts/data_integrity/reconcile.py --json --quiet` every 6 hours.
 
 ```bash
 # Install (one-time)
@@ -89,7 +89,7 @@ psql -d stanford-stroke -c \
 curl -X POST -b cookies.txt http://localhost:8043/api/studies/<study_uid>/warm
 
 # Re-check after Orthanc re-scans
-python scripts/reconcile.py | grep '<uid>'
+python scripts/data_integrity/reconcile.py | grep '<uid>'
 ```
 
 ### `in_orthanc_not_in_db`
@@ -143,16 +143,16 @@ on disk.
   (`image_integration_protocols/`) is the biggest source of NULL or broken
   archive paths.  Retry with:
   ```bash
-  python scripts/archive_all_series.py --patient <patient_id>
+  python scripts/cold_storage/archive_all_series.py --patient <patient_id>
   ```
 
 **Investigation:**
 ```bash
 # List all unarchived series
-python scripts/list_unarchived_series.py
+python scripts/cold_storage/list_unarchived_series.py
 
 # Retry archiving for a specific patient
-python scripts/archive_all_series.py --patient <patient_id>
+python scripts/cold_storage/archive_all_series.py --patient <patient_id>
 ```
 
 ---
@@ -181,11 +181,9 @@ The CLI keeps the most recent 30 JSON reports in
 
 ## Related scripts
 
-- `scripts/verify_indexing.py` — **deprecated**, superseded by
-  `reconciliation.py`.  Kept for reference; use `reconcile.py` instead.
-- `scripts/list_unarchived_series.py` — lists series with no archive
+- `scripts/cold_storage/list_unarchived_series.py` — lists series with no archive
   (one dimension of the reconciliation check).
-- `scripts/archive_all_series.py` — retries compression for specific
+- `scripts/cold_storage/archive_all_series.py` — retries compression for specific
   patients.
-- `scripts/cold_storage_health.py` — health probe for cold-storage
+- `scripts/cold_storage/cold_storage_health.py` — health probe for cold-storage
   subsystem (stuck warming, orphan dirs, disk free).

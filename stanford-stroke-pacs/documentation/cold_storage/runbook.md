@@ -34,7 +34,7 @@ re-ingest) has been removed. See [`design.md`](design.md) §Migration history.
    `dicom_dir_path` in `image_series` is present in Orthanc's main DB. This
    is true after the first `docker compose up -d` with all files on disk.
 5. **Archives exist** for every series that will be served cold. Run
-   `scripts/archive_all_series.py` (see below) and verify
+   `scripts/cold_storage/archive_all_series.py` (see below) and verify
    `dicom_archive_path` is populated for all rows.
 
 ---
@@ -75,10 +75,10 @@ cd /home/perecanals/pacs/stanford-stroke-pacs
 conda activate pacs
 
 # Preview first
-python scripts/archive_all_series.py --dry-run
+python scripts/cold_storage/archive_all_series.py --dry-run
 
 # Full run; workers=4 is a reasonable starting point
-python scripts/archive_all_series.py --workers 4
+python scripts/cold_storage/archive_all_series.py --workers 4
 
 # Verify coverage
 psql -d stanford-stroke -c "
@@ -94,17 +94,17 @@ with per-series details. Those rows have `dicom_archive_path = NULL`. To
 find and retry them:
 
 ```bash
-python scripts/list_unarchived_series.py --count
-python scripts/list_unarchived_series.py --patient <id>   # inspect
-python scripts/archive_all_series.py --patient <id>        # retry (idempotent)
+python scripts/cold_storage/list_unarchived_series.py --count
+python scripts/cold_storage/list_unarchived_series.py --patient <id>   # inspect
+python scripts/cold_storage/archive_all_series.py --patient <id>        # retry (idempotent)
 ```
 
-`scripts/cleanup_loose_dicoms.py` already filters out NULL-archive rows, so
+`scripts/cold_storage/cleanup_loose_dicoms.py` already filters out NULL-archive rows, so
 failed series are safe from accidental cleanup.
 
 NIFTIs are **not** generated during integration in cold_path_cache mode.
 See [`../recipes/dicom_processing.md`](../recipes/dicom_processing.md) for
-the on-demand workflow via `scripts/dicom_to_nifti.py`.
+the on-demand workflow via `scripts/dicom/dicom_to_nifti.py`.
 
 ### 2. Deploy the patched Orthanc image
 
@@ -184,13 +184,13 @@ cd /home/perecanals/pacs/stanford-stroke-pacs
 conda activate pacs
 
 # Dry-run by default — see exactly what would be deleted
-python scripts/cleanup_loose_dicoms.py
+python scripts/cold_storage/cleanup_loose_dicoms.py
 
 # Limit to one patient for an initial test
-python scripts/cleanup_loose_dicoms.py --patient 4-0551
+python scripts/cold_storage/cleanup_loose_dicoms.py --patient 4-0551
 
 # Actually delete
-python scripts/cleanup_loose_dicoms.py --execute
+python scripts/cold_storage/cleanup_loose_dicoms.py --execute
 
 # After cleanup, verify Orthanc still has the full index
 source .env
@@ -298,7 +298,7 @@ returns 500. The operator must clear the underlying cause and retry.
 
 ### Health probe
 
-`scripts/cold_storage_health.py` reports:
+`scripts/cold_storage/cold_storage_health.py` reports:
 - count of stuck-warming rows;
 - count of orphan `*.warming` directories on disk;
 - free disk on `legacy_dicom_root`;
@@ -307,10 +307,10 @@ returns 500. The operator must clear the underlying cause and retry.
 ```bash
 # Human output
 conda activate pacs
-python scripts/cold_storage_health.py
+python scripts/cold_storage/cold_storage_health.py
 
 # JSON for monitoring tools
-python scripts/cold_storage_health.py --json
+python scripts/cold_storage/cold_storage_health.py --json
 ```
 
 Exit code is non-zero if any critical condition holds (stuck rows,
@@ -383,12 +383,12 @@ If you need to roll back:
 | `companion/cache_manager.py` | `warm_study`, `evict_study`, `get_cache_status`, `run_eviction`, helpers |
 | `companion/app.py` | Warm/evict/cache-status endpoints, defensive ohif-link FS probe |
 | `companion/src/api/warmOhif.js` | Frontend warm flow (mode-agnostic cold/warming handling) |
-| `scripts/archive_all_series.py` | Offline archiver — populates `dicom_archive_path` for the existing tree |
-| `scripts/cleanup_loose_dicoms.py` | Safely delete loose DICOMs whose archive exists and Orthanc has indexed (dry-run by default; cron-friendly) |
-| `scripts/list_unarchived_series.py` | List series with loose files but no archive — triage compression failures |
-| `scripts/dicom_to_nifti.py` | On-demand DICOM → NIFTI from a loose dir, a cold archive, or by series UID (optionally warming) |
-| `scripts/orthanc_path_availability_test.py` | Automated DICOMweb path-availability probe |
-| `scripts/orthanc_holdout_case.py` | Manual OHIF holdout test (hide/restore a patient) |
+| `scripts/cold_storage/archive_all_series.py` | Offline archiver — populates `dicom_archive_path` for the existing tree |
+| `scripts/cold_storage/cleanup_loose_dicoms.py` | Safely delete loose DICOMs whose archive exists and Orthanc has indexed (dry-run by default; cron-friendly) |
+| `scripts/cold_storage/list_unarchived_series.py` | List series with loose files but no archive — triage compression failures |
+| `scripts/dicom/dicom_to_nifti.py` | On-demand DICOM → NIFTI from a loose dir, a cold archive, or by series UID (optionally warming) |
+| `scripts/one_off/orthanc_path_availability_test.py` | Automated DICOMweb path-availability probe |
+| `scripts/one_off/orthanc_holdout_case.py` | Manual OHIF holdout test (hide/restore a patient) |
 | `orthanc.json` | `Indexer.RemoveMissingFiles` must be `false` for `cold_path_cache` |
 | `docker-compose.yml` | `image: ssc-orthanc:patched-indexer` |
 | `config.toml` | `[storage].mode` and paths |

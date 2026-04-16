@@ -170,7 +170,7 @@ If both `orthanc_db` and the most recent dump are unusable, drop the DB,
 let Orthanc recreate the schema on first boot, and let the patched
 Folder Indexer re-scan `/DATA2/pacs_imaging_data` (or the cold-warmed
 copies). This takes hours and re-creates labels — read
-`documentation/cold_storage/` and `enrich_orthanc.py` first.
+`documentation/cold_storage/` and `scripts/orthanc/enrich_orthanc.py` first.
 
 ---
 

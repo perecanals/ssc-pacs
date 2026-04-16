@@ -71,7 +71,7 @@ Cold storage / hot cache (when enabled):
 
 ### `image_series.dicom_archive_path`
 
-Nullable `TEXT`. Populated by the offline archiver (`scripts/archive_all_series.py`) when series are packed to `*.tar.zst`. Used when `[storage].mode = "cold_cache"` in `config.toml`.
+Nullable `TEXT`. Populated by the offline archiver (`scripts/cold_storage/archive_all_series.py`) when series are packed to `*.tar.zst`. Used when `[storage].mode = "cold_cache"` in `config.toml`.
 
 ### `cache_state`
 

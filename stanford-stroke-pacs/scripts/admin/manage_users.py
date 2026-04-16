@@ -19,7 +19,7 @@ import psycopg2
 from dotenv import load_dotenv
 
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
+REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 ORTHANC_USERS_FILE = REPO_ROOT / "orthanc_users.json"
 load_dotenv(REPO_ROOT / ".env")
 

@@ -106,10 +106,10 @@ conda activate pacs
 cd stanford-stroke-pacs
 
 # Preview
-python scripts/backfill_annotation_history.py --dry-run
+python scripts/one_off/backfill_annotation_history.py --dry-run
 
 # Apply
-python scripts/backfill_annotation_history.py --execute
+python scripts/one_off/backfill_annotation_history.py --execute
 ```
 
 The script inserts one synthetic `I` row per annotation that has no history

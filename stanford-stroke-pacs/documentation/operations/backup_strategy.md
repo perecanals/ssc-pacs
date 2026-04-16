@@ -98,8 +98,8 @@ When the server is upgraded, install the matching client major.
 
 | Path | Role |
 |---|---|
-| `scripts/backup_pg_db.sh` | dump one DB, write sha256, rotate retention |
-| `scripts/check_backup_freshness.sh` | exit nonzero if any latest dump is older than `MAX_AGE_HOURS` (default 36) |
+| `scripts/backup/backup_pg_db.sh` | dump one DB, write sha256, rotate retention |
+| `scripts/backup/check_backup_freshness.sh` | exit nonzero if any latest dump is older than `MAX_AGE_HOURS` (default 36) |
 | `systemd/pg-backup-stanford-stroke.{service,timer}` | nightly dump of `stanford-stroke` (02:15 + jitter) |
 | `systemd/pg-backup-orthanc.{service,timer}` | nightly dump of `orthanc_db` (02:30 + jitter) |
 | `systemd/pg-backup-freshness.{service,timer}` | hourly freshness check |
@@ -140,12 +140,12 @@ systemctl list-timers 'pg-backup-*'
 ls -lh /DATA2/pg_backups/orthanc_db/ /DATA2/pg_backups/stanford-stroke/
 
 # Run the freshness monitor manually
-/home/perecanals/pacs/stanford-stroke-pacs/scripts/check_backup_freshness.sh
+/home/perecanals/pacs/stanford-stroke-pacs/scripts/backup/check_backup_freshness.sh
 echo "exit=$?"   # 0 = fresh, 2 = stale or missing
 
 # Run a backup on demand (any time)
-/home/perecanals/pacs/stanford-stroke-pacs/scripts/backup_pg_db.sh stanford-stroke
-/home/perecanals/pacs/stanford-stroke-pacs/scripts/backup_pg_db.sh orthanc_db
+/home/perecanals/pacs/stanford-stroke-pacs/scripts/backup/backup_pg_db.sh stanford-stroke
+/home/perecanals/pacs/stanford-stroke-pacs/scripts/backup/backup_pg_db.sh orthanc_db
 ```
 
 ### Monitoring / alerting (TODO)
@@ -167,7 +167,7 @@ loss is recoverable via re-ingestion.
 
 | Path | Role |
 |---|---|
-| `scripts/mirror_cold_archive.sh` | `rsync -a --delete` from `SOURCE_DIR` to `COLD_MIRROR_DEST` (no-op if `COLD_MIRROR_DEST` unset) |
+| `scripts/cold_storage/mirror_cold_archive.sh` | `rsync -a --delete` from `SOURCE_DIR` to `COLD_MIRROR_DEST` (no-op if `COLD_MIRROR_DEST` unset) |
 | `systemd/cold-archive-mirror.service` | reads `/etc/default/pacs-cold-mirror`, runs the script |
 | `systemd/cold-archive-mirror.timer` | nightly at 03:30 + jitter, **not enabled by default** |
 
@@ -213,7 +213,7 @@ loss is recoverable via re-ingestion.
    ```ini
    [Service]
    ExecStart=
-   ExecStart=/home/perecanals/pacs/stanford-stroke-pacs/scripts/check_backup_freshness.sh --include-cold-archive
+   ExecStart=/home/perecanals/pacs/stanford-stroke-pacs/scripts/backup/check_backup_freshness.sh --include-cold-archive
    EnvironmentFile=/etc/default/pacs-cold-mirror
    ```
 

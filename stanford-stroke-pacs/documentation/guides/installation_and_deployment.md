@@ -78,7 +78,7 @@ Variables expected by the current codebase:
 | `PG_ORTHANC_USER` | Orthanc index database user |
 | `PG_ORTHANC_PASSWORD` | Orthanc index database password |
 | `ORTHANC_URL` | Base URL used by scripts and companion, typically `http://localhost:8042` |
-| `ORTHANC_ADMIN_USER` | Orthanc service account used by companion and `verify_indexing.py` |
+| `ORTHANC_ADMIN_USER` | Orthanc service account used by companion and `scripts/data_integrity/reconcile.py` |
 | `ORTHANC_ADMIN_PASSWORD` | Password for the Orthanc service account |
 | `JWT_SECRET` | Secret used to sign companion JWT cookies |
 
@@ -104,16 +104,16 @@ At minimum, the current scripts rely on these columns:
 
 **image_study** (for study-level metadata):
 
-- `study_type` (used by `label_studies.py`)
-- `studydescription` (used by `enrich_orthanc.py`)
+- `study_type` (used by `scripts/orthanc/label_studies.py`)
+- `studydescription` (used by `scripts/orthanc/enrich_orthanc.py`)
 
 How the repo uses these tables:
 
 - companion browsing reads from them
-- `verify_indexing.py` compares `image_series` against Orthanc's index
-- `label_studies.py` reads `study_type` from `image_study` and `modality` from
+- `scripts/data_integrity/reconcile.py` compares `image_series` against Orthanc's index
+- `scripts/orthanc/label_studies.py` reads `study_type` from `image_study` and `modality` from
   `image_series`
-- `enrich_orthanc.py` uses them for display enrichment
+- `scripts/orthanc/enrich_orthanc.py` uses them for display enrichment
 
 If the new environment does not have equivalent tables yet, the PACS service
 layer can still be deployed, but the companion and metadata-driven scripts will
@@ -135,10 +135,9 @@ python3 -m pip install -r requirements.txt
 
 This installs the dependencies needed by root-level helper scripts such as:
 
-- `manage_users.py`
-- `enrich_orthanc.py`
-- `label_studies.py`
-- `verify_indexing.py`
+- `scripts/admin/manage_users.py`
+- `scripts/orthanc/enrich_orthanc.py`
+- `scripts/orthanc/label_studies.py`
 
 ### Step 2. Confirm the DICOM mount path and `env_file` path
 
@@ -188,7 +187,7 @@ Important caveat:
 Run:
 
 ```bash
-python manage_users.py add <username> --admin
+python scripts/admin/manage_users.py add <username> --admin
 ```
 
 What this step accomplishes:
@@ -258,7 +257,7 @@ There are two optional-but-useful post-index tasks.
 Run:
 
 ```bash
-python enrich_orthanc.py
+python scripts/orthanc/enrich_orthanc.py
 ```
 
 Use this when:
@@ -279,7 +278,7 @@ Skip this when:
 Run:
 
 ```bash
-python label_studies.py
+python scripts/orthanc/label_studies.py
 ```
 
 Use this when:
@@ -329,16 +328,16 @@ curl -s 'http://localhost:8043/api/series?per_page=5' | python3 -m json.tool
 The repo includes:
 
 ```bash
-./check_status.sh
-python verify_indexing.py
+./scripts/orthanc/check_status.sh
+python scripts/data_integrity/reconcile.py
 ```
 
 Current caveats:
 
-- `check_status.sh` reads Orthanc credentials from `.env` (no hardcoded values)
-- `check_status.sh` validates the `ssc-orthanc` container and Orthanc only, not
+- `scripts/orthanc/check_status.sh` reads Orthanc credentials from `.env` (no hardcoded values)
+- `scripts/orthanc/check_status.sh` validates the `ssc-orthanc` container and Orthanc only, not
   the companion
-- `verify_indexing.py` uses `ORTHANC_ADMIN_USER` /
+- `scripts/data_integrity/reconcile.py` uses `ORTHANC_ADMIN_USER` /
   `ORTHANC_ADMIN_PASSWORD`
 
 ### 6.3 Browser checks
@@ -362,7 +361,7 @@ Expected outcomes:
 If the source metadata table is present, run:
 
 ```bash
-python verify_indexing.py
+python scripts/data_integrity/reconcile.py
 ```
 
 This compares `SeriesInstanceUID` values between:
@@ -395,7 +394,7 @@ ssh -N \
   <user>@<server>
 ```
 
-The repo's `tunnel.sh` forwards all three ports (`8042`, `8043`, `4242`).
+The repo's `scripts/connectivity/tunnel.sh` forwards all three ports (`8042`, `8043`, `4242`).
 
 ---
 
@@ -450,14 +449,14 @@ Common actions after deployment:
 Add a user:
 
 ```bash
-python manage_users.py add <username>
+python scripts/admin/manage_users.py add <username>
 docker restart ssc-orthanc
 ```
 
 Change a user password:
 
 ```bash
-python manage_users.py passwd <username>
+python scripts/admin/manage_users.py passwd <username>
 docker restart ssc-orthanc
 ```
 
@@ -481,7 +480,7 @@ sudo systemctl restart ssc-companion
 Do not treat these as mandatory steps unless the new environment truly needs
 them.
 
-`enrich_orthanc.py`
+`scripts/orthanc/enrich_orthanc.py`
 
 - optional display-enrichment step
 - specific to deployments where Orthanc's displayed identifiers need replacing
@@ -500,13 +499,13 @@ them.
 
 These are current implementation mismatches worth remembering during deployment:
 
-- `teardown.sh` is destructive and should not be used casually; it does not
+- `scripts/admin/teardown.sh` is destructive and should not be used casually; it does not
   stop the companion systemd service
-- `teardown.sh` sources `.env` from two levels above the repo root (`../../.env`),
+- `scripts/admin/teardown.sh` sources `.env` from two levels above the repo root (`../../.env`),
   **not** the repo-root `.env` used by companion and helper scripts
 - `docker-compose.yml` uses an absolute `env_file` path that must be updated
   for a fresh deployment on a different host
-- `check_status.sh` uses the `ssc-orthanc` container name and reads Orthanc
+- `scripts/orthanc/check_status.sh` uses the `ssc-orthanc` container name and reads Orthanc
   credentials from repo-root `.env`
 
 Treat these as current repo caveats, not as recommended design patterns.
