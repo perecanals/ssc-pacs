@@ -45,15 +45,14 @@ Tables created here fall in three groups:
   proposals via `include_object` in `alembic/env.py`. They are still
   created here so scratch-DB schema-diff parity holds.
 """
-from typing import Sequence, Union
+from collections.abc import Sequence
 
 from alembic import op
 
-
 revision: str = "0001_baseline"
-down_revision: Union[str, Sequence[str], None] = None
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+down_revision: str | Sequence[str] | None = None
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 
 BASELINE_SQL = r"""

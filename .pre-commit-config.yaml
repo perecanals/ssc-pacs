@@ -1,0 +1,32 @@
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+        args: [--markdown-linebreak-ext=md]
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-added-large-files
+        args: [--maxkb=500]
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.15.10
+    hooks:
+      - id: ruff
+        args: [--fix, --config, stanford-stroke-pacs/companion/pyproject.toml]
+        types_or: [python]
+
+  - repo: https://github.com/pre-commit/mirrors-prettier
+    rev: v4.0.0-alpha.8
+    hooks:
+      - id: prettier
+        types_or: [javascript, jsx, json, css, markdown]
+        additional_dependencies:
+          - prettier@3.5.3
+        args: [--write]
+        exclude: |
+          (?x)^(
+            stanford-stroke-pacs/companion/dist/.*|
+            stanford-stroke-pacs/companion/node_modules/.*|
+            .*package-lock\.json
+          )$

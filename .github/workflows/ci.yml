@@ -1,0 +1,125 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHON_VERSION: "3.12"
+  NODE_VERSION: "20"
+
+jobs:
+  lint:
+    name: Lint (ruff + pre-commit)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - run: pip install ruff pre-commit
+      - run: pre-commit run --all-files
+
+  backend-tests:
+    name: Backend tests (pytest)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: ci_user
+          POSTGRES_PASSWORD: ci_pass
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ci_user"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DB_HOST: localhost
+      DB_PORT: "5432"
+      DB_USER: ci_user
+      DB_PASSWORD: ci_pass
+      DB_NAME: stanford-stroke
+      JWT_SECRET: ci-test-jwt-secret-32bytes!!!!
+      ORTHANC_ADMIN_USER: ci_orthanc
+      ORTHANC_ADMIN_PASSWORD: ci_orthanc_pass
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Install dependencies
+        working-directory: stanford-stroke-pacs/companion
+        run: |
+          pip install -r requirements.txt -r requirements-dev.txt
+      - name: Run pytest with coverage
+        working-directory: stanford-stroke-pacs/companion
+        run: |
+          python -m pytest tests/ \
+            --cov=. \
+            --cov-report=term-missing \
+            --tb=short \
+            -v
+
+  frontend-tests:
+    name: Frontend tests (vitest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Install dependencies
+        working-directory: stanford-stroke-pacs/companion
+        run: npm ci
+      - name: Run vitest
+        working-directory: stanford-stroke-pacs/companion
+        run: npx vitest run
+
+  frontend-build:
+    name: Frontend build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Install and build
+        working-directory: stanford-stroke-pacs/companion
+        run: |
+          npm ci
+          npm run build
+
+  mypy:
+    name: mypy (advisory)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Install dependencies
+        working-directory: stanford-stroke-pacs/companion
+        run: |
+          pip install -r requirements.txt -r requirements-dev.txt
+      - name: Run mypy
+        working-directory: stanford-stroke-pacs/companion
+        run: |
+          python -m mypy . \
+            --config-file pyproject.toml \
+            --ignore-missing-imports \
+            --no-error-summary \
+            || true

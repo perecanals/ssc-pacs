@@ -18,8 +18,9 @@ from logging.config import fileConfig
 from pathlib import Path
 from urllib.parse import quote_plus
 
-from alembic import context
 from sqlalchemy import engine_from_config, pool
+
+from alembic import context
 
 # --- Path bootstrap ----------------------------------------------------------
 # env.py runs with CWD set wherever the caller invokes alembic from. Make sure

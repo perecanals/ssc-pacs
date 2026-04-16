@@ -19,8 +19,13 @@ venv/
 .idea/
 
 # Frontend build artifacts
-companion/node_modules/
-companion/dist/
+**/node_modules/
+**/dist/
+
+# Test / coverage artifacts
+.coverage
+**/.coverage
+htmlcov/
 
 # Benchmarks / temp
 .tmp_bench/

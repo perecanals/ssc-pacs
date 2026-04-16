@@ -399,7 +399,51 @@ The repo's `tunnel.sh` forwards all three ports (`8042`, `8043`, `4242`).
 
 ---
 
-## 8. Ongoing operations
+## 8. Developer setup
+
+For contributors who want to run the test suite and linters locally.
+
+### Prerequisites
+
+- Python 3.12+ with the `pacs` conda environment
+- Node.js 20+ and npm
+- A local PostgreSQL instance (the test suite creates a scratch DB)
+
+### One-time setup
+
+From the repo root:
+
+```bash
+conda activate pacs
+make install-dev
+```
+
+This installs all Python deps (runtime + dev), runs `npm ci` for the frontend,
+and installs pre-commit hooks so linting runs automatically before each commit.
+
+### Running tests
+
+```bash
+make test          # backend + frontend
+make test-backend  # pytest only (requires Postgres)
+make test-frontend # vitest only (no Postgres needed)
+```
+
+### Running linters
+
+```bash
+make lint          # ruff check
+```
+
+### CI
+
+Every push to `main` and every PR triggers GitHub Actions CI (`.github/workflows/ci.yml`). Required jobs: lint, backend-tests, frontend-tests, frontend-build. The mypy job is advisory (non-blocking).
+
+Pre-commit hooks run locally before each commit if installed via `make install-dev` (or `pre-commit install`).
+
+---
+
+## 9. Ongoing operations
 
 Common actions after deployment:
 
@@ -432,7 +476,7 @@ sudo systemctl restart ssc-companion
 
 ---
 
-## 9. What is not part of standard redeployment
+## 10. What is not part of standard redeployment
 
 Do not treat these as mandatory steps unless the new environment truly needs
 them.
@@ -452,7 +496,7 @@ them.
 
 ---
 
-## 10. Known repo caveats
+## 11. Known repo caveats
 
 These are current implementation mismatches worth remembering during deployment:
 

@@ -11,7 +11,7 @@ import tempfile
 import time
 import uuid
 from contextlib import asynccontextmanager
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from urllib.parse import urlencode
 
@@ -21,7 +21,6 @@ import psycopg2
 import psycopg2.extras
 import psycopg2.sql as psql
 import requests as http_requests
-from zipstream import ZipStream
 from dotenv import load_dotenv
 from fastapi import Cookie, FastAPI, HTTPException, Query, Request, Response
 from fastapi.responses import FileResponse, StreamingResponse
@@ -30,20 +29,13 @@ from pydantic import BaseModel
 from slowapi import Limiter
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
+from zipstream import ZipStream
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(ROOT_DIR / ".env")
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
-from config import (
-    COOKIE_SECURE,
-    LEGACY_DICOM_ROOT,
-    LOGIN_RATE_LIMIT_PER_5MIN,
-    SESSION_ABSOLUTE_TIMEOUT_HOURS,
-    SESSION_TIMEOUT_HOURS,
-    STORAGE_MODE,
-)
 from cache_manager import (
     InsufficientDiskSpaceError,
     evict_study,
@@ -53,6 +45,14 @@ from cache_manager import (
     touch_access,
     untar_zst,
     warm_study,
+)
+from config import (
+    COOKIE_SECURE,
+    LEGACY_DICOM_ROOT,
+    LOGIN_RATE_LIMIT_PER_5MIN,
+    SESSION_ABSOLUTE_TIMEOUT_HOURS,
+    SESSION_TIMEOUT_HOURS,
+    STORAGE_MODE,
 )
 from labelled_table_sync import (
     ensure_labelled_tables,
@@ -64,6 +64,8 @@ from labelled_table_sync import (
 from logging_config import configure_logging, request_id_ctx, user_ctx
 from metrics import (
     REGISTRY as METRICS_REGISTRY,
+)
+from metrics import (
     cold_storage_evict_total,
     cold_storage_warm_total,
     http_request_duration_seconds,
@@ -136,8 +138,9 @@ def init_db():
     The pre-Alembic `INIT_SQL` / `MIGRATE_SQL` blocks have been folded into
     revision `0001_baseline` — see documentation/operations/schema_migrations.md.
     """
-    from alembic import command
     from alembic.config import Config
+
+    from alembic import command
 
     cfg = Config(str(_ALEMBIC_INI))
     command.upgrade(cfg, "head")
@@ -328,7 +331,7 @@ async def request_id_middleware(request: Request, call_next):
 # ---------------------------------------------------------------------------
 
 def create_jwt(username: str, iat: int | None = None) -> str:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     iat_epoch = int(iat) if iat is not None else int(now.timestamp())
     payload = {
         "sub": username,
@@ -348,7 +351,7 @@ def decode_jwt(token: str) -> dict | None:
     iat = payload.get("iat")
     if iat is not None:
         try:
-            age = int(datetime.now(timezone.utc).timestamp()) - int(iat)
+            age = int(datetime.now(UTC).timestamp()) - int(iat)
         except (TypeError, ValueError):
             return None
         if age > JWT_ABSOLUTE_TIMEOUT_SECONDS:
@@ -531,7 +534,7 @@ def _label_filter_sql(
     if entity_level == "study":
         if ll == "patient":
             return (
-                f"st.patient_id IN "
+                "st.patient_id IN "
                 "(SELECT patient_id FROM annotations WHERE level = 'patient' AND label = %s)"
             )
         if ll == "study":
