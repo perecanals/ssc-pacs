@@ -13,7 +13,8 @@ repos:
     rev: v0.15.10
     hooks:
       - id: ruff
-        args: [--fix, --config, stanford-stroke-pacs/companion/pyproject.toml]
+        args: [--fix]
+        files: ^stanford-stroke-pacs/companion/
         types_or: [python]
 
   - repo: https://github.com/pre-commit/mirrors-prettier
@@ -24,6 +25,7 @@ repos:
         additional_dependencies:
           - prettier@3.5.3
         args: [--write]
+        files: ^stanford-stroke-pacs/companion/
         exclude: |
           (?x)^(
             stanford-stroke-pacs/companion/dist/.*|
