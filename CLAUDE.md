@@ -86,6 +86,15 @@ python enrich_orthanc.py         # rewrite patient/study/series labels in OE2
 python label_studies.py          # seed Orthanc study labels from study_type + modality
 ```
 
+### Schema migrations (`stanford-stroke` DB only)
+```bash
+cd companion && conda activate pacs
+alembic current                  # show current revision
+alembic upgrade head             # apply pending revisions (also runs at app startup)
+alembic revision -m "<message>"  # scaffold a new revision
+```
+Workflow + production-stamp procedure: `documentation/operations/schema_migrations.md`. Do **not** run Alembic against `orthanc_db`.
+
 ### Cold storage (cold_path_cache mode)
 ```bash
 # Check archiving progress

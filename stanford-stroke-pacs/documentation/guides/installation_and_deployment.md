@@ -225,7 +225,7 @@ python3 -m pip install -r companion/requirements.txt
 ### Step 7. Build the Companion frontend
 
 ```bash
-cd companion && npm install && npm run build
+cd companion && npm ci && npm run build
 ```
 
 ### Step 8. Install and start the Companion (systemd)

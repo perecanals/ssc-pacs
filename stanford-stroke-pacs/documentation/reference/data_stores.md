@@ -49,7 +49,10 @@ Notes:
 
 ### Companion-owned tables (app-managed)
 
-These tables are created/migrated by `companion/app.py` on startup:
+These tables are created and evolved by **Alembic migrations** under
+`companion/alembic/versions/`. `init_db()` runs `alembic upgrade head` on
+startup. See [`../operations/schema_migrations.md`](../operations/schema_migrations.md)
+for the workflow when adding a new revision.
 
 - **`users`**: Companion login accounts (bcrypt password hashes).
 - **`annotations`**: multi-level (patient / study / series) annotations.

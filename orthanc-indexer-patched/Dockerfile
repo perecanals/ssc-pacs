@@ -71,7 +71,12 @@ RUN cmake /src \
 # ---------------------------------------------------------------------------
 # Stage 2: overlay the patched plugin onto the official Orthanc image
 # ---------------------------------------------------------------------------
-FROM orthancteam/orthanc:latest
+# Pinned by digest for reproducibility (see maintenance workstream 02). To
+# bump, pull a newer orthancteam/orthanc tag, run
+#   docker image inspect orthancteam/orthanc:<tag> --format '{{index .RepoDigests 0}}'
+# and replace the digest below. Also update the builder Ubuntu version
+# (currently 25.10) if the base OS changes.
+FROM orthancteam/orthanc@sha256:a055ccd31f7cd1e45ce98912e1c6e8e83b6a8f262f5b8fe6c88e2b6cd060fc57
 
 COPY --from=builder /build/libOrthancIndexer.so \
      /usr/share/orthanc/plugins/libOrthancIndexer.so

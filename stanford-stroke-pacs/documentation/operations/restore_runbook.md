@@ -106,6 +106,13 @@ sudo systemctl start ssc-companion
 curl -sf http://localhost:8043/api/labels/summary | python3 -m json.tool | head
 ```
 
+> **Alembic note:** the dump preserves the `alembic_version` table, so a
+> restored DB is already at the same schema revision as the source. **Do
+> not** run `alembic stamp` after a restore — Companion's `init_db()` will
+> see head and emit no DDL. If you restored from a dump older than the
+> current code's head revision, `init_db()` will roll the schema forward
+> automatically. See [`schema_migrations.md`](schema_migrations.md).
+
 Once you've confirmed the app is healthy for at least 24 h, drop the
 broken DB:
 

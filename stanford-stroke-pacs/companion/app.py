@@ -4,9 +4,12 @@ import asyncio
 import json
 import logging
 import os
+import re
 import shutil
 import sys
 import tempfile
+import time
+import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -16,21 +19,33 @@ import bcrypt
 import jwt
 import psycopg2
 import psycopg2.extras
+import psycopg2.sql as psql
 import requests as http_requests
 from zipstream import ZipStream
 from dotenv import load_dotenv
-from fastapi import Cookie, FastAPI, HTTPException, Query, Response
+from fastapi import Cookie, FastAPI, HTTPException, Query, Request, Response
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
+from slowapi import Limiter
+from slowapi.errors import RateLimitExceeded
+from slowapi.util import get_remote_address
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(ROOT_DIR / ".env")
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
-from config import SESSION_TIMEOUT_HOURS, STORAGE_MODE
+from config import (
+    COOKIE_SECURE,
+    LEGACY_DICOM_ROOT,
+    LOGIN_RATE_LIMIT_PER_5MIN,
+    SESSION_ABSOLUTE_TIMEOUT_HOURS,
+    SESSION_TIMEOUT_HOURS,
+    STORAGE_MODE,
+)
 from cache_manager import (
+    InsufficientDiskSpaceError,
     evict_study,
     get_cache_status,
     resolve_series_archive,
@@ -46,235 +61,55 @@ from labelled_table_sync import (
     sync_labelled_rows,
     sync_labelled_schema,
 )
+from logging_config import configure_logging, request_id_ctx, user_ctx
+from metrics import (
+    REGISTRY as METRICS_REGISTRY,
+    cold_storage_evict_total,
+    cold_storage_warm_total,
+    http_request_duration_seconds,
+    http_requests_total,
+    refresh_cold_storage_gauges,
+)
+
+# Configure JSON logging before any module-level log lines fire.
+configure_logging()
+
+def _require_env(name: str) -> str:
+    """Return the value of env var `name`, or abort startup with a clear error."""
+    value = os.getenv(name)
+    if value is None or value.strip() == "":
+        raise RuntimeError(
+            f"{name} must be set (missing or empty in environment / .env). "
+            "Refusing to start a service without required secrets."
+        )
+    return value
+
 
 DB_CONFIG = dict(
     host=os.getenv("DB_HOST", "localhost"),
     port=os.getenv("DB_PORT", "5432"),
     dbname=os.getenv("DB_NAME", "stanford-stroke"),
-    user=os.getenv("DB_USER"),
-    password=os.getenv("DB_PASSWORD"),
+    user=_require_env("DB_USER"),
+    password=_require_env("DB_PASSWORD"),
 )
 
 ORTHANC_URL = os.getenv("ORTHANC_URL", "http://localhost:8042")
-ORTHANC_USER = os.getenv("ORTHANC_ADMIN_USER")
-ORTHANC_PASS = os.getenv("ORTHANC_ADMIN_PASSWORD")
+ORTHANC_USER = _require_env("ORTHANC_ADMIN_USER")
+ORTHANC_PASS = _require_env("ORTHANC_ADMIN_PASSWORD")
 
-JWT_SECRET = os.getenv("JWT_SECRET")
+JWT_SECRET = _require_env("JWT_SECRET")
 JWT_ALGORITHM = "HS256"
 JWT_EXPIRY_HOURS = SESSION_TIMEOUT_HOURS
+JWT_ABSOLUTE_TIMEOUT_SECONDS = int(SESSION_ABSOLUTE_TIMEOUT_HOURS * 3600)
 
 VALID_LEVELS = ("patient", "study", "series")
 
-_log = logging.getLogger("uvicorn.error")
+# Allowlist for label_definitions.name — must start with a letter and contain
+# only letters, digits, and underscores. Keeps DDL-time column aliases safe and
+# forecloses SQL-injection via label names.
+LABEL_NAME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_]{0,62}$")
 
-INIT_SQL = """
-CREATE TABLE IF NOT EXISTS annotations (
-    id                  SERIAL PRIMARY KEY,
-    seriesinstanceuid   TEXT NOT NULL,
-    studyinstanceuid    TEXT NOT NULL,
-    patient_id          TEXT,
-    label               TEXT NOT NULL,
-    value               TEXT,
-    created_by          TEXT NOT NULL,
-    created_at          TIMESTAMPTZ DEFAULT now(),
-    notes               TEXT,
-    UNIQUE(seriesinstanceuid, label, created_by)
-);
-CREATE INDEX IF NOT EXISTS idx_annotations_label ON annotations(label);
-CREATE INDEX IF NOT EXISTS idx_annotations_series ON annotations(seriesinstanceuid);
-
-CREATE TABLE IF NOT EXISTS label_definitions (
-    id          SERIAL PRIMARY KEY,
-    name        TEXT NOT NULL UNIQUE,
-    description TEXT,
-    datatype    TEXT NOT NULL DEFAULT 'bool'
-                CHECK (datatype IN ('bool', 'int', 'text', 'select')),
-    options     TEXT,
-    created_by  TEXT NOT NULL,
-    created_at  TIMESTAMPTZ DEFAULT now()
-);
-
-CREATE TABLE IF NOT EXISTS users (
-    username      TEXT PRIMARY KEY,
-    password_hash TEXT NOT NULL,
-    is_admin      BOOLEAN NOT NULL DEFAULT FALSE,
-    created_at    TIMESTAMPTZ DEFAULT now()
-);
-"""
-
-MIGRATE_SQL = """
--- Legacy migration: add value column if missing
-DO $$
-BEGIN
-    IF NOT EXISTS (
-        SELECT 1 FROM information_schema.columns
-        WHERE table_name = 'annotations' AND column_name = 'value'
-    ) THEN
-        ALTER TABLE annotations ADD COLUMN value TEXT;
-    END IF;
-END $$;
-
--- Legacy migration: update datatype check constraint
-DO $$
-DECLARE
-    cname text;
-BEGIN
-    SELECT conname INTO cname FROM pg_constraint
-    WHERE conrelid = 'label_definitions'::regclass AND contype = 'c' LIMIT 1;
-    IF cname IS NOT NULL THEN
-        EXECUTE format('ALTER TABLE label_definitions DROP CONSTRAINT %I', cname);
-    END IF;
-    ALTER TABLE label_definitions ADD CONSTRAINT label_definitions_datatype_check
-        CHECK (datatype IN ('bool', 'int', 'text', 'select'));
-EXCEPTION WHEN duplicate_object THEN NULL;
-END $$;
-
--- Legacy migration: add options column if missing
-DO $$
-BEGIN
-    IF NOT EXISTS (
-        SELECT 1 FROM information_schema.columns
-        WHERE table_name = 'label_definitions' AND column_name = 'options'
-    ) THEN
-        ALTER TABLE label_definitions ADD COLUMN options TEXT;
-    END IF;
-END $$;
-
--- Multi-level migration: add level column to annotations
-DO $$
-BEGIN
-    IF NOT EXISTS (
-        SELECT 1 FROM information_schema.columns
-        WHERE table_name = 'annotations' AND column_name = 'level'
-    ) THEN
-        ALTER TABLE annotations ADD COLUMN level TEXT NOT NULL DEFAULT 'series';
-        ALTER TABLE annotations ADD CONSTRAINT annotations_level_check
-            CHECK (level IN ('patient', 'study', 'series'));
-    END IF;
-END $$;
-
--- Multi-level migration: relax NOT NULL on seriesinstanceuid / studyinstanceuid
-DO $$
-BEGIN
-    ALTER TABLE annotations ALTER COLUMN seriesinstanceuid DROP NOT NULL;
-    ALTER TABLE annotations ALTER COLUMN studyinstanceuid DROP NOT NULL;
-EXCEPTION WHEN others THEN NULL;
-END $$;
-
--- Multi-level migration: drop old unique constraint and add partial unique indexes
-DO $$
-BEGIN
-    IF EXISTS (
-        SELECT 1 FROM pg_constraint
-        WHERE conname = 'annotations_seriesinstanceuid_label_created_by_key'
-    ) THEN
-        ALTER TABLE annotations
-            DROP CONSTRAINT annotations_seriesinstanceuid_label_created_by_key;
-    END IF;
-END $$;
-
-CREATE UNIQUE INDEX IF NOT EXISTS idx_ann_unique_series
-    ON annotations(seriesinstanceuid, label, created_by) WHERE level = 'series';
-CREATE UNIQUE INDEX IF NOT EXISTS idx_ann_unique_study
-    ON annotations(studyinstanceuid, label, created_by) WHERE level = 'study';
-CREATE UNIQUE INDEX IF NOT EXISTS idx_ann_unique_patient
-    ON annotations(patient_id, label, created_by) WHERE level = 'patient';
-
--- Multi-level migration: add level column to label_definitions
-DO $$
-BEGIN
-    IF NOT EXISTS (
-        SELECT 1 FROM information_schema.columns
-        WHERE table_name = 'label_definitions' AND column_name = 'level'
-    ) THEN
-        ALTER TABLE label_definitions ADD COLUMN level TEXT NOT NULL DEFAULT 'series';
-        ALTER TABLE label_definitions ADD CONSTRAINT label_definitions_level_check
-            CHECK (level IN ('patient', 'study', 'series'));
-    END IF;
-END $$;
-
-CREATE INDEX IF NOT EXISTS idx_annotations_study ON annotations(studyinstanceuid);
-CREATE INDEX IF NOT EXISTS idx_annotations_patient ON annotations(patient_id);
-CREATE INDEX IF NOT EXISTS idx_annotations_level ON annotations(level);
-
--- Shared annotations migration: make annotations global (one value per entity+label)
--- Keep created_by for audit, but remove it from uniqueness.
-DO $$
-DECLARE
-    idx_def TEXT;
-BEGIN
-    SELECT indexdef INTO idx_def FROM pg_indexes
-    WHERE indexname = 'idx_ann_unique_series';
-
-    IF idx_def IS NOT NULL AND idx_def LIKE '%created_by%' THEN
-        -- Deduplicate: for each (level, entity, label) keep the most recent row
-        DELETE FROM annotations a
-        USING (
-            SELECT id, ROW_NUMBER() OVER (
-                PARTITION BY level,
-                    COALESCE(seriesinstanceuid, ''),
-                    COALESCE(studyinstanceuid, ''),
-                    COALESCE(patient_id, ''),
-                    label
-                ORDER BY created_at DESC NULLS LAST, id DESC
-            ) AS rn
-            FROM annotations
-        ) ranked
-        WHERE a.id = ranked.id AND ranked.rn > 1;
-
-        DROP INDEX IF EXISTS idx_ann_unique_series;
-        DROP INDEX IF EXISTS idx_ann_unique_study;
-        DROP INDEX IF EXISTS idx_ann_unique_patient;
-    END IF;
-END $$;
-
-CREATE UNIQUE INDEX IF NOT EXISTS idx_ann_shared_series
-    ON annotations(seriesinstanceuid, label) WHERE level = 'series';
-CREATE UNIQUE INDEX IF NOT EXISTS idx_ann_shared_study
-    ON annotations(studyinstanceuid, label) WHERE level = 'study';
-CREATE UNIQUE INDEX IF NOT EXISTS idx_ann_shared_patient
-    ON annotations(patient_id, label) WHERE level = 'patient';
-
-CREATE TABLE IF NOT EXISTS user_preferences (
-    username   TEXT NOT NULL REFERENCES users(username) ON DELETE CASCADE,
-    level      TEXT NOT NULL CHECK (level IN ('patient', 'study', 'series', '_global')),
-    prefs      JSONB NOT NULL DEFAULT '{}',
-    updated_at TIMESTAMPTZ DEFAULT now(),
-    PRIMARY KEY (username, level)
-);
-
--- Cold storage / hot cache (requires existing image_series table in this database)
-DO $$
-BEGIN
-    IF EXISTS (
-        SELECT 1 FROM information_schema.tables
-        WHERE table_schema = 'public' AND table_name = 'image_series'
-    ) THEN
-        ALTER TABLE image_series ADD COLUMN IF NOT EXISTS dicom_archive_path TEXT;
-    END IF;
-END $$;
-
-CREATE TABLE IF NOT EXISTS cache_state (
-    studyinstanceuid TEXT PRIMARY KEY,
-    status TEXT NOT NULL DEFAULT 'cold'
-        CHECK (status IN ('cold', 'warming', 'hot', 'error')),
-    cache_path TEXT,
-    warmed_at TIMESTAMPTZ,
-    last_accessed_at TIMESTAMPTZ,
-    error_message TEXT
-);
-CREATE INDEX IF NOT EXISTS idx_cache_state_status ON cache_state(status);
-CREATE INDEX IF NOT EXISTS idx_cache_state_last_accessed ON cache_state(last_accessed_at);
-
-CREATE TABLE IF NOT EXISTS orthanc_resource_map (
-    orthanc_id TEXT PRIMARY KEY,
-    resource_type TEXT NOT NULL CHECK (resource_type IN ('study', 'series', 'instance')),
-    studyinstanceuid TEXT NOT NULL REFERENCES cache_state(studyinstanceuid) ON DELETE CASCADE,
-    seriesinstanceuid TEXT,
-    created_at TIMESTAMPTZ DEFAULT now()
-);
-CREATE INDEX IF NOT EXISTS idx_orm_study ON orthanc_resource_map(studyinstanceuid);
-"""
+logger = logging.getLogger(__name__)
 
 DIST_DIR = Path(__file__).parent / "dist"
 
@@ -290,12 +125,25 @@ def get_conn():
     return psycopg2.connect(**DB_CONFIG)
 
 
+_ALEMBIC_INI = Path(__file__).resolve().parent / "alembic.ini"
+
+
 def init_db():
+    """Bring the DB schema up to date, then sync the dynamic labelled tables.
+
+    Schema DDL lives in `alembic/versions/`. On startup we run
+    `alembic upgrade head`; on a DB that is already at head this is a no-op.
+    The pre-Alembic `INIT_SQL` / `MIGRATE_SQL` blocks have been folded into
+    revision `0001_baseline` — see documentation/operations/schema_migrations.md.
+    """
+    from alembic import command
+    from alembic.config import Config
+
+    cfg = Config(str(_ALEMBIC_INI))
+    command.upgrade(cfg, "head")
+
     conn = get_conn()
     try:
-        with conn.cursor() as cur:
-            cur.execute(INIT_SQL)
-            cur.execute(MIGRATE_SQL)
         ensure_labelled_tables(conn)
         conn.commit()
     finally:
@@ -308,14 +156,29 @@ async def _eviction_loop() -> None:
         try:
             evicted = run_eviction()
             if evicted:
-                _log.info("Cold cache eviction removed %d studies: %s", len(evicted), evicted[:10])
+                # Log a per-study line so a structured-log consumer (WS 06)
+                # can pivot on study_uid; keep the rollup line for at-a-glance
+                # journal scanning.
+                for uid in evicted:
+                    logger.info(
+                        "eviction_loop: evicted study",
+                        extra={"study_uid": uid},
+                    )
+                logger.info(
+                    "eviction_loop: removed %d studies (sample=%s)",
+                    len(evicted), evicted[:10],
+                )
         except Exception:
-            _log.exception("Cold cache eviction failed")
+            logger.exception("eviction_loop: cold cache eviction failed")
 
 
 @asynccontextmanager
 async def lifespan(application: FastAPI):
     init_db()
+    # Alembic's env.py calls `logging.config.fileConfig()` during the
+    # startup migration run, which wipes the JSON handler. Re-install it
+    # so every request log line stays structured.
+    configure_logging()
     ev_task: asyncio.Task | None = None
     if STORAGE_MODE == "cold_path_cache":
         ev_task = asyncio.create_task(_eviction_loop())
@@ -332,6 +195,23 @@ async def lifespan(application: FastAPI):
 
 app = FastAPI(title="SSC Series Annotations", lifespan=lifespan)
 
+# Per-IP rate limiter for abuse-prone endpoints (login). Uses slowapi's in-memory
+# backend; behind a reverse proxy, configure X-Forwarded-For handling there.
+limiter = Limiter(key_func=get_remote_address)
+app.state.limiter = limiter
+
+
+@app.exception_handler(RateLimitExceeded)
+async def _rate_limit_handler(request: Request, exc: RateLimitExceeded):
+    from fastapi.responses import JSONResponse
+    retry_after = getattr(exc, "retry_after", None) or 60
+    return JSONResponse(
+        status_code=429,
+        content={"detail": "Too many attempts; please wait and retry."},
+        headers={"Retry-After": str(int(retry_after))},
+    )
+
+
 if DIST_DIR.is_dir():
     app.mount("/assets", StaticFiles(directory=str(DIST_DIR / "assets")), name="assets")
 
@@ -340,61 +220,158 @@ if DIST_DIR.is_dir():
 async def sliding_jwt(request, call_next):
     """Refresh the JWT on every meaningful request so the session stays alive
     as long as the user is active.  /api/me is excluded so that status-check
-    polling does not prevent expiry."""
+    polling does not prevent expiry.
+
+    The original `iat` (issued-at) claim is preserved across refreshes so that
+    the absolute session timeout stays anchored to the true login time.
+    """
     response = await call_next(request)
     path = request.url.path
     if path.startswith("/assets/") or path == "/api/me":
         return response
     token = request.cookies.get("auth_token")
     if token:
-        username = decode_jwt(token)
-        if username:
+        payload = decode_jwt(token)
+        if payload:
             response.set_cookie(
                 key="auth_token",
-                value=create_jwt(username),
+                value=create_jwt(payload["sub"], iat=payload.get("iat")),
                 httponly=True,
+                secure=COOKIE_SECURE,
                 samesite="lax",
                 max_age=int(JWT_EXPIRY_HOURS * 3600),
             )
     return response
 
 
+def _matched_path_template(request: Request) -> str:
+    """Return the matched FastAPI route template for Prometheus labels.
+
+    Falls back to the raw path when no route has been matched yet (e.g.
+    a 404 before routing) — cardinality stays bounded because everything
+    that reaches the SPA catch-all maps to `/{full_path:path}`.
+    """
+    route = request.scope.get("route")
+    path = getattr(route, "path", None)
+    if isinstance(path, str) and path:
+        return path
+    return request.url.path or "__no_route__"
+
+
+@app.middleware("http")
+async def request_id_middleware(request: Request, call_next):
+    """Stamp every request with a UUID, propagate it into logs and metrics.
+
+    Registered AFTER `sliding_jwt` so it becomes the outermost layer in the
+    ASGI stack: contextvars and timing wrap everything below, and the
+    `X-Request-ID` header lands on the final response.
+    """
+    req_id = request.headers.get("x-request-id") or uuid.uuid4().hex
+    rid_token = request_id_ctx.set(req_id)
+
+    # Best-effort user extraction from the JWT cookie so log lines carry
+    # `user` for authenticated requests. Failures here are silent — auth
+    # errors are surfaced by the dependency layer, not the middleware.
+    user_token = None
+    auth_cookie = request.cookies.get("auth_token")
+    if auth_cookie:
+        try:
+            payload = decode_jwt(auth_cookie)
+        except Exception:  # pragma: no cover — decode_jwt already catches
+            payload = None
+        if payload and payload.get("sub"):
+            user_token = user_ctx.set(str(payload["sub"]))
+
+    start = time.perf_counter()
+    status_code = 500
+    try:
+        response = await call_next(request)
+        status_code = response.status_code
+        response.headers["X-Request-ID"] = req_id
+        return response
+    finally:
+        elapsed = time.perf_counter() - start
+        path_template = _matched_path_template(request)
+        # Keep /metrics scrapes out of the request-rate timeseries to
+        # avoid self-inflating the counters.
+        if path_template != "/metrics":
+            try:
+                http_requests_total.labels(
+                    method=request.method,
+                    path_template=path_template,
+                    status=str(status_code),
+                ).inc()
+                http_request_duration_seconds.labels(
+                    method=request.method,
+                    path_template=path_template,
+                ).observe(elapsed)
+            except Exception:
+                # Metric failures must never break the request.
+                pass
+            logger.info(
+                "request",
+                extra={
+                    "http_method": request.method,
+                    "http_path": request.url.path,
+                    "http_path_template": path_template,
+                    "http_status": status_code,
+                    "duration_seconds": round(elapsed, 6),
+                },
+            )
+        request_id_ctx.reset(rid_token)
+        if user_token is not None:
+            user_ctx.reset(user_token)
+
+
 # ---------------------------------------------------------------------------
 # Auth helpers
 # ---------------------------------------------------------------------------
 
-def create_jwt(username: str) -> str:
+def create_jwt(username: str, iat: int | None = None) -> str:
+    now = datetime.now(timezone.utc)
+    iat_epoch = int(iat) if iat is not None else int(now.timestamp())
     payload = {
         "sub": username,
-        "exp": datetime.now(timezone.utc) + timedelta(hours=JWT_EXPIRY_HOURS),
+        "iat": iat_epoch,
+        "exp": now + timedelta(hours=JWT_EXPIRY_HOURS),
     }
     return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
 
 
-def decode_jwt(token: str) -> str | None:
-    """Return the username or None if the token is invalid/expired."""
+def decode_jwt(token: str) -> dict | None:
+    """Return the decoded payload or None if the token is invalid/expired
+    (by sliding exp) or past the absolute session timeout."""
     try:
         payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
-        return payload.get("sub")
     except (jwt.ExpiredSignatureError, jwt.InvalidTokenError):
         return None
+    iat = payload.get("iat")
+    if iat is not None:
+        try:
+            age = int(datetime.now(timezone.utc).timestamp()) - int(iat)
+        except (TypeError, ValueError):
+            return None
+        if age > JWT_ABSOLUTE_TIMEOUT_SECONDS:
+            return None
+    return payload
 
 
 def get_current_user(auth_token: str | None = Cookie(None)) -> str:
     """FastAPI dependency: extracts username from JWT cookie or raises 401."""
     if not auth_token:
         raise HTTPException(status_code=401, detail="Not authenticated")
-    username = decode_jwt(auth_token)
-    if not username:
+    payload = decode_jwt(auth_token)
+    if not payload or not payload.get("sub"):
         raise HTTPException(status_code=401, detail="Invalid or expired token")
-    return username
+    return payload["sub"]
 
 
 def get_optional_user(auth_token: str | None = Cookie(None)) -> str | None:
     """Return username if logged in, None otherwise. Never raises."""
     if not auth_token:
         return None
-    return decode_jwt(auth_token)
+    payload = decode_jwt(auth_token)
+    return payload.get("sub") if payload else None
 
 
 # ---------------------------------------------------------------------------
@@ -407,7 +384,8 @@ class LoginRequest(BaseModel):
 
 
 @app.post("/api/login")
-def login(body: LoginRequest, response: Response):
+@limiter.limit(f"{LOGIN_RATE_LIMIT_PER_5MIN}/5 minutes")
+def login(request: Request, body: LoginRequest, response: Response):
     conn = get_conn()
     try:
         with conn.cursor() as cur:
@@ -427,6 +405,7 @@ def login(body: LoginRequest, response: Response):
         key="auth_token",
         value=token,
         httponly=True,
+        secure=COOKIE_SECURE,
         samesite="lax",
         max_age=int(JWT_EXPIRY_HOURS * 3600),
     )
@@ -1291,13 +1270,41 @@ def api_storage_mode():
 @app.post("/api/studies/{studyinstanceuid}/warm")
 def api_warm_study(studyinstanceuid: str, auth_token: str | None = Cookie(None)):
     get_current_user(auth_token)
-    return warm_study(studyinstanceuid)
+    try:
+        result = warm_study(studyinstanceuid)
+    except InsufficientDiskSpaceError as e:
+        cold_storage_warm_total.labels(result="insufficient_disk_space").inc()
+        raise HTTPException(
+            status_code=507,
+            detail={
+                "error": "insufficient_disk_space",
+                "required_bytes": e.required_bytes,
+                "available_bytes": e.available_bytes,
+                "target": str(e.target),
+            },
+        )
+    cold_storage_warm_total.labels(
+        result="success" if result.get("ok") else "failure"
+    ).inc()
+    return result
 
 
 @app.post("/api/studies/{studyinstanceuid}/evict")
 def api_evict_study(studyinstanceuid: str, auth_token: str | None = Cookie(None)):
     get_current_user(auth_token)
-    return evict_study(studyinstanceuid)
+    try:
+        result = evict_study(studyinstanceuid)
+    except Exception as e:
+        # Transactional eviction: rmtree failed and the cache_state row was
+        # left intact. Surface a 500 with the underlying reason so the
+        # operator can act (chmod, free space, etc.) and retry.
+        cold_storage_evict_total.labels(result="failure").inc()
+        raise HTTPException(
+            status_code=500,
+            detail={"error": "evict_failed", "reason": str(e)[:500]},
+        )
+    cold_storage_evict_total.labels(result="success").inc()
+    return result
 
 
 @app.get("/api/studies/{studyinstanceuid}/cache-status")
@@ -1641,6 +1648,11 @@ def create_label_definition(body: LabelDefinitionCreate, auth_token: str | None 
         raise HTTPException(status_code=400, detail="datatype must be bool, int, text, or select")
     if body.level not in VALID_LEVELS:
         raise HTTPException(status_code=400, detail="level must be patient, study, or series")
+    if not LABEL_NAME_RE.match((body.name or "").strip()):
+        raise HTTPException(
+            status_code=400,
+            detail="name must match ^[A-Za-z][A-Za-z0-9_]{0,62}$ (letters, digits, underscores; must start with a letter; max 63 chars)",
+        )
     options_json = json.dumps(body.options) if body.options else None
     conn = get_conn()
     try:
@@ -1675,53 +1687,94 @@ def create_label_definition(body: LabelDefinitionCreate, auth_token: str | None 
 # ---------------------------------------------------------------------------
 
 def _rebuild_snapshots(conn):
-    """Rebuild the three snapshot tables from source data + annotations."""
+    """Rebuild the three snapshot tables from source data + annotations.
+
+    Uses psycopg2.sql composition for all dynamic identifiers and literals;
+    label names are additionally filtered against LABEL_NAME_RE so the
+    resulting DDL cannot be perturbed by a maliciously-named label.
+    """
     with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
         cur.execute(
             "SELECT name, level, datatype FROM label_definitions ORDER BY level, name"
         )
         label_defs = cur.fetchall()
 
+    bad_names = [
+        ld["name"] for ld in label_defs
+        if not ld.get("name") or not LABEL_NAME_RE.match(ld["name"])
+    ]
+    if bad_names:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Refusing to rebuild snapshots; label name(s) violate allowlist {LABEL_NAME_RE.pattern}: {bad_names}",
+        )
+
     counts = {}
 
-    for level_name, source_table, id_col, base_cols in [
+    levels = [
         ("patient", "lvo_clinical_data", "patient_id",
-         f"{PATIENT_ID_COL} AS patient_id, stroke_date"),
+         psql.SQL("{pid} AS patient_id, stroke_date").format(
+             pid=psql.Identifier(PATIENT_ID_COL)
+         )),
         ("study", "image_study", "studyinstanceuid",
-         "patient_id, acquisitiondatetime, study_type, studyinstanceuid"),
+         psql.SQL("patient_id, acquisitiondatetime, study_type, studyinstanceuid")),
         ("series", "image_series", "seriesinstanceuid",
-         "patient_id, acquisitiondatetime, modality, seriesdescription, seriesinstanceuid"),
-    ]:
+         psql.SQL("patient_id, acquisitiondatetime, modality, seriesdescription, seriesinstanceuid")),
+    ]
+
+    for level_name, source_table, id_col, base_cols in levels:
         snapshot_table = f"snapshot_{level_name}s"
+        snapshot_id = psql.Identifier(snapshot_table)
+        source_id = psql.Identifier(source_table)
+        id_col_id = psql.Identifier(id_col)
+        level_lit = psql.Literal(level_name)
         level_labels = [ld for ld in label_defs if ld["level"] == level_name]
 
-        pivot_cols = ""
-        pivot_joins = ""
+        pivot_col_parts = []
+        pivot_join_parts = []
         for i, ld in enumerate(level_labels):
-            alias = f"a{i}"
-            safe_name = ld["name"].replace(" ", "_").replace("-", "_").lower()
-            pivot_cols += f", {alias}.value AS label_{safe_name}"
-            pivot_joins += (
-                f" LEFT JOIN annotations {alias} ON {alias}.level = '{level_name}' "
-                f"AND {alias}.{id_col} = src.{id_col} "
-                f"AND {alias}.label = '{ld['name']}' "
+            alias_id = psql.Identifier(f"a{i}")
+            col_alias_id = psql.Identifier(f"label_{ld['name'].lower()}")
+            label_lit = psql.Literal(ld["name"])
+            pivot_col_parts.append(
+                psql.SQL("{a}.value AS {c}").format(a=alias_id, c=col_alias_id)
+            )
+            pivot_join_parts.append(
+                psql.SQL(
+                    "LEFT JOIN annotations {a} ON {a}.level = {lvl} "
+                    "AND {a}.{idc} = src.{idc} "
+                    "AND {a}.label = {lbl}"
+                ).format(
+                    a=alias_id, lvl=level_lit, idc=id_col_id, lbl=label_lit,
+                )
             )
 
-        src_alias = "src"
-        if level_name == "patient":
-            src_select = f"SELECT {base_cols} FROM {source_table}"
-        else:
-            src_select = f"SELECT {base_cols} FROM {source_table}"
+        pivot_cols = (
+            psql.SQL(", ") + psql.SQL(", ").join(pivot_col_parts)
+            if pivot_col_parts else psql.SQL("")
+        )
+        pivot_joins = (
+            psql.SQL(" ") + psql.SQL(" ").join(pivot_join_parts)
+            if pivot_join_parts else psql.SQL("")
+        )
 
         with conn.cursor() as cur:
-            cur.execute(f"DROP TABLE IF EXISTS {snapshot_table}")
+            cur.execute(psql.SQL("DROP TABLE IF EXISTS {}").format(snapshot_id))
             cur.execute(
-                f"CREATE TABLE {snapshot_table} AS "
-                f"SELECT DISTINCT ON ({src_alias}.{id_col}) "
-                f"{src_alias}.*{pivot_cols} "
-                f"FROM ({src_select}) {src_alias}{pivot_joins}"
+                psql.SQL(
+                    "CREATE TABLE {snap} AS "
+                    "SELECT DISTINCT ON (src.{idc}) src.*{pcols} "
+                    "FROM (SELECT {base} FROM {src}) src{pjoins}"
+                ).format(
+                    snap=snapshot_id,
+                    idc=id_col_id,
+                    pcols=pivot_cols,
+                    base=base_cols,
+                    src=source_id,
+                    pjoins=pivot_joins,
+                )
             )
-            cur.execute(f"SELECT COUNT(*) FROM {snapshot_table}")
+            cur.execute(psql.SQL("SELECT COUNT(*) FROM {}").format(snapshot_id))
             counts[snapshot_table] = cur.fetchone()[0]
 
     conn.commit()
@@ -1854,6 +1907,146 @@ def ohif_link(
                 return {"status": "ready", "url": url}
             return {"url": url}
     raise HTTPException(status_code=404, detail="Study not found in Orthanc")
+
+
+# ---------------------------------------------------------------------------
+# Observability: /healthz and /metrics (unauthenticated)
+# ---------------------------------------------------------------------------
+
+_GIT_SHA: str | None = None
+
+
+def _resolve_git_sha() -> str:
+    """Return the current git SHA (short), or `"unknown"` if unavailable.
+
+    Cached after first lookup — the companion process is not long-lived
+    enough for the SHA to change under it in practice.
+    """
+    global _GIT_SHA
+    if _GIT_SHA is not None:
+        return _GIT_SHA
+    head = ROOT_DIR.parent / ".git" / "HEAD"
+    try:
+        if head.is_file():
+            ref = head.read_text().strip()
+            if ref.startswith("ref: "):
+                ref_path = ROOT_DIR.parent / ".git" / ref[5:]
+                if ref_path.is_file():
+                    _GIT_SHA = ref_path.read_text().strip()[:12]
+                    return _GIT_SHA
+            if len(ref) >= 7:
+                _GIT_SHA = ref[:12]
+                return _GIT_SHA
+    except OSError:
+        pass
+    _GIT_SHA = "unknown"
+    return _GIT_SHA
+
+
+def _check_db(dsn_kwargs: dict) -> tuple[str, str | None]:
+    try:
+        conn = psycopg2.connect(connect_timeout=3, **dsn_kwargs)
+        try:
+            with conn.cursor() as cur:
+                cur.execute("SELECT 1")
+                cur.fetchone()
+        finally:
+            conn.close()
+        return "ok", None
+    except Exception as e:
+        return "error", str(e)[:200]
+
+
+def _orthanc_db_kwargs() -> dict | None:
+    """Build connect kwargs for `orthanc_db` if PG_ORTHANC_* are configured."""
+    user = os.getenv("PG_ORTHANC_USER")
+    password = os.getenv("PG_ORTHANC_PASSWORD")
+    dbname = os.getenv("PG_ORTHANC_DB", "orthanc_db")
+    if not user or not password:
+        return None
+    return dict(
+        host=DB_CONFIG["host"],
+        port=DB_CONFIG["port"],
+        dbname=dbname,
+        user=user,
+        password=password,
+    )
+
+
+@app.get("/healthz")
+def healthz():
+    """Liveness + dependency check.
+
+    Returns 200 when every critical check passes, 503 otherwise. Critical
+    checks: the `stanford-stroke` DB and (when `cold_path_cache` is the
+    storage mode) the Orthanc HTTP API. `orthanc_db` and disk metrics are
+    reported for observability but don't gate liveness — a bad Postgres
+    password for `orthanc_db` shouldn't page the companion.
+    """
+    from fastapi.responses import JSONResponse
+
+    body: dict[str, object] = {"status": "ok", "version": _resolve_git_sha()}
+
+    db_status, db_err = _check_db(DB_CONFIG)
+    body["db_stanford_stroke"] = db_status
+    if db_err:
+        body["db_stanford_stroke_error"] = db_err
+
+    o_kwargs = _orthanc_db_kwargs()
+    if o_kwargs is not None:
+        o_status, o_err = _check_db(o_kwargs)
+        body["db_orthanc"] = o_status
+        if o_err:
+            body["db_orthanc_error"] = o_err
+    else:
+        body["db_orthanc"] = "unconfigured"
+
+    try:
+        resp = http_requests.get(
+            f"{ORTHANC_URL}/system",
+            auth=(ORTHANC_USER, ORTHANC_PASS),
+            timeout=3,
+        )
+        body["orthanc_api"] = "ok" if resp.status_code == 200 else f"http_{resp.status_code}"
+    except Exception as e:
+        body["orthanc_api"] = "error"
+        body["orthanc_api_error"] = str(e)[:200]
+
+    try:
+        p = LEGACY_DICOM_ROOT
+        while not p.exists():
+            if p.parent == p:
+                break
+            p = p.parent
+        du = shutil.disk_usage(p)
+        body["disk_free_percent_legacy_dicom_root"] = round(du.free * 100.0 / du.total, 1)
+        body["disk_free_bytes_legacy_dicom_root"] = int(du.free)
+    except Exception as e:
+        body["disk_free_percent_legacy_dicom_root"] = None
+        body["disk_error"] = str(e)[:200]
+
+    # Critical gates: stanford-stroke DB + Orthanc API (when cold_path_cache).
+    critical_ok = body["db_stanford_stroke"] == "ok"
+    if STORAGE_MODE == "cold_path_cache":
+        critical_ok = critical_ok and body["orthanc_api"] == "ok"
+
+    if not critical_ok:
+        body["status"] = "degraded"
+        return JSONResponse(status_code=503, content=body)
+    return body
+
+
+@app.get("/metrics")
+def metrics_endpoint():
+    """Prometheus exposition — unauthenticated, same as /healthz."""
+    from fastapi.responses import Response as _Response
+    from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
+
+    refresh_cold_storage_gauges(get_conn, LEGACY_DICOM_ROOT)
+    return _Response(
+        content=generate_latest(METRICS_REGISTRY),
+        media_type=CONTENT_TYPE_LATEST,
+    )
 
 
 # ---------------------------------------------------------------------------

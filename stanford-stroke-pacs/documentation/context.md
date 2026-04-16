@@ -15,6 +15,10 @@ One **Orthanc** container (`ssc-orthanc`), one **Companion** service on the host
 | Image integration protocol (ingesting new data) | [`reference/image_integration_protocol.md`](reference/image_integration_protocol.md) |
 | Fresh install | [`guides/installation_and_deployment.md`](guides/installation_and_deployment.md) |
 | Day-2 commands | [`operations/commands.md`](operations/commands.md) |
+| Upgrading dependencies (pinned packages) | [`operations/upgrading_dependencies.md`](operations/upgrading_dependencies.md) |
+| Schema migrations (Alembic, `stanford-stroke` DB) | [`operations/schema_migrations.md`](operations/schema_migrations.md) |
+| Secret rotation (JWT, Orthanc admin, DB) | [`operations/secret_rotation.md`](operations/secret_rotation.md) |
+| Observability (logs, /healthz, /metrics, Grafana) | [`operations/observability.md`](operations/observability.md) |
 | Backup strategy (Tier 1 active, Tier 2 dormant) | [`operations/backup_strategy.md`](operations/backup_strategy.md) |
 | Restore runbook (DB recovery procedure) | [`operations/restore_runbook.md`](operations/restore_runbook.md) |
 | Cold storage design | [`cold_storage/design.md`](cold_storage/design.md) |

@@ -1,7 +1,7 @@
-pandas
-python-dotenv
-SQLAlchemy
-psycopg2-binary
-numpy
-pydicom
-SimpleITK
+pandas==3.0.1
+python-dotenv==1.2.2
+SQLAlchemy==2.0.48
+psycopg2-binary==2.9.11
+numpy==2.4.3
+pydicom==3.0.1
+SimpleITK==2.5.3

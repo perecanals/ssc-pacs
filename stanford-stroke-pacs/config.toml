@@ -8,6 +8,23 @@ legacy_dicom_root = "/DATA2/pacs_imaging_data"
 cold_archive_root = "/DATA2/pacs_imaging_data_compressed"
 hot_cache_dir = "/DATA2/pacs_hot_cache"
 eviction_ttl_hours = 9999
+# Cold-storage warm watchdog: a `cache_state` row stuck in status='warming'
+# longer than this is treated as cold by the next warm attempt (recovers
+# from a process crash between archive extraction and the final hot mark).
+warming_timeout_minutes = 30
+# Pre-extraction disk-space guard. Required free bytes on the target
+# filesystem are estimated as `safety_factor * compressed_archive_size`
+# plus `min_free_bytes` of headroom. .zst typically expands ~3× for DICOM.
+warming_disk_safety_factor = 3.0
+warming_disk_min_free_bytes = 104857600  # 100 MiB
 
 [companion]
 session_timeout_hours = 0.25
+# Absolute (non-sliding) session lifetime. A token minted more than this many
+# hours ago is rejected regardless of sliding refresh activity.
+session_absolute_timeout_hours = 24
+# Emit the JWT cookie with Secure=true so browsers only send it over HTTPS.
+# Set to false for local HTTP-only development.
+cookie_secure = true
+# Per-IP cap for POST /api/login attempts inside a 5-minute rolling window.
+login_rate_limit_per_5min = 10

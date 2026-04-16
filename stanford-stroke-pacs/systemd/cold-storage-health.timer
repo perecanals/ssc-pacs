@@ -1,0 +1,13 @@
+[Unit]
+Description=PACS — cold-storage health probe every 15 minutes
+Documentation=file:/home/perecanals/ssc-pacs/stanford-stroke-pacs/documentation/cold_storage/runbook.md
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=15min
+RandomizedDelaySec=2min
+Persistent=true
+Unit=cold-storage-health.service
+
+[Install]
+WantedBy=timers.target

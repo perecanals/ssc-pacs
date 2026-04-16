@@ -211,6 +211,127 @@ accidental deletion in legacy mode.
 
 ---
 
+## Watchdog and disk-space guard
+
+The cache manager has three robustness invariants (see WS 05). All three are
+configured in `[storage]` of `config.toml`:
+
+```toml
+warming_timeout_minutes      = 30      # stuck-warming watchdog
+warming_disk_safety_factor   = 3.0     # required ≈ factor × compressed
+warming_disk_min_free_bytes  = 104857600  # plus this much headroom
+```
+
+### Stuck-warming watchdog
+
+If a process crashes between archive extraction and the final
+`status='hot'` mark, the row stays in `status='warming'`. The next call
+to `warm_study()` for that UID:
+
+1. Acquires the per-study advisory lock (the previous warmer's lock was
+   released when its connection died).
+2. Reads the row; sees `status='warming'` with
+   `warming_started_at < now() - warming_timeout_minutes`.
+3. Logs a structured warning (`warm_study: warming watchdog fired …`)
+   and proceeds to re-warm.
+
+If you want to clear a stuck row without waiting for an inbound warm
+request, just trigger one manually:
+
+```bash
+source .env
+SUID="<study uid>"
+curl -X POST -b cookies.txt http://localhost:8043/api/studies/$SUID/warm
+```
+
+To inspect the row directly:
+
+```bash
+psql -d stanford-stroke -c "
+  SELECT studyinstanceuid, status, warming_started_at,
+         now() - warming_started_at AS age, error_message
+  FROM cache_state
+  WHERE status = 'warming';"
+```
+
+To force-clear a row (rare; only if the watchdog is somehow not firing
+and you cannot trigger a warm):
+
+```bash
+psql -d stanford-stroke -c "
+  UPDATE cache_state
+  SET status = 'cold', warming_started_at = NULL, error_message = NULL
+  WHERE studyinstanceuid = '<study uid>';"
+```
+
+### Disk-space precheck
+
+Before extracting, `warm_study()` estimates required free bytes as
+`safety_factor × Σ(compressed archive sizes) + min_free_bytes`. If the
+filesystem holding the target `dicom_dir_path` cannot fit it, the row is
+marked `status='cold'` (not `warming`) and the warm raises
+`InsufficientDiskSpaceError`. The HTTP layer surfaces this as
+**`507 Insufficient Storage`** with a JSON body:
+
+```json
+{"detail": {
+  "error": "insufficient_disk_space",
+  "required_bytes": 12345678,
+  "available_bytes":   234567,
+  "target": "/DATA2/pacs_imaging_data/<patient>/<study>/<series>"
+}}
+```
+
+When you see this in the journal:
+1. `df -h /DATA2/pacs_imaging_data` to confirm.
+2. Identify what's filling the disk — usually a runaway warm fan-out
+   from the UI, or a cron job dumping into the same mount.
+3. Once free space is restored, retrying the warm succeeds (idempotent;
+   the row is at `cold`).
+
+### Transactional eviction
+
+`evict_study()` deletes `cache_state` **only after** every `rmtree`
+succeeds. If `rmtree` fails (permissions, EBUSY, disk error), the row is
+left intact, the failure is logged with the study UID, and the API
+returns 500. The operator must clear the underlying cause and retry.
+
+### Health probe
+
+`scripts/cold_storage_health.py` reports:
+- count of stuck-warming rows;
+- count of orphan `*.warming` directories on disk;
+- free disk on `legacy_dicom_root`;
+- distribution of `cache_state` rows by `last_accessed_at` bucket.
+
+```bash
+# Human output
+conda activate pacs
+python scripts/cold_storage_health.py
+
+# JSON for monitoring tools
+python scripts/cold_storage_health.py --json
+```
+
+Exit code is non-zero if any critical condition holds (stuck rows,
+orphan dirs, or free disk below `--min-free-bytes`, default 5 GiB).
+
+A systemd timer runs the probe every 15 minutes:
+
+```bash
+sudo cp systemd/cold-storage-health.service systemd/cold-storage-health.timer /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now cold-storage-health.timer
+
+systemctl list-timers cold-storage-health.timer
+journalctl -u cold-storage-health.service -n 50
+```
+
+Failures appear in `journalctl` (the unit exits non-zero) and the JSON
+report can be wired into your alerting layer once WS 06 lands.
+
+---
+
 ## API reference (cold storage)
 
 | Endpoint | Auth | Purpose |
@@ -277,6 +398,7 @@ If you need to roll back:
 
 - `image_series.dicom_archive_path TEXT` — populated by archiver / integration protocol
 - `cache_state` table — per-study cold/warming/hot/error status
+- `cache_state.warming_started_at TIMESTAMPTZ` — added by Alembic revision `0002_warming_started_at`; powers the stuck-warming watchdog (see above)
 - `orthanc_resource_map` table — legacy from removed `cold_cache` mode; harmless empty table
 
 See [`../reference/data_stores.md`](../reference/data_stores.md) for column details.
