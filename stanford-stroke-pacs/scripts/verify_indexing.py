@@ -1,6 +1,11 @@
 #!/usr/bin/env python3
 """Cross-reference the image_series SQL table against Orthanc's indexed data.
 
+.. deprecated::
+    This script is superseded by ``scripts/reconcile.py`` which performs the
+    same check plus additional validations (archive path, dicom_dir_path on
+    disk). Use ``python scripts/reconcile.py`` instead.
+
 Reads the existing PostgreSQL table (read-only) and queries the Orthanc REST API
 to report which series have been indexed and which are missing.
 
@@ -11,11 +16,18 @@ Usage:
 
 import os
 import sys
+import warnings
 from pathlib import Path
 
 import psycopg2
 import requests
 from dotenv import load_dotenv
+
+warnings.warn(
+    "verify_indexing.py is deprecated — use scripts/reconcile.py instead.",
+    DeprecationWarning,
+    stacklevel=1,
+)
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 load_dotenv(REPO_ROOT / ".env")
@@ -102,7 +114,7 @@ def main():
         print("Error: DB_USER / DB_PASSWORD not set. Check your .env file.", file=sys.stderr)
         sys.exit(1)
 
-    print(f"Loading .env from: {ENV_PATH}")
+    print(f"Loading .env from: {REPO_ROOT / '.env'}")
     print(f"Connecting to PostgreSQL: {DB_HOST}:{DB_PORT}/{DB_NAME}")
     sql_series = get_sql_series()
     print(f"  SQL table: {len(sql_series)} series with a SeriesInstanceUID\n")
@@ -142,7 +154,7 @@ def main():
     print(f"  Coverage:                  {coverage:.1f}%")
 
     if missing:
-        print(f"\n--- First 20 missing series ---")
+        print("\n--- First 20 missing series ---")
         for uid in sorted(missing)[:20]:
             info = sql_series[uid]
             print(f"  Patient: {info['patient_id']}  |  {info['modality']}  |  {info['description']}")

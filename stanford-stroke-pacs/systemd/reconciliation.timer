@@ -1,0 +1,13 @@
+[Unit]
+Description=PACS — two-DB reconciliation every 6 hours
+Documentation=file:/home/perecanals/ssc-pacs/stanford-stroke-pacs/documentation/operations/reconciliation.md
+
+[Timer]
+OnBootSec=10min
+OnUnitActiveSec=6h
+RandomizedDelaySec=5min
+Persistent=true
+Unit=reconciliation.service
+
+[Install]
+WantedBy=timers.target

@@ -66,6 +66,47 @@ cold_storage_disk_free_bytes = Gauge(
 )
 
 
+# ---------------------------------------------------------------------------
+# Reconciliation metrics
+# ---------------------------------------------------------------------------
+
+reconciliation_mismatches_total = Gauge(
+    "reconciliation_mismatches_total",
+    "Number of mismatches by category from the last reconciliation run.",
+    labelnames=("category",),
+    registry=REGISTRY,
+)
+
+reconciliation_last_run_timestamp = Gauge(
+    "reconciliation_last_run_timestamp",
+    "Unix epoch of the last reconciliation run.",
+    registry=REGISTRY,
+)
+
+reconciliation_duration_seconds = Gauge(
+    "reconciliation_duration_seconds",
+    "Duration in seconds of the last reconciliation run.",
+    registry=REGISTRY,
+)
+
+
+def update_reconciliation_metrics(summary: dict, duration: float) -> None:
+    """Update Prometheus gauges from a reconciliation summary."""
+    import time as _time
+
+    for category in (
+        "in_db_not_in_orthanc",
+        "in_orthanc_not_in_db",
+        "dicom_dir_missing",
+        "dicom_archive_missing",
+    ):
+        reconciliation_mismatches_total.labels(category=category).set(
+            summary.get(category, 0)
+        )
+    reconciliation_last_run_timestamp.set(_time.time())
+    reconciliation_duration_seconds.set(duration)
+
+
 def refresh_cold_storage_gauges(get_conn, legacy_dicom_root) -> None:
     """Refresh the scrape-time gauges.
 
@@ -110,4 +151,8 @@ __all__ = [
     "cold_storage_warming_rows",
     "cold_storage_disk_free_bytes",
     "refresh_cold_storage_gauges",
+    "reconciliation_mismatches_total",
+    "reconciliation_last_run_timestamp",
+    "reconciliation_duration_seconds",
+    "update_reconciliation_metrics",
 ]

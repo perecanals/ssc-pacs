@@ -148,8 +148,13 @@ sudo journalctl -u ssc-companion --since "5 min ago"
 # Check indexing progress
 curl -s -u admin:<password> http://localhost:8042/statistics | python3 -m json.tool
 
-# Verify indexed series vs SQL table (compares image_series vs Orthanc)
-python verify_indexing.py
+# Two-DB reconciliation (image_series vs Orthanc index + disk checks)
+python scripts/reconcile.py               # human-readable summary
+python scripts/reconcile.py --json        # write JSON report
+python scripts/reconcile.py --json --quiet # cron/timer mode
+
+# Legacy (deprecated — use reconcile.py instead):
+# python scripts/verify_indexing.py
 
 # Enrich studies/series with patient_id, seriesdescription (re-run after new indexing)
 python enrich_orthanc.py

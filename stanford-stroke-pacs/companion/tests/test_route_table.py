@@ -47,6 +47,7 @@ EXPECTED_ROUTES = {
     ("POST", "/api/label-definitions"),
     ("GET", "/healthz"),
     ("GET", "/metrics"),
+    ("GET", "/api/admin/reconciliation/latest"),
     ("POST", "/api/snapshots/refresh"),
     ("POST", "/api/labelled-tables/refresh"),
     ("GET", "/{full_path:path}"),

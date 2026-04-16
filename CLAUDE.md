@@ -90,9 +90,16 @@ docker restart ssc-orthanc
 
 ### Indexing / enrichment
 ```bash
-python verify_indexing.py        # compare image_series vs Orthanc REST API
 python enrich_orthanc.py         # rewrite patient/study/series labels in OE2
 python label_studies.py          # seed Orthanc study labels from study_type + modality
+```
+
+### Two-DB reconciliation
+```bash
+python scripts/reconcile.py               # human-readable summary (image_series vs Orthanc)
+python scripts/reconcile.py --json        # write JSON report to maintenance/reconciliation-reports/
+python scripts/reconcile.py --json --quiet # JSON only, no stdout (cron/timer mode)
+# verify_indexing.py is deprecated — use reconcile.py instead
 ```
 
 ### Schema migrations (`stanford-stroke` DB only)
@@ -181,6 +188,7 @@ The stack has two services and two databases.
 - `common.py` — shared SQL builders (`build_label_filter_sql`), annotation helpers, constants.
 - `config.py` — loads `config.toml` (storage, companion settings).
 - `cache_manager.py` — cold-storage warm/evict logic.
+- `reconciliation.py` — two-DB reconciliation: compares `image_series` vs Orthanc index + disk path checks.
 - `routes/` — `APIRouter` submodules: `auth`, `preferences`, `studies`, `cold_storage`, `annotations`, `labels`, `admin`, `static`.
 
 **Two-database model:**
@@ -310,5 +318,6 @@ All canonical docs are under `stanford-stroke-pacs/documentation/`. Start with `
 - `documentation/reference/companion_frontend.md` — React component detail
 - `documentation/reference/image_integration_protocol.md` — ingesting new data, YAML config, per-mode behavior
 - `documentation/operations/commands.md` — day-2 operations cheat sheet
+- `documentation/operations/reconciliation.md` — two-DB reconciliation (image_series vs Orthanc), mismatch categories, admin endpoint
 - `documentation/cold_storage/` — cold storage design and runbook
 - `documentation/recipes/dicom_processing.md` — DICOM → NIFTI, archive inspection, cleanup scripts

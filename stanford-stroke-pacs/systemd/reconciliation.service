@@ -1,0 +1,16 @@
+[Unit]
+Description=PACS — two-DB reconciliation (image_series vs Orthanc index)
+Documentation=file:/home/perecanals/ssc-pacs/stanford-stroke-pacs/documentation/operations/reconciliation.md
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=perecanals
+Group=perecanals
+Nice=15
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
+ExecStart=/home/perecanals/miniconda3/envs/pacs/bin/python /home/perecanals/ssc-pacs/stanford-stroke-pacs/scripts/reconcile.py --json --quiet
+StandardOutput=journal
+StandardError=journal

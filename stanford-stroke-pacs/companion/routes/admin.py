@@ -1,15 +1,17 @@
-"""Admin / observability endpoints: /healthz, /metrics."""
+"""Admin / observability endpoints: /healthz, /metrics, reconciliation."""
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
 from pathlib import Path
 
 import psycopg2
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
 
+from auth import get_current_user
 from config import LEGACY_DICOM_ROOT, STORAGE_MODE
 from db import DB_CONFIG, get_conn
 from orthanc_client import orthanc_system_check
@@ -136,3 +138,47 @@ def metrics_endpoint():
         content=generate_latest(METRICS_REGISTRY),
         media_type=CONTENT_TYPE_LATEST,
     )
+
+
+# ---------------------------------------------------------------------------
+# Reconciliation report (admin-only)
+# ---------------------------------------------------------------------------
+
+_REPORTS_DIR = _ROOT_DIR / "maintenance" / "reconciliation-reports"
+
+
+def _require_admin(username: str) -> None:
+    """Raise 403 if the user is not an admin."""
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT is_admin FROM users WHERE username = %s",
+                (username,),
+            )
+            row = cur.fetchone()
+    finally:
+        conn.close()
+    if not row or not row[0]:
+        raise __import__("fastapi").HTTPException(
+            status_code=403, detail="Admin access required"
+        )
+
+
+@router.get("/api/admin/reconciliation/latest")
+def reconciliation_latest(user: str = Depends(get_current_user)):
+    """Return the most recent reconciliation JSON report.  Admin-only."""
+    _require_admin(user)
+    if not _REPORTS_DIR.is_dir():
+        return JSONResponse(
+            status_code=404,
+            content={"detail": "No reconciliation reports found"},
+        )
+    reports = sorted(_REPORTS_DIR.glob("*.json"), key=lambda p: p.name)
+    if not reports:
+        return JSONResponse(
+            status_code=404,
+            content={"detail": "No reconciliation reports found"},
+        )
+    latest = reports[-1]
+    return json.loads(latest.read_text())
