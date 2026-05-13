@@ -41,8 +41,7 @@ migration_backups/
 maintenance/
 
 # Integration protocol logs
-image_integration_protocols/*.log
-image_integration_protocols/error_log_*.json
+stanford-stroke-pacs/image_integration_protocols/logs/
 
 # SQL data dumps (schema only — CSV/raw data stays out)
 ssc-sql-db/tables/
