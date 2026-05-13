@@ -48,7 +48,7 @@ DB_CONFIG: dict[str, str] = dict(
 )
 
 POOL_MIN = 2
-POOL_MAX = 10
+POOL_MAX = 20
 
 _pool: psycopg2.pool.ThreadedConnectionPool | None = None
 

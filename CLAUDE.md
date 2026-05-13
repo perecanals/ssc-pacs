@@ -141,8 +141,10 @@ python3 -c "from cache_manager import warm_study; print(warm_study('<uid>'))"
 # Check cache status
 curl http://localhost:8043/api/studies/<uid>/cache-status
 
-# Warm via API
-curl -X POST http://localhost:8043/api/studies/<uid>/warm
+# Warm via API — returns 202 immediately; extraction runs in the
+# bounded app.state.warm_executor pool (max_workers from [storage].warm_workers).
+# Poll cache-status until status == "hot" to know when files are restored.
+curl -X POST -b cookies.txt http://localhost:8043/api/studies/<uid>/warm
 
 # Manually evict a study (CLI or API)
 python3 -c "from cache_manager import evict_study; print(evict_study('<uid>'))"

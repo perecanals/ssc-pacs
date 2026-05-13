@@ -260,11 +260,18 @@ See [`../cold_storage/design.md`](../cold_storage/design.md) for why
       │     └── legacy mode: skip cache_state, just lookup + build URL
       │
       ├── (if cold) POST /api/studies/{studyUID}/warm
-      │     → cache_manager.warm_study()
-      │         ├── pg advisory lock on studyUID
-      │         ├── mark cache_state.status='warming'
-      │         ├── for each series: untar_zst(archive, dicom_dir_path)
-      │         └── mark cache_state.status='hot'
+      │     ├── route handler (async, ~ms):
+      │     │     ├── cache_manager.estimate_warm_disk_space(uid)
+      │     │     │     → 507 if required > available  (STOP)
+      │     │     ├── loop.run_in_executor(app.state.warm_executor,
+      │     │     │                         _run_warm_with_metrics, uid)
+      │     │     └── return 202 {ok, queued, studyinstanceuid}
+      │     └── worker thread (bounded pool, `warm_workers` from config):
+      │           → cache_manager.warm_study()
+      │               ├── pg advisory lock on studyUID
+      │               ├── mark cache_state.status='warming'
+      │               ├── for each series: untar_zst(archive, dicom_dir_path)
+      │               └── mark cache_state.status='hot'
       │
       ├── poll /api/studies/{studyUID}/cache-status until 'hot'
       │

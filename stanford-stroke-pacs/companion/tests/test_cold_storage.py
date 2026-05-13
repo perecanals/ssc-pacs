@@ -165,3 +165,51 @@ def test_warm_no_archives_returns_error(cold_env, seeded_db):
         result = cm.warm_study(study_uid)
         assert result["ok"] is False
         assert "no_archives" in result.get("error", "")
+
+
+def test_warm_endpoint_returns_202_and_eventually_hot(cold_env, logged_in_client):
+    """POST /api/studies/{uid}/warm returns 202 quickly; the worker pool
+    runs the extraction in the background and `cache_state` flips to 'hot'
+    shortly after.
+    """
+    import time
+
+    import cache_manager as cm
+
+    study_uid = cold_env["study_uid"]
+    dicom_dir = cold_env["dicom_dir"]
+
+    with (
+        patch.object(cm, "STORAGE_MODE", "cold_path_cache"),
+        patch.object(cm, "LEGACY_DICOM_ROOT", cold_env["legacy_root"]),
+        patch.object(cm, "COLD_ARCHIVE_ROOT", cold_env["cold_root"]),
+    ):
+        t0 = time.perf_counter()
+        resp = logged_in_client.post(f"/api/studies/{study_uid}/warm")
+        elapsed = time.perf_counter() - t0
+
+        assert resp.status_code == 202, resp.text
+        body = resp.json()
+        assert body["ok"] is True
+        assert body["queued"] is True
+        assert body["studyinstanceuid"] == study_uid
+        # The POST must return without waiting for the extraction.
+        assert elapsed < 2.0, f"POST took {elapsed:.2f}s — extraction was not backgrounded"
+
+        # Poll cache-status until the worker reports 'hot' (or the test
+        # gives up after 30s).
+        deadline = time.monotonic() + 30
+        status = None
+        while time.monotonic() < deadline:
+            status_resp = logged_in_client.get(f"/api/studies/{study_uid}/cache-status")
+            assert status_resp.status_code == 200
+            status = status_resp.json().get("status")
+            if status == "hot":
+                break
+            if status == "error":
+                pytest.fail(f"cache-status reported error: {status_resp.json()}")
+            time.sleep(0.2)
+
+        assert status == "hot", f"final status was {status!r}"
+        assert dicom_dir.is_dir()
+        assert any(dicom_dir.iterdir())

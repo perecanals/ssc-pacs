@@ -21,6 +21,7 @@ _DEFAULT_STORAGE = {
     "warming_timeout_minutes": 30.0,
     "warming_disk_safety_factor": 3.0,
     "warming_disk_min_free_bytes": 100 * 1024 * 1024,
+    "warm_workers": 2,
 }
 _DEFAULT_COMPANION = {
     "session_timeout_hours": 2.0,
@@ -60,6 +61,7 @@ WARMING_DISK_SAFETY_FACTOR = float(
 WARMING_DISK_MIN_FREE_BYTES = int(
     _storage.get("warming_disk_min_free_bytes", _DEFAULT_STORAGE["warming_disk_min_free_bytes"])
 )
+WARM_WORKERS = int(_storage.get("warm_workers", _DEFAULT_STORAGE["warm_workers"]))
 
 SESSION_TIMEOUT_HOURS = float(
     _companion.get("session_timeout_hours", _DEFAULT_COMPANION["session_timeout_hours"])

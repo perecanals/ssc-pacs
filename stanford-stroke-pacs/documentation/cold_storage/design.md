@@ -150,9 +150,16 @@ User clicks a row in the Companion DataTable
                            delete cache_state row, return as if 'cold'
       2. If url returned → frontend opens OHIF iframe, done.
       3. If status == 'cold' → POST /api/studies/{uid}/warm
-                                 (cache_manager.warm_study)
+                                 (route: routes/cold_storage.api_warm_study)
          If status == 'warming' → poll cache-status
-      4. warm_study runs:
+      4. Route handler runs synchronously, in milliseconds:
+         a. Disk-space precheck (cache_manager.estimate_warm_disk_space).
+            If required > available → 507 with structured detail; STOP.
+         b. Submit cache_manager.warm_study to app.state.warm_executor
+            (bounded ThreadPoolExecutor; max_workers from
+            [storage].warm_workers, default 2).
+         c. Return 202 with {ok: true, queued: true, studyinstanceuid}.
+      5. Background worker thread runs warm_study:
          a. Advisory pg lock on studyinstanceuid
          b. Mark cache_state status = 'warming'
          c. Query image_series for all series in this study
@@ -163,9 +170,9 @@ User clicks a row in the Companion DataTable
          e. Query image_study for study_path (stored as cache_path)
          f. Mark cache_state status = 'hot', warmed_at = now()
          g. Release lock
-      5. Poll cache-status until 'hot'
-      6. Retry GET /api/ohif-link/{uid} — now returns ready URL
-      7. OHIF loads via DICOMweb; Orthanc reads files from the restored paths
+      6. Frontend polls cache-status until 'hot'
+      7. Retry GET /api/ohif-link/{uid} — now returns ready URL
+      8. OHIF loads via DICOMweb; Orthanc reads files from the restored paths
 ```
 
 No Orthanc API calls during warm itself. The patched Folder Indexer's
@@ -203,7 +210,12 @@ See [`../reference/data_stores.md`](../reference/data_stores.md) for column deta
 
 ### API
 
-- `POST /api/studies/{uid}/warm` (authenticated) — trigger warm
+- `POST /api/studies/{uid}/warm` (authenticated) — queue extraction.
+  Returns **202** with `{ok, queued, studyinstanceuid}` after a synchronous
+  disk-space precheck. Returns **507** if the precheck fails (with
+  `{error: 'insufficient_disk_space', required_bytes, available_bytes, target}`).
+  The extraction runs in `app.state.warm_executor`; clients observe
+  completion via `cache-status` polling.
 - `POST /api/studies/{uid}/evict` (authenticated) — manual eviction
 - `GET  /api/studies/{uid}/cache-status` — current cache_state row
 - `GET  /api/storage-mode` — current storage mode
@@ -213,8 +225,10 @@ See [`../reference/data_stores.md`](../reference/data_stores.md) for column deta
 
 `companion/src/api/warmOhif.js` — `resolveOhifViewerUrl()` calls
 `/api/ohif-link`, and if the response is `cold` or `warming`, it POSTs
-`/warm` (or polls, for warming), then retries the link. Mode-agnostic — no
-dependency on `getStorageMode()` for the warm path.
+`/warm` (or polls, for warming), then retries the link. `warmStudy()`
+treats any 2xx (including 202) as "warming started" and then polls
+`/cache-status` until `hot`. Mode-agnostic — no dependency on
+`getStorageMode()` for the warm path.
 
 ### Defensive cache_state probe
 

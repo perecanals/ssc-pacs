@@ -17,6 +17,11 @@ warming_timeout_minutes = 30
 # plus `min_free_bytes` of headroom. .zst typically expands ~3× for DICOM.
 warming_disk_safety_factor = 3.0
 warming_disk_min_free_bytes = 104857600  # 100 MiB
+# Number of worker threads that run cold-storage warm extractions in the
+# background. POST /api/studies/{uid}/warm returns 202 immediately and the
+# tar+zstd extraction runs in this pool. Bounded to keep disk I/O predictable
+# under burst load — extra POSTs queue rather than thrashing the filesystem.
+warm_workers = 2
 
 [companion]
 # Sliding idle timeout. Cookie is refreshed on every authenticated request; if

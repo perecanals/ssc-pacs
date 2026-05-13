@@ -150,6 +150,61 @@ def _estimate_required_bytes(archives: list[tuple[str, Path]]) -> int:
     return int(compressed_total * WARMING_DISK_SAFETY_FACTOR) + int(WARMING_DISK_MIN_FREE_BYTES)
 
 
+def estimate_warm_disk_space(studyinstanceuid: str) -> dict[str, Any] | None:
+    """Synchronous precheck for the warm route handler.
+
+    Resolves the study's archives, filters out series that are already
+    warm on disk, and compares estimated required bytes against the
+    free space at the extraction target. Does **not** write to
+    ``cache_state`` — the caller decides whether to surface 507 or
+    proceed.
+
+    Returns ``None`` if no extraction would be performed (no archives
+    found, or every series is already warm). Otherwise a dict with
+    ``required_bytes``, ``available_bytes``, and ``target`` (Path).
+
+    The defensive disk-space check inside :func:`warm_study` runs again
+    inside the worker — this precheck is the first-line guard so the
+    route can return 507 synchronously instead of letting the worker
+    discover the problem after a thread submission.
+    """
+    if STORAGE_MODE != "cold_path_cache":
+        return None
+
+    conn = _conn()
+    try:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute(
+                "SELECT dicom_dir_path, dicom_archive_path "
+                "FROM image_series WHERE studyinstanceuid = %s",
+                (studyinstanceuid,),
+            )
+            series_rows = cur.fetchall()
+    finally:
+        conn.close()
+
+    archives: list[tuple[str, Path]] = []
+    for r in series_rows:
+        arch = resolve_series_archive(r.get("dicom_archive_path"), r.get("dicom_dir_path"))
+        if arch and arch.is_file():
+            archives.append((r["dicom_dir_path"], arch))
+
+    archives_to_extract = [
+        (dp, ap) for dp, ap in archives if not _is_series_dir_warm(dp)
+    ]
+    if not archives_to_extract:
+        return None
+
+    required = _estimate_required_bytes(archives_to_extract)
+    target = Path(archives_to_extract[0][0]).parent
+    available = _disk_free_bytes(target)
+    return {
+        "required_bytes": required,
+        "available_bytes": available,
+        "target": target,
+    }
+
+
 def get_cache_status(studyinstanceuid: str) -> dict[str, Any]:
     conn = _conn()
     try:

@@ -162,8 +162,11 @@ SUID="<some study>"
 # Ensure cold first
 curl -X POST -b cookies.txt http://localhost:8043/api/studies/$SUID/evict
 curl      -b cookies.txt http://localhost:8043/api/studies/$SUID/cache-status
-# Warm
-curl -X POST -b cookies.txt http://localhost:8043/api/studies/$SUID/warm
+# Warm (returns 202 immediately; extraction runs in the background)
+curl -X POST -b cookies.txt -w "%{http_code}\n" \
+    http://localhost:8043/api/studies/$SUID/warm
+# Wait for hot
+curl      -b cookies.txt http://localhost:8043/api/studies/$SUID/cache-status
 # Ready
 curl      -b cookies.txt http://localhost:8043/api/ohif-link/$SUID
 ```
@@ -220,7 +223,14 @@ configured in `[storage]` of `config.toml`:
 warming_timeout_minutes      = 30      # stuck-warming watchdog
 warming_disk_safety_factor   = 3.0     # required ≈ factor × compressed
 warming_disk_min_free_bytes  = 104857600  # plus this much headroom
+warm_workers                 = 2       # background extraction pool size
 ```
+
+`warm_workers` bounds how many extractions run concurrently in
+`app.state.warm_executor`. Extra `POST /warm` requests still get 202
+immediately; their extractions queue until a worker is free. Sized to
+match expected disk throughput — bump it if benchmarks show idle disk
+during burst load.
 
 ### Stuck-warming watchdog
 
@@ -266,12 +276,22 @@ psql -d stanford-stroke -c "
 
 ### Disk-space precheck
 
-Before extracting, `warm_study()` estimates required free bytes as
-`safety_factor × Σ(compressed archive sizes) + min_free_bytes`. If the
-filesystem holding the target `dicom_dir_path` cannot fit it, the row is
-marked `status='cold'` (not `warming`) and the warm raises
-`InsufficientDiskSpaceError`. The HTTP layer surfaces this as
-**`507 Insufficient Storage`** with a JSON body:
+The estimate runs in two places:
+
+1. **`POST /api/studies/{uid}/warm` route handler** — calls
+   `cache_manager.estimate_warm_disk_space(uid)` *before* submitting the
+   extraction to the background executor. If `required > available`, the
+   route returns **507 Insufficient Storage** synchronously and no
+   background work is queued. This is the path operators see in practice.
+2. **Inside `warm_study()` (worker thread)** — the same check runs again
+   as a defensive second line in case disk fills between the route
+   precheck and the worker starting. On failure the worker marks the
+   row `status='cold'` and raises `InsufficientDiskSpaceError` to its
+   own log line (no HTTP client is listening at this point).
+
+Required free bytes are estimated as
+`safety_factor × Σ(compressed archive sizes) + min_free_bytes`. The 507
+response body is:
 
 ```json
 {"detail": {
@@ -338,7 +358,7 @@ report can be wired into your alerting layer once WS 06 lands.
 |----------|------|---------|
 | `GET /api/storage-mode` | — | Returns `{"storage_mode": "cold_path_cache" \| "legacy"}` |
 | `GET /api/studies/{uid}/cache-status` | — | `cache_state` row for the study |
-| `POST /api/studies/{uid}/warm` | yes | Extract archives, mark hot |
+| `POST /api/studies/{uid}/warm` | yes | Queue extraction in `app.state.warm_executor`; returns **202** immediately. Returns **507** if a synchronous disk-space precheck fails. Watch `cache-status` for `hot`. |
 | `POST /api/studies/{uid}/evict` | yes | Delete extracted files, clear cache_state |
 | `GET /api/ohif-link/{uid}` | — | Returns `{status: 'cold' \| 'warming' \| 'ready' \| 'error', url}`; with stale-state FS probe |
 
@@ -380,8 +400,9 @@ If you need to roll back:
 
 | File | Purpose |
 |------|---------|
-| `companion/cache_manager.py` | `warm_study`, `evict_study`, `get_cache_status`, `run_eviction`, helpers |
-| `companion/app.py` | Warm/evict/cache-status endpoints, defensive ohif-link FS probe |
+| `companion/cache_manager.py` | `warm_study`, `evict_study`, `get_cache_status`, `run_eviction`, `estimate_warm_disk_space` (route precheck) |
+| `companion/routes/cold_storage.py` | `POST /warm` (202 + executor submit), `/evict`, `/cache-status`, `/storage-mode` |
+| `companion/app.py` | Lifespan owns `app.state.warm_executor` (`ThreadPoolExecutor(max_workers=WARM_WORKERS)`); defensive ohif-link FS probe |
 | `companion/src/api/warmOhif.js` | Frontend warm flow (mode-agnostic cold/warming handling) |
 | `scripts/cold_storage/archive_all_series.py` | Offline archiver — populates `dicom_archive_path` for the existing tree |
 | `scripts/cold_storage/cleanup_loose_dicoms.py` | Safely delete loose DICOMs whose archive exists and Orthanc has indexed (dry-run by default; cron-friendly) |

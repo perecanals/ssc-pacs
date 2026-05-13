@@ -32,6 +32,12 @@ common ones:
 | `study_uid`   | `cache_manager.warm_study` / `evict_study`, `eviction_loop` |
 | `http_method`, `http_path`, `http_path_template`, `http_status`, `duration_seconds` | Per-request log line from the middleware |
 
+`warm_study` runs in `app.state.warm_executor` (a bounded
+`ThreadPoolExecutor`) rather than on the request thread. `request_id`
+and `user` still appear on its log lines because Python copies the
+caller's contextvars into the executor task when
+`loop.run_in_executor()` is invoked — no per-call plumbing needed.
+
 ### Configuration
 
 `companion/logging_config.py` wires up the root logger with
@@ -182,9 +188,13 @@ Unauthenticated, same as `/healthz`.
 so UIDs don't explode cardinality.
 
 The `/metrics` handler refreshes the two gauges on every scrape
-(`metrics.refresh_cold_storage_gauges`). Warm/evict counters are
-incremented in the API layer so they stay accurate even when the
-gauge refresh is skipped due to a transient DB error.
+(`metrics.refresh_cold_storage_gauges`). The evict counter is
+incremented in the route handler; `cold_storage_warm_total` is
+incremented from the **worker thread** that runs the extraction
+(`routes/cold_storage._run_warm_with_metrics`) so the `success` /
+`failure` label reflects the actual extraction outcome rather than
+the synchronous 202 response. The `insufficient_disk_space` variant
+is still emitted from the route handler at precheck time.
 
 ### Prometheus scrape config
 
