@@ -237,7 +237,10 @@ if __name__ == "__main__":
     synced_series_ids = set()
 
     try:
-        nhc_list = sorted([nhc for nhc in os.listdir(src_dir)])
+        nhc_list = sorted(
+            nhc for nhc in os.listdir(src_dir)
+            if not nhc.startswith(".") and os.path.isdir(os.path.join(src_dir, nhc))
+        )
         total_cases = len(nhc_list)
         logger.info(f"Found {total_cases} cases to process")
 
