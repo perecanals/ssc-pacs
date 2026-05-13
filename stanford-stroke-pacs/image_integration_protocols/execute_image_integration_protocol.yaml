@@ -5,8 +5,8 @@
 # env_path defaults to <repo>/.env. Override if you need a different file.
 
 database: stanford-stroke
-src_dir: /DATA2/perecanals/datasets/praneeta_cytof_data
+src_dir: /DATA2/pacs_raw_data
 overwrite_if_exists: false
 anonymize_files: false
-delete_originals_after_verification: true
-import_label: praneeta_cytof_data
+delete_originals_after_verification: false
+import_label: crisp2_390
