@@ -4,6 +4,7 @@
 orthanc_users.json
 **/orthanc_users.json
 maintenance
+hidden
 
 # Python
 __pycache__/
@@ -30,6 +31,8 @@ htmlcov/
 # Benchmarks / temp
 .tmp_bench/
 **/.tmp_bench/
+stanford-stroke-pacs/benchmarks/
+rsync_backup_remote_benchmark_results.json
 
 # Migration/backup dumps
 migration_backups/
