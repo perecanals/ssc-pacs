@@ -5,14 +5,14 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 
 import jwt
-from fastapi import Cookie, HTTPException
+from fastapi import Cookie, Depends, HTTPException
 
 from config import (
     COOKIE_SECURE,  # noqa: F401 — re-exported for runtime patching
     SESSION_ABSOLUTE_TIMEOUT_HOURS,
     SESSION_TIMEOUT_HOURS,
 )
-from db import _require_env
+from db import _require_env, get_conn
 
 JWT_SECRET = _require_env("JWT_SECRET")
 JWT_ALGORITHM = "HS256"
@@ -64,3 +64,20 @@ def get_optional_user(auth_token: str | None = Cookie(None)) -> str | None:
         return None
     payload = decode_jwt(auth_token)
     return payload.get("sub") if payload else None
+
+
+def require_admin(user: str = Depends(get_current_user)) -> str:
+    """FastAPI dependency: 401 if not logged in, 403 if user is not an admin."""
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT is_admin FROM users WHERE username = %s",
+                (user,),
+            )
+            row = cur.fetchone()
+    finally:
+        conn.close()
+    if not row or not row[0]:
+        raise HTTPException(status_code=403, detail="Admin access required")
+    return user

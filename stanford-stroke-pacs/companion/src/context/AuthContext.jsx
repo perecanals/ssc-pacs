@@ -1,18 +1,25 @@
-import { createContext, useContext, useState, useEffect, useCallback } from "react";
+import { createContext, useContext, useState, useEffect, useRef, useCallback } from "react";
 import { apiGet, apiPost } from "../api/client";
 
 const AuthContext = createContext(null);
 
 export function AuthProvider({ children }) {
   const [currentUser, setCurrentUser] = useState(null);
+  const [isAdmin, setIsAdmin] = useState(false);
   const [loading, setLoading] = useState(true);
+  // Tracks whether this tab ever had an authenticated user, so ProtectedRoute
+  // can show the "expired" banner only on involuntary session loss. Cleared
+  // synchronously inside `logout()` so intentional logouts skip the banner.
+  const wasAuthedRef = useRef(false);
 
   const checkAuth = useCallback(async () => {
     try {
       const data = await apiGet("/api/me");
       setCurrentUser(data.username || null);
+      setIsAdmin(Boolean(data.is_admin));
     } catch {
       setCurrentUser(null);
+      setIsAdmin(false);
     } finally {
       setLoading(false);
     }
@@ -23,9 +30,13 @@ export function AuthProvider({ children }) {
   }, [checkAuth]);
 
   useEffect(() => {
+    if (currentUser) wasAuthedRef.current = true;
+  }, [currentUser]);
+
+  useEffect(() => {
     const onExpired = () => {
       setCurrentUser(null);
-      alert("Session expired. Please log in again.");
+      setIsAdmin(false);
     };
     window.addEventListener("auth:expired", onExpired);
     return () => window.removeEventListener("auth:expired", onExpired);
@@ -38,15 +49,21 @@ export function AuthProvider({ children }) {
       throw new Error(err.detail || "Login failed");
     }
     setCurrentUser(username);
+    await checkAuth();
   };
 
   const logout = async () => {
-    await apiPost("/api/logout", {});
-    setCurrentUser(null);
+    try {
+      await apiPost("/api/logout", {});
+    } finally {
+      wasAuthedRef.current = false;
+      setCurrentUser(null);
+      setIsAdmin(false);
+    }
   };
 
   return (
-    <AuthContext.Provider value={{ currentUser, loading, login, logout }}>
+    <AuthContext.Provider value={{ currentUser, isAdmin, loading, login, logout, wasAuthedRef }}>
       {children}
     </AuthContext.Provider>
   );

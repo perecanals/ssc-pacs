@@ -58,18 +58,19 @@ cd companion && uvicorn app:app --port 8043 --reload
 
 ## User management
 
-Users are stored in the `users` PostgreSQL table (bcrypt hashes) and
-in `orthanc_users.json` (plaintext, required by Orthanc). Both are managed
-atomically by `scripts/admin/manage_users.py`. **Never edit `orthanc_users.json` by hand.**
+End users live in the `users` PostgreSQL table (bcrypt). Companion is the
+single login point — its reverse proxy serves OHIF and DICOMweb to any
+authenticated user. Admin users are also mirrored into `orthanc_users.json`
+so they can reach Orthanc directly on `:8042` as themselves.
 
 ```bash
 # List all users
 python scripts/admin/manage_users.py list
 
-# Add a regular user (prompts for password with hidden input + confirmation)
+# Add a regular user (DB only)
 python scripts/admin/manage_users.py add alice
 
-# Add an admin user
+# Add an admin user (DB + orthanc_users.json)
 python scripts/admin/manage_users.py add bob --admin
 
 # Change a user's password
@@ -79,18 +80,29 @@ python scripts/admin/manage_users.py passwd alice
 python scripts/admin/manage_users.py remove alice
 ```
 
-After any change, restart Orthanc to pick up the updated `orthanc_users.json`:
+Adding, removing, or changing the password of a **non-admin** user only touches
+PostgreSQL — no service restart is needed. For **admin** users the script also
+updates `orthanc_users.json`; restart Orthanc to pick it up:
 
 ```bash
 docker restart ssc-orthanc
 ```
 
-If the modified user matches `ORTHANC_ADMIN_USER` in `.env`, the script also
-updates `ORTHANC_ADMIN_PASSWORD` there so the Companion's service-to-service
-calls stay in sync. After changing the admin password, also restart the
-Companion:
+### Rotating the Orthanc service account
+
+The service account is the credential Companion uses to proxy to Orthanc and
+that host-local scripts use for direct Orthanc access (`ORTHANC_ADMIN_USER`
+in `.env`). Rotate it with:
 
 ```bash
+python scripts/admin/manage_users.py rotate-service-account
+```
+
+This rewrites `ORTHANC_ADMIN_PASSWORD` in `.env` and the matching entry in
+`orthanc_users.json` atomically. Then restart both services:
+
+```bash
+docker restart ssc-orthanc
 sudo systemctl restart ssc-companion
 ```
 

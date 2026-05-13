@@ -32,7 +32,7 @@ from common import (
 )
 from config import STORAGE_MODE
 from db import get_conn
-from orthanc_client import ORTHANC_URL, orthanc_lookup
+from orthanc_client import orthanc_lookup
 
 router = APIRouter()
 
@@ -539,7 +539,7 @@ def ohif_link(
             query = {"StudyInstanceUIDs": studyinstanceuid}
             if seriesinstanceuid:
                 query["SeriesInstanceUIDs"] = seriesinstanceuid
-            url = f"{ORTHANC_URL}/ohif/viewer?{urlencode(query)}"
+            url = f"/ohif/viewer?{urlencode(query)}"
             if STORAGE_MODE == "cold_path_cache":
                 return {"status": "ready", "url": url}
             return {"url": url}

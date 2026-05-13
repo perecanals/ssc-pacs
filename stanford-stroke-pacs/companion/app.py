@@ -20,7 +20,7 @@ from config import LOGIN_RATE_LIMIT_PER_5MIN, STORAGE_MODE
 from db import audit_user_var, close_pool, get_conn, init_pool
 from logging_config import configure_logging, request_id_ctx, user_ctx
 from metrics import http_request_duration_seconds, http_requests_total
-from routes import admin, annotations, cold_storage, labels, preferences, static, studies
+from routes import admin, annotations, cold_storage, labels, preferences, proxy, static, studies
 from routes import auth as auth_routes
 
 # Configure JSON logging before any module-level log lines fire.
@@ -76,6 +76,7 @@ async def lifespan(application: FastAPI):
     # Alembic's env.py calls logging.config.fileConfig() during the startup
     # migration run, which wipes the JSON handler.  Re-install it.
     configure_logging()
+    proxy.init_client()
     ev_task: asyncio.Task | None = None
     if STORAGE_MODE == "cold_path_cache":
         ev_task = asyncio.create_task(_eviction_loop())
@@ -88,6 +89,7 @@ async def lifespan(application: FastAPI):
                 await ev_task
             except asyncio.CancelledError:
                 pass
+        await proxy.shutdown_client()
         close_pool()
 
 
@@ -236,4 +238,5 @@ app.include_router(cold_storage.router)
 app.include_router(annotations.router)
 app.include_router(labels.router)
 app.include_router(admin.router)
+app.include_router(proxy.router)
 app.include_router(static.router)

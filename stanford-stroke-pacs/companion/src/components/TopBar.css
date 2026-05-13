@@ -43,15 +43,3 @@
 .topbar__user-name {
   @apply text-text;
 }
-
-.topbar__login-form {
-  @apply flex items-center gap-2;
-}
-
-.topbar__login-input {
-  @apply px-2 py-1 border border-border rounded-md text-xs w-28 outline-none focus:border-primary;
-}
-
-.topbar__error {
-  @apply text-xs text-danger;
-}

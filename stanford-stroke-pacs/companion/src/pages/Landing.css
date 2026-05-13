@@ -1,7 +1,27 @@
 @reference "../app.css";
 
 .landing {
-  @apply min-h-screen flex flex-col items-center justify-center bg-bg p-6;
+  @apply min-h-screen flex flex-col bg-bg;
+}
+
+.landing__topbar {
+  @apply h-12 bg-surface border-b border-border flex items-center justify-end px-4 text-sm shrink-0;
+}
+
+.landing__topbar-identity {
+  @apply flex items-center gap-2;
+}
+
+.landing__topbar-user {
+  @apply text-xs text-text-muted;
+}
+
+.landing__topbar-user strong {
+  @apply text-text font-semibold;
+}
+
+.landing__content {
+  @apply flex-1 flex flex-col items-center justify-center p-6;
 }
 
 .landing__header {
@@ -18,6 +38,14 @@
 
 .landing__grid {
   @apply grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5 max-w-[820px] w-full;
+}
+
+.landing__single {
+  @apply flex justify-center w-full;
+}
+
+.landing__single .landing__card {
+  @apply w-full max-w-[360px];
 }
 
 .landing__card {
@@ -38,8 +66,4 @@
 
 .landing__card-hint {
   @apply mt-auto pt-2 text-xs font-medium text-primary;
-}
-
-.landing__footer {
-  @apply mt-12 text-xs text-text-muted text-center;
 }

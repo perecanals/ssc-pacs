@@ -19,7 +19,10 @@ warming_disk_safety_factor = 3.0
 warming_disk_min_free_bytes = 104857600  # 100 MiB
 
 [companion]
-session_timeout_hours = 0.25
+# Sliding idle timeout. Cookie is refreshed on every authenticated request; if
+# no request is made for this many hours, the next request returns 401 and the
+# UI redirects to /login with an "expired" banner. 0.0833 ≈ 5 minutes.
+session_timeout_hours = 0.0833
 # Absolute (non-sliding) session lifetime. A token minted more than this many
 # hours ago is rejected regardless of sliding refresh activity.
 session_absolute_timeout_hours = 24

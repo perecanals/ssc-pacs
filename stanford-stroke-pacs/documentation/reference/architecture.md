@@ -217,39 +217,42 @@ architecture.
 
 ## 5. Authentication model
 
-There are two runtime auth systems, coordinated by one provisioning script.
+End-user authentication is single-sourced from the PostgreSQL `users` table.
+The companion is the only login point for end users; it reverse-proxies
+OHIF and DICOMweb to Orthanc on the user's behalf.
 
-### 5.1 Orthanc auth
-
-Orthanc authenticates incoming UI and API requests with the `RegisteredUsers`
-block in `orthanc_users.json`.
-
-That file:
-
-- contains plaintext passwords because Orthanc requires them
-- is generated and updated by `scripts/admin/manage_users.py`
-- should not be edited manually
-
-### 5.2 Companion auth
+### 5.1 Companion auth (end users)
 
 The companion authenticates against `users`:
 
 - passwords are bcrypt hashes
 - login returns a JWT cookie
 - authenticated writes use the JWT identity as `created_by`
+- `/ohif/*` and `/dicom-web/*` are reverse-proxied to Orthanc by the companion
+  (see `companion/routes/proxy.py`), attaching the service-account credential
+  from `.env`. End users never present credentials to Orthanc directly.
+
+### 5.2 Orthanc auth (service account + admins only)
+
+`orthanc_users.json` is no longer a runtime user store. It contains:
+
+- the **service account** (matching `ORTHANC_ADMIN_USER` / `ORTHANC_ADMIN_PASSWORD`
+  in `.env`), used by the companion to proxy requests on behalf of any logged-in
+  user, and by host-local maintenance scripts
+- each **admin user** (`users.is_admin = TRUE`), so admins can log in to
+  `:8042/ui/app/` (Orthanc Explorer 2) and `:8042/ohif/` as themselves with
+  per-user attribution in Orthanc's own logs
+
+The file is owned by `scripts/admin/manage_users.py`; do not edit by hand.
 
 ### 5.3 Shared provisioning
 
-`scripts/admin/manage_users.py` is the bridge between the two auth models.
+`scripts/admin/manage_users.py` is the canonical tool for both stores:
 
-It keeps:
-
-- `users` updated for companion login
-- `orthanc_users.json` updated for Orthanc login
-
-When the managed username matches `ORTHANC_ADMIN_USER`, it also updates
-`ORTHANC_ADMIN_PASSWORD` in `.env` so the companion's service-to-service calls
-to Orthanc keep working.
+- `add` / `passwd` / `remove` always touch the `users` table; they also update
+  `orthanc_users.json` when `is_admin=True`
+- `rotate-service-account` rewrites `ORTHANC_ADMIN_PASSWORD` in `.env` and the
+  matching entry in `orthanc_users.json` atomically. It does not touch the DB.
 
 ---
 
@@ -263,7 +266,8 @@ The repo provides:
 
 - `docker-compose.yml` for service wiring
 - `orthanc.json` for structural config
-- `orthanc_users.json` as a generated runtime file
+- `orthanc_users.json` as a deploy-time file holding the service account plus
+  admin users (rotated via `scripts/admin/manage_users.py`)
 
 ### 6.2 Companion packaging
 

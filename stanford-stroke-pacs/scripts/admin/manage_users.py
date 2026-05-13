@@ -1,9 +1,20 @@
 #!/usr/bin/env python3
-"""Manage SSC PACS users (Orthanc + Companion).
+"""Manage SSC PACS users.
 
-Users are stored in the ``users`` PostgreSQL table with bcrypt-hashed
-passwords.  Orthanc requires plaintext passwords in its config, so this script
-also maintains ``orthanc_users.json`` which is mounted into the container.
+End-user authentication lives in the PostgreSQL ``users`` table (bcrypt).
+Companion is the single login point for end users — its reverse proxy serves
+OHIF and DICOMweb to anyone with a valid JWT cookie, attaching the Orthanc
+service-account credential behind the scenes.
+
+``orthanc_users.json`` is no longer used for routine end users. It holds:
+
+ - the Orthanc service account (the credential Companion uses to proxy to
+   Orthanc; rotated via ``rotate-service-account``)
+ - admin users (``is_admin=True``), so admins can also reach Orthanc Explorer 2
+   on :8042 directly as themselves
+
+Regular ``add``/``passwd``/``remove`` commands touch ``orthanc_users.json``
+only when the affected user has ``is_admin=True``.
 """
 
 import argparse
@@ -15,16 +26,16 @@ import sys
 from pathlib import Path
 
 import bcrypt
-import psycopg2
 from dotenv import load_dotenv
 
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 ORTHANC_USERS_FILE = REPO_ROOT / "orthanc_users.json"
-load_dotenv(REPO_ROOT / ".env")
+ENV_FILE = REPO_ROOT / ".env"
+load_dotenv(ENV_FILE)
 
 sys.path.insert(0, str(REPO_ROOT / "companion"))
-from db import DB_CONFIG, get_conn  # noqa: E402
+from db import get_conn  # noqa: E402
 
 USERS_TABLE_SQL = """
 CREATE TABLE IF NOT EXISTS users (
@@ -34,6 +45,10 @@ CREATE TABLE IF NOT EXISTS users (
     created_at    TIMESTAMPTZ DEFAULT now()
 );
 """
+
+
+def _orthanc_admin_user() -> str:
+    return os.getenv("ORTHANC_ADMIN_USER", "admin")
 
 
 def ensure_table():
@@ -63,6 +78,31 @@ def hash_password(password: str) -> str:
     return bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
 
 
+def _refuse_service_account(username: str) -> None:
+    """Bail out if a regular command targets the Orthanc service-account user."""
+    if username == _orthanc_admin_user():
+        print(
+            f"'{username}' is the Orthanc service account. "
+            "Use `rotate-service-account` to rotate its password.",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+
+
+def _is_admin(username: str) -> bool:
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT is_admin FROM users WHERE username = %s",
+                (username,),
+            )
+            row = cur.fetchone()
+    finally:
+        conn.close()
+    return bool(row and row[0])
+
+
 # -- Orthanc users JSON helpers ------------------------------------------------
 
 def load_orthanc_users() -> dict[str, str]:
@@ -79,23 +119,34 @@ def save_orthanc_users(users: dict[str, str]) -> None:
     os.chmod(ORTHANC_USERS_FILE, 0o600)
 
 
+def upsert_orthanc_user(username: str, password: str) -> None:
+    users = load_orthanc_users()
+    users[username] = password
+    save_orthanc_users(users)
+
+
+def remove_orthanc_user(username: str) -> None:
+    users = load_orthanc_users()
+    if users.pop(username, None) is not None:
+        save_orthanc_users(users)
+
+
 # -- .env admin-password sync -------------------------------------------------
 
-def sync_env_admin(username: str, password: str) -> None:
-    """If *username* matches ORTHANC_ADMIN_USER, update ORTHANC_ADMIN_PASSWORD
-    in .env so the Companion's service-to-service calls stay in sync."""
-    admin_user = os.getenv("ORTHANC_ADMIN_USER", "admin")
-    if username != admin_user:
-        return
+def _write_env_admin_password(password: str) -> None:
+    """Rewrite ORTHANC_ADMIN_PASSWORD in .env (idempotent; appends if absent)."""
     text = ENV_FILE.read_text()
-    text = re.sub(
+    new_text, count = re.subn(
         r"^ORTHANC_ADMIN_PASSWORD=.*$",
         f"ORTHANC_ADMIN_PASSWORD='{password}'",
         text,
         flags=re.MULTILINE,
     )
-    ENV_FILE.write_text(text)
-    print(f"  Updated ORTHANC_ADMIN_PASSWORD in .env")
+    if count == 0:
+        if not new_text.endswith("\n"):
+            new_text += "\n"
+        new_text += f"ORTHANC_ADMIN_PASSWORD='{password}'\n"
+    ENV_FILE.write_text(new_text)
 
 
 # -- CLI commands --------------------------------------------------------------
@@ -125,6 +176,7 @@ def cmd_list(_args: argparse.Namespace) -> None:
 
 
 def cmd_add(args: argparse.Namespace) -> None:
+    _refuse_service_account(args.username)
     password = prompt_password()
     pw_hash = hash_password(password)
 
@@ -143,17 +195,17 @@ def cmd_add(args: argparse.Namespace) -> None:
     finally:
         conn.close()
 
-    users = load_orthanc_users()
-    users[args.username] = password
-    save_orthanc_users(users)
-
-    sync_env_admin(args.username, password)
-
-    print(f"User '{args.username}' added.")
-    print("Restart Orthanc to apply:  docker restart ssc-orthanc")
+    if args.admin:
+        upsert_orthanc_user(args.username, password)
+        print(f"Admin user '{args.username}' added (DB + orthanc_users.json).")
+        print("Restart Orthanc to apply:  docker restart ssc-orthanc")
+    else:
+        print(f"User '{args.username}' added (DB only).")
 
 
 def cmd_passwd(args: argparse.Namespace) -> None:
+    _refuse_service_account(args.username)
+
     conn = get_conn()
     try:
         with conn.cursor() as cur:
@@ -181,17 +233,20 @@ def cmd_passwd(args: argparse.Namespace) -> None:
     finally:
         conn.close()
 
-    users = load_orthanc_users()
-    users[args.username] = password
-    save_orthanc_users(users)
-
-    sync_env_admin(args.username, password)
-
-    print(f"Password updated for '{args.username}'.")
-    print("Restart Orthanc to apply:  docker restart ssc-orthanc")
+    if _is_admin(args.username):
+        upsert_orthanc_user(args.username, password)
+        print(f"Password updated for admin '{args.username}' (DB + orthanc_users.json).")
+        print("Restart Orthanc to apply:  docker restart ssc-orthanc")
+    else:
+        print(f"Password updated for '{args.username}' (DB only).")
 
 
 def cmd_remove(args: argparse.Namespace) -> None:
+    _refuse_service_account(args.username)
+
+    # Capture admin status before delete so we know whether to touch the JSON.
+    was_admin = _is_admin(args.username)
+
     conn = get_conn()
     try:
         with conn.cursor() as cur:
@@ -206,19 +261,43 @@ def cmd_remove(args: argparse.Namespace) -> None:
     finally:
         conn.close()
 
-    users = load_orthanc_users()
-    users.pop(args.username, None)
-    save_orthanc_users(users)
+    if was_admin:
+        remove_orthanc_user(args.username)
+        print(f"Admin user '{args.username}' removed (DB + orthanc_users.json).")
+        print("Restart Orthanc to apply:  docker restart ssc-orthanc")
+    else:
+        print(f"User '{args.username}' removed (DB only).")
 
-    print(f"User '{args.username}' removed.")
-    print("Restart Orthanc to apply:  docker restart ssc-orthanc")
+
+def cmd_rotate_service_account(_args: argparse.Namespace) -> None:
+    """Rotate the Orthanc service-account password.
+
+    Rewrites ORTHANC_ADMIN_PASSWORD in .env and the matching entry in
+    orthanc_users.json atomically. Does not touch the users DB table.
+    """
+    username = _orthanc_admin_user()
+    print(f"Rotating Orthanc service-account password for user '{username}'.")
+    password = prompt_password()
+
+    _write_env_admin_password(password)
+    upsert_orthanc_user(username, password)
+
+    print(f"Service-account '{username}' rotated.")
+    print("Restart both services to pick up the new password:")
+    print("  docker restart ssc-orthanc")
+    print("  sudo systemctl restart ssc-companion")
 
 
 # -- Entrypoint ----------------------------------------------------------------
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Manage SSC PACS users (Orthanc + Companion)"
+        description=(
+            "Manage SSC PACS users. Companion users live in the PostgreSQL "
+            "`users` table; admin users (and the Orthanc service account) are "
+            "also mirrored into orthanc_users.json so admins can reach Orthanc "
+            "directly on :8042."
+        )
     )
     sub = parser.add_subparsers(dest="command")
 
@@ -227,7 +306,8 @@ def main() -> None:
     p_add = sub.add_parser("add", help="Add a new user")
     p_add.add_argument("username")
     p_add.add_argument(
-        "--admin", action="store_true", help="Grant admin privileges"
+        "--admin", action="store_true",
+        help="Grant admin privileges (also adds to orthanc_users.json)",
     )
 
     p_passwd = sub.add_parser("passwd", help="Change a user's password")
@@ -235,6 +315,11 @@ def main() -> None:
 
     p_rm = sub.add_parser("remove", help="Remove a user")
     p_rm.add_argument("username")
+
+    sub.add_parser(
+        "rotate-service-account",
+        help="Rotate the Orthanc service-account password (.env + orthanc_users.json)",
+    )
 
     args = parser.parse_args()
     if not args.command:
@@ -248,6 +333,7 @@ def main() -> None:
         "add": cmd_add,
         "passwd": cmd_passwd,
         "remove": cmd_remove,
+        "rotate-service-account": cmd_rotate_service_account,
     }
     cmds[args.command](args)
 

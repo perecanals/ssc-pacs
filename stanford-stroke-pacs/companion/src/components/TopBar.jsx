@@ -1,24 +1,15 @@
-import { useState } from "react";
 import PropTypes from "prop-types";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import "./TopBar.css";
 
 export default function TopBar({ levels = [], level, onLevelChange, toolbarHostRef }) {
-  const { currentUser, login, logout } = useAuth();
-  const [username, setUsername] = useState("");
-  const [password, setPassword] = useState("");
-  const [error, setError] = useState("");
+  const { currentUser, logout } = useAuth();
+  const navigate = useNavigate();
 
-  const handleLogin = async (e) => {
-    e.preventDefault();
-    if (!username.trim() || !password) return;
-    try {
-      setError("");
-      await login(username.trim(), password);
-    } catch (err) {
-      setError(err.message);
-    }
+  const handleLogout = async () => {
+    await logout();
+    navigate("/login", { replace: true });
   };
 
   return (
@@ -48,39 +39,12 @@ export default function TopBar({ levels = [], level, onLevelChange, toolbarHostR
       <div ref={toolbarHostRef} className="topbar__tools" />
 
       <div className="topbar__actions">
-        {currentUser ? (
-          <>
-            <span className="topbar__user-info">
-              Logged in as <strong className="topbar__user-name">{currentUser}</strong>
-            </span>
-            <button onClick={logout} className="btn-outline">
-              Log out
-            </button>
-          </>
-        ) : (
-          <form onSubmit={handleLogin} className="topbar__login-form">
-            <input
-              type="text"
-              placeholder="Username"
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
-              className="topbar__login-input"
-            />
-            <input
-              type="password"
-              placeholder="Password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              className="topbar__login-input"
-            />
-            <button type="submit" className="btn-primary">
-              Log in
-            </button>
-            {error && (
-              <span className="topbar__error">{error}</span>
-            )}
-          </form>
-        )}
+        <span className="topbar__user-info">
+          Logged in as <strong className="topbar__user-name">{currentUser}</strong>
+        </span>
+        <button type="button" onClick={handleLogout} className="btn-outline">
+          Log out
+        </button>
       </div>
     </div>
   );

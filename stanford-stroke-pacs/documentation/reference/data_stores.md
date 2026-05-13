@@ -54,7 +54,7 @@ These tables are created and evolved by **Alembic migrations** under
 startup. See [`../operations/schema_migrations.md`](../operations/schema_migrations.md)
 for the workflow when adding a new revision.
 
-- **`users`**: Companion login accounts (bcrypt password hashes).
+- **`users`**: the single source of truth for end-user authentication (bcrypt password hashes). The `is_admin` column gates `/api/admin/*` endpoints and the "Orthanc Explorer" Landing card; admins are also mirrored into `orthanc_users.json` by `scripts/admin/manage_users.py` so they can reach `:8042` directly.
 - **`annotations`**: multi-level (patient / study / series) annotations.
 - **`label_definitions`**: label registry (level-aware; supports bool/int/text/select).
 - **`user_preferences`**: per-user persisted table layout/state (JSONB).

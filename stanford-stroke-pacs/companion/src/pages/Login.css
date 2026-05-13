@@ -1,0 +1,45 @@
+@reference "../app.css";
+
+.login {
+  @apply min-h-screen flex flex-col items-center justify-center bg-bg p-6;
+}
+
+.login__header {
+  @apply text-center mb-8;
+}
+
+.login__title {
+  @apply text-3xl font-bold text-text;
+}
+
+.login__subtitle {
+  @apply text-sm text-text-muted mt-1;
+}
+
+.login__banner {
+  @apply max-w-[360px] w-full mb-4 px-4 py-2 rounded-md border border-primary bg-pill-bg text-sm text-pill-text;
+}
+
+.login__card {
+  @apply flex flex-col gap-3 bg-surface border border-border rounded-lg p-7 w-full max-w-[360px];
+}
+
+.login__field {
+  @apply flex flex-col gap-1 text-sm text-text;
+}
+
+.login__field input {
+  @apply px-3 py-2 rounded-md border border-border bg-surface text-text outline-none focus:border-primary;
+}
+
+.login__submit {
+  @apply mt-2 py-2 text-sm;
+}
+
+.login__error {
+  @apply text-sm text-danger;
+}
+
+.protected-loading {
+  @apply min-h-screen bg-bg;
+}

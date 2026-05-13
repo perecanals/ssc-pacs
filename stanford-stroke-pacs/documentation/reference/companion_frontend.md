@@ -29,16 +29,24 @@ The companion backend (`companion/app.py` + `companion/routes/`) is a FastAPI se
 - successful login returns an HttpOnly JWT cookie named `auth_token`
 - middleware refreshes the JWT on most requests to provide sliding expiration
 - `/api/me` and `/assets/*` are intentionally excluded from token refresh
+- Companion also reverse-proxies `/ohif/*` and `/dicom-web/*` to Orthanc (see
+  `companion/routes/proxy.py`). Both require a valid JWT. End users never present
+  credentials to Orthanc — Companion attaches the service-account credential
+  from `.env` on every upstream call.
 
 Authorization model:
 
 - read endpoints are public
 - write endpoints require a valid JWT
+- proxied OHIF/DICOMweb routes require a valid JWT (any logged-in user)
 - `created_by` is always taken from the authenticated user, never from client
   input
 
-`users.is_admin` exists in the schema and in `scripts/admin/manage_users.py`, but the
-current companion backend does not implement admin-only authorization rules.
+`users.is_admin` is consulted by the `require_admin` dependency
+(`companion/auth.py`) used by `/api/admin/*` endpoints. It also gates the
+"Orthanc Explorer" Landing card on the frontend — non-admins do not see it.
+`/api/me` returns `{"username": ..., "is_admin": bool}` so the React
+`AuthContext` can apply admin-only UI affordances.
 
 ---
 

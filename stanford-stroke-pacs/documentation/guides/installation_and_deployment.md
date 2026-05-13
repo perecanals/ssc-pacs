@@ -77,8 +77,8 @@ Variables expected by the current codebase:
 | `PG_ORTHANC_DB` | Orthanc index database name |
 | `PG_ORTHANC_USER` | Orthanc index database user |
 | `PG_ORTHANC_PASSWORD` | Orthanc index database password |
-| `ORTHANC_URL` | Base URL used by scripts and companion, typically `http://localhost:8042` |
-| `ORTHANC_ADMIN_USER` | Orthanc service account used by companion and `scripts/data_integrity/reconcile.py` |
+| `ORTHANC_URL` | Base URL used by Companion's reverse proxy and host-local scripts, typically `http://localhost:8042` |
+| `ORTHANC_ADMIN_USER` | Orthanc service account; Companion attaches it on every proxied OHIF/DICOMweb call. Also used by `scripts/data_integrity/reconcile.py` and other host-local scripts. |
 | `ORTHANC_ADMIN_PASSWORD` | Password for the Orthanc service account |
 | `JWT_SECRET` | Secret used to sign companion JWT cookies |
 
@@ -182,26 +182,33 @@ Important caveat:
 - the script assumes local PostgreSQL administration via `sudo -u postgres psql`
 - it is not a generic remote-database provisioning script
 
-### Step 4. Create the first PACS user
+### Step 4. Create the first admin user and the Orthanc service account
 
-Run:
+End users authenticate to Companion (which proxies OHIF/DICOMweb to Orthanc).
+Admins additionally need a direct Orthanc login so they can reach Orthanc
+Explorer 2 on `:8042`. The service account is the credential Companion uses
+internally when proxying.
 
 ```bash
+# 1. Create the first admin (DB + orthanc_users.json):
 python scripts/admin/manage_users.py add <username> --admin
+
+# 2. Set the Orthanc service-account password (.env + orthanc_users.json):
+python scripts/admin/manage_users.py rotate-service-account
 ```
 
 What this step accomplishes:
 
 - ensures `users` exists in the research/app DB
-- inserts the user with a bcrypt password hash
-- creates or updates `orthanc_users.json`
-- updates `ORTHANC_ADMIN_PASSWORD` in `.env` if the username matches
-  `ORTHANC_ADMIN_USER`
+- inserts the admin user with a bcrypt password hash
+- mirrors the admin entry into `orthanc_users.json`
+- writes the service-account credential into `orthanc_users.json` and `.env`
 
 Why this matters before first start:
 
-- Orthanc auth is enabled
-- Orthanc depends on the generated `orthanc_users.json`
+- Orthanc auth is enabled and depends on `orthanc_users.json` existing with at
+  least the service-account entry — without it, Companion's proxy and host-local
+  scripts will get 401s from Orthanc.
 
 ### Step 5. Start Orthanc (Docker)
 

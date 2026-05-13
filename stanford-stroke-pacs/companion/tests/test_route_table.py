@@ -53,6 +53,23 @@ EXPECTED_ROUTES = {
     ("GET", "/api/admin/reconciliation/latest"),
     ("POST", "/api/snapshots/refresh"),
     ("POST", "/api/labelled-tables/refresh"),
+    # Reverse-proxy routes to Orthanc (added 2026-05-13).
+    ("GET", "/ohif"),
+    ("HEAD", "/ohif"),
+    ("POST", "/ohif"),
+    ("OPTIONS", "/ohif"),
+    ("GET", "/ohif/{path:path}"),
+    ("HEAD", "/ohif/{path:path}"),
+    ("POST", "/ohif/{path:path}"),
+    ("OPTIONS", "/ohif/{path:path}"),
+    ("GET", "/dicom-web"),
+    ("HEAD", "/dicom-web"),
+    ("POST", "/dicom-web"),
+    ("OPTIONS", "/dicom-web"),
+    ("GET", "/dicom-web/{path:path}"),
+    ("HEAD", "/dicom-web/{path:path}"),
+    ("POST", "/dicom-web/{path:path}"),
+    ("OPTIONS", "/dicom-web/{path:path}"),
     ("GET", "/{full_path:path}"),
 }
 

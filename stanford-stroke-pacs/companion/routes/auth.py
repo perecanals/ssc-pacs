@@ -60,5 +60,16 @@ def logout(response: Response):
 def me(auth_token: str | None = Cookie(None)):
     username = get_optional_user(auth_token)
     if not username:
-        return {"username": None}
-    return {"username": username}
+        return {"username": None, "is_admin": False}
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT is_admin FROM users WHERE username = %s",
+                (username,),
+            )
+            row = cur.fetchone()
+    finally:
+        conn.close()
+    is_admin = bool(row and row[0])
+    return {"username": username, "is_admin": is_admin}

@@ -358,21 +358,24 @@ Details: [`image_integration_protocol.md`](image_integration_protocol.md).
 
 ## 8. Auth model
 
-Two independent auth systems coordinated by one tool (`scripts/admin/manage_users.py`):
+End users authenticate only to Companion. The PostgreSQL `users` table is the
+single source of truth for end-user identity.
 
-| System | Credential store | Verified against |
+| Role | Credential store | Reaches |
 |---|---|---|
-| Orthanc (Explorer 2, OHIF, REST, DICOMweb) | `orthanc_users.json` (plaintext, required by Orthanc) | `RegisteredUsers` block |
-| Companion (`/app`, `/api/*` writes) | `users` table (bcrypt hashes) + JWT cookie | FastAPI dependency |
+| End user (any logged-in Companion user) | `users` table (bcrypt) + JWT cookie | Companion API, OHIF and DICOMweb via Companion's reverse proxy |
+| Admin (`users.is_admin = TRUE`) | `users` (Companion login) + entry in `orthanc_users.json` | Everything above, plus direct `:8042/ui/app/` and `:8042/ohif/` as themselves |
+| Service account (`ORTHANC_ADMIN_USER` in `.env`) | `orthanc_users.json` + `.env` | Companion's proxy attaches it on every upstream call; host-local scripts use it for direct Orthanc access |
+
+Companion proxies `/ohif/*` and `/dicom-web/*` to Orthanc using the service
+account (see `companion/routes/proxy.py`). End users never present credentials
+to Orthanc directly.
 
 `scripts/admin/manage_users.py`:
-- creates/updates bcrypt rows in `users`
-- regenerates `orthanc_users.json`
-- updates `.env`'s `ORTHANC_ADMIN_PASSWORD` when managing the admin user,
-  so Companion's service-to-service Orthanc calls keep working
-
-The Companion calls Orthanc using `ORTHANC_ADMIN_*` from `.env`; end users
-never hit Orthanc's REST API directly through the Companion.
+- `add` / `passwd` / `remove` always update the `users` table; they also update
+  `orthanc_users.json` when the affected user is an admin
+- `rotate-service-account` rewrites `ORTHANC_ADMIN_PASSWORD` in `.env` and the
+  matching `orthanc_users.json` entry atomically (does not touch the DB)
 
 ---
 

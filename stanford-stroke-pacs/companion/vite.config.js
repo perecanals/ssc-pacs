@@ -7,6 +7,8 @@ export default defineConfig({
   server: {
     proxy: {
       "/api": "http://localhost:8043",
+      "/ohif": "http://localhost:8043",
+      "/dicom-web": "http://localhost:8043",
     },
   },
 });
