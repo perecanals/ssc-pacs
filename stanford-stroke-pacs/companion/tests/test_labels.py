@@ -82,3 +82,119 @@ class TestLabelDefinitions:
         )
         assert resp.status_code == 201
         assert resp.json()["options"] == ["opt_a", "opt_b", "opt_c"]
+
+    def test_create_label_with_instrument(self, logged_in_client):
+        resp = logged_in_client.post(
+            "/api/label-definitions",
+            json={
+                "name": "with_instrument",
+                "level": "series",
+                "datatype": "bool",
+                "instrument": "Functional outcome",
+            },
+        )
+        assert resp.status_code == 201
+        assert resp.json()["instrument"] == "Functional outcome"
+
+    def test_create_label_blank_instrument_stored_as_null(self, logged_in_client):
+        resp = logged_in_client.post(
+            "/api/label-definitions",
+            json={
+                "name": "blank_instrument",
+                "level": "series",
+                "datatype": "bool",
+                "instrument": "   ",
+            },
+        )
+        assert resp.status_code == 201
+        assert resp.json()["instrument"] is None
+
+    def test_list_returns_instrument_field(self, logged_in_client):
+        logged_in_client.post(
+            "/api/label-definitions",
+            json={
+                "name": "lists_instr",
+                "level": "series",
+                "datatype": "bool",
+                "instrument": "Demographics",
+            },
+        )
+        resp = logged_in_client.get("/api/label-definitions")
+        assert resp.status_code == 200
+        match = next(d for d in resp.json() if d["name"] == "lists_instr")
+        assert match["instrument"] == "Demographics"
+
+    def test_patch_updates_instrument(self, logged_in_client):
+        create = logged_in_client.post(
+            "/api/label-definitions",
+            json={
+                "name": "patch_target",
+                "level": "series",
+                "datatype": "bool",
+            },
+        )
+        label_id = create.json()["id"]
+        resp = logged_in_client.patch(
+            f"/api/label-definitions/{label_id}",
+            json={"instrument": "Imaging quality"},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["instrument"] == "Imaging quality"
+
+    def test_patch_only_updates_supplied_fields(self, logged_in_client):
+        create = logged_in_client.post(
+            "/api/label-definitions",
+            json={
+                "name": "patch_partial",
+                "level": "series",
+                "datatype": "bool",
+                "description": "original",
+                "instrument": "first",
+            },
+        )
+        label_id = create.json()["id"]
+        resp = logged_in_client.patch(
+            f"/api/label-definitions/{label_id}",
+            json={"instrument": "second"},
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["instrument"] == "second"
+        assert body["description"] == "original"
+
+    def test_patch_with_no_editable_fields_returns_400(self, logged_in_client):
+        create = logged_in_client.post(
+            "/api/label-definitions",
+            json={"name": "patch_empty", "level": "series", "datatype": "bool"},
+        )
+        label_id = create.json()["id"]
+        resp = logged_in_client.patch(f"/api/label-definitions/{label_id}", json={})
+        assert resp.status_code == 400
+
+    def test_patch_unknown_label_returns_404(self, logged_in_client):
+        resp = logged_in_client.patch(
+            "/api/label-definitions/999999999",
+            json={"instrument": "x"},
+        )
+        assert resp.status_code == 404
+
+    def test_instruments_endpoint_returns_distinct_with_counts(self, logged_in_client):
+        for name, instr in [
+            ("instr_a1", "Alpha"),
+            ("instr_a2", "Alpha"),
+            ("instr_b1", "Beta"),
+        ]:
+            logged_in_client.post(
+                "/api/label-definitions",
+                json={
+                    "name": name,
+                    "level": "series",
+                    "datatype": "bool",
+                    "instrument": instr,
+                },
+            )
+        resp = logged_in_client.get("/api/instruments")
+        assert resp.status_code == 200
+        rows = {r["name"]: r["count"] for r in resp.json()}
+        assert rows.get("Alpha", 0) >= 2
+        assert rows.get("Beta", 0) >= 1

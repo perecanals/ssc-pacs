@@ -40,6 +40,7 @@ function DataTableInner({
   const config = LEVEL_CONFIG[level];
 
   const [showDefModal, setShowDefModal] = useState(false);
+  const [editingLabel, setEditingLabel] = useState(null);
   const [refreshingSnapshots, setRefreshingSnapshots] = useState(false);
   const [refreshingLabelledTables, setRefreshingLabelledTables] = useState(false);
 
@@ -68,8 +69,10 @@ function DataTableInner({
   useEffect(() => { fetchLabelDefs(); }, [fetchLabelDefs]);
 
   const forcedVisibleKeys = filters.label ? [`label:${filters.label}`] : [];
-  const { allCols, visibleCols, visibleKeys, columnOrder, effectiveVisibleKeys, toggle, reorder, resetColumns } =
-    useColumnPrefs(labelDefs, builtinCols, level, forcedVisibleKeys, serverPrefs);
+  const {
+    allCols, visibleCols, visibleKeys, columnOrder, effectiveVisibleKeys,
+    toggle, setKeysVisible, reorder, resetColumns,
+  } = useColumnPrefs(labelDefs, builtinCols, level, forcedVisibleKeys, serverPrefs);
 
   const { items, total, fetchItems } = useTableData({
     level, config, filters, page, sortBy, sortDir, columnFilters, allCols,
@@ -320,9 +323,20 @@ function DataTableInner({
     onPageChange(1);
   };
 
+  const handleEditLabel = (labelDef) => {
+    if (!currentUser) { alert("Please log in to edit label types"); return; }
+    setEditingLabel(labelDef);
+  };
+
   const topBarControls = (
     <>
-      <ColumnSelector allCols={allCols} visibleKeys={visibleKeys} onToggle={toggle} />
+      <ColumnSelector
+        allCols={allCols}
+        visibleKeys={visibleKeys}
+        onToggle={toggle}
+        onSetKeysVisible={setKeysVisible}
+        onEditLabel={handleEditLabel}
+      />
       <button onClick={handleResetDefaults} className="btn-outline">Reset View</button>
       <button onClick={() => {
         if (!currentUser) { alert("Please log in to create label types"); return; }
@@ -460,7 +474,15 @@ function DataTableInner({
         <LabelDefModal
           defaultLevel={level}
           onClose={() => setShowDefModal(false)}
-          onCreated={() => { setShowDefModal(false); fetchLabelDefs(); }}
+          onSaved={() => { setShowDefModal(false); fetchLabelDefs(); }}
+        />
+      )}
+
+      {editingLabel && (
+        <LabelDefModal
+          existingLabel={editingLabel}
+          onClose={() => setEditingLabel(null)}
+          onSaved={() => { setEditingLabel(null); fetchLabelDefs(); }}
         />
       )}
     </div>

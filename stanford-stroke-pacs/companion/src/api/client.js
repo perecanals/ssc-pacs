@@ -28,6 +28,13 @@ export async function apiPost(path, body) {
   });
 }
 
+export async function apiPatch(path, body) {
+  return apiFetch(path, {
+    method: "PATCH",
+    body: JSON.stringify(body),
+  });
+}
+
 export async function apiDelete(path) {
   return apiFetch(path, { method: "DELETE" });
 }

@@ -8,6 +8,7 @@ const COLUMN_KEY_MIGRATIONS = {
 
 const LEVEL_LABELS = { patient: "Patient", study: "Study", series: "Series" };
 const LEVEL_ORDER = ["patient", "study", "series"];
+const UNASSIGNED = "__unassigned__";
 
 export function useColumnPrefs(labelDefs, builtinCols, level, forcedVisibleKeys = [], initialPrefs = {}) {
   const builtinKeyAliases = useMemo(() => {
@@ -36,6 +37,8 @@ export function useColumnPrefs(labelDefs, builtinCols, level, forcedVisibleKeys 
       datatype: d.datatype,
       description: d.description,
       options: d.options || [],
+      instrument: d.instrument || null,
+      labelDef: d,
     })),
     [labelDefs],
   );
@@ -73,6 +76,14 @@ export function useColumnPrefs(labelDefs, builtinCols, level, forcedVisibleKeys 
     );
   };
 
+  const setKeysVisible = useCallback((keys, visible) => {
+    setVisibleKeys((prev) => {
+      if (visible) return Array.from(new Set([...prev, ...keys]));
+      const drop = new Set(keys);
+      return prev.filter((k) => !drop.has(k));
+    });
+  }, []);
+
   const [columnOrder, setColumnOrder] = useState(() => {
     if (Array.isArray(initialPrefs.columnOrder) && initialPrefs.columnOrder.length > 0) {
       return migrateKeys(initialPrefs.columnOrder);
@@ -108,10 +119,40 @@ export function useColumnPrefs(labelDefs, builtinCols, level, forcedVisibleKeys 
     setColumnOrder([]);
   }, [defaultBuiltinKeys]);
 
-  return { allCols, visibleCols, visibleKeys, columnOrder, effectiveVisibleKeys, toggle, reorder, resetColumns };
+  return {
+    allCols, visibleCols, visibleKeys, columnOrder, effectiveVisibleKeys,
+    toggle, setKeysVisible, reorder, resetColumns,
+  };
 }
 
-export default function ColumnSelector({ allCols, visibleKeys, onToggle }) {
+function groupLabelsByInstrument(labels) {
+  const groups = new Map();
+  for (const c of labels) {
+    const key = c.instrument || UNASSIGNED;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(c);
+  }
+  return Array.from(groups.entries())
+    .map(([key, cols]) => ({
+      key,
+      name: key === UNASSIGNED ? "Unassigned" : key,
+      cols,
+    }))
+    .sort((a, b) => {
+      if (a.key === UNASSIGNED) return 1;
+      if (b.key === UNASSIGNED) return -1;
+      if (b.cols.length !== a.cols.length) return b.cols.length - a.cols.length;
+      return a.name.localeCompare(b.name);
+    });
+}
+
+export default function ColumnSelector({
+  allCols,
+  visibleKeys,
+  onToggle,
+  onSetKeysVisible,
+  onEditLabel,
+}) {
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
 
@@ -134,7 +175,9 @@ export default function ColumnSelector({ allCols, visibleKeys, onToggle }) {
       .filter(({ cols }) => cols.length > 0);
 
   const builtinGroups = groupByLevel(builtins);
-  const labelGroups = groupByLevel(labels);
+  const instrumentGroups = useMemo(() => groupLabelsByInstrument(labels), [labels]);
+
+  const visibleSet = useMemo(() => new Set(visibleKeys), [visibleKeys]);
 
   return (
     <div className="col-selector" ref={ref}>
@@ -159,7 +202,7 @@ export default function ColumnSelector({ allCols, visibleKeys, onToggle }) {
                 <label key={c.key} className="col-selector__item">
                   <input
                     type="checkbox"
-                    checked={visibleKeys.includes(c.key)}
+                    checked={visibleSet.has(c.key)}
                     onChange={() => onToggle(c.key)}
                   />
                   {c.label}
@@ -171,30 +214,66 @@ export default function ColumnSelector({ allCols, visibleKeys, onToggle }) {
           <div className="col-selector__section-title">
             Annotation labels
           </div>
-          {labelGroups.map(({ lvl, cols }) => (
-            <div key={`label-${lvl}`}>
-              <div className="col-selector__subgroup-title">
-                {LEVEL_LABELS[lvl] || lvl} labels
-              </div>
-              {cols.map((c) => (
-                <label
-                  key={c.key}
-                  title={c.description || ""}
-                  className="col-selector__item"
-                >
-                  <input
-                    type="checkbox"
-                    checked={visibleKeys.includes(c.key)}
-                    onChange={() => onToggle(c.key)}
-                  />
-                  {c.label}{" "}
-                  <span className="col-selector__datatype">
-                    ({c.datatype})
+          {instrumentGroups.length === 0 && (
+            <div className="col-selector__empty">No labels defined yet.</div>
+          )}
+          {instrumentGroups.map(({ key, name, cols }) => {
+            const keys = cols.map((c) => c.key);
+            const visibleCount = keys.filter((k) => visibleSet.has(k)).length;
+            const allVisible = visibleCount === keys.length;
+            return (
+              <div key={`instr-${key}`}>
+                <div className="col-selector__instrument-header">
+                  <span className="col-selector__instrument-name">
+                    {name}{" "}
+                    <span className="col-selector__instrument-count">
+                      ({cols.length})
+                    </span>
                   </span>
-                </label>
-              ))}
-            </div>
-          ))}
+                  <button
+                    type="button"
+                    onClick={() => onSetKeysVisible(keys, !allVisible)}
+                    className="col-selector__bulk-btn"
+                  >
+                    {allVisible ? "Hide all" : "Show all"}
+                  </button>
+                </div>
+                {cols.map((c) => (
+                  <div key={c.key} className="col-selector__item-row">
+                    <label
+                      title={c.description || ""}
+                      className="col-selector__item col-selector__item--flex"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={visibleSet.has(c.key)}
+                        onChange={() => onToggle(c.key)}
+                      />
+                      <span className="col-selector__label-text">
+                        {c.label}{" "}
+                        <span className="col-selector__datatype">
+                          ({c.datatype} · {c.level})
+                        </span>
+                      </span>
+                    </label>
+                    {onEditLabel && (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onEditLabel(c.labelDef);
+                        }}
+                        title="Edit label"
+                        className="col-selector__edit-btn"
+                      >
+                        {"✎"}
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
+            );
+          })}
         </div>
       )}
     </div>
@@ -205,4 +284,6 @@ ColumnSelector.propTypes = {
   allCols: PropTypes.array.isRequired,
   visibleKeys: PropTypes.arrayOf(PropTypes.string).isRequired,
   onToggle: PropTypes.func.isRequired,
+  onSetKeysVisible: PropTypes.func.isRequired,
+  onEditLabel: PropTypes.func,
 };

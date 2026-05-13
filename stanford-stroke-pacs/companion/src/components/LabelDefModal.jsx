@@ -1,17 +1,32 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import PropTypes from "prop-types";
-import { apiPost } from "../api/client";
+import { apiGet, apiPatch, apiPost } from "../api/client";
 import { valueColor } from "../utils/colors";
 import "./LabelDefModal.css";
 
-export default function LabelDefModal({ defaultLevel = "series", onClose, onCreated }) {
-  const [name, setName] = useState("");
-  const [description, setDescription] = useState("");
-  const [level, setLevel] = useState(defaultLevel);
-  const [datatype, setDatatype] = useState("bool");
-  const [options, setOptions] = useState([]);
+export default function LabelDefModal({
+  defaultLevel = "series",
+  existingLabel = null,
+  onClose,
+  onSaved,
+}) {
+  const isEdit = existingLabel != null;
+
+  const [name, setName] = useState(existingLabel?.name || "");
+  const [description, setDescription] = useState(existingLabel?.description || "");
+  const [level, setLevel] = useState(existingLabel?.level || defaultLevel);
+  const [datatype, setDatatype] = useState(existingLabel?.datatype || "bool");
+  const [options, setOptions] = useState(existingLabel?.options || []);
   const [optionInput, setOptionInput] = useState("");
+  const [instrument, setInstrument] = useState(existingLabel?.instrument || "");
+  const [instrumentSuggestions, setInstrumentSuggestions] = useState([]);
   const [error, setError] = useState("");
+
+  useEffect(() => {
+    apiGet("/api/instruments")
+      .then((rows) => setInstrumentSuggestions(rows.map((r) => r.name).filter(Boolean)))
+      .catch(() => setInstrumentSuggestions([]));
+  }, []);
 
   const addOption = () => {
     const val = optionInput.trim();
@@ -29,6 +44,22 @@ export default function LabelDefModal({ defaultLevel = "series", onClose, onCrea
   };
 
   const handleSave = async () => {
+    setError("");
+
+    if (isEdit) {
+      const res = await apiPatch(`/api/label-definitions/${existingLabel.id}`, {
+        description: description.trim() || null,
+        instrument: instrument.trim() || null,
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        setError(body?.detail || "Failed to update label definition");
+        return;
+      }
+      onSaved();
+      return;
+    }
+
     if (!name.trim()) {
       setError("Name is required");
       return;
@@ -39,6 +70,7 @@ export default function LabelDefModal({ defaultLevel = "series", onClose, onCrea
       level,
       datatype,
       options: datatype === "select" && options.length > 0 ? options : null,
+      instrument: instrument.trim() || null,
     });
     if (res.status === 409) {
       setError("A label with this name already exists");
@@ -49,7 +81,7 @@ export default function LabelDefModal({ defaultLevel = "series", onClose, onCrea
       setError(body?.detail || "Failed to create label definition");
       return;
     }
-    onCreated();
+    onSaved();
   };
 
   return (
@@ -59,7 +91,7 @@ export default function LabelDefModal({ defaultLevel = "series", onClose, onCrea
     >
       <div className="label-modal">
         <h3 className="label-modal__title">
-          Define New Label Type
+          {isEdit ? `Edit label: ${existingLabel.name}` : "Define New Label Type"}
         </h3>
 
         <label className="label-modal__label">
@@ -71,7 +103,8 @@ export default function LabelDefModal({ defaultLevel = "series", onClose, onCrea
           onChange={(e) => setName(e.target.value)}
           placeholder="e.g. hemorrhagic, infarct_volume"
           className="label-modal__input"
-          autoFocus
+          autoFocus={!isEdit}
+          disabled={isEdit}
         />
 
         <label className="label-modal__label">
@@ -86,12 +119,31 @@ export default function LabelDefModal({ defaultLevel = "series", onClose, onCrea
         />
 
         <label className="label-modal__label">
+          Instrument
+        </label>
+        <input
+          type="text"
+          value={instrument}
+          onChange={(e) => setInstrument(e.target.value)}
+          placeholder="e.g. Functional outcome, Imaging quality"
+          className="label-modal__input"
+          list="label-modal-instruments"
+          autoFocus={isEdit}
+        />
+        <datalist id="label-modal-instruments">
+          {instrumentSuggestions.map((s) => (
+            <option key={s} value={s} />
+          ))}
+        </datalist>
+
+        <label className="label-modal__label">
           Level
         </label>
         <select
           value={level}
           onChange={(e) => setLevel(e.target.value)}
           className="label-modal__select"
+          disabled={isEdit}
         >
           <option value="patient">Patient</option>
           <option value="study">Study</option>
@@ -105,6 +157,7 @@ export default function LabelDefModal({ defaultLevel = "series", onClose, onCrea
           value={datatype}
           onChange={(e) => setDatatype(e.target.value)}
           className="label-modal__select"
+          disabled={isEdit}
         >
           <option value="bool">Boolean (present / absent)</option>
           <option value="int">Integer (numeric value)</option>
@@ -118,30 +171,34 @@ export default function LabelDefModal({ defaultLevel = "series", onClose, onCrea
               Initial Values
             </label>
             <p className="label-modal__options-hint">
-              Add values users can pick from. More can be added later.
+              {isEdit
+                ? "Options are read-only in edit mode."
+                : "Add values users can pick from. More can be added later."}
             </p>
-            <div className="label-modal__options-row">
-              <input
-                type="text"
-                value={optionInput}
-                onChange={(e) => setOptionInput(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") {
-                    e.preventDefault();
-                    addOption();
-                  }
-                }}
-                placeholder="Type a value and press Enter"
-                className="label-modal__option-input"
-              />
-              <button
-                type="button"
-                onClick={addOption}
-                className="btn-outline"
-              >
-                Add
-              </button>
-            </div>
+            {!isEdit && (
+              <div className="label-modal__options-row">
+                <input
+                  type="text"
+                  value={optionInput}
+                  onChange={(e) => setOptionInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      addOption();
+                    }
+                  }}
+                  placeholder="Type a value and press Enter"
+                  className="label-modal__option-input"
+                />
+                <button
+                  type="button"
+                  onClick={addOption}
+                  className="btn-outline"
+                >
+                  Add
+                </button>
+              </div>
+            )}
             {options.length > 0 && (
               <div className="label-modal__pills">
                 {options.map((opt, i) => {
@@ -153,13 +210,15 @@ export default function LabelDefModal({ defaultLevel = "series", onClose, onCrea
                       className="label-modal__pill"
                     >
                       {opt}
-                      <button
-                        type="button"
-                        onClick={() => removeOption(i)}
-                        className="label-modal__pill-remove"
-                      >
-                        &times;
-                      </button>
+                      {!isEdit && (
+                        <button
+                          type="button"
+                          onClick={() => removeOption(i)}
+                          className="label-modal__pill-remove"
+                        >
+                          &times;
+                        </button>
+                      )}
                     </span>
                   );
                 })}
@@ -177,7 +236,7 @@ export default function LabelDefModal({ defaultLevel = "series", onClose, onCrea
             Cancel
           </button>
           <button onClick={handleSave} className="btn-primary">
-            Create
+            {isEdit ? "Save" : "Create"}
           </button>
         </div>
       </div>
@@ -187,6 +246,15 @@ export default function LabelDefModal({ defaultLevel = "series", onClose, onCrea
 
 LabelDefModal.propTypes = {
   defaultLevel: PropTypes.oneOf(["patient", "study", "series"]),
+  existingLabel: PropTypes.shape({
+    id: PropTypes.number.isRequired,
+    name: PropTypes.string.isRequired,
+    description: PropTypes.string,
+    level: PropTypes.string,
+    datatype: PropTypes.string,
+    options: PropTypes.array,
+    instrument: PropTypes.string,
+  }),
   onClose: PropTypes.func.isRequired,
-  onCreated: PropTypes.func.isRequired,
+  onSaved: PropTypes.func.isRequired,
 };

@@ -31,3 +31,39 @@
 .col-selector__datatype {
   @apply text-text-muted text-[11px];
 }
+
+.col-selector__empty {
+  @apply px-3 py-1.5 text-[11px] italic text-text-muted;
+}
+
+.col-selector__instrument-header {
+  @apply flex items-center justify-between gap-2 px-3 pt-1.5 pb-0.5;
+}
+
+.col-selector__instrument-name {
+  @apply text-[10px] font-semibold uppercase tracking-wide text-text-muted;
+}
+
+.col-selector__instrument-count {
+  @apply font-normal text-text-muted/70 normal-case;
+}
+
+.col-selector__bulk-btn {
+  @apply text-[10px] text-primary hover:underline bg-transparent border-none p-0 cursor-pointer;
+}
+
+.col-selector__item-row {
+  @apply flex items-center pr-2;
+}
+
+.col-selector__item--flex {
+  @apply flex-1;
+}
+
+.col-selector__label-text {
+  @apply flex-1;
+}
+
+.col-selector__edit-btn {
+  @apply opacity-60 hover:opacity-100 text-text-muted hover:text-primary bg-transparent border-none p-0 px-1 text-sm cursor-pointer;
+}

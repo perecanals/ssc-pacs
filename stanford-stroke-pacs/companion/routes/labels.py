@@ -95,12 +95,39 @@ def get_label_values(label_name: str):
 # ---------------------------------------------------------------------------
 
 
+_LABEL_DEF_COLUMNS = (
+    "id, name, description, level, datatype, options, instrument, "
+    "created_by, created_at"
+)
+
+
+def _clean_optional_text(value: str | None) -> str | None:
+    """Normalize a free-text optional field: trim, treat empty as NULL."""
+    if value is None:
+        return None
+    stripped = value.strip()
+    return stripped or None
+
+
+def _serialize_label_def_row(row: dict) -> dict:
+    if row.get("created_at"):
+        row["created_at"] = row["created_at"].isoformat()
+    row["options"] = json.loads(row["options"]) if row.get("options") else []
+    return row
+
+
 class LabelDefinitionCreate(BaseModel):
     name: str
     description: str | None = None
     level: str = "series"
     datatype: str = "bool"
     options: list[str] | None = None
+    instrument: str | None = None
+
+
+class LabelDefinitionUpdate(BaseModel):
+    description: str | None = None
+    instrument: str | None = None
 
 
 @router.get("/api/label-definitions")
@@ -110,21 +137,16 @@ def list_label_definitions(level: str | None = Query(None)):
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             if level and level in VALID_LEVELS:
                 cur.execute(
-                    "SELECT id, name, description, level, datatype, options, created_by, created_at "
+                    f"SELECT {_LABEL_DEF_COLUMNS} "
                     "FROM label_definitions WHERE level = %s ORDER BY name",
                     (level,),
                 )
             else:
                 cur.execute(
-                    "SELECT id, name, description, level, datatype, options, created_by, created_at "
+                    f"SELECT {_LABEL_DEF_COLUMNS} "
                     "FROM label_definitions ORDER BY name"
                 )
-            rows = cur.fetchall()
-            for r in rows:
-                if r.get("created_at"):
-                    r["created_at"] = r["created_at"].isoformat()
-                r["options"] = json.loads(r["options"]) if r.get("options") else []
-            return rows
+            return [_serialize_label_def_row(r) for r in cur.fetchall()]
     finally:
         conn.close()
 
@@ -142,6 +164,7 @@ def create_label_definition(body: LabelDefinitionCreate, auth_token: str | None 
             detail="name must match ^[A-Za-z][A-Za-z0-9_]{0,62}$ (letters, digits, underscores; must start with a letter; max 63 chars)",
         )
     options_json = json.dumps(body.options) if body.options else None
+    instrument = _clean_optional_text(body.instrument)
     conn = get_conn()
     try:
         conflict = find_label_column_conflict(conn, body.level, body.name.strip())
@@ -152,20 +175,94 @@ def create_label_definition(body: LabelDefinitionCreate, auth_token: str | None 
             )
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             cur.execute(
-                "INSERT INTO label_definitions (name, description, level, datatype, options, created_by) "
-                "VALUES (%s, %s, %s, %s, %s, %s) "
-                "RETURNING id, name, description, level, datatype, options, created_by, created_at",
-                (body.name.strip(), body.description, body.level, body.datatype, options_json, username),
+                "INSERT INTO label_definitions "
+                "(name, description, level, datatype, options, instrument, created_by) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s) "
+                f"RETURNING {_LABEL_DEF_COLUMNS}",
+                (
+                    body.name.strip(),
+                    _clean_optional_text(body.description),
+                    body.level,
+                    body.datatype,
+                    options_json,
+                    instrument,
+                    username,
+                ),
             )
-            row = cur.fetchone()
-            if row.get("created_at"):
-                row["created_at"] = row["created_at"].isoformat()
-            row["options"] = json.loads(row["options"]) if row.get("options") else []
+            row = _serialize_label_def_row(cur.fetchone())
         sync_labelled_schema(conn, body.level)
         conn.commit()
         return row
     except psycopg2.errors.UniqueViolation:
         raise HTTPException(status_code=409, detail="Label with this name already exists")
+    finally:
+        conn.close()
+
+
+@router.patch("/api/label-definitions/{label_id}")
+def update_label_definition(
+    label_id: int,
+    body: LabelDefinitionUpdate,
+    auth_token: str | None = Cookie(None),
+):
+    """Edit `description` and/or `instrument` on an existing label.
+
+    Editing `name`, `level`, `datatype`, or `options` is intentionally
+    out of scope — those are baked into the labelled-table sync and
+    annotation entity-id constraints; renaming/retyping belongs in a
+    dedicated migration flow.
+    """
+    get_current_user(auth_token)
+
+    updates: list[str] = []
+    params: list[object] = []
+    fields = body.model_dump(exclude_unset=True)
+    if "description" in fields:
+        updates.append("description = %s")
+        params.append(_clean_optional_text(fields["description"]))
+    if "instrument" in fields:
+        updates.append("instrument = %s")
+        params.append(_clean_optional_text(fields["instrument"]))
+
+    if not updates:
+        raise HTTPException(
+            status_code=400,
+            detail="No editable fields provided (allowed: description, instrument)",
+        )
+
+    params.append(label_id)
+    conn = get_conn()
+    try:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute(
+                f"UPDATE label_definitions SET {', '.join(updates)} "
+                f"WHERE id = %s RETURNING {_LABEL_DEF_COLUMNS}",
+                params,
+            )
+            row = cur.fetchone()
+            if row is None:
+                raise HTTPException(status_code=404, detail="Label definition not found")
+            row = _serialize_label_def_row(row)
+        conn.commit()
+        return row
+    finally:
+        conn.close()
+
+
+@router.get("/api/instruments")
+def list_instruments():
+    """Distinct non-null instrument values from label_definitions with counts."""
+    conn = get_conn()
+    try:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute(
+                "SELECT instrument AS name, COUNT(*) AS count "
+                "FROM label_definitions "
+                "WHERE instrument IS NOT NULL AND instrument <> '' "
+                "GROUP BY instrument "
+                "ORDER BY count DESC, instrument ASC"
+            )
+            return cur.fetchall()
     finally:
         conn.close()
 
