@@ -7,7 +7,7 @@ mode = "cold_path_cache"
 legacy_dicom_root = "/DATA2/pacs_imaging_data"
 cold_archive_root = "/DATA2/pacs_imaging_data_compressed"
 hot_cache_dir = "/DATA2/pacs_hot_cache"
-eviction_ttl_hours = 9999
+eviction_ttl_hours = 336
 # Cold-storage warm watchdog: a `cache_state` row stuck in status='warming'
 # longer than this is treated as cold by the next warm attempt (recovers
 # from a process crash between archive extraction and the final hot mark).
