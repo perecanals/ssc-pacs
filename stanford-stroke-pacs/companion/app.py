@@ -129,7 +129,13 @@ if DIST_DIR.is_dir():
 async def sliding_jwt(request, call_next):
     response = await call_next(request)
     path = request.url.path
-    if path.startswith("/assets/") or path == "/api/me":
+    # Skip sliding-refresh on routes that own their own auth_token cookie
+    # (login sets a fresh token; logout deletes it) and on read-only probes
+    # we don't want to extend the session from (/api/me, static assets).
+    if (
+        path.startswith("/assets/")
+        or path in ("/api/me", "/api/login", "/api/logout")
+    ):
         return response
     token = request.cookies.get("auth_token")
     if token:
