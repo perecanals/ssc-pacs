@@ -44,6 +44,17 @@ load_dotenv(_REPO_ROOT / ".env")
 # ---------------------------------------------------------------------------
 TEST_DB_NAME = os.getenv("TEST_DB_NAME", "test_stanford_stroke")
 
+# Force DB_NAME in the environment to the scratch DB *before* any test module
+# is collected. The application's `db.DB_CONFIG` is built from os.environ at
+# import time; if a test file imports `db` directly (e.g. via
+# `from db import get_conn`) before the per-test `client` fixture runs its
+# `patch.dict(os.environ, …)`, DB_CONFIG locks in whatever the CI workflow
+# set DB_NAME to (e.g. "stanford-stroke") and any subsequent test that uses
+# `get_conn()` outside the `client` fixture connects to a database that
+# doesn't exist. Pinning DB_NAME here keeps DB_CONFIG pointed at the scratch
+# DB regardless of test-module import order.
+os.environ["DB_NAME"] = TEST_DB_NAME
+
 # Connection params for the *admin* connection (to create/drop the test DB).
 _admin_dsn = dict(
     host=os.getenv("DB_HOST", "localhost"),
