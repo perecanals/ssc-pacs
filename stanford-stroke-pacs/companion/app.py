@@ -8,21 +8,21 @@ from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-import auth as _auth
-from auth import create_jwt, decode_jwt
-from db import audit_user_var, close_pool, get_conn, init_pool
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
-from routes import admin, annotations, cold_storage, labels, preferences, proxy, static, studies
-from routes import auth as auth_routes
 from slowapi import Limiter
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 
+import auth as _auth
+from auth import create_jwt, decode_jwt
 from config import LOGIN_RATE_LIMIT_PER_5MIN, STORAGE_MODE, WARM_WORKERS
+from db import audit_user_var, close_pool, get_conn, init_pool
 from logging_config import configure_logging, request_id_ctx, user_ctx
 from metrics import http_request_duration_seconds, http_requests_total
+from routes import admin, annotations, cold_storage, labels, preferences, proxy, static, studies
+from routes import auth as auth_routes
 
 # Configure JSON logging before any module-level log lines fire.
 configure_logging()
@@ -36,9 +36,9 @@ _ALEMBIC_INI = Path(__file__).resolve().parent / "alembic.ini"
 
 def _init_db():
     """Bring the DB schema up to date, then sync the dynamic labelled tables."""
-    from alembic import command
     from alembic.config import Config
 
+    from alembic import command
     from labelled_table_sync import ensure_labelled_tables
 
     cfg = Config(str(_ALEMBIC_INI))
