@@ -84,11 +84,19 @@ The companion page is decomposed into focused React components:
   Reset Filters and Reset View buttons, label-definition trigger area,
   and login/logout controls
 - `Sidebar` — search box, annotation label list grouped by level with counts,
-  modality filter dropdown. Labels from all levels are always visible; clicking
+  modality filter dropdown. Within each level the labels are grouped by
+  instrument (instruments alphabetical, unassigned last) and ordered by label
+  creation time (oldest first) within each instrument — the same
+  `compareLabelDefsDefault` ordering (`utils/table.js`) used for the default
+  data-table column order, so the quick-filter list and the columns stay
+  consistent. Labels from all levels are always visible; clicking
   a label sets both the label name and its level as the active filter and
-  temporarily forces that label column visible in the data table. Clearing the
-  label filter removes that temporary column visibility unless the user had
-  already enabled the column in saved preferences.
+  enables that label's column in the data table — exactly as if it had been
+  checked in the column selector (a one-time, persisted enable, so the
+  ColumnSelector checkbox stays in sync). The column can then be hidden again
+  from the column selector independently of the filter, and is not
+  auto-removed when the label filter is cleared. `visibleKeys` is the single
+  source of truth for column visibility (no separate forced-visible overlay).
 - `DataTable` (`components/DataTable/`) — generic data table supporting all three
   levels. Split into focused modules: `index.jsx` (orchestrator), `ChildRows.jsx`
   (child/grandchild rendering), `TableHeader.jsx` (column headers + filter row),
@@ -166,8 +174,10 @@ The companion page is decomposed into focused React components:
   - **Default column order**: With no saved `columnOrder` (a clean view, or
     after "Reset View"), built-in data columns come first, followed by label
     columns grouped by instrument (instruments alphabetical, unassigned last)
-    and ordered by label creation time (oldest first) within each instrument.
-    Any user-saved column order takes precedence over this default.
+    and ordered by label creation time (oldest first) within each instrument
+    (shared `compareLabelDefsDefault` in `utils/table.js`, also used by the
+    sidebar quick-filter list). Any user-saved column order takes precedence
+    over this default.
   - **Inline editing with stopPropagation**: Label cells in all table levels
     use `stopPropagation` to prevent expand/collapse when interacting with
     label controls.

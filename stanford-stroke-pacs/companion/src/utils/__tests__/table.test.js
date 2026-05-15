@@ -6,6 +6,7 @@ import {
   getTextFilterValue,
   buildBuiltinColumnCatalog,
   buildPatientStudiesUrl,
+  compareLabelDefsDefault,
   LEVEL_CONFIG,
   PER_PAGE,
 } from "../table";
@@ -116,6 +117,37 @@ describe("buildPatientStudiesUrl", () => {
 
   it("ignores blank label", () => {
     expect(buildPatientStudiesUrl({ patient_id: "P1" }, "  ")).toBe("/api/patients/P1/studies");
+  });
+});
+
+describe("compareLabelDefsDefault", () => {
+  const sortNames = (rows) =>
+    [...rows].sort(compareLabelDefsDefault).map((r) => r.name || r.label);
+
+  it("orders instruments alphabetically with unassigned (null) last", () => {
+    const rows = [
+      { name: "z", instrument: null, created_at: "2020-01-01" },
+      { name: "a", instrument: "Beta", created_at: "2020-01-01" },
+      { name: "b", instrument: "Alpha", created_at: "2020-01-01" },
+    ];
+    expect(sortNames(rows)).toEqual(["b", "a", "z"]);
+  });
+
+  it("orders by creation time (oldest first) within an instrument", () => {
+    const rows = [
+      { name: "new", instrument: "Alpha", created_at: "2024-06-01T00:00:00Z" },
+      { name: "old", instrument: "Alpha", created_at: "2021-01-01T00:00:00Z" },
+      { name: "mid", instrument: "Alpha", created_at: "2022-03-01T00:00:00Z" },
+    ];
+    expect(sortNames(rows)).toEqual(["old", "mid", "new"]);
+  });
+
+  it("falls back to name when timestamps are equal/missing and supports summary rows (.label)", () => {
+    const rows = [
+      { label: "beta", instrument: "Alpha" },
+      { label: "alpha", instrument: "Alpha" },
+    ];
+    expect(sortNames(rows)).toEqual(["alpha", "beta"]);
   });
 });
 

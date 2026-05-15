@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import PropTypes from "prop-types";
+import { compareLabelDefsDefault } from "../utils/table";
 import "./ColumnSelector.css";
 
 const COLUMN_KEY_MIGRATIONS = {
@@ -10,25 +11,7 @@ const LEVEL_LABELS = { patient: "Patient", study: "Study", series: "Series" };
 const LEVEL_ORDER = ["patient", "study", "series"];
 const UNASSIGNED = "__unassigned__";
 
-// Default (clean-view) ordering for label columns: grouped by instrument
-// (alphabetical, unassigned last), then by creation time (oldest first)
-// within each instrument. `name` is a stable tiebreak when timestamps match.
-// Once a user reorders columns, their saved `columnOrder` takes precedence.
-function compareLabelDefsDefault(a, b) {
-  const ai = a.instrument || null;
-  const bi = b.instrument || null;
-  if (ai !== bi) {
-    if (ai === null) return 1;
-    if (bi === null) return -1;
-    return ai.localeCompare(bi);
-  }
-  const at = Number.isNaN(Date.parse(a.created_at)) ? 0 : Date.parse(a.created_at);
-  const bt = Number.isNaN(Date.parse(b.created_at)) ? 0 : Date.parse(b.created_at);
-  if (at !== bt) return at - bt;
-  return (a.name || "").localeCompare(b.name || "");
-}
-
-export function useColumnPrefs(labelDefs, builtinCols, level, forcedVisibleKeys = [], initialPrefs = {}) {
+export function useColumnPrefs(labelDefs, builtinCols, level, initialPrefs = {}) {
   const builtinKeyAliases = useMemo(() => {
     const aliases = new Map();
     for (const col of builtinCols) {
@@ -83,10 +66,7 @@ export function useColumnPrefs(labelDefs, builtinCols, level, forcedVisibleKeys 
     return defaultBuiltinKeys;
   });
 
-  const effectiveVisibleKeys = Array.from(
-    new Set([...visibleKeys, ...forcedVisibleKeys]),
-  );
-  const unorderedVisibleCols = allCols.filter((c) => effectiveVisibleKeys.includes(c.key));
+  const unorderedVisibleCols = allCols.filter((c) => visibleKeys.includes(c.key));
 
   const toggle = (key) => {
     setVisibleKeys((prev) =>
@@ -138,7 +118,7 @@ export function useColumnPrefs(labelDefs, builtinCols, level, forcedVisibleKeys 
   }, [defaultBuiltinKeys]);
 
   return {
-    allCols, visibleCols, visibleKeys, columnOrder, effectiveVisibleKeys,
+    allCols, visibleCols, visibleKeys, columnOrder,
     toggle, setKeysVisible, reorder, resetColumns,
   };
 }

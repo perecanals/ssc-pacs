@@ -75,11 +75,23 @@ function DataTableInner({
   }, []);
   useEffect(() => { fetchLabelDefs(); }, [fetchLabelDefs]);
 
-  const forcedVisibleKeys = filters.label ? [`label:${filters.label}`] : [];
   const {
-    allCols, visibleCols, visibleKeys, columnOrder, effectiveVisibleKeys,
+    allCols, visibleCols, visibleKeys, columnOrder,
     toggle, setKeysVisible, reorder, resetColumns,
-  } = useColumnPrefs(labelDefs, builtinCols, level, forcedVisibleKeys, serverPrefs);
+  } = useColumnPrefs(labelDefs, builtinCols, level, serverPrefs);
+
+  // A sidebar label quick-filter enables that label's column the same way a
+  // dropdown click would (one-time, persisted) — so the ColumnSelector
+  // checkbox reflects it and the user can hide it again without clearing the
+  // filter. Keyed only on the filter changing: a later manual hide is not
+  // undone, and clearing the filter leaves the column as the user left it.
+  const labelFilterKey = filters.label ? `label:${filters.label}` : null;
+  useEffect(() => {
+    if (labelFilterKey && !visibleKeys.includes(labelFilterKey)) {
+      setKeysVisible([labelFilterKey], true);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [labelFilterKey]);
 
   const { items, total, loading, hasMore, loadMore, reload, resetNonce } = useTableData({
     level, config, filters, sortBy, sortDir, columnFilters, allCols,
@@ -303,7 +315,7 @@ function DataTableInner({
   };
 
   const colsForLevel = (targetLevel) => {
-    const builtins = allCols.filter((c) => c.builtin && effectiveVisibleKeys.includes(c.key) && c.level === targetLevel);
+    const builtins = allCols.filter((c) => c.builtin && visibleKeys.includes(c.key) && c.level === targetLevel);
     const labels = visibleCols.filter((c) => !c.builtin && c.level === targetLevel);
     return [...builtins, ...labels];
   };

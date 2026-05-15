@@ -60,7 +60,7 @@ def labels_summary(level: str | None = Query(None)):
                 count_col = _SUMMARY_COUNT_COL[level]
                 cur.execute(
                     f"SELECT a.label, a.level, COUNT(DISTINCT a.{count_col}) AS count, "
-                    "ld.instrument "
+                    "ld.instrument, MIN(ld.created_at) AS created_at "
                     "FROM annotations a "
                     "LEFT JOIN label_definitions ld "
                     "  ON ld.name = a.label AND ld.level = a.level "
@@ -71,14 +71,19 @@ def labels_summary(level: str | None = Query(None)):
                 )
             else:
                 cur.execute(
-                    "SELECT a.label, a.level, COUNT(*) AS count, ld.instrument "
+                    "SELECT a.label, a.level, COUNT(*) AS count, "
+                    "ld.instrument, MIN(ld.created_at) AS created_at "
                     "FROM annotations a "
                     "LEFT JOIN label_definitions ld "
                     "  ON ld.name = a.label AND ld.level = a.level "
                     "GROUP BY a.label, a.level, ld.instrument "
                     "ORDER BY a.label"
                 )
-            return cur.fetchall()
+            rows = cur.fetchall()
+            for row in rows:
+                if row.get("created_at"):
+                    row["created_at"] = row["created_at"].isoformat()
+            return rows
     finally:
         conn.close()
 

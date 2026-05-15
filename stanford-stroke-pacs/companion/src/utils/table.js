@@ -75,6 +75,26 @@ export { LEVEL_RANK, LEVEL_ORDER, LEVEL_CONFIG };
 
 export const PER_PAGE = 50;
 
+// Shared default ordering for annotation labels (used by both the default
+// column order in the data table and the sidebar quick-filter list, so the
+// two stay consistent): grouped by instrument (alphabetical, unassigned/null
+// last), then by label creation time (oldest first) within each instrument.
+// Name is a stable tiebreak when timestamps are equal/missing. Accepts both
+// label-definition objects (`.name`) and labels-summary rows (`.label`).
+export function compareLabelDefsDefault(a, b) {
+  const ai = a.instrument || null;
+  const bi = b.instrument || null;
+  if (ai !== bi) {
+    if (ai === null) return 1;
+    if (bi === null) return -1;
+    return ai.localeCompare(bi);
+  }
+  const at = Number.isNaN(Date.parse(a.created_at)) ? 0 : Date.parse(a.created_at);
+  const bt = Number.isNaN(Date.parse(b.created_at)) ? 0 : Date.parse(b.created_at);
+  if (at !== bt) return at - bt;
+  return (a.name || a.label || "").localeCompare(b.name || b.label || "");
+}
+
 export function buildBuiltinColumnCatalog(activeLevel) {
   return LEVEL_ORDER.flatMap((builtinLevel) =>
     LEVEL_CONFIG[builtinLevel].builtinCols.map((col) => ({

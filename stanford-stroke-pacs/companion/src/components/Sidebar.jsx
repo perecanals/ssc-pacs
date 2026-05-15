@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import PropTypes from "prop-types";
 import { apiGet } from "../api/client";
+import { compareLabelDefsDefault } from "../utils/table";
 import "./Sidebar.css";
 
 const MODALITIES = ["CT", "MR", "CR", "US", "DX", "PT", "NM", "XA", "MG", "RF"];
@@ -8,6 +9,9 @@ const LEVEL_ORDER = ["patient", "study", "series"];
 const LEVEL_LABELS = { patient: "Patient", study: "Study", series: "Series" };
 const UNASSIGNED = "__unassigned__";
 
+// Same default ordering as the data table's columns: instrument groups
+// alphabetical (unassigned last), and within each instrument by label
+// creation time (oldest first) via the shared compareLabelDefsDefault.
 function groupLabelsByInstrument(labels) {
   const groups = new Map();
   for (const l of labels) {
@@ -19,12 +23,11 @@ function groupLabelsByInstrument(labels) {
     .map(([key, ls]) => ({
       key,
       name: key === UNASSIGNED ? "Unassigned" : key,
-      labels: ls,
+      labels: [...ls].sort(compareLabelDefsDefault),
     }))
     .sort((a, b) => {
       if (a.key === UNASSIGNED) return 1;
       if (b.key === UNASSIGNED) return -1;
-      if (b.labels.length !== a.labels.length) return b.labels.length - a.labels.length;
       return a.name.localeCompare(b.name);
     });
 }
