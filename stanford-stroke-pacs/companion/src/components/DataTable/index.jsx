@@ -5,12 +5,10 @@ import { apiGet } from "../../api/client";
 import { downloadDicomZip, resolveOhifLink, refreshSnapshots, refreshLabelledTables } from "./actions";
 import { useColumnPrefs } from "../ColumnSelector";
 import ColumnSelector from "../ColumnSelector";
-import Pagination from "../Pagination";
 import InlineEdit from "../InlineEdit";
 import LabelDefModal from "../LabelDefModal";
 import { useAuth } from "../../context/AuthContext";
 import {
-  PER_PAGE,
   LEVEL_RANK,
   LEVEL_CONFIG,
   buildBuiltinColumnCatalog,
@@ -29,8 +27,6 @@ import "../DataTable.css";
 function DataTableInner({
   level,
   filters,
-  page,
-  onPageChange,
   onResetSidebarFilters,
   onPreviewSelect,
   activeRowKey,
@@ -85,11 +81,33 @@ function DataTableInner({
     toggle, setKeysVisible, reorder, resetColumns,
   } = useColumnPrefs(labelDefs, builtinCols, level, forcedVisibleKeys, serverPrefs);
 
-  const { items, total, fetchItems } = useTableData({
-    level, config, filters, page, sortBy, sortDir, columnFilters, allCols,
+  const { items, total, loading, hasMore, loadMore, reload, resetNonce } = useTableData({
+    level, config, filters, sortBy, sortDir, columnFilters, allCols,
   });
 
-  const totalPages = Math.ceil(total / PER_PAGE);
+  const scrollRef = useRef(null);
+  const sentinelRef = useRef(null);
+
+  // Scroll back to the top whenever the list is reset (filter/sort/level change).
+  useEffect(() => {
+    if (scrollRef.current) scrollRef.current.scrollTop = 0;
+  }, [resetNonce]);
+
+  // Auto-load the next page when the bottom sentinel scrolls into view.
+  // loadMore() self-guards on loading/hasMore so fast scroll can't stack
+  // requests. The sentinel is only rendered when there are rows, so the
+  // observer never fires on an empty or still-loading list.
+  useEffect(() => {
+    const root = scrollRef.current;
+    const target = sentinelRef.current;
+    if (!root || !target) return undefined;
+    const io = new IntersectionObserver(
+      (entries) => { if (entries[0].isIntersecting) loadMore(); },
+      { root, rootMargin: "200px", threshold: 0 },
+    );
+    io.observe(target);
+    return () => io.disconnect();
+  }, [loadMore, items.length === 0, level]);
 
   const {
     dragColKey, dragOverKey, dropSide,
@@ -112,7 +130,7 @@ function DataTableInner({
   const grandChildConfig = childConfig?.expandable ? LEVEL_CONFIG[childConfig.childLevel] : null;
 
   const handleMutated = () => {
-    fetchItems();
+    reload();
     for (const [rowId, isExp] of Object.entries(expanded)) {
       if (!isExp) continue;
       const row = items.find((r) => r[config.idCol] === rowId);
@@ -154,7 +172,6 @@ function DataTableInner({
     clearTimeout(filterTimeout.current);
     filterTimeout.current = setTimeout(() => {
       setColumnFilters((prev) => ({ ...prev, [key]: value || null }));
-      onPageChange(1);
     }, 400);
   };
 
@@ -165,7 +182,6 @@ function DataTableInner({
       const next = cur === "true" ? "false" : cur === "false" ? null : "true";
       return { ...prev, [key]: next };
     });
-    onPageChange(1);
   };
 
   const handleSelectFilterToggle = (key, option) => {
@@ -177,13 +193,11 @@ function DataTableInner({
         : [...current, option];
       return { ...prev, [key]: next.length > 0 ? next : null };
     });
-    onPageChange(1);
   };
 
   const handleSelectFilterClear = (key) => {
     clearTimeout(filterTimeout.current);
     setColumnFilters((prev) => ({ ...prev, [key]: null }));
-    onPageChange(1);
   };
 
   const handleOhifLink = async (studyinstanceuid, seriesinstanceuid = null) => {
@@ -334,7 +348,6 @@ function DataTableInner({
     setColumnFilters({});
     setFrozenFirstCol(false);
     setFontScale(1);
-    onPageChange(1);
   };
 
   // Clears only filters — the per-column table filters here plus the
@@ -343,7 +356,6 @@ function DataTableInner({
   const handleResetFilters = () => {
     setColumnFilters({});
     onResetSidebarFilters?.();
-    onPageChange(1);
   };
 
   const handleEditLabel = (labelDef) => {
@@ -378,7 +390,7 @@ function DataTableInner({
     <div className="dt__panel" style={{ "--dt-font-scale": fontScale }}>
       {toolbarPortalTarget ? createPortal(topBarControls, toolbarPortalTarget) : null}
 
-      <div className="dt__scroll">
+      <div className="dt__scroll" ref={scrollRef}>
         <table className="dt">
           <TableHeader
             config={config}
@@ -478,6 +490,13 @@ function DataTableInner({
                 );
               })
             )}
+            {items.length > 0 && (
+              <tr ref={sentinelRef} className="dt__sentinel" aria-hidden="true">
+                <td colSpan={parentColSpan}>
+                  {loading ? "Loading more…" : !hasMore ? "— end —" : ""}
+                </td>
+              </tr>
+            )}
           </tbody>
         </table>
       </div>
@@ -504,7 +523,10 @@ function DataTableInner({
           )}
         </div>
         <div className="dt__footer-center">
-          <span className="dt__footer-count">{countLabel}</span>
+          <span className="dt__footer-count">
+            {countLabel}
+            {loading && items.length > 0 ? " · loading…" : ""}
+          </span>
         </div>
         <div className="dt__footer-right">
           <div className="dt__font-controls" title={`Table font size: ${fontScalePct}%`}>
@@ -527,7 +549,6 @@ function DataTableInner({
               A+
             </button>
           </div>
-          <Pagination page={page} totalPages={totalPages} onPageChange={onPageChange} />
         </div>
       </div>
 
@@ -573,8 +594,6 @@ export default function DataTable(props) {
 DataTable.propTypes = {
   level: PropTypes.oneOf(["patient", "study", "series"]).isRequired,
   filters: PropTypes.object.isRequired,
-  page: PropTypes.number.isRequired,
-  onPageChange: PropTypes.func.isRequired,
   onResetSidebarFilters: PropTypes.func,
   onPreviewSelect: PropTypes.func,
   activeRowKey: PropTypes.string,

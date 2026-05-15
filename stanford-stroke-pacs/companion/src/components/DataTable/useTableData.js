@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { apiGet } from "../../api/client";
 import {
   PER_PAGE,
@@ -7,11 +7,28 @@ import {
   getTextFilterValue,
 } from "../../utils/table";
 
-export default function useTableData({ level, config, filters, page, sortBy, sortDir, columnFilters, allCols }) {
+// Infinite-scroll data hook. Rows accumulate across offset pages as the caller
+// invokes loadMore(). A "reset" (any filter/sort/level/columnFilter change)
+// replaces the accumulated list with page 1 and bumps resetNonce so the table
+// can scroll back to the top. handleMutated uses reload() to re-fetch every
+// currently loaded page (1..pageRef) in place — the deterministic backend
+// ORDER BY tiebreaker guarantees the re-fetched window is identical, and
+// expanded/child state (keyed by id, not by items index) survives the replace.
+export default function useTableData({ level, config, filters, sortBy, sortDir, columnFilters, allCols }) {
   const [items, setItems] = useState([]);
   const [total, setTotal] = useState(0);
+  const [loading, setLoading] = useState(false);
+  const [resetNonce, setResetNonce] = useState(0);
 
-  const fetchItems = useCallback(async () => {
+  // Mutable mirrors so loadMore/reset/reload stay referentially stable and can
+  // self-guard without depending on render state.
+  const pageRef = useRef(1);
+  const seqRef = useRef(0);
+  const loadingRef = useRef(false);
+  const itemsLenRef = useRef(0);
+  const totalRef = useRef(0);
+
+  const buildParams = useCallback((page) => {
     const params = new URLSearchParams({
       page: String(page),
       per_page: String(PER_PAGE),
@@ -61,18 +78,82 @@ export default function useTableData({ level, config, filters, page, sortBy, sor
     if (labelFilters.length > 0) {
       params.set("label_filters", JSON.stringify(labelFilters));
     }
+    return params;
+  }, [level, config, filters, sortBy, sortDir, columnFilters, allCols]);
 
+  // Fetch pages [from..to] sequentially. mode "replace" swaps the list,
+  // "append" concatenates onto it. A monotonic seq token discards any response
+  // whose request was superseded by a newer reset/loadMore.
+  const fetchPages = useCallback(async (from, to, mode) => {
+    const seq = ++seqRef.current;
+    loadingRef.current = true;
+    setLoading(true);
     try {
-      const data = await apiGet(`${config.endpoint}?${params}`);
-      setItems(data[config.itemsKey]);
-      setTotal(data.total);
+      const collected = [];
+      let lastTotal = 0;
+      for (let p = from; p <= to; p++) {
+        const data = await apiGet(`${config.endpoint}?${buildParams(p)}`);
+        if (seqRef.current !== seq) return;
+        collected.push(...(data[config.itemsKey] || []));
+        lastTotal = data.total ?? 0;
+      }
+      if (mode === "append") {
+        setItems((prev) => {
+          const next = prev.concat(collected);
+          itemsLenRef.current = next.length;
+          return next;
+        });
+      } else {
+        setItems(collected);
+        itemsLenRef.current = collected.length;
+      }
+      setTotal(lastTotal);
+      totalRef.current = lastTotal;
     } catch {
-      setItems([]);
-      setTotal(0);
+      if (seqRef.current !== seq) return;
+      if (mode !== "append") {
+        setItems([]);
+        itemsLenRef.current = 0;
+        setTotal(0);
+        totalRef.current = 0;
+      }
+    } finally {
+      if (seqRef.current === seq) {
+        loadingRef.current = false;
+        setLoading(false);
+      }
     }
-  }, [page, filters, sortBy, sortDir, columnFilters, config, allCols, level]);
+  }, [buildParams, config]);
 
-  useEffect(() => { fetchItems(); }, [fetchItems]);
+  const reset = useCallback(() => {
+    pageRef.current = 1;
+    setResetNonce((n) => n + 1);
+    fetchPages(1, 1, "replace");
+  }, [fetchPages]);
 
-  return { items, total, fetchItems };
+  const loadMore = useCallback(() => {
+    if (loadingRef.current) return;
+    if (totalRef.current && itemsLenRef.current >= totalRef.current) return;
+    pageRef.current += 1;
+    fetchPages(pageRef.current, pageRef.current, "append");
+  }, [fetchPages]);
+
+  const reload = useCallback(() => {
+    fetchPages(1, pageRef.current, "replace");
+  }, [fetchPages]);
+
+  // The only effect that auto-fires fetches. `reset` changes identity exactly
+  // when buildParams does (i.e. a reset-trigger input changed), so this runs
+  // once on mount and once per reset-input change — never for loadMore.
+  useEffect(() => { reset(); }, [reset]);
+
+  return {
+    items,
+    total,
+    loading,
+    hasMore: items.length < total,
+    loadMore,
+    reload,
+    resetNonce,
+  };
 }

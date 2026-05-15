@@ -1,9 +1,0 @@
-@reference "../app.css";
-
-.pagination {
-  @apply flex items-center gap-1.5 text-[11px] leading-tight;
-}
-
-.pagination__label {
-  @apply text-text-muted;
-}

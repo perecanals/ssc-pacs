@@ -151,6 +151,12 @@
   @apply text-center text-text-muted py-10;
 }
 
+/* Infinite-scroll sentinel: an IntersectionObserver target row at the end of
+   the list. Doubles as a subtle "Loading more…" / "— end —" status line. */
+.dt__sentinel td {
+  @apply text-center text-text-muted text-[11px] py-3;
+}
+
 /* Per-level accent stripe (applied to the first cell of every row).
    --row-accent is set by .dt__row--level-* / .dt__child-row--level-* / .dt__gc-row--level-*
    modifiers below and inherits through to <td>. */

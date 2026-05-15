@@ -35,7 +35,6 @@ export default function Companion() {
     studyImportLabel: null,
   });
 
-  const [page, setPage] = useState(1);
   const [previewSelection, setPreviewSelection] = useState(null);
   const [previewUrl, setPreviewUrl] = useState("");
   const [previewLoading, setPreviewLoading] = useState(false);
@@ -56,13 +55,13 @@ export default function Companion() {
 
   const handleFilterChange = useCallback((patch) => {
     setFilters((prev) => ({ ...prev, ...patch }));
-    setPage(1);
   }, []);
 
   // Clears every sidebar quick filter (label, modality, study-import
   // label). Paired with the DataTable's column-filter reset behind the
-  // single "Reset Filters" toolbar button. Page reset is handled by the
-  // DataTable (onPageChange) so it stays a single source of truth.
+  // single "Reset Filters" toolbar button. The DataTable's data hook
+  // resets the accumulated list (and scrolls to top) whenever filters
+  // change, so no page bookkeeping is needed here.
   const handleResetSidebarFilters = useCallback(() => {
     setFilters({
       label: null,
@@ -84,7 +83,6 @@ export default function Companion() {
       description: null,
       studyImportLabel: null,
     });
-    setPage(1);
     clearPreview();
   }, [clearPreview]);
 
@@ -175,8 +173,6 @@ export default function Companion() {
               key={level}
               level={level}
               filters={filters}
-              page={page}
-              onPageChange={setPage}
               onResetSidebarFilters={handleResetSidebarFilters}
               onPreviewSelect={handlePreviewSelect}
               activeRowKey={previewSelection?.rowKey || null}

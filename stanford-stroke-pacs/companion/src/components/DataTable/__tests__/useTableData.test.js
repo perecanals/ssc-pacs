@@ -1,0 +1,96 @@
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { renderHook, act, waitFor } from "@testing-library/react";
+
+// Mock the API client; apiGet returns 2 rows per page out of a 5-row total so
+// hasMore flips false once everything is loaded.
+const apiGet = vi.fn();
+vi.mock("../../../api/client", () => ({ apiGet: (...a) => apiGet(...a) }));
+
+import useTableData from "../useTableData";
+
+const ROWS = ["a", "b", "c", "d", "e"].map((id) => ({ id }));
+const config = { endpoint: "/api/things", itemsKey: "items", filterParamMap: {} };
+
+function pageResponse(page) {
+  const start = (page - 1) * 2;
+  return { total: ROWS.length, page, per_page: 50, items: ROWS.slice(start, start + 2) };
+}
+
+const baseArgs = {
+  level: "patient",
+  config,
+  filters: {},
+  sortBy: "id",
+  sortDir: "asc",
+  columnFilters: {},
+  allCols: [],
+};
+
+beforeEach(() => {
+  apiGet.mockReset();
+  apiGet.mockImplementation((url) => {
+    const page = Number(new URL(url, "http://x").searchParams.get("page"));
+    return Promise.resolve(pageResponse(page));
+  });
+});
+
+describe("useTableData (infinite scroll)", () => {
+  it("loads page 1 on mount", async () => {
+    const { result } = renderHook(() => useTableData(baseArgs));
+    await waitFor(() => expect(result.current.items).toHaveLength(2));
+    expect(result.current.total).toBe(5);
+    expect(result.current.hasMore).toBe(true);
+    expect(result.current.items.map((r) => r.id)).toEqual(["a", "b"]);
+  });
+
+  it("loadMore appends the next page preserving order", async () => {
+    const { result } = renderHook(() => useTableData(baseArgs));
+    await waitFor(() => expect(result.current.items).toHaveLength(2));
+    act(() => result.current.loadMore());
+    await waitFor(() => expect(result.current.items).toHaveLength(4));
+    expect(result.current.items.map((r) => r.id)).toEqual(["a", "b", "c", "d"]);
+    expect(result.current.hasMore).toBe(true);
+  });
+
+  it("hasMore turns false once all rows are loaded", async () => {
+    const { result } = renderHook(() => useTableData(baseArgs));
+    await waitFor(() => expect(result.current.items).toHaveLength(2));
+    act(() => result.current.loadMore());
+    await waitFor(() => expect(result.current.items).toHaveLength(4));
+    act(() => result.current.loadMore());
+    await waitFor(() => expect(result.current.items).toHaveLength(5));
+    expect(result.current.hasMore).toBe(false);
+  });
+
+  it("a sort change replaces the list (no append leakage) and bumps resetNonce", async () => {
+    const { result, rerender } = renderHook((args) => useTableData(args), {
+      initialProps: baseArgs,
+    });
+    await waitFor(() => expect(result.current.items).toHaveLength(2));
+    act(() => result.current.loadMore());
+    await waitFor(() => expect(result.current.items).toHaveLength(4));
+    const nonceBefore = result.current.resetNonce;
+
+    rerender({ ...baseArgs, sortDir: "desc" });
+    await waitFor(() => expect(result.current.items).toHaveLength(2));
+    expect(result.current.items.map((r) => r.id)).toEqual(["a", "b"]);
+    expect(result.current.resetNonce).toBeGreaterThan(nonceBefore);
+  });
+
+  it("reload re-fetches pages 1..N and replaces", async () => {
+    const { result } = renderHook(() => useTableData(baseArgs));
+    await waitFor(() => expect(result.current.items).toHaveLength(2));
+    act(() => result.current.loadMore());
+    await waitFor(() => expect(result.current.items).toHaveLength(4));
+
+    apiGet.mockClear();
+    act(() => result.current.reload());
+    await waitFor(() => expect(result.current.items).toHaveLength(4));
+    // pages 1 and 2 both re-requested
+    const pages = apiGet.mock.calls
+      .map((c) => Number(new URL(c[0], "http://x").searchParams.get("page")))
+      .sort();
+    expect(pages).toEqual([1, 2]);
+    expect(result.current.items.map((r) => r.id)).toEqual(["a", "b", "c", "d"]);
+  });
+});

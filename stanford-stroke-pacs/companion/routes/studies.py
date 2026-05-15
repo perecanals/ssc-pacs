@@ -128,7 +128,7 @@ def list_patients(
             cur.execute(
                 f"SELECT p.{PATIENT_ID_COL} AS patient_id, p.stroke_date, {study_labels_agg} "
                 f"FROM lvo_clinical_data p {where} "
-                f"ORDER BY p.{col} {direction} NULLS LAST "
+                f"ORDER BY p.{col} {direction} NULLS LAST, p.{PATIENT_ID_COL} ASC "
                 f"LIMIT %s OFFSET %s",
                 params + [per_page, offset],
             )
@@ -302,7 +302,7 @@ def list_studies(
                 f"  FROM image_series s WHERE s.studyinstanceuid = st.studyinstanceuid"
                 f"), '') AS modality "
                 f"FROM image_study st {where} "
-                f"ORDER BY st.{col} {direction} NULLS LAST "
+                f"ORDER BY st.{col} {direction} NULLS LAST, st.studyinstanceuid ASC "
                 f"LIMIT %s OFFSET %s",
                 params + [per_page, offset],
             )
@@ -436,7 +436,7 @@ def list_series(
                     {where}
                     ORDER BY s.seriesinstanceuid
                 ) sub
-                ORDER BY sub.{col} {direction} NULLS LAST
+                ORDER BY sub.{col} {direction} NULLS LAST, sub.seriesinstanceuid ASC
                 LIMIT %s OFFSET %s
                 """,
                 params + [per_page, offset],

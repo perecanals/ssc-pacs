@@ -241,7 +241,7 @@ companion/src/
       ChildRows.jsx        Child + grandchild expandable row rendering
       TableHeader.jsx      Column headers, sort carets, filter inputs
       SelectFilterControl.jsx  Dropdown filter for select-type columns
-      useTableData.js      Data fetch hook (items, pagination, label filters)
+      useTableData.js      Data fetch hook (infinite-scroll accumulation, label filters)
       usePreferencePersistence.js  Debounced server-side pref save
       useDragColumns.js    Column drag-and-drop reorder
       actions.js           DICOM download, OHIF link, refresh actions
@@ -251,7 +251,6 @@ companion/src/
     InlineEdit.jsx         In-table annotation editing
     ColumnSelector.jsx     Column visibility/order control
     LabelDefModal.jsx      Label definition creation UI
-    Pagination.jsx         Page navigation
 ```
 
 The `DataTable` is one generic component used at all three hierarchy levels. Table preferences (column visibility, order, sort, filters, frozen column) are persisted per user and per level in `user_preferences` (server-side JSONB). All components use `prop-types` for runtime prop validation.

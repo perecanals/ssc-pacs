@@ -125,6 +125,20 @@ The companion page is decomposed into focused React components:
     horizontally (the spacer collapses to zero), mirroring the main table's
     behavior. `gcColSpan` includes the child table's spacer column so the
     grandchild wrapper spans the full child-table width.
+  - **Auto-load infinite scroll**: The main table has no pager. Rows
+    accumulate as you scroll: an `IntersectionObserver` sentinel row at the
+    bottom of the list (rooted on the bounded `.dt__scroll` container, with a
+    ~200px `rootMargin` prefetch) fetches the next offset page and appends it.
+    The backend `ORDER BY` carries a fixed `ASC` unique-id tiebreaker
+    (`patient_id` / `studyinstanceuid` / `seriesinstanceuid`) so appended
+    pages never duplicate or skip rows on tied sort values. The DOM is
+    unbounded (no cap / no virtualization). Any filter/sort/level change
+    resets the accumulated list and scrolls back to the top; `handleMutated`
+    calls the hook's `reload()` to re-fetch every loaded page (1..N) in place
+    so edits stay visible after deep scroll. The footer keeps a running total
+    count plus a "loading…" / "— end —" indicator. `useTableData.js` owns the
+    page cursor internally and exposes `{ items, total, loading, hasMore,
+    loadMore, reload, resetNonce }`.
   - **Column selector**: Shows label columns from all levels grouped by level.
     The main table only renders columns at or above its own level (e.g. the
     patient table does not show series labels). Child/grandchild subtables
@@ -166,7 +180,6 @@ The companion page is decomposed into focused React components:
   their level with headings (Patient labels, Study labels, Series labels).
   Column visibility and order are persisted server-side in
   `user_preferences`.
-- `Pagination` — prev/next navigation
 - `LabelDefModal` — form to create new label definitions with level and
   datatype selectors, including a select-type option builder with colored
   pills
