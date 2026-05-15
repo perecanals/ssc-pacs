@@ -29,6 +29,14 @@ The companion backend (`companion/app.py` + `companion/routes/`) is a FastAPI se
 - successful login returns an HttpOnly JWT cookie named `auth_token`
 - middleware refreshes the JWT on most requests to provide sliding expiration
 - `/api/me` and `/assets/*` are intentionally excluded from token refresh
+- `AuthContext` runs an **idle watchdog** that mirrors the backend sliding
+  session: `api/client.js` records the last session-sliding request (skipping
+  the same paths the backend `sliding_jwt` middleware skips), and `/api/me`
+  carries `session_timeout_seconds`. Once idle that long — checked on an
+  interval and immediately on tab `visibilitychange`/`focus` (covers
+  laptop-sleep) — it drops the server cookie and dispatches `auth:expired`,
+  so the SPA redirects to `/login?expired=1` proactively instead of waiting
+  for the next request to 401.
 - Companion also reverse-proxies `/ohif/*` and `/dicom-web/*` to Orthanc (see
   `companion/routes/proxy.py`). Both require a valid JWT. End users never present
   credentials to Orthanc — Companion attaches the service-account credential
@@ -105,7 +113,10 @@ The companion page is decomposed into focused React components:
     column will land.
   - **Scroll-limited subtables**: Series-level sub-tables (both direct
     study→series and patient→study→series) are capped at ~280px height with
-    vertical scroll.
+    vertical scroll. Sub-tables are `width: auto` (not full-width) so columns
+    hug their content and stay flushed left rather than being stretched
+    across the wide parent cell; wider sub-tables scroll horizontally,
+    mirroring the main table's behavior.
   - **Column selector**: Shows label columns from all levels grouped by level.
     The main table only renders columns at or above its own level (e.g. the
     patient table does not show series labels). Child/grandchild subtables
@@ -119,6 +130,11 @@ The companion page is decomposed into focused React components:
     via a debounced PUT on changes (with immediate flush on unmount/tab
     close). A "Reset View" button in the top bar restores all table
     preferences to their defaults.
+  - **Default column order**: With no saved `columnOrder` (a clean view, or
+    after "Reset View"), built-in data columns come first, followed by label
+    columns grouped by instrument (instruments alphabetical, unassigned last)
+    and ordered by label creation time (oldest first) within each instrument.
+    Any user-saved column order takes precedence over this default.
   - **Inline editing with stopPropagation**: Label cells in all table levels
     use `stopPropagation` to prevent expand/collapse when interacting with
     label controls.

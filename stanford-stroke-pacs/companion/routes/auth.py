@@ -8,11 +8,16 @@ from pydantic import BaseModel
 
 import auth as _auth
 from auth import create_jwt, get_current_user, get_optional_user
+from config import SESSION_TIMEOUT_HOURS
 from db import get_conn
 
 router = APIRouter()
 
 MIN_PASSWORD_LENGTH = 8
+# Authoritative sliding-idle timeout, surfaced to the SPA so its idle
+# watchdog stays in sync with the backend (config.toml is the single
+# source of truth — never hardcode this in the frontend).
+SESSION_TIMEOUT_SECONDS = int(SESSION_TIMEOUT_HOURS * 3600)
 
 
 class LoginRequest(BaseModel):
@@ -68,7 +73,12 @@ def logout(response: Response):
 def me(auth_token: str | None = Cookie(None)):
     username = get_optional_user(auth_token)
     if not username:
-        return {"username": None, "is_admin": False, "must_change_password": False}
+        return {
+            "username": None,
+            "is_admin": False,
+            "must_change_password": False,
+            "session_timeout_seconds": SESSION_TIMEOUT_SECONDS,
+        }
     conn = get_conn()
     try:
         with conn.cursor() as cur:
@@ -85,6 +95,7 @@ def me(auth_token: str | None = Cookie(None)):
         "username": username,
         "is_admin": is_admin,
         "must_change_password": must_change,
+        "session_timeout_seconds": SESSION_TIMEOUT_SECONDS,
     }
 
 

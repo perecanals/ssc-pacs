@@ -25,8 +25,10 @@ warm_workers = 2
 
 [companion]
 # Sliding idle timeout. Cookie is refreshed on every authenticated request; if
-# no request is made for this many hours, the next request returns 401 and the
-# UI redirects to /login with an "expired" banner. 0.0833 ≈ 5 minutes.
+# no request is made for this many hours the session is dead. The SPA proactively
+# redirects to /login with an "expired" banner once idle this long (its watchdog
+# reads this value via /api/me) — it no longer waits for the next request to 401.
+# 0.0833 ≈ 5 minutes.
 session_timeout_hours = 0.0833
 # Absolute (non-sliding) session lifetime. A token minted more than this many
 # hours ago is rejected regardless of sliding refresh activity.

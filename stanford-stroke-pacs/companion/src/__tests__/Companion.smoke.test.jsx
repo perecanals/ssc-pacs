@@ -16,6 +16,8 @@ vi.mock("../api/client", () => ({
   }),
   apiPost: vi.fn().mockResolvedValue({ ok: true, json: () => Promise.resolve({}) }),
   apiDelete: vi.fn().mockResolvedValue({ ok: true }),
+  markApiActivity: vi.fn(),
+  getLastApiActivityAt: vi.fn(() => Date.now()),
 }));
 
 // Companion uses warmOhif which also calls fetch-based APIs
