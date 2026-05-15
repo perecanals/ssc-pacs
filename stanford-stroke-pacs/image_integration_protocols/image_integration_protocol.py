@@ -102,11 +102,13 @@ class ImageIntegrationProtocol:
             f"Checked existing studies for case {case_name} in "
             f"{time.perf_counter() - step_started:.2f}s"
         )
-        if self.case_study_table.empty:
+        if self.case_series_table.empty:
             if initial_study_count == 0:
                 print(f"No valid studies could be created from case_dir ({self.case_dir})")
             else:
-                print(f"All studies are already in the database for case_dir ({self.case_dir})")
+                print(
+                    f"All series for case_dir ({self.case_dir}) are already in the database"
+                )
             return {"studyinstanceuids": [], "seriesinstanceuids": []}
 
         step_started = time.perf_counter()
@@ -119,8 +121,15 @@ class ImageIntegrationProtocol:
 
         step_started = time.perf_counter()
         self.assign_import_id()
+        # case_study_table is empty in pure append-only runs (only new series
+        # under existing studies); fall back to case_series_table.
+        assigned_import_id = (
+            self.case_study_table["import_id"].iloc[0]
+            if not self.case_study_table.empty
+            else self.case_series_table["import_id"].iloc[0]
+        )
         print(
-            f"Assigned import_id={self.case_study_table['import_id'].iloc[0]} "
+            f"Assigned import_id={assigned_import_id} "
             f"in {time.perf_counter() - step_started:.2f}s"
         )
         self.assign_import_label()
@@ -173,9 +182,13 @@ class ImageIntegrationProtocol:
             f"Completed image integration for case {case_name} in "
             f"{time.perf_counter() - protocol_start:.2f}s"
         )
+        # Derive both lists from case_series_table so labelled-table re-sync
+        # also covers existing studies that received new series in this run
+        # (those study rows were dropped from case_study_table to avoid
+        # overwriting their persisted image_study fields).
         return {
             "studyinstanceuids": sorted(
-                self.case_study_table["studyinstanceuid"].dropna().astype(str).unique().tolist()
+                self.case_series_table["studyinstanceuid"].dropna().astype(str).unique().tolist()
             ),
             "seriesinstanceuids": sorted(
                 self.case_series_table["seriesinstanceuid"].dropna().astype(str).unique().tolist()
@@ -213,7 +226,13 @@ class ImageIntegrationProtocol:
                 )
                 series_columns = [
                     image_series_table.c[column_name]
-                    for column_name in ("studyinstanceuid", "seriesinstanceuid", "dicom_dir_path")
+                    for column_name in (
+                        "studyinstanceuid",
+                        "seriesinstanceuid",
+                        "dicom_dir_path",
+                        "dicom_archive_path",
+                        "number_of_slices",
+                    )
                     if column_name in image_series_table.c
                 ]
                 series_rows = connection.execute(
@@ -586,37 +605,161 @@ class ImageIntegrationProtocol:
     def filter_existing_studies(self, overwrite_if_exists=False):
         study_uids = self.case_study_table["studyinstanceuid"].dropna().astype(str).unique().tolist()
         print(
-            f"Checking {len(study_uids)} study UID(s) against image_study"
-            + (" and image_series" if overwrite_if_exists else "")
+            f"Checking {len(study_uids)} study UID(s) against image_study and image_series"
         )
-        self._load_case_rows_from_db(study_uids, include_series=overwrite_if_exists)
+        # Always load image_series so append mode (overwrite_if_exists=False)
+        # can filter at the series level, not just the study level — otherwise
+        # new series arriving under a previously-integrated study get dropped.
+        self._load_case_rows_from_db(study_uids, include_series=True)
 
-        existing_study_uids = set(self.image_study["studyinstanceuid"].astype(str))
-        study_uids_to_drop = []
+        existing_study_uids = (
+            set(self.image_study["studyinstanceuid"].astype(str))
+            if self.image_study is not None and not self.image_study.empty
+            else set()
+        )
+        existing_series_uids = (
+            set(self.image_series["seriesinstanceuid"].astype(str))
+            if self.image_series is not None and not self.image_series.empty
+            else set()
+        )
         print(
-            f"Found {len(existing_study_uids)} existing study UID(s) for current case"
+            f"Found {len(existing_study_uids)} existing study UID(s) and "
+            f"{len(existing_series_uids)} existing series UID(s) for current case"
         )
 
+        appended_study_uids = []
         for idx, row in self.case_study_table.iterrows():
             study_uid = str(row["studyinstanceuid"])
             if study_uid not in existing_study_uids:
                 continue
 
-            print(f"Study row {idx} already in database (StudyInstanceUID: {study_uid})")
             if overwrite_if_exists:
+                print(
+                    f"Study row {idx} already in database — overwriting "
+                    f"(StudyInstanceUID: {study_uid})"
+                )
                 self.overwrite_existing_study(study_uid)
             else:
-                study_uids_to_drop.append(study_uid)
+                print(
+                    f"Study row {idx} already in database — appending only new "
+                    f"series, leaving existing study row untouched "
+                    f"(StudyInstanceUID: {study_uid})"
+                )
+                appended_study_uids.append(study_uid)
 
-        if study_uids_to_drop:
+        if appended_study_uids:
+            # Drop these study rows from case_study_table so update_postgres_tables
+            # does not overwrite the persisted import_id / import_label /
+            # study_path / acquisitiondatetime on the existing image_study row.
             self.case_study_table = self.case_study_table[
-                ~self.case_study_table["studyinstanceuid"].isin(study_uids_to_drop)
+                ~self.case_study_table["studyinstanceuid"].isin(appended_study_uids)
             ].reset_index(drop=True)
-            self.case_series_table = self.case_series_table[
-                ~self.case_series_table["studyinstanceuid"].isin(study_uids_to_drop)
-            ].reset_index(drop=True)
+
+            # Build per-UID lookup of DB state for drift comparison.
+            db_info_by_uid = {}
+            if self.image_series is not None and not self.image_series.empty:
+                for _, db_row in self.image_series.iterrows():
+                    uid = str(db_row.get("seriesinstanceuid", "") or "")
+                    if uid:
+                        db_info_by_uid[uid] = {
+                            "number_of_slices": db_row.get("number_of_slices"),
+                            "dicom_dir_path": db_row.get("dicom_dir_path"),
+                            "dicom_archive_path": db_row.get("dicom_archive_path"),
+                        }
+
+            appended_study_uid_set = set(appended_study_uids)
+            drop_match_uids = set()
+            drop_unverifiable_uids = set()
+            drift_records = []  # list of (uid, db_n, disk_n, old_dir, old_archive)
+            new_under_existing_count = 0
+
+            for _, row in self.case_series_table.iterrows():
+                if str(row["studyinstanceuid"]) not in appended_study_uid_set:
+                    continue
+                series_uid = str(row["seriesinstanceuid"])
+                if series_uid not in existing_series_uids:
+                    new_under_existing_count += 1
+                    continue
+                disk_n = row.get("number_of_slices")
+                info = db_info_by_uid.get(series_uid, {})
+                db_n = info.get("number_of_slices")
+                if db_n is None or (isinstance(db_n, float) and pd.isna(db_n)):
+                    drop_unverifiable_uids.add(series_uid)
+                    continue
+                try:
+                    db_n_int = int(db_n)
+                    disk_n_int = int(disk_n)
+                except (TypeError, ValueError):
+                    drop_unverifiable_uids.add(series_uid)
+                    continue
+                if db_n_int == disk_n_int:
+                    drop_match_uids.add(series_uid)
+                else:
+                    drift_records.append(
+                        (
+                            series_uid,
+                            db_n_int,
+                            disk_n_int,
+                            info.get("dicom_dir_path"),
+                            info.get("dicom_archive_path"),
+                        )
+                    )
+
+            drop_uids = drop_match_uids | drop_unverifiable_uids
+            if drop_uids:
+                self.case_series_table = self.case_series_table[
+                    ~self.case_series_table["seriesinstanceuid"].astype(str).isin(drop_uids)
+                ].reset_index(drop=True)
+
+            for series_uid, db_n, disk_n, old_dir, old_archive in drift_records:
+                print(
+                    f"Slice-count drift for SeriesInstanceUID {series_uid}: "
+                    f"image_series has {db_n} slices, disk has {disk_n}. "
+                    f"Wiping old files and re-ingesting."
+                )
+                # Path safety: only delete under base_dir / cold_archive_root.
+                if isinstance(old_dir, str) and old_dir:
+                    base_abs = os.path.abspath(self.base_dir)
+                    old_dir_abs = os.path.abspath(old_dir)
+                    if (
+                        old_dir_abs.startswith(base_abs + os.sep)
+                        and os.path.isdir(old_dir_abs)
+                    ):
+                        shutil.rmtree(old_dir_abs, ignore_errors=True)
+                        print(f"  removed old DICOM dir {old_dir_abs}")
+                if (
+                    self.cold_archive_root
+                    and isinstance(old_archive, str)
+                    and old_archive
+                ):
+                    cold_abs = os.path.abspath(self.cold_archive_root)
+                    old_archive_abs = os.path.abspath(old_archive)
+                    if (
+                        old_archive_abs.startswith(cold_abs + os.sep)
+                        and os.path.isfile(old_archive_abs)
+                    ):
+                        os.remove(old_archive_abs)
+                        print(f"  removed stale archive {old_archive_abs}")
+
+            if drop_unverifiable_uids:
+                print(
+                    f"WARNING: {len(drop_unverifiable_uids)} already-integrated "
+                    f"series have NULL/non-integer number_of_slices in image_series; "
+                    f"cannot verify drift. Skipping. To force re-ingest, set "
+                    f"overwrite_if_exists: true for these studies."
+                )
+
+            print(
+                f"Append-only filter: skipped {len(drop_match_uids)} matching + "
+                f"{len(drop_unverifiable_uids)} unverifiable series already in "
+                f"image_series; re-ingesting {len(drift_records)} drift series; "
+                f"appending {new_under_existing_count} brand-new series; "
+                f"under {len(appended_study_uids)} existing study row(s)."
+            )
+
         print(
-            f"Retained {len(self.case_study_table)} new study row(s) after filtering existing entries"
+            f"Retained {len(self.case_study_table)} new study row(s) and "
+            f"{len(self.case_series_table)} series row(s) after filtering"
         )
 
     def overwrite_existing_study(self, study_instance_uid):
@@ -640,16 +783,74 @@ class ImageIntegrationProtocol:
                 path for path in series_rows["dicom_dir_path"].dropna().unique() if path
             )
 
+        archives_to_remove = []
+        if "dicom_archive_path" in series_rows.columns:
+            archives_to_remove.extend(
+                archive
+                for archive in series_rows["dicom_archive_path"].dropna().unique()
+                if archive
+            )
+
+        old_series_uids = [
+            str(uid)
+            for uid in series_rows["seriesinstanceuid"].dropna().astype(str).unique()
+            if str(uid)
+        ]
+
         for path in sorted(set(paths_to_remove), key=len, reverse=True):
             if os.path.isdir(path):
                 print(f"Removing directory: {path}")
                 shutil.rmtree(path, ignore_errors=True)
+
+        if self.cold_archive_root:
+            cold_abs = os.path.abspath(self.cold_archive_root)
+            for archive in sorted(set(archives_to_remove)):
+                archive_abs = os.path.abspath(archive)
+                if (
+                    archive_abs.startswith(cold_abs + os.sep)
+                    and os.path.isfile(archive_abs)
+                ):
+                    print(f"Removing stale archive: {archive_abs}")
+                    os.remove(archive_abs)
 
         if not study_rows.empty:
             patient_id = self._safe_text(study_rows.iloc[0].get("patient_id"))
             if patient_id is not None:
                 self._remove_empty_parent_dirs(
                     os.path.join(self.base_dir, patient_id, str(study_instance_uid))
+                )
+
+        # Delete the DB rows so a subsequent series that was previously
+        # ingested but is no longer on disk does not survive as an orphan.
+        # The new scan's series get re-upserted below; only series still on
+        # disk will exist in image_series after the protocol completes.
+        db_inspector = inspect(self.postgres_engine)
+        with self.postgres_engine.begin() as connection:
+            connection.execute(
+                text("DELETE FROM image_series WHERE studyinstanceuid = :uid"),
+                {"uid": str(study_instance_uid)},
+            )
+            connection.execute(
+                text("DELETE FROM image_study WHERE studyinstanceuid = :uid"),
+                {"uid": str(study_instance_uid)},
+            )
+            # Labelled-table rows are not refreshed for entity IDs missing
+            # from the post-batch sync call, so explicitly clean them up here.
+            if old_series_uids and db_inspector.has_table("image_series_labelled"):
+                connection.execute(
+                    text(
+                        "DELETE FROM image_series_labelled "
+                        "WHERE seriesinstanceuid = ANY(:uids)"
+                    ),
+                    {"uids": old_series_uids},
+                )
+            if db_inspector.has_table("image_study_labelled"):
+                connection.execute(
+                    text(
+                        "DELETE FROM image_study_labelled "
+                        "WHERE studyinstanceuid = :uid"
+                    ),
+                    {"uid": str(study_instance_uid)},
                 )
 
         self.image_study = self.image_study[

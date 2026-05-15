@@ -63,7 +63,7 @@ import_label: "2026-04-batch"               # optional, tags all rows in this ru
 | `env_path` | Path to `.env` for DB credentials. Defaults to `<repo>/.env`. |
 | `database` | PostgreSQL database name (usually `stanford-stroke`) |
 | `src_dir` | Directory containing per-patient subdirectories to ingest |
-| `overwrite_if_exists` | If true, re-integrate studies already in `image_study` (deletes the existing rows + DICOM tree for matching StudyInstanceUIDs first) |
+| `overwrite_if_exists` | Controls behavior when a `StudyInstanceUID` is already in `image_study`. **`false` (default — append + drift detect):** keep the existing `image_study` row untouched; for each series, append it if `SeriesInstanceUID` is new, skip it if `(SeriesUID, number_of_slices)` matches the DB, and **re-ingest** it if the SeriesUID is in DB but the on-disk slice count differs from `image_series.number_of_slices` (wiping the stale `dicom_dir_path` and `dicom_archive_path` for that series first). Series whose DB `number_of_slices` is NULL emit a warning and are skipped — set this flag to `true` to force re-ingest. **`true` (full overwrite):** for each matching StudyInstanceUID, delete the existing rows in `image_study`, `image_series`, `image_study_labelled`, `image_series_labelled`, and the on-disk DICOM tree + cold archives, then re-ingest from the new scan. Any series previously in DB but not in the new scan does NOT survive. |
 | `anonymize_files` | Strip identifying DICOM headers during copy |
 | `delete_originals_after_verification` | After verifying every file copied successfully, remove the source case directory |
 | `import_label` | Free-text tag written to `import_label` column in both tables — useful for filtering a batch later |
@@ -137,7 +137,7 @@ the tar.
 |------|--------|-------|
 | 1 | `create_series_table` | Recursively scans `case_dir`, reads DICOM headers, builds a pandas DataFrame of candidate series with their source paths |
 | 2 | `create_study_table` | Groups series by StudyInstanceUID, computes per-study metadata, predicts `study_type` from `stroke_date` |
-| 3 | `filter_existing_studies` | Skips studies already in `image_study` unless `overwrite_if_exists=true` (in which case it deletes existing rows + their DICOM directories first) |
+| 3 | `filter_existing_studies` | Decides per study/series what to do given the current DB state. Always loads both `image_study` and `image_series` for the scanned `StudyInstanceUID`s. **Append mode (`overwrite_if_exists=false`):** for studies already in DB, drops the study row from the working set so the persisted `import_id` / `import_label` / `study_path` are preserved; then per series, drops the series row if `(SeriesUID, number_of_slices)` matches DB, keeps it for re-ingest if the slice count drifted (and wipes the stale `dicom_dir_path` and `dicom_archive_path` from disk before re-copy), keeps it if the SeriesUID is new, or warns-and-skips if DB `number_of_slices` is NULL. **Overwrite mode (`overwrite_if_exists=true`):** calls `overwrite_existing_study()`, which deletes the on-disk DICOM directories, stale cold archives, and the rows in `image_study`, `image_series`, `image_study_labelled`, and `image_series_labelled` for that study, all in one transaction — orphan rows from series that no longer exist on disk cannot survive. |
 | 4 | `load_clinical_data_table` | Reads `lvo_clinical_data` |
 | 5 | `validate_studies_against_clinical_data` | Drops studies whose `patient_id` doesn't match a clinical row or whose `studydate` is outside the allowed stroke-date window |
 | 6 | `assign_import_id` / `assign_import_label` | Tags all rows with the batch import_id/label |
@@ -278,9 +278,12 @@ That's it — the protocol picks up the same values automatically.
   conversion, verification) catch exceptions per series where possible and
   log them without aborting the whole case.
 - **Database writes:** `update_postgres_tables` runs inside a transaction.
-  If it raises, the upsert is rolled back, but the files on disk from the
-  copy step remain (they'll be cleaned up when you rerun the protocol with
-  `overwrite_if_exists=true` for the affected studies).
+  If it raises, the upsert is rolled back but the files on disk from the
+  copy step remain. Simply re-running the protocol with default settings
+  is enough to recover: `filter_existing_studies` will see the series UIDs
+  as new (the upsert never committed) and re-ingest them, overwriting the
+  stale on-disk files in place. Use `overwrite_if_exists=true` only if you
+  also want to wipe an existing study's DB rows on top of that.
 
 ---
 
