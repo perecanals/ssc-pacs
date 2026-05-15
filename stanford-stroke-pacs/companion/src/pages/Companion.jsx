@@ -177,6 +177,9 @@ export default function Companion() {
               onPreviewSelect={handlePreviewSelect}
               activeRowKey={previewSelection?.rowKey || null}
               toolbarPortalTarget={toolbarHostEl}
+              previewOpen={previewOpen}
+              previewUrl={previewUrl}
+              onPreviewClose={() => setPreviewOpen(false)}
             />
             <PreviewPane
               selection={previewSelection}
@@ -185,7 +188,6 @@ export default function Companion() {
               loadingLabel={previewLoadingLabel}
               error={previewError}
               isOpen={previewOpen}
-              onClose={() => setPreviewOpen(false)}
             />
           </div>
         </main>

@@ -31,6 +31,9 @@ function DataTableInner({
   onPreviewSelect,
   activeRowKey,
   toolbarPortalTarget,
+  previewOpen,
+  previewUrl,
+  onPreviewClose,
   serverPrefs,
 }) {
   const { currentUser, isAdmin } = useAuth();
@@ -534,12 +537,36 @@ function DataTableInner({
             </>
           )}
         </div>
+        <div className="dt__footer-slot">
+          {previewOpen && (
+            <div className="dt__pane-tabs">
+              {previewUrl && (
+                <a
+                  href={previewUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="dt__pane-tab"
+                >
+                  Open in New Tab <span aria-hidden="true">↗</span>
+                </a>
+              )}
+              <button
+                type="button"
+                onClick={onPreviewClose}
+                className="dt__pane-tab"
+              >
+                Collapse
+              </button>
+            </div>
+          )}
+        </div>
         <div className="dt__footer-center">
           <span className="dt__footer-count">
             {countLabel}
             {loading && items.length > 0 ? " · loading…" : ""}
           </span>
         </div>
+        <div className="dt__footer-slot" aria-hidden="true" />
         <div className="dt__footer-right">
           <div className="dt__font-controls" title={`Table font size: ${fontScalePct}%`}>
             <button
@@ -610,4 +637,7 @@ DataTable.propTypes = {
   onPreviewSelect: PropTypes.func,
   activeRowKey: PropTypes.string,
   toolbarPortalTarget: PropTypes.instanceOf(Element),
+  previewOpen: PropTypes.bool,
+  previewUrl: PropTypes.string,
+  onPreviewClose: PropTypes.func,
 };

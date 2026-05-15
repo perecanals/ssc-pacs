@@ -198,9 +198,14 @@ The companion page is decomposed into focused React components:
 - `LabelDefModal` — form to create new label definitions with level and
   datatype selectors, including a select-type option builder with colored
   pills
-- `PreviewPane` — lower OHIF iframe container with inline loading/error states
-  and overlay controls for opening the current viewer in a new tab or collapsing
-  the pane
+- `PreviewPane` — lower OHIF iframe container with inline loading/error states.
+  Its "Open in New Tab" / "Collapse" controls are not overlaid on the iframe;
+  they render in the `DataTable` footer as dark-navy tabs (default `#1a2256`,
+  hover `#090C29`) centered in a flex slot between the Refresh buttons and the
+  row count, visually stemming from the pane's top edge. A mirror flex slot
+  keeps the count centered. State is threaded from `Companion.jsx` into
+  `DataTable` via the `previewOpen` / `previewUrl` / `onPreviewClose` props.
+  The sidebar toggle (`.sidebar__toggle`) shares the same navy palette/shape.
 - `AuthContext` — React context providing `currentUser`, `login()`, `logout()`,
   and automatic 401 interception
 

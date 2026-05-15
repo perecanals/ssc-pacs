@@ -21,7 +21,15 @@
 }
 
 .dt__footer-center {
-  @apply flex-1 flex justify-center text-center;
+  @apply flex justify-center text-center;
+}
+
+/* Two equal flex-1 slots flank the count: the first holds the OHIF pane
+   tabs centered in the gap between the Refresh buttons and the count; the
+   second is an empty mirror so the count stays centered. Pure flex — no
+   fixed offsets, so placement holds at any viewport width. */
+.dt__footer-slot {
+  @apply flex-1 flex items-end justify-center min-w-0;
 }
 
 .dt__footer-count {
@@ -30,6 +38,24 @@
 
 .dt__font-controls {
   @apply flex items-center gap-1;
+}
+
+/* OHIF preview controls, docked in the footer as tabs that stem from the
+   pane below. mb-[-0.375rem] cancels the .companion__content gap-1.5 so the
+   tab's flat bottom meets the pane's (squared) top edge; #090C29 matches
+   OHIF's backdrop so they read as one surface. */
+.dt__pane-tabs {
+  @apply flex items-end gap-1 mb-[-0.375rem];
+}
+
+/* ~30% larger than the footer's pill-btns but same text-xs font. Default is
+   OHIF's top-bar navy (#1a2256); on hover it deepens to OHIF's backdrop navy
+   (#090C29) — the two shades swap. */
+.dt__pane-tab {
+  @apply px-4 py-1.5 text-xs font-semibold text-white no-underline
+         bg-[#1a2256] rounded-t-md border border-b-0 border-[#1a2256]
+         shadow-sm cursor-pointer transition-colors
+         hover:bg-[#090C29] hover:border-[#090C29];
 }
 
 /* Main table */

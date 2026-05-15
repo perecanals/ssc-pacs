@@ -157,11 +157,15 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  border: 1px solid var(--color-border);
+  /* Same palette/shape as the OHIF pane tabs (.dt__pane-tab): navy fill,
+     white glyph, rounded on the outer (right) edge it stems toward, flat
+     and borderless where it attaches to the sidebar. Hover deepens the
+     navy, same as the pane tabs. */
+  border: 1px solid #1a2256;
   border-left: none;
-  border-radius: 0;
-  background: var(--color-surface);
-  color: var(--color-text-muted);
+  border-radius: 0 0.375rem 0.375rem 0;
+  background: #1a2256;
+  color: #ffffff;
   font-size: 14px;
   line-height: 1;
   cursor: pointer;
@@ -171,6 +175,7 @@
 }
 
 .sidebar__toggle:hover {
-  background: var(--color-table-row-hover);
-  color: var(--color-primary);
+  background: #090c29;
+  border-color: #090c29;
+  color: #ffffff;
 }

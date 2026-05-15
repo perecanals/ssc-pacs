@@ -20,7 +20,6 @@ export default function PreviewPane({
   loadingLabel,
   error,
   isOpen,
-  onClose,
 }) {
   if (!selection) {
     return null;
@@ -46,27 +45,12 @@ export default function PreviewPane({
         )}
 
         {!loading && !error && previewUrl && (
-          <>
-            <iframe
-              key={previewUrl}
-              src={previewUrl}
-              title="OHIF preview"
-              className="preview-pane__frame"
-            />
-            <div className="preview-pane__overlay-actions">
-              <a
-                href={previewUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="preview-pane__overlay-btn"
-              >
-                Open in New Tab
-              </a>
-              <button type="button" onClick={onClose} className="preview-pane__overlay-btn">
-                Collapse
-              </button>
-            </div>
-          </>
+          <iframe
+            key={previewUrl}
+            src={previewUrl}
+            title="OHIF preview"
+            className="preview-pane__frame"
+          />
         )}
       </div>
     </section>
@@ -80,5 +64,4 @@ PreviewPane.propTypes = {
   loadingLabel: PropTypes.string,
   error: PropTypes.string,
   isOpen: PropTypes.bool,
-  onClose: PropTypes.func,
 };
