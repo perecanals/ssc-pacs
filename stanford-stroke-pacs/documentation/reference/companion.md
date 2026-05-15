@@ -120,6 +120,7 @@ The top bar contains:
 - home link / app identity
 - level switcher for `Patients`, `Studies`, and `Series`
 - column selector
+- Reset Filters button (clears column + sidebar quick filters only)
 - Reset View button (restores all table preferences to defaults)
 - new label type trigger
 - login/logout controls
@@ -241,7 +242,9 @@ sort column/direction, column filters, and frozen-column state.
 
 Column display order can be changed by dragging and dropping column headers.
 A "Reset View" button in the top bar restores all table preferences to
-their defaults.
+their defaults. A "Reset Filters" button next to it clears only the
+active filters — both the per-column table filters and the sidebar quick
+filters — leaving column visibility, order, and sort untouched.
 
 When a label is selected from the sidebar, that label column is also forced
 visible in the active table display for as long as the filter is active. If the

@@ -81,8 +81,8 @@ selection, and remounts the data table via a React `key` prop.
 The companion page is decomposed into focused React components:
 
 - `TopBar` — home link, level switcher, column selector portal target,
-  Reset View button, label-definition trigger area, and login/logout
-  controls
+  Reset Filters and Reset View buttons, label-definition trigger area,
+  and login/logout controls
 - `Sidebar` — search box, annotation label list grouped by level with counts,
   modality filter dropdown. Labels from all levels are always visible; clicking
   a label sets both the label name and its level as the active filter and
@@ -137,7 +137,13 @@ The companion page is decomposed into focused React components:
     the `user_preferences` table. Preferences are loaded on mount and saved
     via a debounced PUT on changes (with immediate flush on unmount/tab
     close). A "Reset View" button in the top bar restores all table
-    preferences to their defaults.
+    preferences to their defaults. A separate "Reset Filters" button
+    clears only the active filters — the per-column table filters **and**
+    the sidebar quick filters (label, modality, study-import label) —
+    without touching column visibility/order/sort. It lives in the same
+    toolbar portal as "Reset View"; clearing the cross-component sidebar
+    filters is delegated to `Companion` via an `onResetSidebarFilters`
+    callback passed into `DataTable`.
   - **Default column order**: With no saved `columnOrder` (a clean view, or
     after "Reset View"), built-in data columns come first, followed by label
     columns grouped by instrument (instruments alphabetical, unassigned last)

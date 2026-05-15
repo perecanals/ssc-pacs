@@ -59,6 +59,21 @@ export default function Companion() {
     setPage(1);
   }, []);
 
+  // Clears every sidebar quick filter (label, modality, study-import
+  // label). Paired with the DataTable's column-filter reset behind the
+  // single "Reset Filters" toolbar button. Page reset is handled by the
+  // DataTable (onPageChange) so it stays a single source of truth.
+  const handleResetSidebarFilters = useCallback(() => {
+    setFilters({
+      label: null,
+      labelLevel: null,
+      patientId: null,
+      modality: null,
+      description: null,
+      studyImportLabel: null,
+    });
+  }, []);
+
   const handleLevelChange = useCallback((newLevel) => {
     setLevel(newLevel);
     setFilters({
@@ -162,6 +177,7 @@ export default function Companion() {
               filters={filters}
               page={page}
               onPageChange={setPage}
+              onResetSidebarFilters={handleResetSidebarFilters}
               onPreviewSelect={handlePreviewSelect}
               activeRowKey={previewSelection?.rowKey || null}
               toolbarPortalTarget={toolbarHostEl}

@@ -31,6 +31,7 @@ function DataTableInner({
   filters,
   page,
   onPageChange,
+  onResetSidebarFilters,
   onPreviewSelect,
   activeRowKey,
   toolbarPortalTarget,
@@ -336,6 +337,15 @@ function DataTableInner({
     onPageChange(1);
   };
 
+  // Clears only filters — the per-column table filters here plus the
+  // sidebar quick filters (via the Companion callback). Distinct from
+  // "Reset View", which also resets column visibility/order/sort/etc.
+  const handleResetFilters = () => {
+    setColumnFilters({});
+    onResetSidebarFilters?.();
+    onPageChange(1);
+  };
+
   const handleEditLabel = (labelDef) => {
     if (!currentUser) { alert("Please log in to edit label types"); return; }
     setEditingLabel(labelDef);
@@ -350,6 +360,7 @@ function DataTableInner({
         onSetKeysVisible={setKeysVisible}
         onEditLabel={handleEditLabel}
       />
+      <button onClick={handleResetFilters} className="pill-btn">Reset Filters</button>
       <button onClick={handleResetDefaults} className="pill-btn">Reset View</button>
       <button onClick={() => {
         if (!currentUser) { alert("Please log in to create label types"); return; }
@@ -564,6 +575,7 @@ DataTable.propTypes = {
   filters: PropTypes.object.isRequired,
   page: PropTypes.number.isRequired,
   onPageChange: PropTypes.func.isRequired,
+  onResetSidebarFilters: PropTypes.func,
   onPreviewSelect: PropTypes.func,
   activeRowKey: PropTypes.string,
   toolbarPortalTarget: PropTypes.instanceOf(Element),
