@@ -18,6 +18,7 @@ function GrandChildTable({
   grandChildConfig,
   gcColSpan,
   activeRowKey,
+  isAdmin,
   downloadingSeries,
   onGrandChildRowClick,
   onResolveOhifLink,
@@ -94,7 +95,7 @@ function GrandChildTable({
                           OHIF
                         </button>
                       )}
-                      {gc.seriesinstanceuid && (
+                      {gc.seriesinstanceuid && isAdmin && (
                         <button
                           onClick={() => onDicomDownload(gc.seriesinstanceuid)}
                           className="dt__gc-link-btn"
@@ -130,6 +131,7 @@ export default function ChildRows({
   grandChildConfig,
   gcColSpan,
   activeRowKey,
+  isAdmin,
   downloadingSeries,
   onChildRowClick,
   onGrandChildRowClick,
@@ -227,7 +229,7 @@ export default function ChildRows({
                       OHIF
                     </button>
                   )}
-                  {childConfig.idCol === "seriesinstanceuid" && child.seriesinstanceuid && (
+                  {childConfig.idCol === "seriesinstanceuid" && child.seriesinstanceuid && isAdmin && (
                     <button
                       onClick={() => onDicomDownload(child.seriesinstanceuid)}
                       className="link-btn"
@@ -247,6 +249,7 @@ export default function ChildRows({
                   grandChildConfig={grandChildConfig}
                   gcColSpan={gcColSpan}
                   activeRowKey={activeRowKey}
+                  isAdmin={isAdmin}
                   downloadingSeries={downloadingSeries}
                   onGrandChildRowClick={onGrandChildRowClick}
                   onResolveOhifLink={onResolveOhifLink}
@@ -285,6 +288,7 @@ ChildRows.propTypes = {
   grandChildConfig: PropTypes.object,
   gcColSpan: PropTypes.number.isRequired,
   activeRowKey: PropTypes.string,
+  isAdmin: PropTypes.bool,
   downloadingSeries: PropTypes.string,
   onChildRowClick: PropTypes.func.isRequired,
   onGrandChildRowClick: PropTypes.func.isRequired,

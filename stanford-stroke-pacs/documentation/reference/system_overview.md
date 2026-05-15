@@ -287,7 +287,10 @@ See [`../cold_storage/design.md`](../cold_storage/design.md) for why
 
 ### 6.2 DICOM download (`GET /api/series/{uid}/dicom-zip`)
 
-Both modes emit a `.zip` whose top-level folder is
+**Admin-only** (`Depends(require_admin)`): bulk DICOM export is a
+privilege, not a public read like the browsing endpoints — non-admins get
+403 (401 if unauthenticated), and the frontend hides the download button
+for them. Both modes emit a `.zip` whose top-level folder is
 `{patient_id}_{seriesdescription}`:
 
 - **Legacy:** `ZipStream.from_path(dicom_dir, arcname=folder)` streams

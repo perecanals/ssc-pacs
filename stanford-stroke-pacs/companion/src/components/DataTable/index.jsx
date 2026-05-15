@@ -36,7 +36,7 @@ function DataTableInner({
   toolbarPortalTarget,
   serverPrefs,
 }) {
-  const { currentUser } = useAuth();
+  const { currentUser, isAdmin } = useAuth();
   const config = LEVEL_CONFIG[level];
 
   const [showDefModal, setShowDefModal] = useState(false);
@@ -275,7 +275,7 @@ function DataTableInner({
       return (
         <>
           <button onClick={() => handleOhifLink(uid, rowLevel === "series" ? row.seriesinstanceuid : null)} className="link-btn">OHIF</button>
-          {rowLevel === "series" && row.seriesinstanceuid && (
+          {rowLevel === "series" && row.seriesinstanceuid && isAdmin && (
             <button onClick={() => handleDicomDownload(row.seriesinstanceuid)} className="link-btn"
               title="Download DICOM as zip" disabled={downloadingSeries === row.seriesinstanceuid}>
               {downloadingSeries === row.seriesinstanceuid ? "\u2026" : <DownloadIcon />}
@@ -454,6 +454,7 @@ function DataTableInner({
                         grandChildConfig={grandChildConfig}
                         gcColSpan={gcColSpan}
                         activeRowKey={activeRowKey}
+                        isAdmin={isAdmin}
                         downloadingSeries={downloadingSeries}
                         onChildRowClick={handleChildRowClick}
                         onGrandChildRowClick={handleGrandChildRowClick}

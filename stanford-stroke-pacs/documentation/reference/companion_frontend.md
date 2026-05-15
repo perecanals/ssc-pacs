@@ -46,13 +46,17 @@ Authorization model:
 
 - read endpoints are public
 - write endpoints require a valid JWT
+- DICOM zip download (`GET /api/series/{uid}/dicom-zip`) is **admin-only**
+  (`Depends(require_admin)`) — bulk export is a privilege, not a public
+  read; the DataTable download button is hidden for non-admins
 - proxied OHIF/DICOMweb routes require a valid JWT (any logged-in user)
 - `created_by` is always taken from the authenticated user, never from client
   input
 
 `users.is_admin` is consulted by the `require_admin` dependency
-(`companion/auth.py`) used by `/api/admin/*` endpoints. It also gates the
-"Orthanc Explorer" Landing card on the frontend — non-admins do not see it.
+(`companion/auth.py`) used by `/api/admin/*` endpoints and the DICOM zip
+download. It also gates the "Orthanc Explorer" Landing card and the
+DataTable DICOM download button on the frontend — non-admins do not see them.
 `/api/me` returns `{"username": ..., "is_admin": bool}` so the React
 `AuthContext` can apply admin-only UI affordances.
 

@@ -10,10 +10,11 @@ from pathlib import Path
 from urllib.parse import urlencode
 
 import psycopg2.extras
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from zipstream import ZipStream
 
+from auth import require_admin
 from cache_manager import (
     get_cache_status,
     resolve_series_archive,
@@ -552,8 +553,12 @@ def ohif_link(
 
 
 @router.get("/api/series/{seriesinstanceuid}/dicom-zip")
-def download_dicom_zip(seriesinstanceuid: str):
-    """Stream a `.zip` of the series' DICOMs."""
+def download_dicom_zip(
+    seriesinstanceuid: str,
+    user: str = Depends(require_admin),
+):
+    """Stream a `.zip` of the series' DICOMs. Admin-only (bulk DICOM export
+    is a privilege, not a public read like the browsing endpoints)."""
     conn = get_conn()
     try:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
