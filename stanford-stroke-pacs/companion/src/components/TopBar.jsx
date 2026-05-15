@@ -27,7 +27,7 @@ export default function TopBar({ levels = [], level, onLevelChange, toolbarHostR
             key={item.key}
             type="button"
             onClick={() => onLevelChange?.(item.key)}
-            className={`topbar__level-btn ${
+            className={`topbar__level-btn topbar__level-btn--${item.key} ${
               level === item.key ? "topbar__level-btn--active" : ""
             }`}
           >

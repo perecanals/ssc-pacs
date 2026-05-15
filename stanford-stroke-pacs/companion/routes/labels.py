@@ -59,14 +59,24 @@ def labels_summary(level: str | None = Query(None)):
             if level and level in VALID_LEVELS:
                 count_col = _SUMMARY_COUNT_COL[level]
                 cur.execute(
-                    f"SELECT label, level, COUNT(DISTINCT {count_col}) AS count "
-                    f"FROM annotations WHERE level = %s GROUP BY label, level ORDER BY label",
+                    f"SELECT a.label, a.level, COUNT(DISTINCT a.{count_col}) AS count, "
+                    "ld.instrument "
+                    "FROM annotations a "
+                    "LEFT JOIN label_definitions ld "
+                    "  ON ld.name = a.label AND ld.level = a.level "
+                    "WHERE a.level = %s "
+                    "GROUP BY a.label, a.level, ld.instrument "
+                    "ORDER BY a.label",
                     (level,),
                 )
             else:
                 cur.execute(
-                    "SELECT label, level, COUNT(*) AS count "
-                    "FROM annotations GROUP BY label, level ORDER BY label"
+                    "SELECT a.label, a.level, COUNT(*) AS count, ld.instrument "
+                    "FROM annotations a "
+                    "LEFT JOIN label_definitions ld "
+                    "  ON ld.name = a.label AND ld.level = a.level "
+                    "GROUP BY a.label, a.level, ld.instrument "
+                    "ORDER BY a.label"
                 )
             return cur.fetchall()
     finally:

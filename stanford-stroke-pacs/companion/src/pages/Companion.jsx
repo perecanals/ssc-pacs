@@ -16,6 +16,16 @@ const LEVELS = [
 export default function Companion() {
   const { loading: authLoading } = useAuth();
   const [level, setLevel] = useState("patient");
+  const [sidebarOpen, setSidebarOpen] = useState(
+    () => window.localStorage.getItem("sidebar:open") !== "false",
+  );
+  const toggleSidebar = useCallback(() => {
+    setSidebarOpen((prev) => {
+      const next = !prev;
+      window.localStorage.setItem("sidebar:open", String(next));
+      return next;
+    });
+  }, []);
   const [filters, setFilters] = useState({
     label: null,
     labelLevel: null,
@@ -136,8 +146,14 @@ export default function Companion() {
         onLevelChange={handleLevelChange}
         toolbarHostRef={setToolbarHostEl}
       />
-      <div className="companion__layout">
-        <Sidebar level={level} filters={filters} onFilterChange={handleFilterChange} />
+      <div className={`companion__layout${sidebarOpen ? "" : " companion__layout--sidebar-closed"}`}>
+        <Sidebar
+          level={level}
+          filters={filters}
+          onFilterChange={handleFilterChange}
+          open={sidebarOpen}
+          onToggle={toggleSidebar}
+        />
         <main className="companion__main">
           <div className="companion__content">
             <DataTable

@@ -1,7 +1,32 @@
 @reference "../app.css";
 
 .sidebar {
-  @apply w-60 bg-surface border-r border-border p-4 flex flex-col gap-3 fixed top-12 bottom-0 overflow-y-auto;
+  @apply bg-surface border-r border-border flex flex-col fixed top-9 bottom-0 overflow-hidden;
+  width: var(--sidebar-width, 15rem);
+  transition: width 180ms ease;
+}
+
+.sidebar--closed {
+  border-right-color: transparent;
+}
+
+.sidebar__inner {
+  @apply flex flex-col gap-4 p-4 overflow-y-auto;
+  width: 15rem;
+  height: 100%;
+  transition: transform 180ms ease;
+}
+
+.sidebar--closed .sidebar__inner {
+  transform: translateX(-100%);
+}
+
+.sidebar__group-title {
+  @apply text-[13px] font-bold text-text uppercase tracking-wider pb-1 border-b border-border;
+}
+
+.sidebar__section {
+  @apply flex flex-col;
 }
 
 .sidebar__section-title {
@@ -21,7 +46,42 @@
 }
 
 .sidebar__level-heading {
-  @apply px-2 text-[10px] font-semibold text-text-muted uppercase tracking-wide;
+  position: relative;
+  @apply pl-2 text-[11px] font-semibold uppercase tracking-wide text-text-muted cursor-pointer select-none;
+}
+
+.sidebar__instrument-group {
+  @apply mt-1;
+}
+
+.sidebar__instrument-heading {
+  @apply pl-2 text-[10px] font-semibold uppercase tracking-wide text-text-muted/80 cursor-pointer select-none;
+}
+
+.sidebar__level-heading::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 2px;
+  bottom: 2px;
+  width: 3px;
+  border-radius: 2px;
+  background: var(--level-accent, transparent);
+}
+
+.sidebar__level-heading--patient {
+  --level-accent: var(--color-level-patient);
+  color: var(--color-level-patient);
+}
+
+.sidebar__level-heading--study {
+  --level-accent: var(--color-level-study);
+  color: var(--color-level-study);
+}
+
+.sidebar__level-heading--series {
+  --level-accent: var(--color-level-series);
+  color: var(--color-level-series);
 }
 
 .sidebar__label-list {
@@ -75,18 +135,42 @@
   @apply shrink-0 text-xs text-text-muted;
 }
 
-.sidebar__quick-filters {
-  @apply mt-auto pt-3 border-t border-border;
-}
-
 .sidebar__filter-group {
   @apply flex flex-col gap-1 mt-1;
 }
 
-.sidebar__filter-label {
-  @apply text-[10px] font-medium text-text-muted px-0.5;
-}
-
 .sidebar__modality-select {
   @apply text-xs px-1.5 py-1 border border-border rounded-md bg-surface;
+}
+
+/* Collapse toggle tab — sits in the main-content padding gutter on the left.
+   When sidebar is open: x = sidebar-width (in the 16px gutter of .companion__main).
+   When closed:         x = 0           (in the same 16px gutter, now at the viewport edge).
+   Never overlaps the table (the table starts after the gutter). */
+.sidebar__toggle {
+  position: fixed;
+  top: 2.25rem;
+  left: var(--sidebar-width, 15rem);
+  z-index: 60;
+  width: 16px;
+  height: 56px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--color-border);
+  border-left: none;
+  border-radius: 0;
+  background: var(--color-surface);
+  color: var(--color-text-muted);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
+  box-shadow: 1px 1px 4px rgba(0, 0, 0, 0.08);
+  transition: left 180ms ease, color 120ms ease, background 120ms ease;
+}
+
+.sidebar__toggle:hover {
+  background: var(--color-table-row-hover);
+  color: var(--color-primary);
 }

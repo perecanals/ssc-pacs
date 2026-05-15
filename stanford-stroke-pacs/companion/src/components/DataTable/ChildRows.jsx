@@ -35,14 +35,17 @@ function GrandChildTable({
   }
   return (
     <tr>
-      <td colSpan={gcColSpan} className="dt__gc-wrapper">
+      <td colSpan={gcColSpan} className="dt__gc-wrapper dt__gc-wrapper--level-series">
         <div className="dt__gc-scroll">
           <table className="dt__gc-table">
             <thead className="dt__gc-thead">
               <tr className="dt__gc-head-row">
-                {grandChildCols.map((c) => (
-                  <th key={c.key} className="dt__gc-th">{c.label}</th>
-                ))}
+                {grandChildCols.map((c) => {
+                  const isNarrow = c.builtin && (c.sourceKey === "patient_id" || c.sourceKey === "stroke_date");
+                  return (
+                    <th key={c.key} className={`dt__gc-th${isNarrow ? " dt__gc-th--narrow" : ""}`}>{c.label}</th>
+                  );
+                })}
                 <th className="dt__gc-th">Actions</th>
               </tr>
             </thead>
@@ -54,7 +57,7 @@ function GrandChildTable({
                 return (
                   <tr
                     key={gcId}
-                    className={`dt__gc-row dt__gc-row--previewable ${
+                    className={`dt__gc-row dt__gc-row--level-series dt__gc-row--previewable ${
                       isActivePreview ? "dt__gc-row--active" : ""
                     }`}
                     onClick={() => onGrandChildRowClick(gc)}
@@ -63,11 +66,12 @@ function GrandChildTable({
                       if (c.builtin) {
                         const raw = gc[c.sourceKey] ?? "";
                         const display = c.sourceKey === "acquisitiondatetime" ? formatDatetime(raw) : raw;
-                        return <td key={c.key} className="dt__gc-td">{display}</td>;
+                        const isNarrow = c.sourceKey === "patient_id" || c.sourceKey === "stroke_date";
+                        return <td key={c.key} className={`dt__gc-td${isNarrow ? " dt__gc-td--narrow" : ""}`}>{display}</td>;
                       }
                       const labelName = c.key.replace("label:", "");
                       return (
-                        <td key={c.key} className="dt__gc-td" onClick={(e) => e.stopPropagation()}>
+                        <td key={c.key} className="dt__gc-td dt__gc-td--label" onClick={(e) => e.stopPropagation()}>
                           <InlineEdit
                             level={c.level}
                             entity={gc}
@@ -132,6 +136,7 @@ export default function ChildRows({
   onMutated,
 }) {
   const children = childRows[parentRowId];
+  const childLevel = childConfig.idCol === "studyinstanceuid" ? "study" : "series";
   if (!children || children.length === 0) {
     return (
       <tr>
@@ -146,12 +151,14 @@ export default function ChildRows({
       <thead className="dt__child-thead">
         <tr className="dt__child-head-row">
           {childIsExpandable && <th className="dt__child-th--expand" />}
-          {childCols.map((c) => (
-            <th key={c.key} className="dt__child-th">
-              {c.label}
-              {!c.builtin && <span className="dt__child-datatype-hint">({c.datatype})</span>}
-            </th>
-          ))}
+          {childCols.map((c) => {
+            const isNarrow = c.builtin && (c.sourceKey === "patient_id" || c.sourceKey === "stroke_date");
+            return (
+              <th key={c.key} className={`dt__child-th${isNarrow ? " dt__child-th--narrow" : ""}`}>
+                {c.label}
+              </th>
+            );
+          })}
           <th className="dt__child-th">Actions</th>
         </tr>
       </thead>
@@ -169,7 +176,7 @@ export default function ChildRows({
           return (
             <Fragment key={childId}>
               <tr
-                className={`dt__child-row${
+                className={`dt__child-row dt__child-row--level-${childLevel}${
                   childIsExpandable ? " dt__child-row--expandable" : ""
                 }${childConfig.idCol === "studyinstanceuid" || childConfig.idCol === "seriesinstanceuid" ? " dt__child-row--previewable" : ""}${
                   isActivePreview ? " dt__child-row--active" : ""
@@ -187,11 +194,12 @@ export default function ChildRows({
                   if (c.builtin) {
                     const raw = child[c.sourceKey] ?? "";
                     const display = c.sourceKey === "acquisitiondatetime" ? formatDatetime(raw) : raw;
-                    return <td key={c.key} className="dt__child-td">{display}</td>;
+                    const isNarrow = c.sourceKey === "patient_id" || c.sourceKey === "stroke_date";
+                    return <td key={c.key} className={`dt__child-td${isNarrow ? " dt__child-td--narrow" : ""}`}>{display}</td>;
                   }
                   const labelName = c.key.replace("label:", "");
                   return (
-                    <td key={c.key} className="dt__child-td" onClick={(e) => e.stopPropagation()}>
+                    <td key={c.key} className="dt__child-td dt__child-td--label" onClick={(e) => e.stopPropagation()}>
                       <InlineEdit
                         level={c.level}
                         entity={child}
@@ -251,7 +259,7 @@ export default function ChildRows({
   const needsScroll = !childIsExpandable;
   return (
     <tr>
-      <td colSpan={parentColSpan} className="dt__child-wrapper">
+      <td colSpan={parentColSpan} className={`dt__child-wrapper dt__child-wrapper--level-${childLevel}`}>
         {needsScroll
           ? <div className="dt__child-scroll">{childTableContent}</div>
           : childTableContent}

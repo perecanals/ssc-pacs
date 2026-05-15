@@ -11,6 +11,7 @@ export default function usePreferencePersistence({
   sortDir,
   columnFilters,
   frozenFirstCol,
+  fontScale,
 }) {
   const latestPrefs = useRef({});
   const dirty = useRef(false);
@@ -26,6 +27,7 @@ export default function usePreferencePersistence({
       Object.entries(columnFilters).filter(([, v]) => hasFilterValue(v)),
     ),
     freezeFirstCol: frozenFirstCol,
+    fontScale,
   };
 
   const flushSave = useCallback(() => {
@@ -57,7 +59,7 @@ export default function usePreferencePersistence({
       }).catch(() => {});
     }, 800);
     return () => clearTimeout(saveTimer.current);
-  }, [currentUser, level, visibleKeys, columnOrder, sortBy, sortDir, columnFilters, frozenFirstCol]);
+  }, [currentUser, level, visibleKeys, columnOrder, sortBy, sortDir, columnFilters, frozenFirstCol, fontScale]);
 
   useEffect(() => {
     const handleUnload = () => flushSave();

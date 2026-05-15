@@ -1,7 +1,7 @@
 @reference "../app.css";
 
 .topbar {
-  @apply fixed top-0 left-0 right-0 h-12 bg-surface border-b border-border flex items-center gap-4 px-4 z-50 text-sm;
+  @apply fixed top-0 left-0 right-0 h-9 bg-surface border-b border-border flex items-center gap-4 px-4 z-50 text-sm;
 }
 
 .topbar__brand {
@@ -25,11 +25,22 @@
 }
 
 .topbar__level-btn {
-  @apply px-3 py-1 rounded-md border border-transparent text-xs font-medium text-text-muted bg-transparent transition-colors cursor-pointer hover:text-text hover:border-border;
+  @apply px-3 py-1 rounded-md border border-transparent text-xs font-medium text-text-muted bg-transparent transition-colors cursor-pointer;
+}
+
+.topbar__level-btn--patient { --level-accent: var(--color-level-patient); }
+.topbar__level-btn--study   { --level-accent: var(--color-level-study); }
+.topbar__level-btn--series  { --level-accent: var(--color-level-series); }
+
+.topbar__level-btn:hover {
+  color: var(--level-accent);
+  border-color: color-mix(in srgb, var(--level-accent) 25%, transparent);
 }
 
 .topbar__level-btn--active {
-  @apply border-primary/30 bg-primary/10 text-primary;
+  color: var(--level-accent);
+  background: color-mix(in srgb, var(--level-accent) 12%, transparent);
+  border-color: color-mix(in srgb, var(--level-accent) 35%, transparent);
 }
 
 .topbar__actions {

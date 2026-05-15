@@ -243,6 +243,14 @@ curl -s -X DELETE http://localhost:8043/api/annotations/42
 
 # Remove a label entirely (definition + annotation rows) — run from repo root
 sudo ./scripts/admin/remove_label.py "My Label Name"
+
+# Bulk-set a label's values from a CSV/Excel table (admin backdoor).
+# Creates the label if it does not exist (interactive y/n unless --yes).
+sudo bash scripts/admin/bulk_set_label_values.sh \
+    --file /tmp/series_quality.csv --level series \
+    --id-column seriesinstanceuid --value-column quality \
+    --label series_quality --datatype select --options 'good,acceptable,poor' \
+    --dry-run
 ```
 
 ### Removing the companion app

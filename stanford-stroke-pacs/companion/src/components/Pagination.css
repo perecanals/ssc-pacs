@@ -1,9 +1,9 @@
 @reference "../app.css";
 
 .pagination {
-  @apply flex items-center gap-1.5 mt-0.5 py-0 text-[11px] leading-tight;
+  @apply flex items-center gap-1.5 text-[11px] leading-tight;
 }
 
-.pagination__btn {
-  @apply px-2 py-0 border border-border rounded-md bg-surface text-[11px] leading-tight cursor-pointer disabled:opacity-40 disabled:cursor-default hover:not-disabled:border-primary hover:not-disabled:text-primary;
+.pagination__label {
+  @apply text-text-muted;
 }

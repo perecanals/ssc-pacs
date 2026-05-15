@@ -49,7 +49,9 @@ export default function TableHeader({
                 : ""
             }${dragColKeyRef.current === c.key ? " dt__th--dragging" : ""}${
               dragOverKey === c.key && dropSide === "before" ? " dt__th--drop-before" : ""
-            }${dragOverKey === c.key && dropSide === "after" ? " dt__th--drop-after" : ""}`}
+            }${dragOverKey === c.key && dropSide === "after" ? " dt__th--drop-after" : ""}${
+              c.builtin && (c.sourceKey === "patient_id" || c.sourceKey === "stroke_date") ? " dt__th--narrow" : ""
+            }`}
           >
             {c.label}
             {idx === 0 && (
@@ -67,13 +69,8 @@ export default function TableHeader({
                 {sortDir === "asc" ? "\u2191" : "\u2193"}
               </span>
             )}
-            {!c.builtin && (
-              <span className="dt__datatype-hint">
-                {c.datatype}
-                {c.level && c.level !== level && (
-                  <span className="dt__level-hint">({c.level})</span>
-                )}
-              </span>
+            {!c.builtin && c.level && c.level !== level && (
+              <span className="dt__level-hint">({c.level})</span>
             )}
           </th>
         ))}
@@ -94,7 +91,7 @@ export default function TableHeader({
               frozenFirstCol && idx === 0
                 ? config.expandable ? " dt__filter-th--frozen-first-offset" : " dt__filter-th--frozen-first"
                 : ""
-            }`}
+            }${c.builtin && (c.sourceKey === "patient_id" || c.sourceKey === "stroke_date") ? " dt__filter-th--narrow" : ""}`}
           >
             {c.builtin && config.filterParamMap[c.sourceKey] ? (
               <input

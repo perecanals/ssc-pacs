@@ -53,6 +53,16 @@ function DataTableInner({
   );
   const filterTimeout = useRef(null);
   const [frozenFirstCol, setFrozenFirstCol] = useState(!!serverPrefs.freezeFirstCol);
+  const [fontScale, setFontScale] = useState(() => {
+    const v = Number(serverPrefs.fontScale);
+    return Number.isFinite(v) && v >= 0.85 && v <= 1.25 ? v : 1;
+  });
+  const adjustFontScale = (delta) => {
+    setFontScale((prev) => {
+      const next = Math.round((prev + delta) * 100) / 100;
+      return Math.min(1.25, Math.max(0.85, next));
+    });
+  };
 
   const [expanded, setExpanded] = useState({});
   const [childRowsData, setChildRowsData] = useState({});
@@ -86,7 +96,7 @@ function DataTableInner({
   } = useDragColumns(reorder);
 
   usePreferencePersistence({
-    currentUser, level, visibleKeys, columnOrder, sortBy, sortDir, columnFilters, frozenFirstCol,
+    currentUser, level, visibleKeys, columnOrder, sortBy, sortDir, columnFilters, frozenFirstCol, fontScale,
   });
 
   const [downloadingSeries, setDownloadingSeries] = useState(null);
@@ -320,6 +330,7 @@ function DataTableInner({
     setSortDir("asc");
     setColumnFilters({});
     setFrozenFirstCol(false);
+    setFontScale(1);
     onPageChange(1);
   };
 
@@ -337,37 +348,22 @@ function DataTableInner({
         onSetKeysVisible={setKeysVisible}
         onEditLabel={handleEditLabel}
       />
-      <button onClick={handleResetDefaults} className="btn-outline">Reset View</button>
+      <button onClick={handleResetDefaults} className="pill-btn">Reset View</button>
       <button onClick={() => {
         if (!currentUser) { alert("Please log in to create label types"); return; }
         setShowDefModal(true);
-      }} className="btn-outline">+ New Label Type</button>
+      }} className="pill-btn">+ New Label Type</button>
     </>
   );
 
-  return (
-    <div className="dt__panel">
-      {toolbarPortalTarget ? createPortal(topBarControls, toolbarPortalTarget) : null}
+  const countLabel = total === 0
+    ? `0 ${config.entityLabel}`
+    : `${total.toLocaleString()} ${config.entityLabel}`;
+  const fontScalePct = Math.round(fontScale * 100);
 
-      <div className="dt__summary-bar">
-        <div className="dt__summary">
-          {total === 0
-            ? `0 ${config.entityLabel}`
-            : `${total.toLocaleString()} ${config.entityLabel} total \u2014 page ${page} of ${totalPages}`}
-        </div>
-        {currentUser && (
-          <div className="dt__summary-actions">
-            <button onClick={handleRefreshLabelledTables} disabled={refreshingLabelledTables}
-              className={`dt__summary-action ${refreshingLabelledTables ? "dt__refresh-btn--disabled" : ""}`}>
-              {refreshingLabelledTables ? "Refreshing..." : "Refresh Labelled Tables"}
-            </button>
-            <button onClick={handleRefreshSnapshots} disabled={refreshingSnapshots}
-              className={`dt__summary-action ${refreshingSnapshots ? "dt__refresh-btn--disabled" : ""}`}>
-              {refreshingSnapshots ? "Refreshing..." : "Refresh Snapshots"}
-            </button>
-          </div>
-        )}
-      </div>
+  return (
+    <div className="dt__panel" style={{ "--dt-font-scale": fontScale }}>
+      {toolbarPortalTarget ? createPortal(topBarControls, toolbarPortalTarget) : null}
 
       <div className="dt__scroll">
         <table className="dt">
@@ -413,7 +409,7 @@ function DataTableInner({
                 return (
                   <Fragment key={rowId}>
                     <tr
-                      className={`dt__row${config.expandable ? " dt__row--expandable" : ""}${
+                      className={`dt__row dt__row--level-${level}${config.expandable ? " dt__row--expandable" : ""}${
                         level === "study" || level === "series" ? " dt__row--previewable" : ""
                       }${isActivePreview ? " dt__row--active" : ""}`}
                       onClick={() => handleMainRowClick(rowId, row)}
@@ -423,15 +419,19 @@ function DataTableInner({
                           <span className={`dt__expand-arrow ${isExpanded ? "rotate-90" : ""}`}>{"\u25B6"}</span>
                         </td>
                       )}
-                      {mainTableCols.map((c, idx) => (
-                        <td key={c.key}
-                          className={`dt__td${frozenFirstCol && idx === 0
-                            ? config.expandable ? " dt__td--frozen-first-offset" : " dt__td--frozen-first" : ""}`}
-                          onClick={!c.builtin && (config.expandable || level === "series") ? (e) => e.stopPropagation() : undefined}
-                        >
-                          {renderCellValue(row, c)}
-                        </td>
-                      ))}
+                      {mainTableCols.map((c, idx) => {
+                        const isNarrow = c.builtin && (c.sourceKey === "patient_id" || c.sourceKey === "stroke_date");
+                        return (
+                          <td key={c.key}
+                            className={`dt__td${frozenFirstCol && idx === 0
+                              ? config.expandable ? " dt__td--frozen-first-offset" : " dt__td--frozen-first" : ""}${
+                              isNarrow ? " dt__td--narrow" : ""}${!c.builtin ? " dt__td--label" : ""}`}
+                            onClick={!c.builtin && (config.expandable || level === "series") ? (e) => e.stopPropagation() : undefined}
+                          >
+                            {renderCellValue(row, c)}
+                          </td>
+                        );
+                      })}
                       {showActions && (
                         <td className="dt__td--actions" onClick={(e) => e.stopPropagation()}>
                           {renderActions(row, level)}
@@ -468,7 +468,54 @@ function DataTableInner({
         </table>
       </div>
 
-      <Pagination page={page} totalPages={totalPages} onPageChange={onPageChange} />
+      <div className="dt__footer">
+        <div className="dt__footer-left">
+          {currentUser && (
+            <>
+              <button
+                onClick={handleRefreshLabelledTables}
+                disabled={refreshingLabelledTables}
+                className="pill-btn"
+              >
+                {refreshingLabelledTables ? "Refreshing…" : "Refresh Labelled Tables"}
+              </button>
+              <button
+                onClick={handleRefreshSnapshots}
+                disabled={refreshingSnapshots}
+                className="pill-btn"
+              >
+                {refreshingSnapshots ? "Refreshing…" : "Refresh Snapshots"}
+              </button>
+            </>
+          )}
+        </div>
+        <div className="dt__footer-center">
+          <span className="dt__footer-count">{countLabel}</span>
+        </div>
+        <div className="dt__footer-right">
+          <div className="dt__font-controls" title={`Table font size: ${fontScalePct}%`}>
+            <button
+              type="button"
+              onClick={() => adjustFontScale(-0.05)}
+              disabled={fontScale <= 0.85}
+              className="pill-btn"
+              aria-label="Decrease table font size"
+            >
+              A−
+            </button>
+            <button
+              type="button"
+              onClick={() => adjustFontScale(0.05)}
+              disabled={fontScale >= 1.25}
+              className="pill-btn"
+              aria-label="Increase table font size"
+            >
+              A+
+            </button>
+          </div>
+          <Pagination page={page} totalPages={totalPages} onPageChange={onPageChange} />
+        </div>
+      </div>
 
       {showDefModal && (
         <LabelDefModal

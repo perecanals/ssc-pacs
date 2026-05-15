@@ -183,7 +183,7 @@ export default function ColumnSelector({
     <div className="col-selector" ref={ref}>
       <button
         onClick={() => setOpen(!open)}
-        className="col-selector__trigger"
+        className="pill-btn col-selector__trigger"
       >
         Displayed Columns &#9662;
       </button>

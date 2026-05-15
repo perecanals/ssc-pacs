@@ -7,17 +7,17 @@ export default function Pagination({ page, totalPages, onPageChange }) {
       <button
         disabled={page <= 1}
         onClick={() => onPageChange(page - 1)}
-        className="pagination__btn"
+        className="pill-btn"
       >
         &laquo; Prev
       </button>
-      <span>
+      <span className="pagination__label">
         Page {page} of {totalPages || 1}
       </span>
       <button
         disabled={page >= totalPages}
         onClick={() => onPageChange(page + 1)}
-        className="pagination__btn"
+        className="pill-btn"
       >
         Next &raquo;
       </button>

@@ -1,8 +1,11 @@
 @reference "../app.css";
 
-/* SelectPill */
+/* SelectPill — sized at 0.85em so the pill (with bold weight + bg) reads at
+   the same visual weight as plain table text. Tracks --dt-font-scale via em. */
 .select-pill {
-  @apply inline-block px-2 py-0.5 rounded-full text-xs font-medium whitespace-nowrap;
+  @apply inline-block px-2 py-0 rounded-full font-medium whitespace-nowrap align-middle;
+  font-size: 0.85em;
+  line-height: 1.4;
 }
 
 .select-pill--clickable {
@@ -22,9 +25,11 @@
   @apply flex flex-wrap gap-1;
 }
 
-/* BoolEdit */
+/* BoolEdit — checkbox scales with the cell's font-size */
 .bool-edit__checkbox {
-  @apply w-4 h-4 cursor-pointer accent-primary;
+  @apply cursor-pointer accent-primary align-middle m-0 block;
+  width: 1.15em;
+  height: 1.15em;
 }
 
 .bool-edit__others {
@@ -37,7 +42,9 @@
 }
 
 .select-edit__placeholder {
-  @apply px-2 py-0.5 text-xs text-text-muted border border-dashed border-border rounded cursor-pointer hover:border-primary hover:text-primary bg-transparent;
+  @apply px-2 py-0 text-text-muted border border-dashed border-border rounded cursor-pointer hover:border-primary hover:text-primary bg-transparent align-middle;
+  font-size: 0.85em;
+  line-height: 1.4;
 }
 
 .select-edit__others {
@@ -80,9 +87,11 @@
   @apply px-3 py-2 text-xs text-text-muted;
 }
 
-/* ValueEdit */
+/* ValueEdit — input font-size inherits from the cell so it scales with --dt-font-scale */
 .value-edit__input {
-  @apply px-1.5 py-0.5 border border-border rounded text-xs bg-surface font-[inherit] outline-none focus:border-primary;
+  @apply px-1.5 py-0 border border-border rounded bg-surface font-[inherit] outline-none focus:border-primary align-middle;
+  font-size: inherit;
+  line-height: 1.4;
 }
 
 .value-edit__input--saving {

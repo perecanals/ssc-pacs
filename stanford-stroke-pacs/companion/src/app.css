@@ -21,6 +21,9 @@
   --color-grandchild-row-hover: #cad3e4;
   --color-grandchild-empty-bg: #d8dce4;
   --color-dropdown-hover: #f5f5f5;
+  --color-level-patient: #6366f1;
+  --color-level-study: #14b8a6;
+  --color-level-series: #f59e0b;
 }
 
 /* Shared component styles */
@@ -39,4 +42,20 @@
 
 .link-btn {
   @apply text-primary text-xs font-medium bg-transparent border-none cursor-pointer hover:underline;
+}
+
+/* Shared pill button — same shape and at-rest state as the topbar level pills
+   (Patients / Studies / Series), minus the per-level accent color. Used for
+   toolbar actions, pagination, and footer controls so all secondary chrome
+   has one consistent look. */
+.pill-btn {
+  @apply px-3 py-1 rounded-md border border-transparent bg-transparent text-xs font-medium
+         text-text-muted transition-colors cursor-pointer
+         hover:border-primary/35 hover:text-primary
+         disabled:opacity-40 disabled:cursor-default
+         disabled:hover:border-transparent disabled:hover:text-text-muted;
+}
+
+.pill-btn--active {
+  @apply text-primary border-primary/35 bg-primary/10;
 }

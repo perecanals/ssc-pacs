@@ -32,7 +32,8 @@ session_timeout_hours = 0.0833
 # hours ago is rejected regardless of sliding refresh activity.
 session_absolute_timeout_hours = 24
 # Emit the JWT cookie with Secure=true so browsers only send it over HTTPS.
-# Set to false for local HTTP-only development.
-cookie_secure = true
+# Disabled because all access is via SSH tunnel (browser↔companion is loopback,
+# wire is SSH-encrypted) and Safari refuses Secure cookies on http://localhost.
+cookie_secure = false
 # Per-IP cap for POST /api/login attempts inside a 5-minute rolling window.
 login_rate_limit_per_5min = 10

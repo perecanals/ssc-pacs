@@ -1,32 +1,35 @@
 @reference "../app.css";
 
-/* Toolbar */
+/* Panel */
 .dt__panel {
   @apply flex-1 min-h-0 flex flex-col;
-}
-
-.dt__refresh-btn--disabled {
-  @apply opacity-50 pointer-events-none;
-}
-
-.dt__summary-bar {
-  @apply flex items-center justify-between gap-2 mb-0.5;
-}
-
-.dt__summary {
-  @apply text-[11px] leading-tight text-text-muted;
-}
-
-.dt__summary-actions {
-  @apply flex items-center gap-3;
-}
-
-.dt__summary-action {
-  @apply text-[10px] leading-tight text-primary bg-transparent border-none cursor-pointer px-0 py-0 hover:underline;
+  --dt-font-scale: 1;
 }
 
 .dt__scroll {
   @apply flex-1 min-h-0 overflow-auto rounded-md;
+}
+
+/* Bottom footer: refresh actions | count (centered) | font-size + pagination */
+.dt__footer {
+  @apply flex items-center gap-3 mt-1 text-[11px] text-text-muted;
+}
+
+.dt__footer-left,
+.dt__footer-right {
+  @apply flex items-center gap-2;
+}
+
+.dt__footer-center {
+  @apply flex-1 flex justify-center text-center;
+}
+
+.dt__footer-count {
+  @apply text-text-muted;
+}
+
+.dt__font-controls {
+  @apply flex items-center gap-1;
 }
 
 /* Main table */
@@ -39,7 +42,10 @@
 }
 
 .dt__th {
-  @apply px-3 py-1 text-left border-b border-border text-sm font-semibold whitespace-nowrap select-none;
+  @apply px-3 text-left border-b border-border font-semibold whitespace-nowrap select-none align-middle;
+  font-size: calc(0.875rem * var(--dt-font-scale, 1));
+  line-height: 1.4;
+  padding-block: 0.32em;
 }
 
 .dt__th--sortable {
@@ -60,19 +66,16 @@
 }
 
 .dt__th--expand {
-  @apply w-8 px-2 py-1 border-b border-border;
+  @apply w-8 px-2 border-b border-border align-middle;
+  padding-block: 0.32em;
 }
 
 .dt__sort-arrow {
   @apply ml-1 text-primary;
 }
 
-.dt__datatype-hint {
-  @apply font-normal text-text-muted text-[10px] ml-1;
-}
-
 .dt__level-hint {
-  @apply ml-0.5 opacity-60;
+  @apply ml-1 font-normal text-text-muted text-[10px] opacity-80;
 }
 
 .dt__bool-filter {
@@ -148,6 +151,36 @@
   @apply text-center text-text-muted py-10;
 }
 
+/* Per-level accent stripe (applied to the first cell of every row).
+   --row-accent is set by .dt__row--level-* / .dt__child-row--level-* / .dt__gc-row--level-*
+   modifiers below and inherits through to <td>. */
+.dt__row > td:first-child,
+.dt__child-row > td:first-child,
+.dt__gc-row > td:first-child {
+  position: relative;
+}
+
+.dt__row > td:first-child::before,
+.dt__child-row > td:first-child::before,
+.dt__gc-row > td:first-child::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background: var(--row-accent, transparent);
+  pointer-events: none;
+}
+
+.dt__row--level-patient,
+.dt__child-row--level-patient { --row-accent: var(--color-level-patient); }
+.dt__row--level-study,
+.dt__child-row--level-study   { --row-accent: var(--color-level-study); }
+.dt__row--level-series,
+.dt__child-row--level-series,
+.dt__gc-row--level-series     { --row-accent: var(--color-level-series); }
+
 /* Parent rows */
 .dt__row {
   @apply hover:bg-table-row-hover transition-colors duration-100;
@@ -166,7 +199,8 @@
 }
 
 .dt__expand-cell {
-  @apply w-8 px-2 py-1 border-b border-border text-center text-text-muted;
+  @apply w-8 px-2 border-b border-border text-center text-text-muted align-middle;
+  padding-block: 0.32em;
 }
 
 .dt__expand-arrow {
@@ -174,11 +208,37 @@
 }
 
 .dt__td {
-  @apply px-3 py-1 border-b border-border text-sm;
+  @apply px-3 border-b border-border whitespace-nowrap align-middle;
+  font-size: calc(0.875rem * var(--dt-font-scale, 1));
+  line-height: 1.4;
+  padding-block: 0.32em;
 }
 
 .dt__td--actions {
-  @apply px-3 py-1 border-b border-border text-sm whitespace-nowrap flex items-center gap-2;
+  @apply px-3 border-b border-border whitespace-nowrap align-middle flex items-center gap-2;
+  font-size: calc(0.875rem * var(--dt-font-scale, 1));
+  line-height: 1.4;
+  padding-block: 0.32em;
+}
+
+/* Narrow columns (Patient ID, Stroke Date): trim padding and let the cell
+   shrink to content, reducing column width ~20% versus default px-3 padding. */
+.dt__th--narrow,
+.dt__td--narrow,
+.dt__filter-th--narrow,
+.dt__child-th--narrow,
+.dt__child-td--narrow,
+.dt__gc-th--narrow,
+.dt__gc-td--narrow {
+  @apply px-1.5;
+  width: 1%;
+}
+
+/* Label (annotation) columns center their values; built-in columns stay left. */
+.dt__td--label,
+.dt__child-td--label,
+.dt__gc-td--label {
+  @apply text-center;
 }
 
 /* Child rows (depth 1) */
@@ -187,8 +247,22 @@
 }
 
 .dt__child-wrapper {
-  @apply p-0 border-b border-border;
+  @apply relative pl-6 border-b border-border;
 }
+
+.dt__child-wrapper::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 4px;
+  background: var(--wrapper-accent, transparent);
+  pointer-events: none;
+}
+
+.dt__child-wrapper--level-study  { --wrapper-accent: var(--color-level-study); }
+.dt__child-wrapper--level-series { --wrapper-accent: var(--color-level-series); }
 
 .dt__child-scroll {
   @apply max-h-[280px] overflow-y-auto;
@@ -207,15 +281,15 @@
 }
 
 .dt__child-th {
-  @apply px-3 py-1 text-left text-[11px] font-semibold text-text-muted border-b border-border whitespace-nowrap;
+  @apply px-3 text-left font-semibold text-text-muted border-b border-border whitespace-nowrap align-middle;
+  font-size: calc(0.6875rem * var(--dt-font-scale, 1));
+  line-height: 1.4;
+  padding-block: 0.32em;
 }
 
 .dt__child-th--expand {
-  @apply w-7 px-1 py-1 border-b border-border;
-}
-
-.dt__child-datatype-hint {
-  @apply font-normal text-[9px] ml-0.5 opacity-60;
+  @apply w-7 px-1 border-b border-border;
+  padding-block: 0.32em;
 }
 
 .dt__child-row {
@@ -235,7 +309,8 @@
 }
 
 .dt__child-expand-cell {
-  @apply w-7 px-1 py-1 border-b border-border/60 text-center text-text-muted;
+  @apply w-7 px-1 border-b border-border/60 text-center text-text-muted align-middle;
+  padding-block: 0.32em;
 }
 
 .dt__child-expand-arrow {
@@ -243,11 +318,17 @@
 }
 
 .dt__child-td {
-  @apply px-3 py-1 border-b border-border/60 text-xs;
+  @apply px-3 border-b border-border/60 whitespace-nowrap align-middle;
+  font-size: calc(0.75rem * var(--dt-font-scale, 1));
+  line-height: 1.4;
+  padding-block: 0.32em;
 }
 
 .dt__child-td--actions {
-  @apply px-3 py-1 border-b border-border/60 text-xs whitespace-nowrap flex items-center gap-2;
+  @apply px-3 border-b border-border/60 whitespace-nowrap align-middle flex items-center gap-2;
+  font-size: calc(0.75rem * var(--dt-font-scale, 1));
+  line-height: 1.4;
+  padding-block: 0.32em;
 }
 
 /* Grandchild rows (depth 2) */
@@ -256,8 +337,21 @@
 }
 
 .dt__gc-wrapper {
-  @apply p-0 border-b border-border/60;
+  @apply relative pl-6 border-b border-border/60;
 }
+
+.dt__gc-wrapper::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 4px;
+  background: var(--wrapper-accent, transparent);
+  pointer-events: none;
+}
+
+.dt__gc-wrapper--level-series { --wrapper-accent: var(--color-level-series); }
 
 .dt__gc-scroll {
   @apply max-h-[280px] overflow-y-auto;
@@ -276,7 +370,10 @@
 }
 
 .dt__gc-th {
-  @apply px-3 py-0.5 text-left text-[10px] font-semibold text-text-muted border-b border-border/40 whitespace-nowrap;
+  @apply px-3 text-left font-semibold text-text-muted border-b border-border/40 whitespace-nowrap align-middle;
+  font-size: calc(0.625rem * var(--dt-font-scale, 1));
+  line-height: 1.4;
+  padding-block: 0.32em;
 }
 
 .dt__gc-row {
@@ -292,11 +389,17 @@
 }
 
 .dt__gc-td {
-  @apply px-3 py-0.5 border-b border-border/30 text-[11px];
+  @apply px-3 border-b border-border/30 whitespace-nowrap align-middle;
+  font-size: calc(0.6875rem * var(--dt-font-scale, 1));
+  line-height: 1.4;
+  padding-block: 0.32em;
 }
 
 .dt__gc-td--actions {
-  @apply px-3 py-0.5 border-b border-border/30 text-[11px] whitespace-nowrap flex items-center gap-1.5;
+  @apply px-3 border-b border-border/30 whitespace-nowrap align-middle flex items-center gap-1.5;
+  font-size: calc(0.6875rem * var(--dt-font-scale, 1));
+  line-height: 1.4;
+  padding-block: 0.32em;
 }
 
 .dt__gc-link-btn {

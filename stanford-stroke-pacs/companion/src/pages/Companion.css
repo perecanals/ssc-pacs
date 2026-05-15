@@ -5,14 +5,21 @@
 }
 
 .companion__layout {
-  @apply flex pt-12;
+  @apply flex pt-9;
+  --sidebar-width: 15rem;
+}
+
+.companion__layout--sidebar-closed {
+  --sidebar-width: 0rem;
 }
 
 .companion__main {
-  @apply ml-60 flex-1 p-4 min-h-0 overflow-hidden;
-  height: calc(100vh - 3rem);
+  @apply flex-1 px-4 pt-1 pb-1.5 min-h-0 overflow-hidden;
+  margin-left: var(--sidebar-width);
+  transition: margin-left 180ms ease;
+  height: calc(100vh - 2.25rem);
 }
 
 .companion__content {
-  @apply h-full min-h-0 flex flex-col gap-3;
+  @apply h-full min-h-0 flex flex-col gap-1.5;
 }

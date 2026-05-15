@@ -150,6 +150,7 @@ Runtime split:
 | `scripts/orthanc/label_studies.py` | Seeds Orthanc study labels from `study_type` + `modality` | Portable if columns exist |
 | `companion/labelled_table_sync.py` | Helpers for maintaining per-level labelled mirror tables | Imported by `companion/routes/labels.py` and `scripts/admin/remove_label.py` |
 | `scripts/admin/remove_label.py` | Remove a label definition + annotation rows from DB | |
+| `scripts/admin/bulk_set_label_values.py` | Bulk-set annotation values from a CSV/Excel table; creates the label on demand | Requires `openpyxl` for `.xlsx` |
 | `image_integration_protocols/` | Legacy metadata pipeline | Not part of standard fresh deploy |
 
 ---
