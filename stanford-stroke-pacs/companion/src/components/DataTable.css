@@ -42,7 +42,7 @@
 }
 
 .dt__th {
-  @apply px-3 text-left border-b border-border font-semibold whitespace-nowrap select-none align-middle;
+  @apply relative px-3 text-left border-b border-border font-semibold whitespace-nowrap select-none align-middle;
   font-size: calc(0.875rem * var(--dt-font-scale, 1));
   line-height: 1.4;
   padding-block: 0.32em;
@@ -76,6 +76,34 @@
 
 .dt__level-hint {
   @apply ml-1 font-normal text-text-muted text-[10px] opacity-80;
+}
+
+/* Column-header description tooltip. Replaces the native `title=` (which
+   has a ~1s browser delay and can't be styled): a CSS :hover toggle is
+   instant and fully themeable. */
+.dt__col-tip {
+  @apply pointer-events-none absolute left-0 top-full z-30 mt-1.5 hidden
+         w-max max-w-[300px] flex-col gap-2 rounded-lg border border-border
+         bg-surface px-3 py-2.5 text-left font-normal normal-case shadow-lg;
+  white-space: normal;
+}
+.dt__th:hover > .dt__col-tip,
+.dt__th:focus-within > .dt__col-tip {
+  @apply flex;
+}
+.dt__col-tip__desc {
+  @apply text-[12.5px] leading-snug text-text;
+}
+.dt__col-tip__meta {
+  @apply flex flex-wrap gap-1.5;
+}
+.dt__col-tip__chip {
+  @apply rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase
+         tracking-wide bg-table-header-bg text-text-muted;
+}
+.dt__col-tip__chip--type {
+  color: var(--color-primary);
+  background: color-mix(in srgb, var(--color-primary) 12%, transparent);
 }
 
 .dt__bool-filter {

@@ -109,6 +109,11 @@ The companion page is decomposed into focused React components:
   - **Sticky column headers**: The table header (column labels + filter
     inputs) stays pinned at the top of the scroll container during vertical
     scrolling. Uses `position: sticky` on the `thead`.
+  - **Label-column header tooltip**: Hovering a label column header shows
+    an instant, themed tooltip (`.dt__col-tip`, a CSS `:hover` toggle —
+    not the slow native `title=`) with the label description plus
+    instrument and data-type chips. Level is omitted (already conveyed by
+    the `dt__level-hint` badge). Builtin columns have no tooltip.
   - **Frozen first column**: A pin toggle button in the first column header
     freezes both the expand-arrow column and the first data column so they
     remain visible during horizontal scrolling.

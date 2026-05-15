@@ -41,7 +41,6 @@ export default function TableHeader({
             onDragLeave={onDragLeave}
             onDrop={(e) => onDrop(c.key, e)}
             onDragEnd={onDragEnd}
-            title={!c.builtin ? c.description || "" : undefined}
             onClick={() => c.builtin && c.sortable !== false && onSort(c.sourceKey)}
             className={`dt__th ${c.builtin && c.sortable !== false ? "dt__th--sortable" : ""}${
               frozenFirstCol && idx === 0
@@ -71,6 +70,25 @@ export default function TableHeader({
             )}
             {!c.builtin && c.level && c.level !== level && (
               <span className="dt__level-hint">({c.level})</span>
+            )}
+            {!c.builtin && (c.description || c.instrument || c.datatype) && (
+              <span className="dt__col-tip" role="tooltip">
+                {c.description && (
+                  <span className="dt__col-tip__desc">{c.description}</span>
+                )}
+                {(c.instrument || c.datatype) && (
+                  <span className="dt__col-tip__meta">
+                    {c.instrument && (
+                      <span className="dt__col-tip__chip">{c.instrument}</span>
+                    )}
+                    {c.datatype && (
+                      <span className="dt__col-tip__chip dt__col-tip__chip--type">
+                        {c.datatype}
+                      </span>
+                    )}
+                  </span>
+                )}
+              </span>
             )}
           </th>
         ))}
