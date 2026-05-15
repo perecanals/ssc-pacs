@@ -47,6 +47,7 @@ function GrandChildTable({
                   );
                 })}
                 <th className="dt__gc-th">Actions</th>
+                <th className="dt__gc-th dt__gc-th--spacer" aria-hidden="true" />
               </tr>
             </thead>
             <tbody>
@@ -104,6 +105,7 @@ function GrandChildTable({
                         </button>
                       )}
                     </td>
+                    <td className="dt__gc-td dt__gc-td--spacer" aria-hidden="true" />
                   </tr>
                 );
               })}
@@ -160,6 +162,7 @@ export default function ChildRows({
             );
           })}
           <th className="dt__child-th">Actions</th>
+          <th className="dt__child-th dt__child-th--spacer" aria-hidden="true" />
         </tr>
       </thead>
       <tbody>
@@ -235,6 +238,7 @@ export default function ChildRows({
                     </button>
                   )}
                 </td>
+                <td className="dt__child-td dt__child-td--spacer" aria-hidden="true" />
               </tr>
               {childIsExpandable && isGrandExpanded && (
                 <GrandChildTable

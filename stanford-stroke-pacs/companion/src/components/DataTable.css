@@ -265,9 +265,15 @@
 .dt__child-wrapper--level-series { --wrapper-accent: var(--color-level-series); }
 
 .dt__child-scroll {
-  @apply max-h-[280px] overflow-y-auto;
+  @apply max-h-[280px] overflow-auto;
 }
 
+/* Full-width so the row background spans the whole container, but a
+   trailing spacer cell (.dt__*-td--spacer / --th--spacer) carries
+   width:100% and absorbs all slack — so the real columns collapse to
+   their content width and stay flushed left while the row still extends
+   to the right edge. Wider tables scroll horizontally via the
+   overflow-auto container above, mirroring the main table's behavior. */
 .dt__child-table {
   @apply w-full border-collapse bg-child-bg;
 }
@@ -354,9 +360,10 @@
 .dt__gc-wrapper--level-series { --wrapper-accent: var(--color-level-series); }
 
 .dt__gc-scroll {
-  @apply max-h-[280px] overflow-y-auto;
+  @apply max-h-[280px] overflow-auto;
 }
 
+/* See .dt__child-table: spacer cell keeps grandchild columns flushed left. */
 .dt__gc-table {
   @apply w-full border-collapse bg-grandchild-bg;
 }
@@ -470,4 +477,18 @@
 }
 .dt__pin-btn--active {
   @apply opacity-100 text-primary;
+}
+
+/* Trailing spacer cell for sub-tables: width:100% absorbs all leftover
+   horizontal space so the real columns collapse to content width and stay
+   flushed left, while the row background still extends to the right edge.
+   Reuses the sibling .dt__child-td / .dt__gc-td base for the bottom border;
+   only strips padding and claims the slack. Defined after the base rules
+   so the zero padding wins. */
+.dt__child-th--spacer,
+.dt__child-td--spacer,
+.dt__gc-th--spacer,
+.dt__gc-td--spacer {
+  @apply p-0;
+  width: 100%;
 }

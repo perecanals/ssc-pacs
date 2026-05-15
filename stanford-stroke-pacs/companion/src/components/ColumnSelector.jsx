@@ -10,6 +10,24 @@ const LEVEL_LABELS = { patient: "Patient", study: "Study", series: "Series" };
 const LEVEL_ORDER = ["patient", "study", "series"];
 const UNASSIGNED = "__unassigned__";
 
+// Default (clean-view) ordering for label columns: grouped by instrument
+// (alphabetical, unassigned last), then by creation time (oldest first)
+// within each instrument. `name` is a stable tiebreak when timestamps match.
+// Once a user reorders columns, their saved `columnOrder` takes precedence.
+function compareLabelDefsDefault(a, b) {
+  const ai = a.instrument || null;
+  const bi = b.instrument || null;
+  if (ai !== bi) {
+    if (ai === null) return 1;
+    if (bi === null) return -1;
+    return ai.localeCompare(bi);
+  }
+  const at = Number.isNaN(Date.parse(a.created_at)) ? 0 : Date.parse(a.created_at);
+  const bt = Number.isNaN(Date.parse(b.created_at)) ? 0 : Date.parse(b.created_at);
+  if (at !== bt) return at - bt;
+  return (a.name || "").localeCompare(b.name || "");
+}
+
 export function useColumnPrefs(labelDefs, builtinCols, level, forcedVisibleKeys = [], initialPrefs = {}) {
   const builtinKeyAliases = useMemo(() => {
     const aliases = new Map();
@@ -29,7 +47,7 @@ export function useColumnPrefs(labelDefs, builtinCols, level, forcedVisibleKeys 
     [builtinCols],
   );
   const labelCols = useMemo(
-    () => labelDefs.map((d) => ({
+    () => [...labelDefs].sort(compareLabelDefsDefault).map((d) => ({
       key: `label:${d.name}`,
       label: d.name,
       builtin: false,

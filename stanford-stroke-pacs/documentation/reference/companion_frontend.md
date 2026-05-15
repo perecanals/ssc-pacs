@@ -113,10 +113,14 @@ The companion page is decomposed into focused React components:
     column will land.
   - **Scroll-limited subtables**: Series-level sub-tables (both direct
     study→series and patient→study→series) are capped at ~280px height with
-    vertical scroll. Sub-tables are `width: auto` (not full-width) so columns
-    hug their content and stay flushed left rather than being stretched
-    across the wide parent cell; wider sub-tables scroll horizontally,
-    mirroring the main table's behavior.
+    vertical scroll. Sub-tables stay `width: 100%` (so the row background
+    spans the full container) but carry a trailing empty spacer column with
+    `width: 100%` that absorbs all leftover horizontal space — the real
+    columns collapse to their content width and stay flushed left while
+    rows still extend to the right edge. Wider sub-tables scroll
+    horizontally (the spacer collapses to zero), mirroring the main table's
+    behavior. `gcColSpan` includes the child table's spacer column so the
+    grandchild wrapper spans the full child-table width.
   - **Column selector**: Shows label columns from all levels grouped by level.
     The main table only renders columns at or above its own level (e.g. the
     patient table does not show series labels). Child/grandchild subtables

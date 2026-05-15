@@ -300,7 +300,9 @@ function DataTableInner({
   const showActions = level !== "patient";
   const parentColSpan = mainTableCols.length + (config.expandable ? 1 : 0) + (showActions ? 1 : 0);
   const childIsExpandable = !!grandChildConfig;
-  const gcColSpan = childCols.length + (childIsExpandable ? 2 : 1);
+  // +1 for the child table's trailing spacer column so the grandchild
+  // wrapper/empty cell spans the full child-table width (not cut short).
+  const gcColSpan = childCols.length + (childIsExpandable ? 2 : 1) + 1;
 
   const handleMainRowClick = (rowId, row) => {
     if (level === "study") {
