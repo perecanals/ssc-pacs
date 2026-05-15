@@ -34,9 +34,9 @@ tunnel.
             ┌─────────────────────────────────────────────────────────────────┐
             │                         Host: stroke                            │
             │                                                                 │
- Browser ───┼──► :8043  ssc-companion.service  (FastAPI + React, systemd)    │
+ Browser ───┼──► :8043  ssc-companion.service  (FastAPI + React, systemd)     │
  (via SSH   │         │                                                       │
-  tunnel)   │         │  ┌──────────── service-to-service ─────────────┐     │
+  tunnel)   │         │  ┌──────────── service-to-service ─────────────┐      │
             │         ▼  ▼                                              │     │
             │  ┌─────────────────┐                                      │     │
             │  │ stanford-stroke │◄──── reads metadata ────────┐        │     │
