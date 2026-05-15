@@ -9,7 +9,7 @@
 }
 
 .col-selector__dropdown {
-  @apply absolute top-full left-0 mt-1 bg-surface border border-border rounded-md shadow-lg z-30 min-w-[220px] max-h-[360px] overflow-y-auto py-1.5;
+  @apply absolute top-full left-0 mt-1 bg-surface border border-border rounded-md shadow-lg z-30 min-w-[220px] max-h-[70vh] overflow-y-auto py-1.5;
 }
 
 .col-selector__section-title {
