@@ -39,10 +39,12 @@ from db import get_conn  # noqa: E402
 
 USERS_TABLE_SQL = """
 CREATE TABLE IF NOT EXISTS users (
-    username      TEXT PRIMARY KEY,
-    password_hash TEXT NOT NULL,
-    is_admin      BOOLEAN NOT NULL DEFAULT FALSE,
-    created_at    TIMESTAMPTZ DEFAULT now()
+    username             TEXT PRIMARY KEY,
+    password_hash        TEXT NOT NULL,
+    is_admin             BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at           TIMESTAMPTZ DEFAULT now(),
+    must_change_password BOOLEAN NOT NULL DEFAULT FALSE,
+    password_changed_at  TIMESTAMPTZ
 );
 """
 
@@ -177,6 +179,10 @@ def cmd_list(_args: argparse.Namespace) -> None:
 
 def cmd_add(args: argparse.Namespace) -> None:
     _refuse_service_account(args.username)
+    print(
+        "Set a temporary password. The user will be required to change it on "
+        "first login."
+    )
     password = prompt_password()
     pw_hash = hash_password(password)
 
@@ -184,11 +190,15 @@ def cmd_add(args: argparse.Namespace) -> None:
     try:
         with conn.cursor() as cur:
             cur.execute(
-                "INSERT INTO users (username, password_hash, is_admin) "
-                "VALUES (%s, %s, %s) "
+                "INSERT INTO users "
+                "(username, password_hash, is_admin, "
+                " must_change_password, password_changed_at) "
+                "VALUES (%s, %s, %s, TRUE, NULL) "
                 "ON CONFLICT (username) DO UPDATE "
                 "SET password_hash = EXCLUDED.password_hash, "
-                "    is_admin = EXCLUDED.is_admin",
+                "    is_admin = EXCLUDED.is_admin, "
+                "    must_change_password = TRUE, "
+                "    password_changed_at = NULL",
                 (args.username, pw_hash, args.admin),
             )
         conn.commit()
@@ -201,6 +211,7 @@ def cmd_add(args: argparse.Namespace) -> None:
         print("Restart Orthanc to apply:  docker restart ssc-orthanc")
     else:
         print(f"User '{args.username}' added (DB only).")
+    print("They will be prompted to set a new password on first login.")
 
 
 def cmd_passwd(args: argparse.Namespace) -> None:
@@ -219,6 +230,10 @@ def cmd_passwd(args: argparse.Namespace) -> None:
     finally:
         conn.close()
 
+    print(
+        "Set a temporary password. The user will be required to change it on "
+        "next login."
+    )
     password = prompt_password()
     pw_hash = hash_password(password)
 
@@ -226,7 +241,11 @@ def cmd_passwd(args: argparse.Namespace) -> None:
     try:
         with conn.cursor() as cur:
             cur.execute(
-                "UPDATE users SET password_hash = %s WHERE username = %s",
+                "UPDATE users "
+                "SET password_hash = %s, "
+                "    must_change_password = TRUE, "
+                "    password_changed_at = NULL "
+                "WHERE username = %s",
                 (pw_hash, args.username),
             )
         conn.commit()
@@ -239,6 +258,7 @@ def cmd_passwd(args: argparse.Namespace) -> None:
         print("Restart Orthanc to apply:  docker restart ssc-orthanc")
     else:
         print(f"Password updated for '{args.username}' (DB only).")
+    print("They will be prompted to set a new password on next login.")
 
 
 def cmd_remove(args: argparse.Namespace) -> None:

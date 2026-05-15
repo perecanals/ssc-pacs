@@ -145,11 +145,20 @@ created_at  TIMESTAMPTZ DEFAULT now()
 ### `users`
 
 ```text
-username      TEXT PRIMARY KEY
-password_hash TEXT NOT NULL
-is_admin      BOOLEAN NOT NULL DEFAULT FALSE
-created_at    TIMESTAMPTZ DEFAULT now()
+username             TEXT PRIMARY KEY
+password_hash        TEXT NOT NULL
+is_admin             BOOLEAN NOT NULL DEFAULT FALSE
+created_at           TIMESTAMPTZ DEFAULT now()
+must_change_password BOOLEAN NOT NULL DEFAULT FALSE
+password_changed_at  TIMESTAMPTZ
 ```
+
+`must_change_password` is set TRUE when an admin creates the user (or runs
+`manage_users.py passwd …` against them) and cleared by
+`POST /api/auth/change-password` once the user picks their own credential.
+While the flag is TRUE the API rejects every non-auth endpoint with
+`403 password_change_required`. `password_changed_at` is stamped when the user
+last self-set their password (NULL means never self-chosen).
 
 ### `user_preferences`
 

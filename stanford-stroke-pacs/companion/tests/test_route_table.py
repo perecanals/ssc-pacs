@@ -23,6 +23,7 @@ EXPECTED_ROUTES = {
     ("POST", "/api/login"),
     ("POST", "/api/logout"),
     ("GET", "/api/me"),
+    ("POST", "/api/auth/change-password"),
     ("GET", "/api/preferences/{level}"),
     ("PUT", "/api/preferences/{level}"),
     ("GET", "/api/patients"),

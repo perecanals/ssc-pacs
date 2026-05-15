@@ -6,6 +6,7 @@ const AuthContext = createContext(null);
 export function AuthProvider({ children }) {
   const [currentUser, setCurrentUser] = useState(null);
   const [isAdmin, setIsAdmin] = useState(false);
+  const [mustChangePassword, setMustChangePassword] = useState(false);
   const [loading, setLoading] = useState(true);
   // Tracks whether this tab ever had an authenticated user, so ProtectedRoute
   // can show the "expired" banner only on involuntary session loss. Cleared
@@ -17,9 +18,11 @@ export function AuthProvider({ children }) {
       const data = await apiGet("/api/me");
       setCurrentUser(data.username || null);
       setIsAdmin(Boolean(data.is_admin));
+      setMustChangePassword(Boolean(data.must_change_password));
     } catch {
       setCurrentUser(null);
       setIsAdmin(false);
+      setMustChangePassword(false);
     } finally {
       setLoading(false);
     }
@@ -37,6 +40,7 @@ export function AuthProvider({ children }) {
     const onExpired = () => {
       setCurrentUser(null);
       setIsAdmin(false);
+      setMustChangePassword(false);
     };
     window.addEventListener("auth:expired", onExpired);
     return () => window.removeEventListener("auth:expired", onExpired);
@@ -59,11 +63,23 @@ export function AuthProvider({ children }) {
       wasAuthedRef.current = false;
       setCurrentUser(null);
       setIsAdmin(false);
+      setMustChangePassword(false);
     }
   };
 
   return (
-    <AuthContext.Provider value={{ currentUser, isAdmin, loading, login, logout, wasAuthedRef }}>
+    <AuthContext.Provider
+      value={{
+        currentUser,
+        isAdmin,
+        mustChangePassword,
+        loading,
+        login,
+        logout,
+        checkAuth,
+        wasAuthedRef,
+      }}
+    >
       {children}
     </AuthContext.Provider>
   );

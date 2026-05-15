@@ -67,18 +67,25 @@ so they can reach Orthanc directly on `:8042` as themselves.
 # List all users
 python scripts/admin/manage_users.py list
 
-# Add a regular user (DB only)
+# Add a regular user (DB only) — admin types a temporary password
 python scripts/admin/manage_users.py add alice
 
 # Add an admin user (DB + orthanc_users.json)
 python scripts/admin/manage_users.py add bob --admin
 
-# Change a user's password
+# Reset a user's password (admin-driven; user is forced to change it again)
 python scripts/admin/manage_users.py passwd alice
 
 # Remove a user
 python scripts/admin/manage_users.py remove alice
 ```
+
+`add` and `passwd` both set the user's `must_change_password` flag to TRUE. On
+their next sign-in the Companion UI redirects them to `/change-password` and
+the API blocks every other endpoint with `403 password_change_required` until
+they pick a new password. There is no self-service password reset — a forgotten
+password requires an admin to run `passwd` and share a fresh temporary one
+out-of-band.
 
 Adding, removing, or changing the password of a **non-admin** user only touches
 PostgreSQL — no service restart is needed. For **admin** users the script also

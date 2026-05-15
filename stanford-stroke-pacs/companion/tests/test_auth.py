@@ -112,3 +112,143 @@ def test_logout_actually_clears_session(logged_in_client):
     me = logged_in_client.get("/api/me")
     assert me.status_code == 200
     assert me.json()["username"] is None
+
+
+# ---------------------------------------------------------------------------
+# must_change_password flow
+# ---------------------------------------------------------------------------
+
+def _seed_user_must_change(username: str, password: str) -> None:
+    """Insert a user with must_change_password=TRUE."""
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            pw_hash = bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
+            cur.execute(
+                "INSERT INTO users "
+                "(username, password_hash, is_admin, must_change_password) "
+                "VALUES (%s, %s, false, TRUE) "
+                "ON CONFLICT (username) DO UPDATE "
+                "SET password_hash = EXCLUDED.password_hash, "
+                "    must_change_password = TRUE, "
+                "    password_changed_at = NULL",
+                (username, pw_hash),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def test_login_response_includes_must_change_flag(client):
+    user, pw = "must_change_user", "tempPass123"
+    _seed_user_must_change(user, pw)
+
+    resp = client.post("/api/login", json={"username": user, "password": pw})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["username"] == user
+    assert body["must_change_password"] is True
+
+
+def test_me_includes_must_change_flag_for_existing_user(logged_in_client):
+    """testuser is seeded with must_change_password=FALSE in conftest."""
+    resp = logged_in_client.get("/api/me")
+    assert resp.status_code == 200
+    assert resp.json()["must_change_password"] is False
+
+
+def test_change_password_happy_path(client):
+    user, pw = "change_pw_user", "tempPass123"
+    new_pw = "brandNewPass456"
+    _seed_user_must_change(user, pw)
+
+    login = client.post("/api/login", json={"username": user, "password": pw})
+    assert login.status_code == 200
+    assert login.json()["must_change_password"] is True
+
+    resp = client.post(
+        "/api/auth/change-password",
+        json={"current_password": pw, "new_password": new_pw},
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["ok"] is True
+
+    # /api/me now reports the flag cleared.
+    me = client.get("/api/me")
+    assert me.json()["must_change_password"] is False
+
+    # Password actually changed: old fails, new succeeds.
+    client.post("/api/logout")
+    fail = client.post("/api/login", json={"username": user, "password": pw})
+    assert fail.status_code == 401
+    ok = client.post("/api/login", json={"username": user, "password": new_pw})
+    assert ok.status_code == 200
+    assert ok.json()["must_change_password"] is False
+
+
+def test_change_password_wrong_current(client):
+    user, pw = "change_pw_wrong_current", "tempPass123"
+    _seed_user_must_change(user, pw)
+    client.post("/api/login", json={"username": user, "password": pw})
+
+    resp = client.post(
+        "/api/auth/change-password",
+        json={"current_password": "not-it", "new_password": "anotherPass456"},
+    )
+    assert resp.status_code == 401
+
+
+def test_change_password_too_short(client):
+    user, pw = "change_pw_short", "tempPass123"
+    _seed_user_must_change(user, pw)
+    client.post("/api/login", json={"username": user, "password": pw})
+
+    resp = client.post(
+        "/api/auth/change-password",
+        json={"current_password": pw, "new_password": "short"},
+    )
+    assert resp.status_code == 422
+
+
+def test_change_password_same_as_current(client):
+    user, pw = "change_pw_same", "tempPass123"
+    _seed_user_must_change(user, pw)
+    client.post("/api/login", json={"username": user, "password": pw})
+
+    resp = client.post(
+        "/api/auth/change-password",
+        json={"current_password": pw, "new_password": pw},
+    )
+    assert resp.status_code == 422
+
+
+def test_must_change_gate_blocks_protected_endpoints(client):
+    """While must_change_password=TRUE, non-allowlisted endpoints 403."""
+    user, pw = "gated_user", "tempPass123"
+    _seed_user_must_change(user, pw)
+    client.post("/api/login", json={"username": user, "password": pw})
+
+    # Allowlisted endpoints still work.
+    assert client.get("/api/me").status_code == 200
+
+    # Other API endpoints are blocked.
+    blocked = client.get("/api/labels")
+    assert blocked.status_code == 403
+    assert blocked.json()["detail"] == "password_change_required"
+
+
+def test_must_change_gate_lifts_after_password_change(client):
+    """After change-password, the user can hit protected endpoints again."""
+    user, pw = "gate_lift_user", "tempPass123"
+    new_pw = "brandNewPass456"
+    _seed_user_must_change(user, pw)
+    client.post("/api/login", json={"username": user, "password": pw})
+
+    resp = client.post(
+        "/api/auth/change-password",
+        json={"current_password": pw, "new_password": new_pw},
+    )
+    assert resp.status_code == 200
+
+    after = client.get("/api/labels")
+    assert after.status_code == 200

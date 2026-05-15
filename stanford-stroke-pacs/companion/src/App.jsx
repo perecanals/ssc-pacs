@@ -3,6 +3,7 @@ import { AuthProvider } from "./context/AuthContext";
 import Landing from "./pages/Landing";
 import Companion from "./pages/Companion";
 import Login from "./pages/Login";
+import ChangePassword from "./pages/ChangePassword";
 import ProtectedRoute from "./components/ProtectedRoute";
 
 export default function App() {
@@ -10,6 +11,14 @@ export default function App() {
     <AuthProvider>
       <Routes>
         <Route path="/login" element={<Login />} />
+        <Route
+          path="/change-password"
+          element={
+            <ProtectedRoute>
+              <ChangePassword />
+            </ProtectedRoute>
+          }
+        />
         <Route
           path="/"
           element={

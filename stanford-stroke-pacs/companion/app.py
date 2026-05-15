@@ -164,6 +164,51 @@ async def sliding_jwt(request, call_next):
 
 
 # ---------------------------------------------------------------------------
+# Middleware: block app access while the user must change their password
+# ---------------------------------------------------------------------------
+
+# Paths the user may still hit while flagged must_change_password=TRUE.
+# Anything else is blocked with 403 password_change_required so the UI
+# isn't the only enforcer (defends against direct API access too).
+_MUST_CHANGE_ALLOWLIST = frozenset({
+    "/api/login",
+    "/api/logout",
+    "/api/me",
+    "/api/auth/change-password",
+    "/healthz",
+    "/metrics",
+})
+
+
+@app.middleware("http")
+async def must_change_password_gate(request: Request, call_next):
+    path = request.url.path
+    if path in _MUST_CHANGE_ALLOWLIST or path.startswith("/assets/"):
+        return await call_next(request)
+    token = request.cookies.get("auth_token")
+    if token:
+        payload = decode_jwt(token)
+        username = payload.get("sub") if payload else None
+        if username:
+            conn = get_conn()
+            try:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        "SELECT must_change_password FROM users WHERE username = %s",
+                        (username,),
+                    )
+                    row = cur.fetchone()
+            finally:
+                conn.close()
+            if row and row[0]:
+                return JSONResponse(
+                    status_code=403,
+                    content={"detail": "password_change_required"},
+                )
+    return await call_next(request)
+
+
+# ---------------------------------------------------------------------------
 # Middleware: request-ID + metrics
 # ---------------------------------------------------------------------------
 
