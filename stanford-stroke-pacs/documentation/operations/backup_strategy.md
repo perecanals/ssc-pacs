@@ -91,7 +91,7 @@ When the server is upgraded, install the matching client major.
 - One file per night per DB.
 - `latest.dump` symlink always points at the newest dump.
 - `.sha256` sidecar written immediately after the dump.
-- Retention: dumps older than `RETENTION_DAYS` (default 14) are deleted,
+- Retention: dumps older than `RETENTION_DAYS` (default 60) are deleted,
   but at least one dump is always kept.
 
 ### Files

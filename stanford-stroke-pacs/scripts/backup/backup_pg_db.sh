@@ -7,7 +7,7 @@
 # /home/perecanals/pacs/stanford-stroke-pacs/.env). Required keys:
 #   DB_HOST, DB_PORT, DB_USER, DB_PASSWORD
 # Optional override: BACKUP_ROOT (default: /DATA2/pg_backups).
-# Optional override: RETENTION_DAYS (default: 14).
+# Optional override: RETENTION_DAYS (default: 60).
 #
 # Output layout:
 #   $BACKUP_ROOT/<db>/<utc-timestamp>.dump      # pg_dump custom format
@@ -31,7 +31,7 @@ fi
 
 BACKUP_ENV_FILE="${BACKUP_ENV_FILE:-/home/perecanals/pacs/stanford-stroke-pacs/.env}"
 BACKUP_ROOT="${BACKUP_ROOT:-/DATA2/pg_backups}"
-RETENTION_DAYS="${RETENTION_DAYS:-14}"
+RETENTION_DAYS="${RETENTION_DAYS:-60}"
 
 if [[ ! -r "$BACKUP_ENV_FILE" ]]; then
     echo "env file not readable: $BACKUP_ENV_FILE" >&2
