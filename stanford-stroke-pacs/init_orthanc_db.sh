@@ -7,7 +7,10 @@
 # Usage:  ./init_orthanc_db.sh
 set -euo pipefail
 
-source "/home/perecanals/pacs/stanford-stroke-pacs/.env"
+# Resolve .env relative to this script so the bootstrap is portable across
+# hosts/checkouts (no hardcoded absolute path). Override with ENV_FILE=... .
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${ENV_FILE:-$SCRIPT_DIR/.env}"
 
 echo "Ensuring Orthanc database role and database exist..."
 echo "  Connecting as ${DB_USER} to ${DB_HOST}:${DB_PORT}"
