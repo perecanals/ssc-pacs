@@ -18,6 +18,7 @@ at the repo root.
 | `connectivity/` | SSH tunnel helper | `tunnel.sh` |
 | `data_integrity/` | Two-DB reconciliation, filesystem audit | `reconcile.py`, `dicom_path_sql_fs_audit.py` |
 | `dicom/` | DICOM conversion utilities | `dicom_to_nifti.py` |
+| `migration/` | Port the stack to a new host (e.g. Linux→Mac) | `reconcile_migration.py` |
 | `one_off/` | Migration helpers, one-time test utilities | `backfill_annotation_history.py`, `orthanc_holdout_case.py` |
 | `orthanc/` | Orthanc enrichment, labelling, status check | `enrich_orthanc.py`, `label_studies.py`, `check_status.sh` |
 
@@ -33,6 +34,9 @@ python scripts/admin/manage_users.py add <user> [--admin]
 # Two-DB reconciliation
 python scripts/data_integrity/reconcile.py
 python scripts/data_integrity/reconcile.py --json
+
+# Post-migration reconciliation (run on the target host after a port)
+python scripts/migration/reconcile_migration.py
 
 # Cold storage
 python scripts/cold_storage/archive_all_series.py --dry-run

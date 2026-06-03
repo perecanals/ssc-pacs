@@ -15,6 +15,8 @@ One **Orthanc** container (`ssc-orthanc`), one **Companion** service on the host
 | Image integration protocol (ingesting new data) | [`reference/image_integration_protocol.md`](reference/image_integration_protocol.md) |
 | Testing, linting, CI (developer setup) | [`guides/installation_and_deployment.md` §8](guides/installation_and_deployment.md) |
 | Fresh install | [`guides/installation_and_deployment.md`](guides/installation_and_deployment.md) |
+| Deploy on macOS (Linux→Mac deltas, launchd, boot) | [`guides/deployment_on_mac.md`](guides/deployment_on_mac.md) |
+| Port the stack to a new host (cluster + Orthanc, no reindex) | [`operations/cluster_migration.md`](operations/cluster_migration.md) |
 | Day-2 commands | [`operations/commands.md`](operations/commands.md) |
 | Upgrading dependencies (pinned packages) | [`operations/upgrading_dependencies.md`](operations/upgrading_dependencies.md) |
 | Schema migrations (Alembic, `stanford-stroke` DB) | [`operations/schema_migrations.md`](operations/schema_migrations.md) |
