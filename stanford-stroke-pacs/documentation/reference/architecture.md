@@ -11,17 +11,17 @@ database.
 ## 1. Topology
 
 The repo deploys one Docker service (Orthanc) and one native host service
-(the Companion), and relies on one existing host PostgreSQL server plus an
+(the web app), and relies on one existing host PostgreSQL server plus an
 existing DICOM filesystem.
 
 ```mermaid
 flowchart TD
     Browser[BrowserViaSshTunnel] --> Orthanc8042["ssc-orthanc :8042 (Docker)"]
-    Browser --> Companion8043["Companion :8043 (native FastAPI)"]
+    Browser --> WebApp8043["Web App :8043 (native FastAPI)"]
     Orthanc8042 --> OrthancDb[OrthancIndexDb]
     Orthanc8042 --> DicomTree[DicomTreeReadOnly]
-    Companion8043 --> SscDb[stanford-stroke DB]
-    Companion8043 --> Orthanc8042
+    WebApp8043 --> SscDb[stanford-stroke DB]
+    WebApp8043 --> Orthanc8042
     SscDb --> LvoClinicalData[lvo_clinical_data]
     SscDb --> ImageSeries[image_series]
     SscDb --> ImageStudy[image_study]
@@ -34,7 +34,7 @@ User-facing entry points:
 - `http://localhost:8042/ui/app/` for Orthanc Explorer 2
 - `http://localhost:8042/ohif/` for OHIF
 - `http://localhost:8043/` for the landing page
-- `http://localhost:8043/app/` for the companion app
+- `http://localhost:8043/app/` for the web app app
 
 The repo does not include a reverse proxy. In the current deployment model,
 users normally reach these ports through an SSH tunnel.
@@ -60,11 +60,11 @@ It is not responsible for:
 
 - owning the source DICOM files
 - generating the upstream `image_series` and `image_study` metadata tables
-- storing companion annotations
+- storing web app annotations
 
-### 2.2 Companion
+### 2.2 Web App
 
-The companion is a FastAPI application that runs natively on the host (managed
+The web app is a FastAPI application that runs natively on the host (managed
 by systemd), serving a React frontend and a REST API for multi-level
 annotation workflows that Orthanc Explorer 2 does not support.
 
@@ -79,7 +79,7 @@ It is responsible for:
 - building refreshable snapshot tables for bulk export
 - authenticating users against `users`
 - generating study- and series-aware OHIF links by querying Orthanc
-- embedding OHIF inside the companion UI as a lower preview pane for row-driven
+- embedding OHIF inside the Navigator UI as a lower preview pane for row-driven
   image review
 
 It is not responsible for:
@@ -123,7 +123,7 @@ It contains:
 
 - the existing read-only source tables `lvo_clinical_data`, `image_series`,
   and `image_study`
-- companion-owned tables:
+- web-app-owned tables:
   - `annotations` — multi-level (patient/study/series) with shared partial
     unique indexes per level (one value per entity+label; `created_by`
     tracks who last edited)
@@ -139,7 +139,7 @@ It contains:
 Optional cold-storage support adds columns and tables documented in
 [`data_stores.md`](data_stores.md).
 
-This database is where the companion app gets its patient, study, and series
+This database is where the web app app gets its patient, study, and series
 listings and where it stores user-generated annotations and label definitions.
 
 ### 3.3 Why the split exists
@@ -147,7 +147,7 @@ listings and where it stores user-generated annotations and label definitions.
 The two-database design keeps responsibilities clean:
 
 - Orthanc's operational index stays isolated from research metadata tables
-- the companion can evolve its own schema without touching Orthanc internals
+- the web app can evolve its own schema without touching Orthanc internals
 - the DICOM tree can remain external and read-only
 - the same host PostgreSQL server can support both layers without mixing roles
 
@@ -169,7 +169,7 @@ The DICOM Application Entity Title (AE Title) is configured as `SSC`.
 
 **Optional cold storage mode** (`mode = "cold_cache"` under `[storage]` in repo-root `config.toml`):
 canonical series payloads live as `*.tar.zst` under `/DATA2/pacs_imaging_data_compressed`;
-the Companion warms a whole study into `/DATA2/pacs_hot_cache` and POSTs DICOMs to Orthanc;
+the web app warms a whole study into `/DATA2/pacs_hot_cache` and POSTs DICOMs to Orthanc;
 Orthanc’s Folder Indexer bind-mount should target the hot cache instead of the legacy tree.
 Legacy loose files under `/DATA2/pacs_imaging_data` remain available when `mode = "legacy"`.
 
@@ -179,11 +179,11 @@ Legacy loose files under `/DATA2/pacs_imaging_data` remain available when `mode 
 ### 4.2 Metadata and annotations
 
 1. `lvo_clinical_data`, `image_series`, and `image_study` provide the metadata
-   that drives the companion app.
-2. The companion reads these tables to build patient, study, and series browsers
+   that drives the web app app.
+2. The web app reads these tables to build patient, study, and series browsers
    with filtering, sorting, and pagination. Series listings JOIN `image_study`
    for `study_type`.
-3. Companion writes shared annotations at three levels (patient, study,
+3. Web App writes shared annotations at three levels (patient, study,
    series) and level-aware label definitions back into the same research/app
    database. Annotations are global: any user can edit any annotation, and
    the value is shared across all users (`created_by` tracks the last
@@ -191,12 +191,12 @@ Legacy loose files under `/DATA2/pacs_imaging_data` remain available when `mode 
 4. Annotations inherit downward: parent-level annotations are attached to child
    rows as `inherited_annotations`. Cross-level filtering allows filtering any
    level by annotations at a different level.
-5. When a study or series row is selected in the companion, the backend builds
+5. When a study or series row is selected in the web app, the backend builds
    an OHIF viewer URL and the frontend can load it inside an embedded preview
    pane. Study selections load the study viewer; series selections use a
    series-specific OHIF URL scoped to that study.
 6. Orthanc study labels are stored inside Orthanc and manipulated via Orthanc's
-   UI or REST API, not through the companion tables.
+   UI or REST API, not through the web app tables.
 
 ### 4.3 Optional enrichment layer
 
@@ -218,18 +218,18 @@ architecture.
 ## 5. Authentication model
 
 End-user authentication is single-sourced from the PostgreSQL `users` table.
-The companion is the only login point for end users; it reverse-proxies
+The web app is the only login point for end users; it reverse-proxies
 OHIF and DICOMweb to Orthanc on the user's behalf.
 
-### 5.1 Companion auth (end users)
+### 5.1 Web App auth (end users)
 
-The companion authenticates against `users`:
+The web app authenticates against `users`:
 
 - passwords are bcrypt hashes
 - login returns a JWT cookie
 - authenticated writes use the JWT identity as `created_by`
-- `/ohif/*` and `/dicom-web/*` are reverse-proxied to Orthanc by the companion
-  (see `companion/routes/proxy.py`), attaching the service-account credential
+- `/ohif/*` and `/dicom-web/*` are reverse-proxied to Orthanc by the web app
+  (see `web-app/routes/proxy.py`), attaching the service-account credential
   from `.env`. End users never present credentials to Orthanc directly.
 
 ### 5.2 Orthanc auth (service account + admins only)
@@ -237,7 +237,7 @@ The companion authenticates against `users`:
 `orthanc_users.json` is no longer a runtime user store. It contains:
 
 - the **service account** (matching `ORTHANC_ADMIN_USER` / `ORTHANC_ADMIN_PASSWORD`
-  in `.env`), used by the companion to proxy requests on behalf of any logged-in
+  in `.env`), used by the web app to proxy requests on behalf of any logged-in
   user, and by host-local maintenance scripts
 - each **admin user** (`users.is_admin = TRUE`), so admins can log in to
   `:8042/ui/app/` (Orthanc Explorer 2) and `:8042/ohif/` as themselves with
@@ -269,19 +269,19 @@ The repo provides:
 - `orthanc_users.json` as a deploy-time file holding the service account plus
   admin users (rotated via `scripts/admin/manage_users.py`)
 
-### 6.2 Companion packaging
+### 6.2 Web App packaging
 
-The companion runs natively on the host (no Docker container):
+The web app runs natively on the host (no Docker container):
 
-- FastAPI served by uvicorn, managed by a systemd unit (`ssc-companion.service`)
+- FastAPI served by uvicorn, managed by a systemd unit (`ssc-web-app.service`)
 - Python dependencies installed in the `pacs` conda environment
-- React frontend built with Vite + Tailwind CSS into `companion/dist/`
+- React frontend built with Vite + Tailwind CSS into `web-app/dist/`
 - FastAPI serves the built frontend as static files and provides the REST API
 - Node.js and npm are only needed at build time (to run `npm run build`);
   no Node process runs in production
 
-To rebuild the frontend after changes: `cd companion && npm run build`.
-To restart the service: `sudo systemctl restart ssc-companion`.
+To rebuild the frontend after changes: `cd web-app && npm run build`.
+To restart the service: `sudo systemctl restart ssc-web-app`.
 
 ---
 
@@ -294,8 +294,8 @@ follow the same pattern:
 
 - `docker-compose.yml` (Orthanc only)
 - `orthanc.json`
-- `companion/` (FastAPI backend + React frontend)
-- `ssc-companion.service` (systemd unit)
+- `web-app/` (FastAPI backend + React frontend)
+- `ssc-web-app.service` (systemd unit)
 - `scripts/admin/manage_users.py`
 - `init_orthanc_db.sh`
 
@@ -337,7 +337,7 @@ If a new server already has:
 then the PACS stack can usually be redeployed without using
 `image_integration_protocols/`. The patient-level table
 (`lvo_clinical_data`) is optional — if absent, the patient tab in the
-companion will have no data, but study and series browsing will work normally.
+web app will have no data, but study and series browsing will work normally.
 
 If the new deployment does not already have equivalent metadata tables, that
 metadata-ingestion problem must be solved separately from the PACS deployment.

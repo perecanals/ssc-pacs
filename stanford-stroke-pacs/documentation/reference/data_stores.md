@@ -1,11 +1,11 @@
 # Data stores (PostgreSQL)
 
-**Purpose:** Authoritative reference for logical databases, source tables, companion-owned tables, and optional cold-storage schema. For query/join behavior at a glance, see also [How the Companion queries the DB](#how-the-companion-queries-the-db). Stack context: [`architecture.md`](architecture.md).
+**Purpose:** Authoritative reference for logical databases, source tables, web-app-owned tables, and optional cold-storage schema. For query/join behavior at a glance, see also [How the web app queries the DB](#how-the-web app-queries-the-db). Stack context: [`architecture.md`](architecture.md).
 
 This PACS stack uses **one PostgreSQL server** but **two logical databases** with separate responsibilities:
 
 - **`orthanc_db`**: Orthanc’s internal index database (managed by Orthanc’s PostgreSQL plugin).
-- **`stanford-stroke`**: Research / application database used by the Companion and helper scripts.
+- **`stanford-stroke`**: Research / application database used by the web app and helper scripts.
 
 ---
 
@@ -25,14 +25,14 @@ Connection is configured via `ORTHANC__POSTGRESQL__*` in `docker-compose.yml` (s
 
 ## `stanford-stroke` (research / app DB)
 
-This is where the Companion reads metadata and stores annotations and preferences.
+This is where the web app reads metadata and stores annotations and preferences.
 
 ### Source metadata tables (upstream-owned)
 
-These tables drive browsing in the Companion UI:
+These tables drive browsing in the Navigator UI:
 
 - **`lvo_clinical_data`** (patient-level clinical table)
-  - used fields include: `study_id` (mapped to `patient_id` in the Companion API), `stroke_date`
+  - used fields include: `study_id` (mapped to `patient_id` in the web app API), `stroke_date`
 - **`image_study`** (study-level imaging metadata)
   - typical fields: `patient_id`, `studyinstanceuid`, `studydescription`, `study_type`, `study_path`, `acquisitiondatetime`, `import_id`, `import_label`
 - **`image_series`** (series-level imaging metadata)
@@ -47,10 +47,10 @@ Notes:
 - The legacy Stanford ingestion pipeline (`image_integration_protocols/`) upserts into `image_study` and `image_series`.
 - `number_of_slices` is populated during ingest and can be backfilled for existing rows.
 
-### Companion-owned tables (app-managed)
+### web-app-owned tables (app-managed)
 
 These tables are created and evolved by **Alembic migrations** under
-`companion/alembic/versions/`. `init_db()` runs `alembic upgrade head` on
+`web-app/alembic/versions/`. `init_db()` runs `alembic upgrade head` on
 startup. See [`../operations/schema_migrations.md`](../operations/schema_migrations.md)
 for the workflow when adding a new revision.
 
@@ -101,9 +101,9 @@ Index: `idx_orm_study` on `studyinstanceuid`.
 
 ---
 
-## Companion table DDL (logical reference)
+## Web App table DDL (logical reference)
 
-Migrations in `companion/app.py` are authoritative; this section mirrors the intended shape for documentation readers.
+Migrations in `web-app/app.py` are authoritative; this section mirrors the intended shape for documentation readers.
 
 ### `annotations`
 
@@ -194,7 +194,7 @@ Populated by `annotations_audit_trg` trigger (PL/pgSQL). See [`../operations/ann
 
 ---
 
-## How the Companion queries the DB
+## How the web app queries the DB
 
 - **Patients**: listed from `lvo_clinical_data` (patient tab).
 - **Studies**: listed from `image_study`, and modality is aggregated from `image_series` by `studyinstanceuid`.

@@ -1,4 +1,4 @@
-"""JSON structured logging for the companion service.
+"""JSON structured logging for the web-app service.
 
 Configures the root logger with a `python-json-logger` formatter so every
 log record is a single JSON line with a consistent field set. Two

@@ -19,7 +19,7 @@ and how to recover. Restore steps live in
 | Cold DICOM archives `/DATA2/pacs_imaging_data_compressed/` | local disk | **No on dev**, mirror script implemented for production (Tier 2) | Dev: re-ingest from source is acceptable. Production: requires a destination |
 | Hot cache `/DATA2/pacs_hot_cache/` and `/DATA2/pacs_imaging_data/` | local disk | No | Reconstructible from cold archives on demand |
 | Orthanc container filesystem | docker | No | Stateless; rebuilt from `docker compose up` + image |
-| Companion `dist/` build output | local | No | Reproducible via `npm run build` |
+| Web App `dist/` build output | local | No | Reproducible via `npm run build` |
 | `.env`, `config.toml`, `orthanc.json`, `orthanc_users.json` | repo / host | Out of scope here | Tracked separately (git for non-secrets, secret management for `.env`) |
 
 ---
@@ -105,7 +105,7 @@ When the server is upgraded, install the matching client major.
 | `systemd/pg-backup-freshness.{service,timer}` | hourly freshness check |
 
 The backup script reads connection details from the same `.env` the
-Companion uses (`DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`).
+Web App uses (`DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`).
 Override the env file with `BACKUP_ENV_FILE=...` if needed.
 
 ### Installation on the dev host

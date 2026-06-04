@@ -1,13 +1,13 @@
 """Alembic runtime environment for the `stanford-stroke` database.
 
 Builds the SQLAlchemy URL from the same environment variables the
-companion app uses (DB_HOST/DB_PORT/DB_NAME/DB_USER/DB_PASSWORD), and
+the web app uses (DB_HOST/DB_PORT/DB_NAME/DB_USER/DB_PASSWORD), and
 configures `include_object` so `--autogenerate` ignores tables owned by
 upstream (raw clinical/imaging tables) or by `labelled_table_sync.py`
 (labelled / snapshot tables built dynamically from label_definitions).
 
 This file is invoked by the `alembic` CLI and by the in-process call
-from `companion/app.py:init_db`.
+from `web-app/app.py:init_db`.
 """
 
 from __future__ import annotations
@@ -24,11 +24,11 @@ from alembic import context
 
 # --- Path bootstrap ----------------------------------------------------------
 # env.py runs with CWD set wherever the caller invokes alembic from. Make sure
-# we can import the repo's `config.py` (one level above `companion/`) and pick
+# we can import the repo's `config.py` (one level above `web-app/`) and pick
 # up `.env` consistently.
-_COMPANION_DIR = Path(__file__).resolve().parent.parent
-_REPO_ROOT = _COMPANION_DIR.parent
-for p in (_COMPANION_DIR, _REPO_ROOT):
+_WEB_APP_DIR = Path(__file__).resolve().parent.parent
+_REPO_ROOT = _WEB_APP_DIR.parent
+for p in (_WEB_APP_DIR, _REPO_ROOT):
     if str(p) not in sys.path:
         sys.path.insert(0, str(p))
 
@@ -45,7 +45,7 @@ if config.config_file_name is not None:
 
 
 def _build_db_url() -> str:
-    """Build the SQLAlchemy URL from .env, matching companion/app.py."""
+    """Build the SQLAlchemy URL from .env, matching web-app/app.py."""
     user = os.environ.get("DB_USER")
     password = os.environ.get("DB_PASSWORD")
     host = os.environ.get("DB_HOST", "localhost")
@@ -71,7 +71,7 @@ db_url = os.environ.get("DATABASE_URL") or _build_db_url()
 
 
 # --- Autogenerate scope filter ----------------------------------------------
-# Tables owned outside companion's migration scope. Listed by name only —
+# Tables owned outside the web app's migration scope. Listed by name only —
 # they all live in the `public` schema. See workstream 04 §2.
 UPSTREAM_TABLES = frozenset({
     "image_series",
@@ -98,7 +98,7 @@ def include_object(object_, name, type_, reflected, compare_to):
     """Filter callback for --autogenerate.
 
     Skip tables we don't own and any indexes/constraints attached to them,
-    so autogen drafts only touch companion-owned tables.
+    so autogen drafts only touch web-app-owned tables.
     """
     if type_ == "table" and name in EXCLUDED_TABLES:
         return False
@@ -110,7 +110,7 @@ def include_object(object_, name, type_, reflected, compare_to):
     return True
 
 
-# No SQLAlchemy models — companion uses raw psycopg2. Set target_metadata to
+# No SQLAlchemy models — the web app uses raw psycopg2. Set target_metadata to
 # None; --autogenerate would only emit "drop everything" without a model
 # layer, so we'll write revisions by hand.
 target_metadata = None

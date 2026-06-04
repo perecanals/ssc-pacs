@@ -8,8 +8,8 @@ from __future__ import annotations
 import tomllib
 from pathlib import Path
 
-_COMPANION_DIR = Path(__file__).resolve().parent
-_REPO_ROOT = _COMPANION_DIR.parent
+_WEB_APP_DIR = Path(__file__).resolve().parent
+_REPO_ROOT = _WEB_APP_DIR.parent
 _CONFIG_PATH = _REPO_ROOT / "config.toml"
 
 _DEFAULT_STORAGE = {
@@ -23,7 +23,7 @@ _DEFAULT_STORAGE = {
     "warming_disk_min_free_bytes": 100 * 1024 * 1024,
     "warm_workers": 2,
 }
-_DEFAULT_COMPANION = {
+_DEFAULT_WEB_APP = {
     "session_timeout_hours": 2.0,
     "session_absolute_timeout_hours": 24.0,
     "cookie_secure": True,
@@ -33,19 +33,19 @@ _DEFAULT_COMPANION = {
 
 def _load_toml() -> tuple[dict, dict]:
     storage = dict(_DEFAULT_STORAGE)
-    companion = dict(_DEFAULT_COMPANION)
+    web_app = dict(_DEFAULT_WEB_APP)
     if not _CONFIG_PATH.is_file():
-        return storage, companion
+        return storage, web_app
     with _CONFIG_PATH.open("rb") as f:
         raw = tomllib.load(f)
     if isinstance(raw.get("storage"), dict):
         storage.update(raw["storage"])
-    if isinstance(raw.get("companion"), dict):
-        companion.update(raw["companion"])
-    return storage, companion
+    if isinstance(raw.get("web-app"), dict):
+        web_app.update(raw["web-app"])
+    return storage, web_app
 
 
-_storage, _companion = _load_toml()
+_storage, _web_app = _load_toml()
 
 STORAGE_MODE = str(_storage.get("mode", "legacy")).strip().lower()
 LEGACY_DICOM_ROOT = Path(str(_storage.get("legacy_dicom_root", _DEFAULT_STORAGE["legacy_dicom_root"]))).resolve()
@@ -64,20 +64,20 @@ WARMING_DISK_MIN_FREE_BYTES = int(
 WARM_WORKERS = int(_storage.get("warm_workers", _DEFAULT_STORAGE["warm_workers"]))
 
 SESSION_TIMEOUT_HOURS = float(
-    _companion.get("session_timeout_hours", _DEFAULT_COMPANION["session_timeout_hours"])
+    _web_app.get("session_timeout_hours", _DEFAULT_WEB_APP["session_timeout_hours"])
 )
 SESSION_ABSOLUTE_TIMEOUT_HOURS = float(
-    _companion.get(
+    _web_app.get(
         "session_absolute_timeout_hours",
-        _DEFAULT_COMPANION["session_absolute_timeout_hours"],
+        _DEFAULT_WEB_APP["session_absolute_timeout_hours"],
     )
 )
 COOKIE_SECURE = bool(
-    _companion.get("cookie_secure", _DEFAULT_COMPANION["cookie_secure"])
+    _web_app.get("cookie_secure", _DEFAULT_WEB_APP["cookie_secure"])
 )
 LOGIN_RATE_LIMIT_PER_5MIN = int(
-    _companion.get(
+    _web_app.get(
         "login_rate_limit_per_5min",
-        _DEFAULT_COMPANION["login_rate_limit_per_5min"],
+        _DEFAULT_WEB_APP["login_rate_limit_per_5min"],
     )
 )

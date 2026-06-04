@@ -1,17 +1,17 @@
-# Companion frontend implementation detail
+# Web App frontend implementation detail
 
-**Purpose:** Deep reference for React routes, `DataTable` behavior, and component responsibilities. For product-level Companion documentation see [`companion.md`](companion.md).
+**Purpose:** Deep reference for React routes, `DataTable` behavior, and component responsibilities. For product-level Web App documentation see [`web_app.md`](web_app.md).
 
 ---
 
 ## Backend summary (for context)
 
-The companion backend (`companion/app.py` + `companion/routes/`) is a FastAPI service that:
+The web app backend (`web-app/app.py` + `web-app/routes/`) is a FastAPI service that:
 
 - creates its app-owned tables on startup (via Alembic migrations)
 - runs schema migrations (`MIGRATE_SQL`) to evolve the schema
 - serves the landing page at `/`
-- serves the companion UI via SPA catch-all for all non-API routes
+- serves the Navigator UI via SPA catch-all for all non-API routes
 - exposes read APIs for browsing patients, studies, series, annotations,
   labels, and label definitions
 - exposes write APIs for annotations and label definitions
@@ -37,9 +37,9 @@ The companion backend (`companion/app.py` + `companion/routes/`) is a FastAPI se
   laptop-sleep) — it drops the server cookie and dispatches `auth:expired`,
   so the SPA redirects to `/login?expired=1` proactively instead of waiting
   for the next request to 401.
-- Companion also reverse-proxies `/ohif/*` and `/dicom-web/*` to Orthanc (see
-  `companion/routes/proxy.py`). Both require a valid JWT. End users never present
-  credentials to Orthanc — Companion attaches the service-account credential
+- Web App also reverse-proxies `/ohif/*` and `/dicom-web/*` to Orthanc (see
+  `web-app/routes/proxy.py`). Both require a valid JWT. End users never present
+  credentials to Orthanc — Web App attaches the service-account credential
   from `.env` on every upstream call.
 
 Authorization model:
@@ -54,7 +54,7 @@ Authorization model:
   input
 
 `users.is_admin` is consulted by the `require_admin` dependency
-(`companion/auth.py`) used by `/api/admin/*` endpoints and the DICOM zip
+(`web-app/auth.py`) used by `/api/admin/*` endpoints and the DICOM zip
 download. It also gates the "Orthanc Explorer" Landing card and the
 DataTable DICOM download button on the frontend — non-admins do not see them.
 `/api/me` returns `{"username": ..., "is_admin": bool}` so the React
@@ -64,21 +64,21 @@ DataTable DICOM download button on the frontend — non-admins do not see them.
 
 ## Routes and layout
 
-The companion frontend is a React single-page application built with Vite and
-Tailwind CSS. Source code lives in `companion/src/`; the production build is in
-`companion/dist/`. Component styles are in co-located `.css` files.
+The web app frontend is a React single-page application built with Vite and
+Tailwind CSS. Source code lives in `web-app/src/`; the production build is in
+`web-app/dist/`. Component styles are in co-located `.css` files.
 
 The app has two routes:
 
-- `/` — Landing page with card links to Companion, Orthanc Explorer 2, and OHIF
-- `/app` — Companion annotation browser
+- `/` — Landing page with card links to Web App, Orthanc Explorer 2, and OHIF
+- `/app` — Web App annotation browser
 
-The companion page (`Companion.jsx`) provides three hierarchical levels:
+The Navigator page (`Navigator.jsx`) provides three hierarchical levels:
 **Patients**, **Studies**, and **Series**. The level switcher lives in the
 top bar. Switching levels resets all filters, clears the active preview
 selection, and remounts the data table via a React `key` prop.
 
-The companion page is decomposed into focused React components:
+The Navigator page is decomposed into focused React components:
 
 - `TopBar` — home link, level switcher, column selector portal target,
   Reset Filters and Reset View buttons, label-definition trigger area,
@@ -169,7 +169,7 @@ The companion page is decomposed into focused React components:
     the sidebar quick filters (label, modality, study-import label) —
     without touching column visibility/order/sort. It lives in the same
     toolbar portal as "Reset View"; clearing the cross-component sidebar
-    filters is delegated to `Companion` via an `onResetSidebarFilters`
+    filters is delegated to `Web App` via an `onResetSidebarFilters`
     callback passed into `DataTable`.
   - **Default column order**: With no saved `columnOrder` (a clean view, or
     after "Reset View"), built-in data columns come first, followed by label
@@ -203,7 +203,7 @@ The companion page is decomposed into focused React components:
   they render in the `DataTable` footer as dark-navy tabs (default `#1a2256`,
   hover `#090C29`) centered in a flex slot between the Refresh buttons and the
   row count, visually stemming from the pane's top edge. A mirror flex slot
-  keeps the count centered. State is threaded from `Companion.jsx` into
+  keeps the count centered. State is threaded from `Navigator.jsx` into
   `DataTable` via the `previewOpen` / `previewUrl` / `onPreviewClose` props.
   The sidebar toggle (`.sidebar__toggle`) shares the same navy palette/shape.
 - `AuthContext` — React context providing `currentUser`, `login()`, `logout()`,
@@ -244,7 +244,7 @@ Orthanc Explorer and OHIF links on the landing page are dynamically built from
 
 ## Snapshot tables (backend-driven)
 
-The companion can rebuild three snapshot tables on demand via
+The web app can rebuild three snapshot tables on demand via
 `POST /api/snapshots/refresh`. Each snapshot is a `CREATE TABLE ... AS SELECT`
 that joins the source table with pivoted annotation columns for that level's
 label definitions:
@@ -256,4 +256,4 @@ label definitions:
 These tables are dropped and recreated on each refresh and are intended for
 bulk export or periodic reporting.
 
-**Table DDL, indexes, and cold-storage columns** are documented in [`data_stores.md`](data_stores.md); migrations are managed via Alembic (`companion/alembic/`).
+**Table DDL, indexes, and cold-storage columns** are documented in [`data_stores.md`](data_stores.md); migrations are managed via Alembic (`web-app/alembic/`).

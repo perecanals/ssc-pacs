@@ -1,15 +1,15 @@
-# Stanford Stroke Center Companion App
+# Stanford Stroke Center Web App App
 
-**Purpose:** Product-level reference for the Companion — why it exists, features, and UI model. For stack-wide architecture see [`architecture.md`](architecture.md). For SQL schemas and tables see [`data_stores.md`](data_stores.md). For deep React/component behavior see [`companion_frontend.md`](companion_frontend.md).
+**Purpose:** Product-level reference for the web app — why it exists, features, and UI model. For stack-wide architecture see [`architecture.md`](architecture.md). For SQL schemas and tables see [`data_stores.md`](data_stores.md). For deep React/component behavior see [`web_app_frontend.md`](web_app_frontend.md).
 
 This document describes the purpose, design rationale, and main features of the
-Companion application in the Stanford Stroke Center PACS stack.
+Web App application in the Stanford Stroke Center PACS stack.
 
 ---
 
 ## 1. Purpose
 
-The Companion is the research-facing web application that sits alongside
+The Web App is the research-facing web application that sits alongside
 Orthanc.
 
 Its job is not to replace Orthanc as a PACS server or DICOM indexer. Instead,
@@ -23,18 +23,18 @@ it provides a workflow-oriented interface for:
 In short:
 
 - Orthanc is the PACS/viewer infrastructure
-- the Companion is the annotation and navigation layer for research work
+- the web app is the annotation and navigation layer for research work
 
 ---
 
 ## 2. Construction Rationale
 
-### 2.1 Why the Companion exists
+### 2.1 Why the web app exists
 
 Orthanc Explorer 2 is useful for PACS operations and study-level review, but it
 does not provide the richer workflow needed for the SSC annotation use case.
 
-The Companion was built to support:
+The Web App was built to support:
 
 - multi-level annotations instead of study-only labeling
 - research-oriented filtering across patients, studies, and series
@@ -58,7 +58,7 @@ This split was chosen because:
 
 ### 2.3 Why a generic hierarchical table
 
-Instead of separate screens or separate table implementations, the Companion
+Instead of separate screens or separate table implementations, the web app
 uses one configurable `DataTable` component for patients, studies, and series.
 
 This keeps behavior consistent across levels:
@@ -78,7 +78,7 @@ Originally, OHIF integration was mainly "open in new tab."
 The embedded preview pane was added so users can:
 
 - click a study or series row
-- review images without leaving the Companion
+- review images without leaving the web app
 - continue annotating with the relevant row context still visible
 
 This improves the workflow significantly for rapid review and labeling.
@@ -87,20 +87,20 @@ This improves the workflow significantly for rapid review and labeling.
 
 ## 3. High-Level Architecture
 
-The Companion is one native host service running on port `8043`.
+The Web App is one native host service running on port `8043`.
 
 It has two main parts:
 
-- **Backend**: `companion/app.py` (entry point), `companion/routes/` (API routers), `companion/db.py` (connection pool), `companion/auth.py` (JWT), `companion/common.py` (shared SQL helpers)
-- **Frontend**: `companion/src/`
+- **Backend**: `web-app/app.py` (entry point), `web-app/routes/` (API routers), `web-app/db.py` (connection pool), `web-app/auth.py` (JWT), `web-app/common.py` (shared SQL helpers)
+- **Frontend**: `web-app/src/`
 
 At runtime:
 
-1. the browser loads the Companion UI from FastAPI
-2. the frontend requests metadata and annotations from Companion API endpoints
+1. the browser loads the Navigator UI from FastAPI
+2. the frontend requests metadata and annotations from Web App API endpoints
 3. the backend reads source rows from `lvo_clinical_data`, `image_study`, and
    `image_series`
-4. the backend reads/writes Companion-owned tables such as `annotations`,
+4. the backend reads/writes web-app-owned tables such as `annotations`,
    `label_definitions`, and `users`
 5. when the user requests image viewing, the backend resolves an OHIF URL via
    Orthanc and returns it to the frontend
@@ -111,7 +111,7 @@ At runtime:
 
 ## 4. Main UI Structure
 
-The current Companion UI is organized into four main areas.
+The current Navigator UI is organized into four main areas.
 
 ### 4.1 Top bar
 
@@ -159,7 +159,7 @@ Key behaviors:
 - the Actions column is hidden at the patient level (no OHIF action applies)
 
 For component-level detail (routes, `DataTable` internals, etc.), see
-[`companion_frontend.md`](companion_frontend.md).
+[`web_app_frontend.md`](web_app_frontend.md).
 
 ### 4.4 Embedded OHIF preview pane
 
@@ -173,7 +173,7 @@ It:
 - uses study URLs for study selections
 - uses series-specific OHIF URLs for series selections
 
-This pane is intentionally part of the Companion page rather than a modal, so
+This pane is intentionally part of the Navigator page rather than a modal, so
 the table remains visible while images are reviewed.
 
 ---
@@ -182,7 +182,7 @@ the table remains visible while images are reviewed.
 
 ### 5.1 Multi-level annotation
 
-The Companion supports:
+The Web App supports:
 
 - patient-level annotations
 - study-level annotations
@@ -201,7 +201,7 @@ Examples:
 - filter studies by a patient-level label
 - filter series by a study-level label
 
-This is one of the main reasons the Companion is more useful than a
+This is one of the main reasons the web app is more useful than a
 viewer-only UI for research tasks.
 
 ### 5.3 Inherited annotation visibility
@@ -262,7 +262,7 @@ mixing that logic into routine browsing.
 
 ## 6. OHIF Integration Behavior
 
-The Companion does not talk directly to DICOMweb from the browser. Instead, it
+The Web App does not talk directly to DICOMweb from the browser. Instead, it
 asks its backend to construct OHIF URLs after validating the requested study or
 series against local metadata and Orthanc lookup.
 
@@ -285,9 +285,9 @@ OHIF; see [`../cold_storage/design.md`](../cold_storage/design.md).
 
 ---
 
-## 7. What the Companion Is Not
+## 7. What the web app Is Not
 
-The Companion is not:
+The Web App is not:
 
 - a DICOM storage server
 - a replacement for Orthanc indexing
@@ -300,17 +300,17 @@ Its responsibility is workflow, annotation, and review support.
 
 ## 8. Relevant Files
 
-The most important Companion files are:
+The most important Web App files are:
 
-- `companion/app.py` - FastAPI entry point (lifespan, middleware, router registration)
-- `companion/routes/` - API route modules (auth, studies, annotations, labels, cold_storage, admin, preferences, static)
-- `companion/db.py` - DB connection pool and `DB_CONFIG` (single source of truth)
-- `companion/auth.py` - JWT utilities and auth dependencies
-- `companion/common.py` - shared label-filter SQL builders and annotation helpers
-- `companion/orthanc_client.py` - Orthanc REST API wrappers
-- `companion/cache_manager.py` - cold-storage warm/evict logic
-- `companion/src/pages/Companion.jsx` - page-level layout and preview state
-- `companion/src/components/DataTable/` - hierarchical table (split into focused modules):
+- `web-app/app.py` - FastAPI entry point (lifespan, middleware, router registration)
+- `web-app/routes/` - API route modules (auth, studies, annotations, labels, cold_storage, admin, preferences, static)
+- `web-app/db.py` - DB connection pool and `DB_CONFIG` (single source of truth)
+- `web-app/auth.py` - JWT utilities and auth dependencies
+- `web-app/common.py` - shared label-filter SQL builders and annotation helpers
+- `web-app/orthanc_client.py` - Orthanc REST API wrappers
+- `web-app/cache_manager.py` - cold-storage warm/evict logic
+- `web-app/src/pages/Navigator.jsx` - page-level layout and preview state
+- `web-app/src/components/DataTable/` - hierarchical table (split into focused modules):
   - `index.jsx` - orchestrator, main body rendering
   - `ChildRows.jsx` - child + grandchild expandable row rendering
   - `TableHeader.jsx` - column headers, sort carets, filter inputs
@@ -319,14 +319,14 @@ The most important Companion files are:
   - `usePreferencePersistence.js` - debounced server-side pref save
   - `useDragColumns.js` - column drag-and-drop reorder
   - `actions.js` - DICOM download, OHIF link, refresh actions
-- `companion/src/utils/colors.js` - shared color palette (NOTION_COLORS, hashStr, valueColor)
-- `companion/src/utils/table.js` - table constants (LEVEL_CONFIG), formatters, filter helpers
-- `companion/src/components/PreviewPane.jsx` - embedded OHIF pane
-- `companion/src/components/TopBar.jsx` - top navigation and controls host
-- `companion/src/components/Sidebar.jsx` - global filters and labels
-- `companion/src/components/InlineEdit.jsx` - in-table annotation editing
-- `companion/src/components/ColumnSelector.jsx` - column visibility and order control
-- `companion/src/components/LabelDefModal.jsx` - label-definition creation UI
+- `web-app/src/utils/colors.js` - shared color palette (NOTION_COLORS, hashStr, valueColor)
+- `web-app/src/utils/table.js` - table constants (LEVEL_CONFIG), formatters, filter helpers
+- `web-app/src/components/PreviewPane.jsx` - embedded OHIF pane
+- `web-app/src/components/TopBar.jsx` - top navigation and controls host
+- `web-app/src/components/Sidebar.jsx` - global filters and labels
+- `web-app/src/components/InlineEdit.jsx` - in-table annotation editing
+- `web-app/src/components/ColumnSelector.jsx` - column visibility and order control
+- `web-app/src/components/LabelDefModal.jsx` - label-definition creation UI
 
 ---
 
@@ -334,6 +334,6 @@ The most important Companion files are:
 
 If you need a one-sentence mental model:
 
-The Companion is a hierarchical annotation browser for patients, studies, and
+The Web App is a hierarchical annotation browser for patients, studies, and
 series, designed to keep metadata review, labeling, filtering, and OHIF image
 inspection in one page.

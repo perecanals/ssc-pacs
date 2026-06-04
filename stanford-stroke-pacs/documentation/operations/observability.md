@@ -1,6 +1,6 @@
 # Observability — logs, health, and metrics
 
-The companion service emits JSON-structured logs, exposes a dependency
+The web app service emits JSON-structured logs, exposes a dependency
 health probe at `/healthz`, and serves Prometheus metrics at `/metrics`.
 This document is the operator-facing reference for all three.
 
@@ -40,7 +40,7 @@ caller's contextvars into the executor task when
 
 ### Configuration
 
-`companion/logging_config.py` wires up the root logger with
+`web-app/logging_config.py` wires up the root logger with
 `python-json-logger`. Two contextvars are used to thread request-scoped
 context through every record:
 
@@ -58,37 +58,37 @@ temporarily when diagnosing a sticky warm failure:
 
 ```bash
 sudo systemctl set-environment LOG_LEVEL=DEBUG
-sudo systemctl restart ssc-companion
+sudo systemctl restart ssc-web-app
 # ...reproduce, then...
 sudo systemctl unset-environment LOG_LEVEL
-sudo systemctl restart ssc-companion
+sudo systemctl restart ssc-web-app
 ```
 
 ### Reading logs
 
-Running under systemd, the companion writes to the journal. JSON is
+Running under systemd, the web app writes to the journal. JSON is
 harder to grep casually than plain text, so use `jq`:
 
 ```bash
 # Last 50 lines, pretty-printed
-sudo journalctl -u ssc-companion -n 50 -o cat | jq .
+sudo journalctl -u ssc-web-app -n 50 -o cat | jq .
 
 # All lines for one request
 RID=$(curl -sI http://localhost:8043/api/me | grep -i X-Request-ID | cut -d: -f2 | tr -d ' \r')
-sudo journalctl -u ssc-companion --since "5 minutes ago" | grep "\"request_id\": \"$RID\""
+sudo journalctl -u ssc-web-app --since "5 minutes ago" | grep "\"request_id\": \"$RID\""
 
 # All warm/evict activity for one study
-sudo journalctl -u ssc-companion -o cat | jq 'select(.study_uid == "<UID>")'
+sudo journalctl -u ssc-web-app -o cat | jq 'select(.study_uid == "<UID>")'
 
 # Just the request rate for the last hour
-sudo journalctl -u ssc-companion --since "1 hour ago" -o cat \
+sudo journalctl -u ssc-web-app --since "1 hour ago" -o cat \
   | jq -r 'select(.message == "request") | [.http_status, .http_path_template] | @tsv' \
   | sort | uniq -c | sort -rn
 ```
 
 ### Rotation
 
-The systemd journal holds the logs; the companion does not write to a
+The systemd journal holds the logs; the web app does not write to a
 file sink. Retention is controlled globally by `/etc/systemd/journald.conf`.
 Recommended settings for the PACS host:
 
@@ -134,7 +134,7 @@ Unauthenticated liveness probe returning JSON:
 - `503` — at least one critical check failed (`"status": "degraded"`).
 
 **Critical checks:**
-- `db_stanford_stroke` must be `ok` (companion cannot serve its own
+- `db_stanford_stroke` must be `ok` (web app cannot serve its own
   data without it).
 - When `STORAGE_MODE == "cold_path_cache"`, `orthanc_api` must also be
   `ok` (OHIF can't render otherwise).
@@ -199,13 +199,13 @@ is still emitted from the route handler at precheck time.
 ### Prometheus scrape config
 
 The live config is at `~/monitoring/prometheus.yml`. It scrapes
-`host.docker.internal:8043` (the companion, as seen from inside the
+`host.docker.internal:8043` (the web app, as seen from inside the
 Prometheus container) every 30 s. If you move Prometheus to a
 different host, adjust the target:
 
 ```yaml
 scrape_configs:
-  - job_name: ssc-companion
+  - job_name: ssc-web-app
     metrics_path: /metrics
     static_configs:
       - targets: ['host.docker.internal:8043']
@@ -220,16 +220,16 @@ alert config once Prometheus is running.
 
 ```yaml
 groups:
-  - name: ssc-companion
+  - name: ssc-web-app
     rules:
-      - alert: CompanionDown
-        expr: up{job="ssc-companion"} == 0
+      - alert: WebAppDown
+        expr: up{job="ssc-web-app"} == 0
         for: 2m
-      - alert: CompanionHighErrorRate
+      - alert: WebAppHighErrorRate
         expr: sum(rate(http_requests_total{status=~"5.."}[5m]))
               / sum(rate(http_requests_total[5m])) > 0.05
         for: 10m
-      - alert: CompanionLatencyP95
+      - alert: WebAppLatencyP95
         expr: histogram_quantile(
                 0.95,
                 sum by (le) (rate(http_request_duration_seconds_bucket[5m]))
@@ -252,13 +252,13 @@ groups:
 
 ## 4. Grafana dashboard
 
-The **SSC Companion** dashboard is auto-provisioned when Grafana starts
+The **SSC Web App** dashboard is auto-provisioned when Grafana starts
 — no manual import needed. It lives in two places:
 
 | Copy | Purpose |
 |------|---------|
 | `documentation/operations/grafana_dashboard.json` | Portable template with `${DS_PROMETHEUS}` variable (for manual import into a different Grafana) |
-| `~/monitoring/dashboards/ssc-companion.json` | Provisioned copy with the datasource UID hard-coded to `ssc-prometheus` (loaded automatically) |
+| `~/monitoring/dashboards/ssc-web-app.json` | Provisioned copy with the datasource UID hard-coded to `ssc-prometheus` (loaded automatically) |
 
 **Panels:** request rate, p50/p95 latency, warm/evict success rate,
 cold-storage disk free, warming rows over time.
@@ -279,8 +279,8 @@ Prometheus and Grafana run as Docker containers managed by
 |------------|----------------------------|---------------------|
 | Grafana    | `http://localhost:3000`    | `admin` / `admin` (change on first login) |
 | Prometheus | `http://localhost:9090`    | no auth             |
-| Companion `/healthz` | `http://localhost:8043/healthz` | no auth |
-| Companion `/metrics`  | `http://localhost:8043/metrics`  | no auth |
+| Web App `/healthz` | `http://localhost:8043/healthz` | no auth |
+| Web App `/metrics`  | `http://localhost:8043/metrics`  | no auth |
 
 **Via SSH tunnel** (from a laptop):
 
@@ -289,21 +289,21 @@ ssh -L 3000:localhost:3000 -L 9090:localhost:9090 -L 8043:localhost:8043 <host>
 ```
 
 Then open `http://localhost:3000` in your browser, go to
-_Dashboards_ > _SSC Companion_.
+_Dashboards_ > _SSC Web App_.
 
 ### Directory layout
 
 ```
 ~/monitoring/
 ├── docker-compose.yml          # Prometheus + Grafana services
-├── prometheus.yml              # Scrape config (companion on :8043)
+├── prometheus.yml              # Scrape config (web app on :8043)
 ├── provisioning/
 │   ├── datasources/
 │   │   └── prometheus.yml      # Auto-wires Prometheus datasource in Grafana
 │   └── dashboards/
 │       └── default.yml         # Tells Grafana to load from /dashboards/
 └── dashboards/
-    └── ssc-companion.json      # Auto-provisioned dashboard
+    └── ssc-web-app.json      # Auto-provisioned dashboard
 ```
 
 ### Common operations
@@ -322,10 +322,10 @@ docker compose logs -f grafana
 # Restart after editing prometheus.yml (hot-reload)
 curl -X POST http://localhost:9090/-/reload
 
-# Check Prometheus is scraping the companion
+# Check Prometheus is scraping the web app
 curl -s http://localhost:9090/api/v1/targets | python3 -m json.tool
 
-# Check companion target health
+# Check web app target health
 curl -s http://localhost:9090/api/v1/query?query=up | python3 -m json.tool
 ```
 
@@ -340,10 +340,10 @@ start fresh:
 cd ~/monitoring && docker compose down -v && docker compose up -d
 ```
 
-### If the companion restarts
+### If the web app restarts
 
 Prometheus will show a brief gap in the time series (the scrape returns
-an error until the companion is back). Counters reset to zero on
+an error until the web app is back). Counters reset to zero on
 restart; Prometheus' `rate()` handles resets gracefully. No operator
 action needed.
 

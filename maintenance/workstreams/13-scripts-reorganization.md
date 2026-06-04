@@ -27,7 +27,7 @@ dead files, moves the test to the proper test directory, and fixes a latent
 **In scope:**
 - Reorganize `scripts/` into subdirectories by function.
 - Delete deprecated `verify_indexing.py` (superseded by `reconcile.py`).
-- Move `test_snapshot_sql.py` to `companion/tests/`.
+- Move `test_snapshot_sql.py` to `web-app/tests/`.
 - Delete stray `verify_and_repair_archives_results.json`.
 - Fix `label_studies.py` `ENV_PATH` `NameError` bug.
 - Update all documentation, systemd units, and CLAUDE.md references.
@@ -65,7 +65,7 @@ dead files, moves the test to the proper test directory, and fixes a latent
 
 - [x] **T1** — Create subdirectories and move scripts via `git mv`.
 - [x] **T2** — Delete `verify_indexing.py` via `git rm`.
-- [x] **T3** — Move `test_snapshot_sql.py` to `companion/tests/`; fix path references.
+- [x] **T3** — Move `test_snapshot_sql.py` to `web-app/tests/`; fix path references.
 - [x] **T4** — Delete `verify_and_repair_archives_results.json` via `git rm`.
 - [x] **T5** — Fix `label_studies.py` `ENV_PATH` bug.
 - [x] **T6** — Update all `REPO_ROOT` path computations in moved scripts (extra `.parent`).
@@ -78,7 +78,7 @@ dead files, moves the test to the proper test directory, and fixes a latent
 
 - [x] No script references undefined `REPO_ROOT` (all paths resolve correctly).
 - [x] `verify_indexing.py` no longer exists.
-- [x] `test_snapshot_sql.py` lives in `companion/tests/`.
+- [x] `test_snapshot_sql.py` lives in `web-app/tests/`.
 - [x] All systemd unit `ExecStart` paths point to new locations.
 - [x] `grep -r 'scripts/reconcile.py' CLAUDE.md documentation/` returns only new path.
 - [x] `scripts/README.md` exists with directory index.
@@ -123,7 +123,7 @@ git revert <sha>
 - `stanford-stroke-pacs/scripts/*` (reorganized into subdirectories)
 - `stanford-stroke-pacs/scripts/verify_indexing.py` (delete)
 - `stanford-stroke-pacs/scripts/verify_and_repair_archives_results.json` (delete)
-- `stanford-stroke-pacs/scripts/test_snapshot_sql.py` → `companion/tests/test_snapshot_sql.py` (move)
+- `stanford-stroke-pacs/scripts/test_snapshot_sql.py` → `web-app/tests/test_snapshot_sql.py` (move)
 - `stanford-stroke-pacs/scripts/README.md` (new)
 - `stanford-stroke-pacs/systemd/*.service` (path updates)
 - `CLAUDE.md` (path updates)

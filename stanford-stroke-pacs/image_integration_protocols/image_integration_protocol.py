@@ -24,11 +24,11 @@ from utils import (
 )
 
 # Pull canonical paths from repo-root config.toml (same source of truth the
-# Companion uses). Avoids hardcoding /DATA2/pacs_imaging_data here.
+# the web app uses). Avoids hardcoding /DATA2/pacs_imaging_data here.
 _REPO_ROOT = Path(__file__).resolve().parent.parent
-_COMPANION_DIR = _REPO_ROOT / "companion"
-if str(_COMPANION_DIR) not in sys.path:
-    sys.path.insert(0, str(_COMPANION_DIR))
+_WEB_APP_DIR = _REPO_ROOT / "web-app"
+if str(_WEB_APP_DIR) not in sys.path:
+    sys.path.insert(0, str(_WEB_APP_DIR))
 from config import COLD_ARCHIVE_ROOT, LEGACY_DICOM_ROOT, STORAGE_MODE  # noqa: E402
 
 import warnings
@@ -66,7 +66,7 @@ class ImageIntegrationProtocol:
         self.clinical_data = None
 
         # Canonical destination for loose DICOMs. Read from repo-root config.toml
-        # (companion/config.py LEGACY_DICOM_ROOT) so the protocol always agrees
+        # (web-app/config.py LEGACY_DICOM_ROOT) so the protocol always agrees
         # with the running stack about where files live.
         self.base_dir = str(LEGACY_DICOM_ROOT)
 

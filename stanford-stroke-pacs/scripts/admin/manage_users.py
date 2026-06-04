@@ -2,13 +2,13 @@
 """Manage SSC PACS users.
 
 End-user authentication lives in the PostgreSQL ``users`` table (bcrypt).
-Companion is the single login point for end users — its reverse proxy serves
+The web app is the single login point for end users — its reverse proxy serves
 OHIF and DICOMweb to anyone with a valid JWT cookie, attaching the Orthanc
 service-account credential behind the scenes.
 
 ``orthanc_users.json`` is no longer used for routine end users. It holds:
 
- - the Orthanc service account (the credential Companion uses to proxy to
+ - the Orthanc service account (the credential the web app uses to proxy to
    Orthanc; rotated via ``rotate-service-account``)
  - admin users (``is_admin=True``), so admins can also reach Orthanc Explorer 2
    on :8042 directly as themselves
@@ -34,7 +34,7 @@ ORTHANC_USERS_FILE = REPO_ROOT / "orthanc_users.json"
 ENV_FILE = REPO_ROOT / ".env"
 load_dotenv(ENV_FILE)
 
-sys.path.insert(0, str(REPO_ROOT / "companion"))
+sys.path.insert(0, str(REPO_ROOT / "web-app"))
 from db import get_conn  # noqa: E402
 
 USERS_TABLE_SQL = """
@@ -305,7 +305,7 @@ def cmd_rotate_service_account(_args: argparse.Namespace) -> None:
     print(f"Service-account '{username}' rotated.")
     print("Restart both services to pick up the new password:")
     print("  docker restart ssc-orthanc")
-    print("  sudo systemctl restart ssc-companion")
+    print("  sudo systemctl restart ssc-web-app")
 
 
 # -- Entrypoint ----------------------------------------------------------------
@@ -313,7 +313,7 @@ def cmd_rotate_service_account(_args: argparse.Namespace) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(
         description=(
-            "Manage SSC PACS users. Companion users live in the PostgreSQL "
+            "Manage SSC PACS users. Web-app users live in the PostgreSQL "
             "`users` table; admin users (and the Orthanc service account) are "
             "also mirrored into orthanc_users.json so admins can reach Orthanc "
             "directly on :8042."

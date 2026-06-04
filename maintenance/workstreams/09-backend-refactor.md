@@ -11,7 +11,7 @@ a safety net.
 
 ## 1. Context
 
-`companion/app.py` is 1,865 lines and contains 29 route handlers plus filter
+`web-app/app.py` is 1,865 lines and contains 29 route handlers plus filter
 SQL generators, snapshot management, annotation logic, and DB helpers. Any
 feature change today requires scrolling through unrelated code. Four
 near-duplicate filter-SQL functions (`_label_filter_sql`,
@@ -35,9 +35,9 @@ See `AUDIT_FINDINGS.md` §1.1, §1.4, §1.6.
 
 **In scope:**
 - Split `app.py` into `APIRouter` submodules under
-  `companion/routes/`.
+  `web-app/routes/`.
 - Extract shared DB helpers (`DB_CONFIG`, `get_conn()`, Orthanc client)
-  into `companion/db.py` and `companion/orthanc_client.py`.
+  into `web-app/db.py` and `web-app/orthanc_client.py`.
 - Remove duplicate `DB_CONFIG` definitions from `cache_manager.py` and all
   scripts.
 - Collapse the four `_label_*_filter_sql` helpers into a single
@@ -54,7 +54,7 @@ See `AUDIT_FINDINGS.md` §1.1, §1.4, §1.6.
 
 ## 3. Findings
 
-- **F-09.1** — `companion/app.py` is 1,865 lines; 29 routes, no routers.
+- **F-09.1** — `web-app/app.py` is 1,865 lines; 29 routes, no routers.
 - **F-09.2** — `_label_filter_sql` (lines 522–575), `_label_value_filter_sql`
   (576–625), `_label_select_values_filter_sql` (626–680),
   `_label_bool_filter_sql` (681–719) are 95% duplicated.
@@ -71,23 +71,23 @@ See `AUDIT_FINDINGS.md` §1.1, §1.4, §1.6.
 
 ### Phase A — extract shared infrastructure
 
-- [ ] **T1** — Create `companion/db.py` with:
+- [ ] **T1** — Create `web-app/db.py` with:
   - `DB_CONFIG` loaded from `config.py` (single source of truth),
   - `get_pool()` returning a `ThreadedConnectionPool`,
   - `get_conn()` context manager that acquires from the pool,
   - unit tests (requires WS 07) covering pool exhaustion and connection
     recycling.
-- [ ] **T2** — Create `companion/orthanc_client.py` wrapping all existing
+- [ ] **T2** — Create `web-app/orthanc_client.py` wrapping all existing
   Orthanc REST calls (collect from `app.py` grep). Functions take a
   session object so tests can mock it.
 - [ ] **T3** — Replace `DB_CONFIG` + `get_conn()` in `app.py`,
   `cache_manager.py`, and every script under `scripts/` and the top
   level (`label_studies.py`, `enrich_orthanc.py`, `verify_indexing.py`,
-  `manage_users.py`) with imports from `companion/db.py`.
-- [ ] **T4** — Turn `companion/` into a proper importable package:
+  `manage_users.py`) with imports from `web-app/db.py`.
+- [ ] **T4** — Turn `web-app/` into a proper importable package:
   ensure `__init__.py` exists; fix the `sys.path` hack in scripts by
-  adding `companion` to `PYTHONPATH` via a small wrapper or by
-  converting scripts to `python -m companion.scripts.cleanup_loose_dicoms`
+  adding `web app` to `PYTHONPATH` via a small wrapper or by
+  converting scripts to `python -m web app.scripts.cleanup_loose_dicoms`
   style. Document the new invocation in `documentation/operations/commands.md`.
 
 ### Phase B — collapse duplicated SQL helpers
@@ -103,7 +103,7 @@ See `AUDIT_FINDINGS.md` §1.1, §1.4, §1.6.
 
 ### Phase C — split app.py into routers
 
-- [ ] **T8** — Create `companion/routes/__init__.py` and empty module
+- [ ] **T8** — Create `web-app/routes/__init__.py` and empty module
   files for each logical grouping:
   - `auth.py` — `/api/login`, `/api/logout`, `/api/me`, session refresh
   - `annotations.py` — `/api/annotations/*`
@@ -118,7 +118,7 @@ See `AUDIT_FINDINGS.md` §1.1, §1.4, §1.6.
   - `static.py` — SPA fallback / static file serving
 - [ ] **T9** — Move route handlers one router at a time, running tests
   after each move. Each router file should own its Pydantic models and
-  helpers; cross-router helpers go to `companion/common.py`.
+  helpers; cross-router helpers go to `web-app/common.py`.
 - [ ] **T10** — Rewire `app.py` to include each router:
   ```python
   app.include_router(auth.router)
@@ -145,7 +145,7 @@ See `AUDIT_FINDINGS.md` §1.1, §1.4, §1.6.
 
 - [ ] `app.py` ≤ 300 lines.
 - [ ] No file imports `DB_CONFIG` or builds one inline except
-  `companion/db.py`.
+  `web-app/db.py`.
 - [ ] The four `_label_*_filter_sql` helpers are gone; a single
   replacement exists.
 - [ ] Connection pool is initialized at app startup and released at
@@ -159,15 +159,15 @@ See `AUDIT_FINDINGS.md` §1.1, §1.4, §1.6.
 
 ```bash
 # Line counts
-wc -l stanford-stroke-pacs/companion/app.py
-wc -l stanford-stroke-pacs/companion/routes/*.py
+wc -l stanford-stroke-pacs/web-app/app.py
+wc -l stanford-stroke-pacs/web-app/routes/*.py
 
 # No stray DB_CONFIG
 grep -rn 'DB_CONFIG = ' --include='*.py' stanford-stroke-pacs/ \
-  | grep -v 'companion/db.py'   # should be empty
+  | grep -v 'web-app/db.py'   # should be empty
 
 # Tests
-cd stanford-stroke-pacs/companion && pytest -x --cov
+cd stanford-stroke-pacs/web-app && pytest -x --cov
 
 # Route-table snapshot
 pytest -k test_route_table
@@ -190,21 +190,21 @@ rollback is pure code.
 
 ## 8. Files touched
 
-- `stanford-stroke-pacs/companion/app.py` (heavy edit — shrink to
+- `stanford-stroke-pacs/web-app/app.py` (heavy edit — shrink to
   ≤300 lines)
-- `stanford-stroke-pacs/companion/db.py` (new)
-- `stanford-stroke-pacs/companion/orthanc_client.py` (new)
-- `stanford-stroke-pacs/companion/common.py` (new — optional)
-- `stanford-stroke-pacs/companion/routes/__init__.py` (new)
-- `stanford-stroke-pacs/companion/routes/auth.py` (new)
-- `stanford-stroke-pacs/companion/routes/annotations.py` (new)
-- `stanford-stroke-pacs/companion/routes/labels.py` (new)
-- `stanford-stroke-pacs/companion/routes/studies.py` (new)
-- `stanford-stroke-pacs/companion/routes/preferences.py` (new)
-- `stanford-stroke-pacs/companion/routes/cold_storage.py` (new)
-- `stanford-stroke-pacs/companion/routes/admin.py` (new)
-- `stanford-stroke-pacs/companion/routes/static.py` (new)
-- `stanford-stroke-pacs/companion/cache_manager.py` (edit — use
+- `stanford-stroke-pacs/web-app/db.py` (new)
+- `stanford-stroke-pacs/web-app/orthanc_client.py` (new)
+- `stanford-stroke-pacs/web-app/common.py` (new — optional)
+- `stanford-stroke-pacs/web-app/routes/__init__.py` (new)
+- `stanford-stroke-pacs/web-app/routes/auth.py` (new)
+- `stanford-stroke-pacs/web-app/routes/annotations.py` (new)
+- `stanford-stroke-pacs/web-app/routes/labels.py` (new)
+- `stanford-stroke-pacs/web-app/routes/studies.py` (new)
+- `stanford-stroke-pacs/web-app/routes/preferences.py` (new)
+- `stanford-stroke-pacs/web-app/routes/cold_storage.py` (new)
+- `stanford-stroke-pacs/web-app/routes/admin.py` (new)
+- `stanford-stroke-pacs/web-app/routes/static.py` (new)
+- `stanford-stroke-pacs/web-app/cache_manager.py` (edit — use
   `db.get_conn`)
 - `stanford-stroke-pacs/scripts/*.py` (edit — use `db.get_conn`, fix
   sys.path)
@@ -212,8 +212,8 @@ rollback is pure code.
   `manage_users.py` (edit)
 - `stanford-stroke-pacs/documentation/operations/commands.md` (edit — new
   invocation patterns)
-- `stanford-stroke-pacs/companion/tests/test_route_table.py` (new)
-- `stanford-stroke-pacs/companion/tests/test_label_filter_sql.py` (new)
+- `stanford-stroke-pacs/web-app/tests/test_route_table.py` (new)
+- `stanford-stroke-pacs/web-app/tests/test_label_filter_sql.py` (new)
 
 ---
 

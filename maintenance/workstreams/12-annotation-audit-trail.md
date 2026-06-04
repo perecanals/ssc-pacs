@@ -11,7 +11,7 @@ should ship as a migration.
 
 ## 1. Context
 
-Annotations are **hard-deleted** today (`companion/app.py:1521`) and
+Annotations are **hard-deleted** today (`web-app/app.py:1521`) and
 updates overwrite previous values with no record of what changed, when,
 or by whom. For a research tool where annotations drive downstream
 analysis, this is a reproducibility and integrity risk:
@@ -52,10 +52,10 @@ See `AUDIT_FINDINGS.md` §4.6.
 
 ## 3. Findings
 
-- **F-12.1** — `DELETE FROM annotations` at `companion/app.py:1521`
+- **F-12.1** — `DELETE FROM annotations` at `web-app/app.py:1521`
   removes history.
 - **F-12.2** — UPDATE paths (the UPSERT helper at
-  `companion/app.py:1427–1461`) overwrite without recording the prior
+  `web-app/app.py:1427–1461`) overwrite without recording the prior
   value.
 - **F-12.3** — No `created_at` / `updated_at` diff history; only the
   latest value is stored.
@@ -97,7 +97,7 @@ See `AUDIT_FINDINGS.md` §4.6.
   - Set `operation_by` via a session variable the app will set:
     `SET LOCAL app.current_user = '<username>';` at the start of each
     request's transaction. Fall back to `'system'` if unset.
-- [ ] **T4** — In the Companion request middleware, set `app.current_user`
+- [ ] **T4** — In the web app request middleware, set `app.current_user`
   on the transaction for authenticated requests. This is the lightest
   coupling possible between app and trigger. If WS 09 has not landed,
   add the hook in the current `app.py` dependency that wraps each
@@ -180,19 +180,19 @@ The Alembic downgrade path should do the first two automatically.
 
 ## 8. Files touched
 
-- `stanford-stroke-pacs/companion/alembic/versions/000N_annotations_history.py`
+- `stanford-stroke-pacs/web-app/alembic/versions/000N_annotations_history.py`
   (new)
-- `stanford-stroke-pacs/companion/app.py` (edit — middleware hook, new
-  endpoint) OR `companion/routes/annotations.py` if WS 09 landed
+- `stanford-stroke-pacs/web-app/app.py` (edit — middleware hook, new
+  endpoint) OR `web-app/routes/annotations.py` if WS 09 landed
 - `stanford-stroke-pacs/scripts/one_off/backfill_annotation_history.py` (new)
-- `stanford-stroke-pacs/companion/tests/test_annotation_history.py`
+- `stanford-stroke-pacs/web-app/tests/test_annotation_history.py`
   (new)
 - `stanford-stroke-pacs/documentation/operations/annotation_history.md`
   (new)
 - `stanford-stroke-pacs/documentation/reference/data_stores.md` (edit —
   add table description)
 - `stanford-stroke-pacs/documentation/context.md` (edit — add link)
-- `stanford-stroke-pacs/companion/src/components/InlineEdit.jsx` (optional
+- `stanford-stroke-pacs/web-app/src/components/InlineEdit.jsx` (optional
   edit if T10 is done)
 
 ---

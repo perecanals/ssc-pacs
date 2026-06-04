@@ -14,7 +14,7 @@ The PACS has two PostgreSQL databases that must stay in sync but have no
 enforced referential integrity:
 
 - **`orthanc_db`** — owned by Orthanc; indexes DICOM files on disk.
-- **`stanford-stroke`** — owned by the Companion; `image_series` tracks
+- **`stanford-stroke`** — owned by the web app; `image_series` tracks
   research metadata including `dicom_dir_path` and `dicom_archive_path`.
 
 If a series exists in `image_series` but not in Orthanc's index (or vice
@@ -77,7 +77,7 @@ See `AUDIT_FINDINGS.md` §4.2.
     `dicom_archive_path`.
   - Any others. Read them; list in this workstream file for reference.
 - [ ] **T2** — Design a unified reconciliation module at
-  `stanford-stroke-pacs/companion/reconciliation.py` (new) with
+  `stanford-stroke-pacs/web-app/reconciliation.py` (new) with
   functions:
   - `diff_image_series_vs_orthanc()` → list of mismatches by category
     (`in_db_not_in_orthanc`, `in_orthanc_not_in_db`,
@@ -90,7 +90,7 @@ See `AUDIT_FINDINGS.md` §4.2.
   (Reports are intentionally under `maintenance/` so they're
   co-located with ops state, not application state.)
 - [ ] **T4** — Add `GET /api/admin/reconciliation/latest` endpoint in
-  `companion/routes/admin.py` (if WS 09 landed) or `app.py` (if not).
+  `web-app/routes/admin.py` (if WS 09 landed) or `app.py` (if not).
   Returns the most recent JSON report. Admin-only — verified against
   the `users.is_admin` flag.
 - [ ] **T5** — Add Prometheus gauges (depends on WS 06):
@@ -175,8 +175,8 @@ The reports directory can stay (inert).
 
 ## 8. Files touched
 
-- `stanford-stroke-pacs/companion/reconciliation.py` (new)
-- `stanford-stroke-pacs/companion/routes/admin.py` (edit if WS 09
+- `stanford-stroke-pacs/web-app/reconciliation.py` (new)
+- `stanford-stroke-pacs/web-app/routes/admin.py` (edit if WS 09
   landed; otherwise new)
 - `stanford-stroke-pacs/scripts/data_integrity/reconcile.py` (new)
 - `stanford-stroke-pacs/systemd/reconciliation.service` (new)

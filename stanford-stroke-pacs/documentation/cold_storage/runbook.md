@@ -133,7 +133,7 @@ Indexer plugin: RemoveMissingFiles=false — files missing from disk
   will be KEPT in Orthanc's index (cold-storage mode)
 ```
 
-### 3. Switch the Companion to cold_path_cache
+### 3. Switch the web app to cold_path_cache
 
 Edit `config.toml`:
 ```toml
@@ -144,9 +144,9 @@ cold_archive_root = "/DATA2/pacs_imaging_data_compressed"
 eviction_ttl_hours = 24
 ```
 
-Restart the Companion:
+Restart the web app:
 ```bash
-sudo systemctl restart ssc-companion
+sudo systemctl restart ssc-web-app
 ```
 
 ### 4. Validate warm/evict in the UI
@@ -389,7 +389,7 @@ If you need to roll back:
 1. Restore all loose files to `/DATA2/pacs_imaging_data` (from backup or by
    batch-extracting archives).
 2. Edit `config.toml` → `mode = "legacy"`
-3. Restart the Companion.
+3. Restart the web app.
 4. You can keep the patched Orthanc image — it's a strict superset of the
    stock one, behaving identically when `RemoveMissingFiles` is unset (the
    flag defaults to `true`).
@@ -400,10 +400,10 @@ If you need to roll back:
 
 | File | Purpose |
 |------|---------|
-| `companion/cache_manager.py` | `warm_study`, `evict_study`, `get_cache_status`, `run_eviction`, `estimate_warm_disk_space` (route precheck) |
-| `companion/routes/cold_storage.py` | `POST /warm` (202 + executor submit), `/evict`, `/cache-status`, `/storage-mode` |
-| `companion/app.py` | Lifespan owns `app.state.warm_executor` (`ThreadPoolExecutor(max_workers=WARM_WORKERS)`); defensive ohif-link FS probe |
-| `companion/src/api/warmOhif.js` | Frontend warm flow (mode-agnostic cold/warming handling) |
+| `web-app/cache_manager.py` | `warm_study`, `evict_study`, `get_cache_status`, `run_eviction`, `estimate_warm_disk_space` (route precheck) |
+| `web-app/routes/cold_storage.py` | `POST /warm` (202 + executor submit), `/evict`, `/cache-status`, `/storage-mode` |
+| `web-app/app.py` | Lifespan owns `app.state.warm_executor` (`ThreadPoolExecutor(max_workers=WARM_WORKERS)`); defensive ohif-link FS probe |
+| `web-app/src/api/warmOhif.js` | Frontend warm flow (mode-agnostic cold/warming handling) |
 | `scripts/cold_storage/archive_all_series.py` | Offline archiver — populates `dicom_archive_path` for the existing tree |
 | `scripts/cold_storage/cleanup_loose_dicoms.py` | Safely delete loose DICOMs whose archive exists and Orthanc has indexed (dry-run by default; cron-friendly) |
 | `scripts/cold_storage/list_unarchived_series.py` | List series with loose files but no archive — triage compression failures |
@@ -415,7 +415,7 @@ If you need to roll back:
 | `config.toml` | `[storage].mode` and paths |
 | `orthanc-indexer-patched/` | Source for the custom Folder Indexer plugin |
 
-### Database changes (auto-applied on Companion restart)
+### Database changes (auto-applied on Web App restart)
 
 - `image_series.dicom_archive_path TEXT` — populated by archiver / integration protocol
 - `cache_state` table — per-study cold/warming/hot/error status

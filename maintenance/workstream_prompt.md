@@ -48,7 +48,7 @@ Execute the workstream at /home/perecanals/ssc-pacs/maintenance/12-annotation-au
 
   WS 03 — Security hardening (P0, no deps)
   Execute /home/perecanals/ssc-pacs/maintenance/workstreams/03-security-hardening.md.
-  Priority: fix the SQL-injection path at companion/app.py:1699-1722 first
+  Priority: fix the SQL-injection path at web-app/app.py:1699-1722 first
   (use psycopg2.sql.Identifier). Then secret validation, cookie Secure flag,
   absolute session timeout, and slowapi rate limiting.
 
@@ -80,7 +80,7 @@ Execute the workstream at /home/perecanals/ssc-pacs/maintenance/12-annotation-au
   WS 08 — Deployment portability (P1, no deps)
   Execute /home/perecanals/ssc-pacs/maintenance/workstreams/08-deployment-portability.md.
   Acceptance gate: `grep -rn '/home/perecanals/' --exclude .env --exclude-dir=.git`
-  must return empty. Parameterize ssc-companion.service via a generator
+  must return empty. Parameterize ssc-web-app.service via a generator
   script; move hardcoded IP/user out of scripts/connectivity/tunnel.sh into .env;
   add top-level READMEs.
 

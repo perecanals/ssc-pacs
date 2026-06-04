@@ -8,7 +8,7 @@ server.
 It assumes the target deployment wants the same overall architecture:
 
 - Orthanc + OE2 + OHIF in Docker (**Orthanc only** in `docker-compose.yml`)
-- Companion app as a **native systemd service** on port `8043` (not Docker)
+- Web App app as a **native systemd service** on port `8043` (not Docker)
 - PostgreSQL on the host
 - DICOM files kept on disk and indexed read-only (or hot cache when using cold storage)
 
@@ -17,7 +17,7 @@ It assumes the target deployment wants the same overall architecture:
 ## 1. What must already exist
 
 Before using this repo on another server, decide whether the new environment
-already has the source metadata layer that the companion app expects.
+already has the source metadata layer that the web app app expects.
 
 Minimum required inputs:
 
@@ -25,10 +25,10 @@ Minimum required inputs:
 - Docker Engine with `docker compose`
 - PostgreSQL reachable from the host
 - `python3` and `pip`
-- Node.js and npm (for building the Companion frontend)
+- Node.js and npm (for building the web app frontend)
 - a DICOM directory tree on disk
 - a metadata table equivalent to `image_series` (and `image_study` for study
-  metadata) if you want to use the companion app and the metadata-driven helper
+  metadata) if you want to use the web app app and the metadata-driven helper
   scripts
 
 Important:
@@ -52,7 +52,7 @@ The host should satisfy all of the following:
 - free host ports:
   - `8042` for Orthanc HTTP
   - `4242` for Orthanc DICOM
-  - `8043` for the companion app
+  - `8043` for the web app app
 - writable checkout of this repository
 - filesystem path for the DICOM repository chosen and available
 
@@ -71,24 +71,24 @@ Variables expected by the current codebase:
 |----------|---------|
 | `DB_HOST` | Host for the research/app PostgreSQL database |
 | `DB_PORT` | Port for the research/app PostgreSQL database |
-| `DB_NAME` | Database name used by companion and helper scripts, typically `stanford-stroke` |
+| `DB_NAME` | Database name used by web app and helper scripts, typically `stanford-stroke` |
 | `DB_USER` | Database user for the research/app database |
 | `DB_PASSWORD` | Password for the research/app database |
 | `PG_ORTHANC_DB` | Orthanc index database name |
 | `PG_ORTHANC_USER` | Orthanc index database user |
 | `PG_ORTHANC_PASSWORD` | Orthanc index database password |
-| `ORTHANC_URL` | Base URL used by Companion's reverse proxy and host-local scripts, typically `http://localhost:8042` |
-| `ORTHANC_ADMIN_USER` | Orthanc service account; Companion attaches it on every proxied OHIF/DICOMweb call. Also used by `scripts/data_integrity/reconcile.py` and other host-local scripts. |
+| `ORTHANC_URL` | Base URL used by Web App's reverse proxy and host-local scripts, typically `http://localhost:8042` |
+| `ORTHANC_ADMIN_USER` | Orthanc service account; Web App attaches it on every proxied OHIF/DICOMweb call. Also used by `scripts/data_integrity/reconcile.py` and other host-local scripts. |
 | `ORTHANC_ADMIN_PASSWORD` | Password for the Orthanc service account |
-| `JWT_SECRET` | Secret used to sign companion JWT cookies |
+| `JWT_SECRET` | Secret used to sign web app JWT cookies |
 
-Non-secret companion tuning (storage paths, storage mode, session length) lives in repo-root `config.toml` (loaded by `companion/config.py`).
+Non-secret web app tuning (storage paths, storage mode, session length) lives in repo-root `config.toml` (loaded by `web-app/config.py`).
 
 ---
 
 ## 4. Expected source metadata tables
 
-If you want the full companion workflow, the source database should provide
+If you want the full web app workflow, the source database should provide
 tables compatible with `image_series` and `image_study`.
 
 At minimum, the current scripts rely on these columns:
@@ -109,14 +109,14 @@ At minimum, the current scripts rely on these columns:
 
 How the repo uses these tables:
 
-- companion browsing reads from them
+- web app browsing reads from them
 - `scripts/data_integrity/reconcile.py` compares `image_series` against Orthanc's index
 - `scripts/orthanc/label_studies.py` reads `study_type` from `image_study` and `modality` from
   `image_series`
 - `scripts/orthanc/enrich_orthanc.py` uses them for display enrichment
 
 If the new environment does not have equivalent tables yet, the PACS service
-layer can still be deployed, but the companion and metadata-driven scripts will
+layer can still be deployed, but the web app and metadata-driven scripts will
 not function as documented.
 
 ---
@@ -184,9 +184,9 @@ Important caveat:
 
 ### Step 4. Create the first admin user and the Orthanc service account
 
-End users authenticate to Companion (which proxies OHIF/DICOMweb to Orthanc).
+End users authenticate to Web App (which proxies OHIF/DICOMweb to Orthanc).
 Admins additionally need a direct Orthanc login so they can reach Orthanc
-Explorer 2 on `:8042`. The service account is the credential Companion uses
+Explorer 2 on `:8042`. The service account is the credential Web App uses
 internally when proxying.
 
 ```bash
@@ -207,7 +207,7 @@ What this step accomplishes:
 Why this matters before first start:
 
 - Orthanc auth is enabled and depends on `orthanc_users.json` existing with at
-  least the service-account entry — without it, Companion's proxy and host-local
+  least the service-account entry — without it, Web App's proxy and host-local
   scripts will get 401s from Orthanc.
 
 ### Step 5. Start Orthanc (Docker)
@@ -218,28 +218,28 @@ Run:
 docker compose up -d
 ```
 
-This starts **`ssc-orthanc`** only. `docker-compose.yml` does not define a Companion container.
+This starts **`ssc-orthanc`** only. `docker-compose.yml` does not define a Web App container.
 
-### Step 6. Install Companion Python dependencies
+### Step 6. Install Web App Python dependencies
 
 From the repo root (use your preferred env, e.g. conda `pacs`):
 
 ```bash
-python3 -m pip install -r companion/requirements.txt
+python3 -m pip install -r web-app/requirements.txt
 ```
 
-### Step 7. Build the Companion frontend
+### Step 7. Build the web app frontend
 
 ```bash
-cd companion && npm ci && npm run build
+cd web-app && npm ci && npm run build
 ```
 
-### Step 8. Install and start the Companion (systemd)
+### Step 8. Install and start the web app (systemd)
 
 ```bash
-sudo cp ssc-companion.service /etc/systemd/system/
+sudo cp ssc-web-app.service /etc/systemd/system/
 sudo systemctl daemon-reload
-sudo systemctl enable --now ssc-companion
+sudo systemctl enable --now ssc-web-app
 ```
 
 ### Step 9. Wait for Orthanc indexing
@@ -278,7 +278,7 @@ Skip this when:
 
 - the DICOM headers already contain acceptable values for Orthanc/OE2
 - you do not want to mutate Orthanc's PostgreSQL index tables
-- you only need indexing, OHIF, or the companion workflow
+- you only need indexing, OHIF, or the web app workflow
 
 #### Option B. Pre-seed Orthanc study labels
 
@@ -317,13 +317,13 @@ curl -s -u <user>:<pass> http://localhost:8042/system | python3 -m json.tool
 curl -s -u <user>:<pass> http://localhost:8042/statistics | python3 -m json.tool
 ```
 
-Companion service:
+Web App service:
 
 ```bash
-sudo systemctl status ssc-companion
+sudo systemctl status ssc-web-app
 ```
 
-Companion read APIs:
+Web App read APIs:
 
 ```bash
 curl -s http://localhost:8043/api/labels | python3 -m json.tool
@@ -343,7 +343,7 @@ Current caveats:
 
 - `scripts/orthanc/check_status.sh` reads Orthanc credentials from `.env` (no hardcoded values)
 - `scripts/orthanc/check_status.sh` validates the `ssc-orthanc` container and Orthanc only, not
-  the companion
+  the web app
 - `scripts/data_integrity/reconcile.py` uses `ORTHANC_ADMIN_USER` /
   `ORTHANC_ADMIN_PASSWORD`
 
@@ -361,7 +361,7 @@ Expected outcomes:
 - Orthanc Explorer 2 loads at `/ui/app/`
 - OHIF opens at `/ohif/`
 - the landing page shows links to Orthanc Explorer and OHIF
-- the companion app loads its series browser
+- the web app app loads its series browser
 
 ### 6.4 Index coverage check
 
@@ -386,7 +386,7 @@ the expected metadata inventory.
 The documented tunnel for interactive use should forward:
 
 - `8042` for Orthanc/OE2/OHIF
-- `8043` for the companion app
+- `8043` for the web app app
 - optionally `4242` if DICOM port forwarding is needed
 
 Example:
@@ -467,17 +467,17 @@ python scripts/admin/manage_users.py passwd <username>
 docker restart ssc-orthanc
 ```
 
-If the changed user is the Orthanc service account used by the companion:
+If the changed user is the Orthanc service account used by the web app:
 
 ```bash
-sudo systemctl restart ssc-companion
+sudo systemctl restart ssc-web-app
 ```
 
-Rebuild the companion frontend after code changes:
+Rebuild the web app frontend after code changes:
 
 ```bash
-cd companion && npm run build
-sudo systemctl restart ssc-companion
+cd web-app && npm run build
+sudo systemctl restart ssc-web-app
 ```
 
 ---
@@ -507,9 +507,9 @@ them.
 These are current implementation mismatches worth remembering during deployment:
 
 - `scripts/admin/teardown.sh` is destructive and should not be used casually; it does not
-  stop the companion systemd service
+  stop the web app systemd service
 - `scripts/admin/teardown.sh` sources `.env` from two levels above the repo root (`../../.env`),
-  **not** the repo-root `.env` used by companion and helper scripts
+  **not** the repo-root `.env` used by web app and helper scripts
 - `docker-compose.yml` uses an absolute `env_file` path that must be updated
   for a fresh deployment on a different host
 - `scripts/orthanc/check_status.sh` uses the `ssc-orthanc` container name and reads Orthanc

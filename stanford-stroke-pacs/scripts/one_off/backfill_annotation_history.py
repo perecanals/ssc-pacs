@@ -14,10 +14,10 @@ import argparse
 import sys
 from pathlib import Path
 
-# Bootstrap imports — repo layout: scripts/ is a sibling of companion/
+# Bootstrap imports — repo layout: scripts/ is a sibling of web-app/
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
-_COMPANION_DIR = _REPO_ROOT / "companion"
-sys.path.insert(0, str(_COMPANION_DIR))
+_WEB_APP_DIR = _REPO_ROOT / "web-app"
+sys.path.insert(0, str(_WEB_APP_DIR))
 sys.path.insert(0, str(_REPO_ROOT))
 
 from db import get_conn  # noqa: E402

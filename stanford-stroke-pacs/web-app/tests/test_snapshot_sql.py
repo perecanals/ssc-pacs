@@ -17,9 +17,9 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-COMPANION = Path(__file__).resolve().parents[1]
-ROOT = COMPANION.parent
-sys.path.insert(0, str(COMPANION))
+WEBAPP = Path(__file__).resolve().parents[1]
+ROOT = WEBAPP.parent
+sys.path.insert(0, str(WEBAPP))
 sys.path.insert(0, str(ROOT))
 
 import psycopg2.sql as psql

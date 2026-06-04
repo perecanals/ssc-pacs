@@ -1,4 +1,4 @@
-"""Shared pytest fixtures for the companion backend test suite.
+"""Shared pytest fixtures for the web-app backend test suite.
 
 Creates a scratch PostgreSQL database per test session, runs Alembic
 migrations to set up the schema, seeds a test user, and provides
@@ -26,12 +26,12 @@ import psycopg2
 import pytest
 
 # ---------------------------------------------------------------------------
-# Bootstrap: ensure companion/ and its parent (repo root with config.py)
+# Bootstrap: ensure web-app/ and its parent (repo root with config.py)
 # are importable, and load .env for DB creds.
 # ---------------------------------------------------------------------------
-_COMPANION_DIR = Path(__file__).resolve().parent.parent
-_REPO_ROOT = _COMPANION_DIR.parent
-for p in (_COMPANION_DIR, _REPO_ROOT):
+_WEB_APP_DIR = Path(__file__).resolve().parent.parent
+_REPO_ROOT = _WEB_APP_DIR.parent
+for p in (_WEB_APP_DIR, _REPO_ROOT):
     if str(p) not in sys.path:
         sys.path.insert(0, str(p))
 
@@ -89,7 +89,7 @@ def test_db():
     admin.close()
 
     # Point the Alembic env at the test DB via DATABASE_URL override
-    # (see companion/alembic/env.py — it checks this var first).
+    # (see web-app/alembic/env.py — it checks this var first).
     from urllib.parse import quote_plus
 
     db_url = (
@@ -103,7 +103,7 @@ def test_db():
 
     from alembic import command
 
-    cfg = Config(str(_COMPANION_DIR / "alembic.ini"))
+    cfg = Config(str(_WEB_APP_DIR / "alembic.ini"))
     command.upgrade(cfg, "head")
 
     if old_url is None:

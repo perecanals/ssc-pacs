@@ -41,7 +41,7 @@ from pathlib import Path
 import requests
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
-sys.path.insert(0, str(REPO_ROOT / "companion"))
+sys.path.insert(0, str(REPO_ROOT / "web-app"))
 
 from config import (  # noqa: E402
     COLD_ARCHIVE_ROOT,

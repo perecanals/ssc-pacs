@@ -1,6 +1,6 @@
 # PACS documentation context
 
-One **Orthanc** container (`ssc-orthanc`), one **Companion** service on the host (**systemd**, port `8043`), and **two logical PostgreSQL databases** (`orthanc_db` + `stanford-stroke`).
+One **Orthanc** container (`ssc-orthanc`), one **Web App** service on the host (**systemd**, port `8043`), and **two logical PostgreSQL databases** (`orthanc_db` + `stanford-stroke`).
 
 **Give an agent only what it needs:**
 
@@ -10,8 +10,8 @@ One **Orthanc** container (`ssc-orthanc`), one **Companion** service on the host
 | Architecture / data flow | [`reference/architecture.md`](reference/architecture.md) |
 | Runtime, config files, ports, scripts | [`reference/runtime_and_config.md`](reference/runtime_and_config.md) |
 | Schema / tables / SQL behavior | [`reference/data_stores.md`](reference/data_stores.md) |
-| Companion product + UI model | [`reference/companion.md`](reference/companion.md) |
-| Companion React / `DataTable` detail | [`reference/companion_frontend.md`](reference/companion_frontend.md) |
+| Web App product + UI model | [`reference/web_app.md`](reference/web_app.md) |
+| Web App React / `DataTable` detail | [`reference/web_app_frontend.md`](reference/web_app_frontend.md) |
 | Image integration protocol (ingesting new data) | [`reference/image_integration_protocol.md`](reference/image_integration_protocol.md) |
 | Testing, linting, CI (developer setup) | [`guides/installation_and_deployment.md` §8](guides/installation_and_deployment.md) |
 | Fresh install | [`guides/installation_and_deployment.md`](guides/installation_and_deployment.md) |

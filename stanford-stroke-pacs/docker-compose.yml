@@ -20,7 +20,7 @@ services:
       # Legacy (full loose DICOM tree):
       - /DATA2/pacs_imaging_data:/dicom-data:ro
       # Cold-cache mode: comment the line above and use the hot cache instead
-      # (Companion warms studies into this tree; Orthanc Folder Indexer scans it):
+      # (The web app warms studies into this tree; Orthanc Folder Indexer scans it):
       # - /DATA2/pacs_hot_cache:/dicom-data:ro
       - ./orthanc.json:/etc/orthanc/orthanc.json:ro
       - ./orthanc_users.json:/etc/orthanc/orthanc_users.json:ro

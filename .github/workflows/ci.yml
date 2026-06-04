@@ -24,8 +24,8 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
       - run: pip install ruff
-      - name: Run ruff on companion
-        working-directory: stanford-stroke-pacs/companion
+      - name: Run ruff on web-app
+        working-directory: stanford-stroke-pacs/web-app
         run: ruff check .
 
   backend-tests:
@@ -60,11 +60,11 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
       - name: Install dependencies
-        working-directory: stanford-stroke-pacs/companion
+        working-directory: stanford-stroke-pacs/web-app
         run: |
           pip install -r requirements.txt -r requirements-dev.txt
       - name: Run pytest with coverage
-        working-directory: stanford-stroke-pacs/companion
+        working-directory: stanford-stroke-pacs/web-app
         run: |
           python -m pytest tests/ \
             --cov=. \
@@ -81,10 +81,10 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
       - name: Install dependencies
-        working-directory: stanford-stroke-pacs/companion
+        working-directory: stanford-stroke-pacs/web-app
         run: npm ci
       - name: Run vitest
-        working-directory: stanford-stroke-pacs/companion
+        working-directory: stanford-stroke-pacs/web-app
         run: npx vitest run
 
   frontend-build:
@@ -96,7 +96,7 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
       - name: Install and build
-        working-directory: stanford-stroke-pacs/companion
+        working-directory: stanford-stroke-pacs/web-app
         run: |
           npm ci
           npm run build
@@ -111,11 +111,11 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
       - name: Install dependencies
-        working-directory: stanford-stroke-pacs/companion
+        working-directory: stanford-stroke-pacs/web-app
         run: |
           pip install -r requirements.txt -r requirements-dev.txt
       - name: Run mypy
-        working-directory: stanford-stroke-pacs/companion
+        working-directory: stanford-stroke-pacs/web-app
         run: |
           python -m mypy . \
             --config-file pyproject.toml \

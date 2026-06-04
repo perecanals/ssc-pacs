@@ -8,7 +8,7 @@ Adds an append-only ``annotations_history`` table that captures every
 INSERT, UPDATE, and DELETE on ``annotations`` via a PL/pgSQL trigger.
 
 The trigger reads ``current_setting('app.audit_user', true)`` to
-attribute each change to the authenticated user.  The Companion
+attribute each change to the authenticated user.  The web app
 middleware sets this session variable at the start of each request's
 transaction via ``SET LOCAL``.
 

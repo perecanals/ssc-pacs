@@ -1,4 +1,4 @@
-"""FastAPI companion app — entry point, middleware, and router registration."""
+"""FastAPI web-app — entry point, middleware, and router registration."""
 
 import asyncio
 import logging

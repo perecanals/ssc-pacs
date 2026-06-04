@@ -1,4 +1,4 @@
-> **Historical document.** Early bootstrap plan; the deployed system differs (e.g. `orthancteam/orthanc`, Folder Indexer, native Companion). For current truth see [`../reference/architecture.md`](../reference/architecture.md) and [`../guides/installation_and_deployment.md`](../guides/installation_and_deployment.md).
+> **Historical document.** Early bootstrap plan; the deployed system differs (e.g. `orthancteam/orthanc`, Folder Indexer, native Web App). For current truth see [`../reference/architecture.md`](../reference/architecture.md) and [`../guides/installation_and_deployment.md`](../guides/installation_and_deployment.md).
 
 # Implementation Plan: Lightweight PACS Setup (Orthanc + OHIF + PostgreSQL)
 

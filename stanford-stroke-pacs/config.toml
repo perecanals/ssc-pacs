@@ -23,7 +23,7 @@ warming_disk_min_free_bytes = 104857600  # 100 MiB
 # under burst load — extra POSTs queue rather than thrashing the filesystem.
 warm_workers = 2
 
-[companion]
+[web-app]
 # Sliding idle timeout. Cookie is refreshed on every authenticated request; if
 # no request is made for this many hours the session is dead. The SPA proactively
 # redirects to /login with an "expired" banner once idle this long (its watchdog
@@ -34,7 +34,7 @@ session_timeout_hours = 0.0833
 # hours ago is rejected regardless of sliding refresh activity.
 session_absolute_timeout_hours = 24
 # Emit the JWT cookie with Secure=true so browsers only send it over HTTPS.
-# Disabled because all access is via SSH tunnel (browser↔companion is loopback,
+# Disabled because all access is via SSH tunnel (browser↔web-app is loopback,
 # wire is SSH-encrypted) and Safari refuses Secure cookies on http://localhost.
 cookie_secure = false
 # Per-IP cap for POST /api/login attempts inside a 5-minute rolling window.

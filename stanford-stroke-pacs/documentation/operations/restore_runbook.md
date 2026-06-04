@@ -38,7 +38,7 @@ export PGPASSWORD="$DB_PASSWORD"
 
 ---
 
-## 1. Restore `stanford-stroke` (Companion data)
+## 1. Restore `stanford-stroke` (Web App data)
 
 This is the **fatal-loss** DB — annotations, users, label defs, preferences.
 
@@ -71,7 +71,7 @@ If counts look right, go to 1b. Otherwise try an older dump.
 "backup taken" and "restore performed":
 
 ```bash
-sudo systemctl stop ssc-companion
+sudo systemctl stop ssc-web-app
 ```
 
 Then promote the scratch DB. Two options:
@@ -99,16 +99,16 @@ pg_restore -h "$DB_HOST" -U "$DB_USER" -d stanford-stroke \
 Option A is preferred — the broken DB stays around (renamed) for forensic
 analysis and you get a sub-second cutover.
 
-Restart Companion and validate:
+Restart Web App and validate:
 
 ```bash
-sudo systemctl start ssc-companion
+sudo systemctl start ssc-web-app
 curl -sf http://localhost:8043/api/labels/summary | python3 -m json.tool | head
 ```
 
 > **Alembic note:** the dump preserves the `alembic_version` table, so a
 > restored DB is already at the same schema revision as the source. **Do
-> not** run `alembic stamp` after a restore — Companion's `init_db()` will
+> not** run `alembic stamp` after a restore — Web App's `init_db()` will
 > see head and emit no DDL. If you restored from a dump older than the
 > current code's head revision, `init_db()` will roll the schema forward
 > automatically. See [`schema_migrations.md`](schema_migrations.md).

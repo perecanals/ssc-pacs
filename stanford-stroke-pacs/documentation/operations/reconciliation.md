@@ -4,7 +4,7 @@ The PACS has two PostgreSQL databases that must stay in sync but have no
 enforced referential integrity:
 
 - **`orthanc_db`** — owned by Orthanc; indexes DICOM files on disk.
-- **`stanford-stroke`** — owned by Companion; `image_series` tracks research
+- **`stanford-stroke`** — owned by Web App; `image_series` tracks research
   metadata including `dicom_dir_path` and `dicom_archive_path`.
 
 The reconciliation job diffs the two sources and surfaces drift.  It is a
@@ -167,7 +167,7 @@ The reconciliation run updates these gauges (added in WS 06):
 | `reconciliation_last_run_timestamp` | gauge | — | Unix epoch of last run |
 | `reconciliation_duration_seconds` | gauge | — | Duration of last run |
 
-These are refreshed by the CLI script on every run.  The companion
+These are refreshed by the CLI script on every run.  The web app
 `/metrics` endpoint exposes them alongside the other application metrics.
 
 ---

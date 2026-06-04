@@ -47,7 +47,7 @@ from psycopg2 import sql
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 load_dotenv(REPO_ROOT / ".env")
 
-sys.path.insert(0, str(REPO_ROOT / "companion"))
+sys.path.insert(0, str(REPO_ROOT / "web-app"))
 
 from common import LABEL_NAME_RE  # noqa: E402
 from db import DB_CONFIG  # noqa: E402

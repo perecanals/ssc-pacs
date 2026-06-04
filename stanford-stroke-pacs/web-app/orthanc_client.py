@@ -1,4 +1,4 @@
-"""Thin wrapper around Orthanc REST API calls used by the companion."""
+"""Thin wrapper around Orthanc REST API calls used by the web app."""
 
 from __future__ import annotations
 

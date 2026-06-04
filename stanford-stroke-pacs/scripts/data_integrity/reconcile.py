@@ -20,7 +20,7 @@ import time
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
-sys.path.insert(0, str(REPO_ROOT / "companion"))
+sys.path.insert(0, str(REPO_ROOT / "web-app"))
 
 from db import DB_CONFIG, get_conn  # noqa: E402
 from metrics import update_reconciliation_metrics  # noqa: E402
@@ -90,7 +90,7 @@ def main() -> int:
         conn.close()
 
     # Update Prometheus gauges (written to the shared registry; the
-    # companion /metrics endpoint will pick them up on next scrape).
+    # web-app /metrics endpoint will pick them up on next scrape).
     summary = snapshot_summary(report)
     update_reconciliation_metrics(summary, report.get("duration_seconds", 0))
 

@@ -18,7 +18,7 @@ Output:
 
 Reuses:
   - image_integration_protocols/utils.convert_dicom_to_nifti
-  - companion/cache_manager.warm_study, _is_series_dir_warm, untar_zst
+  - web-app/cache_manager.warm_study, _is_series_dir_warm, untar_zst
 """
 
 from __future__ import annotations
@@ -30,8 +30,8 @@ import tempfile
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
-# Make companion + integration utilities importable.
-sys.path.insert(0, str(REPO_ROOT / "companion"))
+# Make web-app + integration utilities importable.
+sys.path.insert(0, str(REPO_ROOT / "web-app"))
 sys.path.insert(0, str(REPO_ROOT / "image_integration_protocols"))
 
 import psycopg2

@@ -1,7 +1,7 @@
 # Upgrading dependencies
 
 The PACS stack pins every layer — Python packages, the conda env, the
-upstream Orthanc image, and the Companion frontend's npm deps — so that a
+upstream Orthanc image, and the web app frontend's npm deps — so that a
 rebuild months from now produces the same bytes. This doc covers how to
 bump a pin on purpose.
 
@@ -15,9 +15,9 @@ for the rationale.
 | Layer | File | Form |
 |---|---|---|
 | Root Python deps | `requirements.txt` | `pkg==X.Y.Z` |
-| Companion Python deps | `stanford-stroke-pacs/companion/requirements.txt` | `pkg==X.Y.Z` |
+| Web App Python deps | `stanford-stroke-pacs/web-app/requirements.txt` | `pkg==X.Y.Z` |
 | Conda base env | `stanford-stroke-pacs/environment.yml` | `--from-history` (python + ipykernel) |
-| Companion Node deps | `stanford-stroke-pacs/companion/package-lock.json` | npm lockfile |
+| Web App Node deps | `stanford-stroke-pacs/web-app/package-lock.json` | npm lockfile |
 | Upstream Orthanc image | `orthanc-indexer-patched/Dockerfile` | `FROM orthancteam/orthanc@sha256:...` |
 | Patched Orthanc image | `stanford-stroke-pacs/docker-compose.yml` | local tag `ssc-orthanc:patched-indexer` (rebuild-driven) |
 
@@ -30,25 +30,25 @@ for the rationale.
    conda activate pacs
    ```
 2. Edit the pin in `requirements.txt` (root) **and**
-   `stanford-stroke-pacs/companion/requirements.txt` if the package appears
+   `stanford-stroke-pacs/web-app/requirements.txt` if the package appears
    in both (e.g. `psycopg2-binary`, `python-dotenv`). Keep versions in sync
    across the two files.
 3. Apply the change:
    ```bash
    pip install -r requirements.txt
-   pip install -r stanford-stroke-pacs/companion/requirements.txt
+   pip install -r stanford-stroke-pacs/web-app/requirements.txt
    ```
 4. (When WS 07 lands) re-run the test suite. Until then, smoke-test:
    ```bash
-   sudo systemctl restart ssc-companion
-   sudo journalctl -u ssc-companion -n 50
+   sudo systemctl restart ssc-web-app
+   sudo journalctl -u ssc-web-app -n 50
    curl -sf http://localhost:8043/api/health
    ```
 5. Commit the pin change.
 
 ## Bump a Node package
 
-1. In `stanford-stroke-pacs/companion/`, edit `package.json` for the desired
+1. In `stanford-stroke-pacs/web-app/`, edit `package.json` for the desired
    version range, then:
    ```bash
    npm install   # updates package-lock.json
@@ -57,7 +57,7 @@ for the rationale.
 3. Rebuild and roll out:
    ```bash
    npm ci && npm run build
-   sudo systemctl restart ssc-companion
+   sudo systemctl restart ssc-web-app
    ```
 
 Note: production builds use `npm ci` (not `npm install`) so that a

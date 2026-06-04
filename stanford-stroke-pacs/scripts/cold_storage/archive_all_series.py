@@ -26,8 +26,8 @@ from dotenv import load_dotenv
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 load_dotenv(REPO_ROOT / ".env")
 
-# Paths from repo-root config.toml (see companion/config.py)
-sys.path.insert(0, str(REPO_ROOT / "companion"))
+# Paths from repo-root config.toml (see web-app/config.py)
+sys.path.insert(0, str(REPO_ROOT / "web-app"))
 from config import COLD_ARCHIVE_ROOT, LEGACY_DICOM_ROOT  # noqa: E402
 from db import DB_CONFIG, get_conn  # noqa: E402
 

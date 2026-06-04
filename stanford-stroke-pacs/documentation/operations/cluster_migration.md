@@ -33,7 +33,7 @@ Three things must travel, and they are keyed differently:
 
 The deployment has **two databases in one PostgreSQL server**:
 `stanford-stroke` (users, `image_series`/`image_study`/`lvo_clinical_data`,
-annotations, all Companion-owned tables) and `orthanc_db` (Orthanc's index).
+annotations, all web-app-owned tables) and `orthanc_db` (Orthanc's index).
 
 `scripts/backup/backup_pg_db.sh` runs `pg_dump` on **one database at a time**.
 Make sure your backup set includes **both** — a `stanford-stroke`-only dump is
@@ -53,7 +53,7 @@ pg_restore --no-owner -d orthanc_db       <latest>/orthanc_db.dump
 
 Notes:
 - Restoring `stanford-stroke` brings Alembic's `alembic_version` along, so
-  Companion will see the schema already at head and won't re-migrate on startup.
+  Web App will see the schema already at head and won't re-migrate on startup.
 - `users` (bcrypt logins) travel in the dump. Re-run
   `scripts/admin/manage_users.py rotate-service-account` on the new host only if
   you want fresh Orthanc service-account credentials; otherwise the restored
@@ -123,11 +123,11 @@ matches the restored index → OHIF loads, no re-ingestion.
 
 ---
 
-## 3. Repoint Companion's host paths
+## 3. Repoint Web App's host paths
 
-`image_series.dicom_dir_path` and `dicom_archive_path` are read by **Companion
+`image_series.dicom_dir_path` and `dicom_archive_path` are read by **Web App
 natively on the host** (for warm/evict and NIfTI generation) — these do need
-rewriting, because Companion does not go through the container. Backfill the
+rewriting, because Web App does not go through the container. Backfill the
 host prefix only:
 
 ```sql
@@ -206,4 +206,4 @@ metadata, and the files on disk all agree after the port.
    `docker compose up -d`; import the volume; `docker compose up -d` again.
 5. Backfill `image_series` host paths (§3).
 6. `reconcile_migration.py`, then `reconcile.py`.
-7. Smoke-test: click a study in Companion → it warms → OHIF renders.
+7. Smoke-test: click a study in Web App → it warms → OHIF renders.

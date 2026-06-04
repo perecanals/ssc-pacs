@@ -11,7 +11,7 @@ import psycopg2
 from dotenv import load_dotenv
 from psycopg2 import sql
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "companion"))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "web-app"))
 
 from labelled_table_sync import LEVEL_CONFIGS, sanitize_label_column  # noqa: E402
 from db import DB_CONFIG, get_conn  # noqa: E402

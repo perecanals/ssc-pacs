@@ -28,7 +28,7 @@ ALTER:
 
 Tables created here fall in three groups:
 
-  Companion-owned (managed by future Alembic revisions):
+  Web-app-owned (managed by future Alembic revisions):
     annotations, label_definitions, users, user_preferences,
     cache_state, orthanc_resource_map
 
@@ -57,7 +57,7 @@ depends_on: str | Sequence[str] | None = None
 
 BASELINE_SQL = r"""
 -- =========================================================================
--- Companion-owned tables
+-- Web-app-owned tables
 -- =========================================================================
 
 CREATE TABLE public.annotations (

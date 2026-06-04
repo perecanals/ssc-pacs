@@ -50,7 +50,7 @@ This approach was chosen over app-level capture because:
 ### Session-variable coupling
 
 The trigger reads `current_setting('app.audit_user', true)` to attribute
-each change to the authenticated user.  The Companion middleware sets this
+each change to the authenticated user.  The Web App middleware sets this
 via `SET LOCAL` on every database connection obtained through `get_conn()`:
 
 1. The request middleware extracts the username from the JWT cookie.
@@ -147,7 +147,7 @@ DROP TABLE annotations_history;
 Or via Alembic:
 
 ```bash
-cd companion && alembic downgrade 0002_warming_started_at
+cd web-app && alembic downgrade 0002_warming_started_at
 ```
 
 ---
@@ -156,4 +156,4 @@ cd companion && alembic downgrade 0002_warming_started_at
 
 - [Data stores reference](../reference/data_stores.md) — full table schemas
 - [Schema migrations workflow](schema_migrations.md) — adding new revisions
-- Alembic revision: `companion/alembic/versions/0003_annotations_history.py`
+- Alembic revision: `web-app/alembic/versions/0003_annotations_history.py`

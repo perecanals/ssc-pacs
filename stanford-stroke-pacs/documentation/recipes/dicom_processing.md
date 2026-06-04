@@ -12,7 +12,7 @@ cd /home/perecanals/pacs/stanford-stroke-pacs
 
 ## DICOM → NIFTI
 
-The Companion does **not** generate NIFTIs automatically in
+The Web App does **not** generate NIFTIs automatically in
 `cold_path_cache` mode. Use `scripts/dicom/dicom_to_nifti.py` to produce them on
 demand. It wraps `image_integration_protocols/utils.convert_dicom_to_nifti`
 (SimpleITK + GDCM) and supports three input modes.

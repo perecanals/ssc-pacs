@@ -20,7 +20,7 @@ one disk.
 development mode. DICOM / cold-archive data loss is **not** considered
 fatal — re-ingesting from source is acceptable. **SQL data loss (annotations,
 users, preferences, label definitions) IS fatal** — this data is authored in
-the Companion and cannot be reconstructed.
+the web app and cannot be reconstructed.
 
 This workstream therefore has two tiers:
 

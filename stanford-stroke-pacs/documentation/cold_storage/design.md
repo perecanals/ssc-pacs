@@ -135,8 +135,8 @@ archive_path = cold_root / dicom_dir.relative_to(legacy_root).parent / f"{dicom_
 ## Warm path detail
 
 ```
-User clicks a row in the Companion DataTable
-  → Companion.jsx handlePreviewSelect
+User clicks a row in the web app DataTable
+  → Navigator.jsx handlePreviewSelect
   → warmOhif.resolveOhifViewerUrl(studyinstanceuid)
       1. GET /api/ohif-link/{uid}
          Backend checks cache_state:
@@ -206,7 +206,7 @@ See [`../reference/data_stores.md`](../reference/data_stores.md) for column deta
 
 ---
 
-## Companion runtime
+## Web App runtime
 
 ### API
 
@@ -223,7 +223,7 @@ See [`../reference/data_stores.md`](../reference/data_stores.md) for column deta
 
 ### Frontend
 
-`companion/src/api/warmOhif.js` — `resolveOhifViewerUrl()` calls
+`web-app/src/api/warmOhif.js` — `resolveOhifViewerUrl()` calls
 `/api/ohif-link`, and if the response is `cold` or `warming`, it POSTs
 `/warm` (or polls, for warming), then retries the link. `warmStudy()`
 treats any 2xx (including 202) as "warming started" and then polls
@@ -240,7 +240,7 @@ files are moved/deleted out-of-band.
 
 ### Eviction loop
 
-Background task in `companion/app.py` lifespan (only when mode is
+Background task in `web-app/app.py` lifespan (only when mode is
 `cold_path_cache`). Every 15 minutes, scans for studies past
 `eviction_ttl_hours` and calls `evict_study()`.
 
@@ -305,7 +305,7 @@ The Orthanc bind mount is the legacy root, read-only:
 - /DATA2/pacs_imaging_data:/dicom-data:ro
 ```
 
-Orthanc never writes. The Companion (running on the host, outside the
+Orthanc never writes. The Web App (running on the host, outside the
 container) is responsible for all writes into the legacy tree during warm
 and all deletes during evict.
 

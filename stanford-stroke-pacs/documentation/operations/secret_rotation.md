@@ -3,7 +3,7 @@
 Procedures for rotating the secrets this stack depends on. Each section is
 self-contained; run them independently.
 
-Secrets live in `stanford-stroke-pacs/.env` (loaded by Companion via
+Secrets live in `stanford-stroke-pacs/.env` (loaded by Web App via
 `python-dotenv` and by `docker-compose.yml` via `env_file`). Changing a
 secret there is the source of truth; restart the consumer(s) to pick it up.
 
@@ -11,7 +11,7 @@ secret there is the source of truth; restart the consumer(s) to pick it up.
 
 ## 1. `JWT_SECRET`
 
-Used by Companion (`app.py`) to sign and verify the `auth_token` cookie.
+Used by Web App (`app.py`) to sign and verify the `auth_token` cookie.
 Rotating invalidates every live session — users will need to log in again.
 
 ### When to rotate
@@ -30,12 +30,12 @@ python -c 'import secrets; print(secrets.token_hex(32))'
 sudo -e /home/perecanals/ssc-pacs/stanford-stroke-pacs/.env
 #    Replace the JWT_SECRET=... line with the new value.
 
-# 3. Reload Companion to pick it up. All existing cookies are now invalid.
-sudo systemctl restart ssc-companion
+# 3. Reload Web App to pick it up. All existing cookies are now invalid.
+sudo systemctl restart ssc-web-app
 
 # 4. Spot-check that the service came back up and auth still works for a
 #    fresh login:
-sudo systemctl status ssc-companion
+sudo systemctl status ssc-web-app
 curl -s -o /dev/null -w "%{http_code}\n" http://localhost:8043/
 ```
 
@@ -52,7 +52,7 @@ longest `session_absolute_timeout_hours` interval.
 
 - **Empty secret after edit.** The service now **fails fast** at startup
   with `RuntimeError: JWT_SECRET must be set ...`. Check
-  `journalctl -u ssc-companion -n 50` and restore the value.
+  `journalctl -u ssc-web-app -n 50` and restore the value.
 - **Cookies still show old value in the browser.** Expected — the browser
   keeps the old cookie until it expires or the user hits a protected page
   and gets a 401. Clearing cookies or logging in again is the workaround.
@@ -63,7 +63,7 @@ longest `session_absolute_timeout_hours` interval.
 
 Used by:
 
-1. Companion's reverse proxy and other host-local scripts (Basic auth against
+1. Web App's reverse proxy and other host-local scripts (Basic auth against
    Orthanc on `:8042`), via `ORTHANC_ADMIN_USER` / `ORTHANC_ADMIN_PASSWORD`
    in `.env`.
 2. The matching entry in `orthanc_users.json` (Orthanc's own auth, plaintext).
@@ -81,12 +81,12 @@ python scripts/admin/manage_users.py rotate-service-account
 
 # 2. Restart both consumers:
 docker restart ssc-orthanc
-sudo systemctl restart ssc-companion
+sudo systemctl restart ssc-web-app
 
-# 3. Verify the service account works against Orthanc and that Companion can
+# 3. Verify the service account works against Orthanc and that Web App can
 #    still proxy:
 curl -u admin:<newpass> http://localhost:8042/system | head -5
-sudo journalctl -u ssc-companion -n 50 | grep -iE 'orthanc|401' || echo 'no auth errors'
+sudo journalctl -u ssc-web-app -n 50 | grep -iE 'orthanc|401' || echo 'no auth errors'
 ```
 
 ### What can go wrong
@@ -101,7 +101,7 @@ sudo journalctl -u ssc-companion -n 50 | grep -iE 'orthanc|401' || echo 'no auth
 
 ## 3. Database password (`DB_PASSWORD`)
 
-Used by Companion to connect to the `stanford-stroke` PostgreSQL database.
+Used by Web App to connect to the `stanford-stroke` PostgreSQL database.
 The database is owned by the host (not managed by this repo); rotation is
 coordinated with whoever owns the Postgres role.
 
@@ -115,11 +115,11 @@ sudo -u postgres psql -c "ALTER USER stanford_app WITH PASSWORD '<newpass>';"
 # 2. Update .env.
 sudo -e /home/perecanals/ssc-pacs/stanford-stroke-pacs/.env
 
-# 3. Restart Companion. Startup will now fail-fast if DB_USER/DB_PASSWORD
+# 3. Restart Web App. Startup will now fail-fast if DB_USER/DB_PASSWORD
 #    are missing, but an *incorrect* password surfaces as connection errors
 #    on the first request — watch the logs.
-sudo systemctl restart ssc-companion
-sudo journalctl -u ssc-companion -f
+sudo systemctl restart ssc-web-app
+sudo journalctl -u ssc-web-app -f
 ```
 
 ---
@@ -127,10 +127,10 @@ sudo journalctl -u ssc-companion -f
 ## Appendix — relevant config
 
 - `stanford-stroke-pacs/.env` — all secrets listed above.
-- `stanford-stroke-pacs/config.toml` — `[companion]` section controls
+- `stanford-stroke-pacs/config.toml` — `[web app]` section controls
   session durations (`session_timeout_hours`,
   `session_absolute_timeout_hours`) and the `cookie_secure` flag that
   accompanies rotated JWTs.
-- `stanford-stroke-pacs/companion/db.py` — startup helper `_require_env()`
+- `stanford-stroke-pacs/web-app/db.py` — startup helper `_require_env()`
   enforces that required secrets (`DB_USER`, `DB_PASSWORD`,
   `ORTHANC_ADMIN_USER`, `ORTHANC_ADMIN_PASSWORD`, `JWT_SECRET`) are non-empty.

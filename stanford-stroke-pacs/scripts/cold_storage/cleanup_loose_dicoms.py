@@ -45,8 +45,8 @@ from dotenv import load_dotenv
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 load_dotenv(REPO_ROOT / ".env")
 
-# Read paths from companion/config.py so cleanup matches the running stack.
-sys.path.insert(0, str(REPO_ROOT / "companion"))
+# Read paths from web-app/config.py so cleanup matches the running stack.
+sys.path.insert(0, str(REPO_ROOT / "web-app"))
 from config import LEGACY_DICOM_ROOT, STORAGE_MODE  # noqa: E402
 from db import DB_CONFIG, get_conn  # noqa: E402
 

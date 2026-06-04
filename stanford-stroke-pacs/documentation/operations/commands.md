@@ -27,38 +27,38 @@ docker compose restart
 ./scripts/admin/teardown.sh
 ```
 
-### Companion (native systemd service)
+### Web App (native systemd service)
 
 ```bash
 # Start / stop / restart
-sudo systemctl start ssc-companion
-sudo systemctl stop ssc-companion
-sudo systemctl restart ssc-companion
+sudo systemctl start ssc-web-app
+sudo systemctl stop ssc-web-app
+sudo systemctl restart ssc-web-app
 
 # Check status
-sudo systemctl status ssc-companion
+sudo systemctl status ssc-web-app
 
 # View live logs
-sudo journalctl -u ssc-companion -f
+sudo journalctl -u ssc-web-app -f
 
 # Enable auto-start on boot (one-time setup)
-sudo cp ssc-companion.service /etc/systemd/system/
+sudo cp ssc-web-app.service /etc/systemd/system/
 sudo systemctl daemon-reload
-sudo systemctl enable --now ssc-companion
+sudo systemctl enable --now ssc-web-app
 
 # Rebuild frontend after code changes
-cd companion && npm run build
-sudo systemctl restart ssc-companion
+cd web-app && npm run build
+sudo systemctl restart ssc-web-app
 
 # Run manually (development, with auto-reload)
-cd companion && uvicorn app:app --port 8043 --reload
+cd web-app && uvicorn app:app --port 8043 --reload
 ```
 
 ---
 
 ## User management
 
-End users live in the `users` PostgreSQL table (bcrypt). Companion is the
+End users live in the `users` PostgreSQL table (bcrypt). Web App is the
 single login point — its reverse proxy serves OHIF and DICOMweb to any
 authenticated user. Admin users are also mirrored into `orthanc_users.json`
 so they can reach Orthanc directly on `:8042` as themselves.
@@ -81,7 +81,7 @@ python scripts/admin/manage_users.py remove alice
 ```
 
 `add` and `passwd` both set the user's `must_change_password` flag to TRUE. On
-their next sign-in the Companion UI redirects them to `/change-password` and
+their next sign-in the Navigator UI redirects them to `/change-password` and
 the API blocks every other endpoint with `403 password_change_required` until
 they pick a new password. There is no self-service password reset — a forgotten
 password requires an admin to run `passwd` and share a fresh temporary one
@@ -97,7 +97,7 @@ docker restart ssc-orthanc
 
 ### Rotating the Orthanc service account
 
-The service account is the credential Companion uses to proxy to Orthanc and
+The service account is the credential Web App uses to proxy to Orthanc and
 that host-local scripts use for direct Orthanc access (`ORTHANC_ADMIN_USER`
 in `.env`). Rotate it with:
 
@@ -110,7 +110,7 @@ This rewrites `ORTHANC_ADMIN_PASSWORD` in `.env` and the matching entry in
 
 ```bash
 docker restart ssc-orthanc
-sudo systemctl restart ssc-companion
+sudo systemctl restart ssc-web-app
 ```
 
 ---
@@ -118,7 +118,7 @@ sudo systemctl restart ssc-companion
 ## SSH tunnel (run from local machine)
 
 ```bash
-# Open tunnel (includes companion app on 8043)
+# Open tunnel (includes web app app on 8043)
 ssh -N \
   -L 8042:localhost:8042 \
   -L 8043:localhost:8043 \
@@ -136,7 +136,7 @@ kill $(lsof -ti :8042 -sTCP:LISTEN)
 ## Web UI URLs (via tunnel or localhost)
 
 - **Orthanc Explorer 2 (default UI):** http://localhost:8042/ui/app/
-- **Companion (landing + app):** http://localhost:8043/ and http://localhost:8043/app/
+- **Web App (landing + app):** http://localhost:8043/ and http://localhost:8043/app/
 - **OHIF Viewer:** http://localhost:8042/ohif/
 - **Legacy Orthanc Explorer:** http://localhost:8042/app/explorer.html
 
@@ -154,9 +154,9 @@ docker compose logs -f orthanc
 # Recent Orthanc logs only
 docker logs --since 5m ssc-orthanc
 
-# Companion logs (systemd)
-sudo journalctl -u ssc-companion -f
-sudo journalctl -u ssc-companion --since "5 min ago"
+# Web App logs (systemd)
+sudo journalctl -u ssc-web-app -f
+sudo journalctl -u ssc-web-app --since "5 min ago"
 ```
 
 ---
@@ -215,14 +215,14 @@ Users can add custom labels through the OE2 UI. All labels are shared across use
 
 ---
 
-## Companion API examples
+## Web App API examples
 
 Multi-level annotations live in the `stanford-stroke` database; see [`../reference/data_stores.md`](../reference/data_stores.md).
 
 ```bash
-# Rebuild frontend and restart the companion service
-cd companion && npm run build
-sudo systemctl restart ssc-companion
+# Rebuild frontend and restart the web app service
+cd web-app && npm run build
+sudo systemctl restart ssc-web-app
 
 # List all annotation labels via the API
 curl -s http://localhost:8043/api/labels | python3 -m json.tool
@@ -253,12 +253,12 @@ sudo bash scripts/admin/bulk_set_label_values.sh \
     --dry-run
 ```
 
-### Removing the companion app
+### Removing the web app app
 
-1. Stop and disable the service: `sudo systemctl disable --now ssc-companion`
-2. Remove the unit file: `sudo rm /etc/systemd/system/ssc-companion.service`
-3. Delete the `companion/` folder and `ssc-companion.service`
-4. (Optional) drop companion-owned tables in `stanford-stroke` if you no longer need them
+1. Stop and disable the service: `sudo systemctl disable --now ssc-web-app`
+2. Remove the unit file: `sudo rm /etc/systemd/system/ssc-web-app.service`
+3. Delete the `web-app/` folder and `ssc-web-app.service`
+4. (Optional) drop web-app-owned tables in `stanford-stroke` if you no longer need them
 
 Orthanc is unaffected.
 
@@ -266,7 +266,7 @@ Orthanc is unaffected.
 
 ## Backend module structure
 
-The companion backend is split into focused modules under `companion/`:
+The web app backend is split into focused modules under `web-app/`:
 
 | Module | Purpose |
 |--------|---------|
@@ -280,7 +280,7 @@ The companion backend is split into focused modules under `companion/`:
 | `routes/*.py` | `APIRouter` submodules (auth, studies, annotations, labels, etc.) |
 
 **Scripts** under `scripts/` import `DB_CONFIG` and `get_conn` from
-`companion/db.py` (via `sys.path` insertion). They no longer define their
+`web-app/db.py` (via `sys.path` insertion). They no longer define their
 own database config inline.
 
 ---
@@ -302,7 +302,7 @@ make test-backend
 # Frontend only (vitest — no Postgres needed)
 make test-frontend
 
-# Lint (ruff on companion/)
+# Lint (ruff on web-app/)
 make lint
 ```
 
@@ -311,7 +311,7 @@ make lint
 frontend-tests, frontend-build. The mypy job is advisory (non-blocking).
 
 **Pre-commit hooks:** Installed by `make install-dev`. Runs ruff and prettier
-on `companion/` files automatically before each `git commit`.
+on `web-app/` files automatically before each `git commit`.
 
 For full developer setup details see
 [`../guides/installation_and_deployment.md` §8](../guides/installation_and_deployment.md).

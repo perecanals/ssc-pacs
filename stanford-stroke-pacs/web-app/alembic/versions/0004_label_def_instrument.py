@@ -6,7 +6,7 @@ Create Date: 2026-05-13
 
 Adds a nullable ``instrument`` text column to ``label_definitions`` so
 variables can be grouped (e.g. "Functional outcome", "Imaging quality")
-in the Companion DataTable's ColumnSelector. Existing labels start with
+in the Navigator DataTable's ColumnSelector. Existing labels start with
 ``instrument = NULL`` ("Unassigned").
 """
 from collections.abc import Sequence

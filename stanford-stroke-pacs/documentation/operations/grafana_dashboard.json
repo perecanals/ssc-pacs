@@ -3,7 +3,7 @@
     {
       "name": "DS_PROMETHEUS",
       "label": "Prometheus",
-      "description": "Prometheus datasource scraping ssc-companion :8043/metrics",
+      "description": "Prometheus datasource scraping ssc-web-app :8043/metrics",
       "type": "datasource",
       "pluginId": "prometheus",
       "pluginName": "Prometheus"
@@ -26,7 +26,7 @@
       },
       "targets": [
         {
-          "expr": "sum(rate(http_requests_total{job=\"ssc-companion\"}[5m])) by (path_template)",
+          "expr": "sum(rate(http_requests_total{job=\"ssc-web-app\"}[5m])) by (path_template)",
           "legendFormat": "{{ path_template }}",
           "refId": "A"
         }
@@ -43,12 +43,12 @@
       },
       "targets": [
         {
-          "expr": "histogram_quantile(0.50, sum by (le) (rate(http_request_duration_seconds_bucket{job=\"ssc-companion\"}[5m])))",
+          "expr": "histogram_quantile(0.50, sum by (le) (rate(http_request_duration_seconds_bucket{job=\"ssc-web-app\"}[5m])))",
           "legendFormat": "p50",
           "refId": "A"
         },
         {
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(http_request_duration_seconds_bucket{job=\"ssc-companion\"}[5m])))",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(http_request_duration_seconds_bucket{job=\"ssc-web-app\"}[5m])))",
           "legendFormat": "p95",
           "refId": "B"
         }
@@ -65,12 +65,12 @@
       },
       "targets": [
         {
-          "expr": "sum(rate(cold_storage_warm_total{result=\"success\",job=\"ssc-companion\"}[15m])) / clamp_min(sum(rate(cold_storage_warm_total{job=\"ssc-companion\"}[15m])), 1e-10)",
+          "expr": "sum(rate(cold_storage_warm_total{result=\"success\",job=\"ssc-web-app\"}[15m])) / clamp_min(sum(rate(cold_storage_warm_total{job=\"ssc-web-app\"}[15m])), 1e-10)",
           "legendFormat": "warm success rate",
           "refId": "A"
         },
         {
-          "expr": "sum(rate(cold_storage_evict_total{result=\"success\",job=\"ssc-companion\"}[15m])) / clamp_min(sum(rate(cold_storage_evict_total{job=\"ssc-companion\"}[15m])), 1e-10)",
+          "expr": "sum(rate(cold_storage_evict_total{result=\"success\",job=\"ssc-web-app\"}[15m])) / clamp_min(sum(rate(cold_storage_evict_total{job=\"ssc-web-app\"}[15m])), 1e-10)",
           "legendFormat": "evict success rate",
           "refId": "B"
         }
@@ -87,7 +87,7 @@
       },
       "targets": [
         {
-          "expr": "cold_storage_disk_free_bytes{job=\"ssc-companion\"}",
+          "expr": "cold_storage_disk_free_bytes{job=\"ssc-web-app\"}",
           "legendFormat": "free bytes",
           "refId": "A"
         }
@@ -104,7 +104,7 @@
       },
       "targets": [
         {
-          "expr": "cold_storage_warming_rows{job=\"ssc-companion\"}",
+          "expr": "cold_storage_warming_rows{job=\"ssc-web-app\"}",
           "legendFormat": "warming rows",
           "refId": "A"
         }
@@ -112,7 +112,7 @@
     }
   ],
   "schemaVersion": 39,
-  "tags": ["ssc-companion", "pacs"],
+  "tags": ["ssc-web-app", "pacs"],
   "templating": {
     "list": [
       {
@@ -132,7 +132,7 @@
   "time": { "from": "now-6h", "to": "now" },
   "timepicker": {},
   "timezone": "utc",
-  "title": "SSC Companion",
-  "uid": "ssc-companion-starter",
+  "title": "SSC Web App",
+  "uid": "ssc-web-app-starter",
   "version": 1
 }

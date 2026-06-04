@@ -26,7 +26,7 @@ disproportionately cheap to fix.
    No WAL archiving, no snapshot schedule, no RTO/RPO. → WS 01.
 2. **Unpinned Python deps + `orthancteam/orthanc:latest`.** A fresh rebuild is
    not reproducible. → WS 02.
-3. **SQL injection vector in snapshot rebuild** (`companion/app.py:1699–1722`):
+3. **SQL injection vector in snapshot rebuild** (`web-app/app.py:1699–1722`):
    label names are only sanitized for spaces/dashes before being interpolated
    into SQL. → WS 03.
 4. **No schema migration tool.** `INIT_SQL`/`MIGRATE_SQL` embedded in `app.py`
@@ -43,7 +43,7 @@ disproportionately cheap to fix.
 
 ### 1.1 Monolith vs modular split — LARGE KITCHEN SINK
 
-- `companion/app.py` is **1,865 lines** — all routes, DB helpers, filter SQL
+- `web-app/app.py` is **1,865 lines** — all routes, DB helpers, filter SQL
   generators, annotation logic, snapshot management in one file.
 - **29 routes** (18 GET, 8 POST, 1 PUT, 1 DELETE, 1 middleware) bundled
   directly on the `FastAPI` instance. No `APIRouter` abstraction.
@@ -139,7 +139,7 @@ disproportionately cheap to fix.
 - **`DataTable.jsx`: 1,272 lines** — god-component. Handles API fetching,
   filtering, sorting, pagination, inline editing, expandable rows, and column
   management.
-- `Companion.jsx`: ~180 lines (page container, reasonable).
+- `Navigator.jsx`: ~180 lines (page container, reasonable).
 - `InlineEdit.jsx`: 324 lines.
 - `LabelDefModal.jsx`: 207 lines.
 - `Sidebar.jsx`: 169 lines.
@@ -149,7 +149,7 @@ disproportionately cheap to fix.
 ### 2.2 State management
 
 - React Context for auth only (`AuthContext`).
-- `Companion.jsx` holds 9+ state vars, prop-drills through 5+ props.
+- `Navigator.jsx` holds 9+ state vars, prop-drills through 5+ props.
 - No Redux or Zustand.
 
 ### 2.3 API layer
@@ -220,7 +220,7 @@ disproportionately cheap to fix.
 - `/home/perecanals/pacs/requirements.txt` — 7 packages, **no versions pinned**
   (pandas, python-dotenv, SQLAlchemy, psycopg2-binary, numpy, pydicom,
   SimpleITK).
-- `stanford-stroke-pacs/companion/requirements.txt` — 8 packages, **no
+- `stanford-stroke-pacs/web-app/requirements.txt` — 8 packages, **no
   versions pinned** (fastapi, uvicorn, psycopg2-binary, requests, PyJWT,
   bcrypt, python-dotenv, zipstream-ng, zstandard).
 - No `pyproject.toml`, no `setup.py`, no constraints file.
@@ -250,7 +250,7 @@ disproportionately cheap to fix.
 
 ### 3.7 systemd — HARDCODED PATHS
 
-- `ssc-companion.service` is in repo but contains hardcoded paths:
+- `ssc-web-app.service` is in repo but contains hardcoded paths:
   `User=perecanals`, `WorkingDirectory=/home/perecanals/pacs/...`, conda env
   path in `ExecStart`.
 - No templating. Each deployment must manually edit.
@@ -267,7 +267,7 @@ Files with hardcoded `/home/perecanals/` or personal identifiers:
 - `init_orthanc_db.sh:10` — `source "/home/perecanals/pacs/.../.env"`
 - `scripts/connectivity/tunnel.sh:1` — hardcoded server IP `10.110.128.149` + user
   `perecanals@`
-- `ssc-companion.service` — all paths under `/home/perecanals/`
+- `ssc-web-app.service` — all paths under `/home/perecanals/`
 - `docker-compose.yml` — absolute env_file path
 
 No `TODO: Pere` markers in code proper.
@@ -280,13 +280,13 @@ No `TODO: Pere` markers in code proper.
 
 ### 4.1 Schema management — HIGH RISK
 
-- `INIT_SQL` + `MIGRATE_SQL` embedded in `companion/app.py:70–277`.
+- `INIT_SQL` + `MIGRATE_SQL` embedded in `web-app/app.py:70–277`.
 - `init_db()` (`app.py:293–302`) runs on every startup, guarded by PL/pgSQL
   `DO $$` blocks for idempotency.
 - Failure mid-migration leaves DB in partial state; no version table.
 - `ssc-sql-db/` contains read-only DDL for `image_study` and `image_series` —
-  not managed by the companion.
-- Upstream schema changes could break companion assumptions silently.
+  not managed by the web app.
+- Upstream schema changes could break web app assumptions silently.
 
 ### 4.2 Two-DB integrity — MEDIUM/HIGH
 
@@ -316,7 +316,7 @@ No `TODO: Pere` markers in code proper.
 - **Missing `Secure=True` flag.**
 
 **Orthanc:**
-- Admin creds flow through companion env vars.
+- Admin creds flow through web app env vars.
 - Orthanc users stored as plaintext per `orthanc_users.json` (known
   limitation).
 
@@ -365,7 +365,7 @@ directly — requires DB compromise first.
 - Documented as "legacy" and "site-specific" but still actively used (logs
   dated March–April 2026).
 - Hardcoded DICOM layouts specific to SSC.
-- No schema validation on upserts — would fail silently if companion adds NOT
+- No schema validation on upserts — would fail silently if web app adds NOT
   NULL columns.
 
 ---

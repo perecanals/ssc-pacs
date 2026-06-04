@@ -12,9 +12,9 @@ from image_integration_protocol import ImageIntegrationProtocol
 ROOT_DIR = Path(__file__).resolve().parent.parent
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
-COMPANION_DIR = ROOT_DIR / "companion"
-if str(COMPANION_DIR) not in sys.path:
-    sys.path.insert(0, str(COMPANION_DIR))
+WEB_APP_DIR = ROOT_DIR / "web-app"
+if str(WEB_APP_DIR) not in sys.path:
+    sys.path.insert(0, str(WEB_APP_DIR))
 
 from labelled_table_sync import sync_labelled_rows
 from config import COLD_ARCHIVE_ROOT, LEGACY_DICOM_ROOT, STORAGE_MODE  # noqa: E402

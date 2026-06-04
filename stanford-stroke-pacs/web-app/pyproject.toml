@@ -1,5 +1,5 @@
-# pyproject.toml — tool config for the companion backend.
-# Lives at companion/ because it is the only non-trivial Python component.
+# pyproject.toml — tool config for the web-app backend.
+# Lives at web-app/ because it is the only non-trivial Python component.
 
 [tool.ruff]
 line-length = 120

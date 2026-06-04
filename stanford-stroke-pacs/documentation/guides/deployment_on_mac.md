@@ -8,7 +8,7 @@ covers only what changes on a Mac and how to make the stack survive reboots.
 For moving an existing deployment onto a Mac, see
 [`../operations/cluster_migration.md`](../operations/cluster_migration.md).
 
-The stack ports cleanly in principle — Orthanc in Docker, Companion as a
+The stack ports cleanly in principle — Orthanc in Docker, Web App as a
 native process, PostgreSQL on the host — but four assumptions in the Linux
 setup must be adapted.
 
@@ -20,7 +20,7 @@ setup must be adapted.
 |---|---|---|---|
 | 1 | `network_mode: host` in `docker-compose.yml` | Docker Desktop runs Linux in a VM; host networking does **not** publish container ports to the Mac, and the container can't reach `localhost` Postgres | §4 |
 | 2 | Image is Linux/amd64 | Apple Silicon is arm64; `orthancteam/orthanc` may be amd64-only | §3 |
-| 3 | Companion runs under **systemd** (`ssc-companion.service`) | macOS has no systemd | §6 |
+| 3 | Web App runs under **systemd** (`ssc-web-app.service`) | macOS has no systemd | §6 |
 | 4 | `/DATA2/...` paths, `sudo -u postgres` | Those paths don't exist; Homebrew Postgres has no `postgres` system user (your Mac user is the superuser) | §5 |
 
 On an **Intel Mac**, difference #2 disappears.
@@ -110,7 +110,7 @@ Keep this override file Mac-local (e.g. `.gitignore` it, or name it
 so it never lands on the Linux host.
 
 Leave `DB_HOST=localhost` in `.env`: that value is still correct for the
-**native** Companion process and host-local scripts. Only the container needs
+**native** Web App process and host-local scripts. Only the container needs
 `host.docker.internal`, which is why it is overridden literally here rather
 than via `${DB_HOST}`. `ORTHANC_URL` stays `http://localhost:8042` — the
 published ports make Orthanc reachable from the Mac host.
@@ -145,16 +145,16 @@ Two Mac-specific adaptations to the documented bootstrap:
 
 > **Simpler alternative for an eval/dev box:** run Postgres as a Docker service
 > in the same compose file instead. Orthanc then reaches it by service name and
-> Companion via a published port — no `host.docker.internal`, no `pg_hba`
+> Web App via a published port — no `host.docker.internal`, no `pg_hba`
 > editing. Use the host-Postgres path for anything resembling production.
 
 ---
 
-## 6. Companion as a launchd service (start on boot)
+## 6. Web App as a launchd service (start on boot)
 
-There is no systemd; `ssc-companion.service` does not apply. Create a **launchd
-agent** so Companion starts at login and restarts on crash. Write
-`~/Library/LaunchAgents/com.ssc.companion.plist` (adjust the conda path and
+There is no systemd; `ssc-web-app.service` does not apply. Create a **launchd
+agent** so Web App starts at login and restarts on crash. Write
+`~/Library/LaunchAgents/com.ssc.web app.plist` (adjust the conda path and
 username):
 
 ```xml
@@ -163,7 +163,7 @@ username):
   "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-  <key>Label</key>            <string>com.ssc.companion</string>
+  <key>Label</key>            <string>com.ssc.web app</string>
   <key>ProgramArguments</key>
   <array>
     <string>/Users/you/miniconda3/envs/pacs/bin/uvicorn</string>
@@ -171,11 +171,11 @@ username):
     <string>--host</string><string>0.0.0.0</string>
     <string>--port</string><string>8043</string>
   </array>
-  <key>WorkingDirectory</key> <string>/Users/you/ssc-pacs/stanford-stroke-pacs/companion</string>
+  <key>WorkingDirectory</key> <string>/Users/you/ssc-pacs/stanford-stroke-pacs/web-app</string>
   <key>RunAtLoad</key>        <true/>
   <key>KeepAlive</key>        <true/>
-  <key>StandardOutPath</key>  <string>/Users/you/Library/Logs/ssc-companion.log</string>
-  <key>StandardErrorPath</key><string>/Users/you/Library/Logs/ssc-companion.err</string>
+  <key>StandardOutPath</key>  <string>/Users/you/Library/Logs/ssc-web-app.log</string>
+  <key>StandardErrorPath</key><string>/Users/you/Library/Logs/ssc-web-app.err</string>
 </dict>
 </plist>
 ```
@@ -183,10 +183,10 @@ username):
 Load and manage it:
 
 ```bash
-launchctl load -w ~/Library/LaunchAgents/com.ssc.companion.plist   # enable + start
-launchctl kickstart -k gui/$(id -u)/com.ssc.companion              # restart (≈ systemctl restart)
-launchctl print gui/$(id -u)/com.ssc.companion                     # status
-launchctl unload ~/Library/LaunchAgents/com.ssc.companion.plist    # stop + disable
+launchctl load -w ~/Library/LaunchAgents/com.ssc.web app.plist   # enable + start
+launchctl kickstart -k gui/$(id -u)/com.ssc.web app              # restart (≈ systemctl restart)
+launchctl print gui/$(id -u)/com.ssc.web app                     # status
+launchctl unload ~/Library/LaunchAgents/com.ssc.web app.plist    # stop + disable
 log show --predicate 'process == "uvicorn"' --last 5m             # logs (or tail the StandardOutPath file)
 ```
 
@@ -202,7 +202,7 @@ machine must serve before anyone logs in, install the same plist as a
 |---|---|
 | Orthanc (Docker) | `restart: unless-stopped` in compose **plus** Docker Desktop set to **start at login** (Settings → General → "Start Docker Desktop when you sign in"). The container will not come back without the Docker daemon running. |
 | PostgreSQL | `brew services start postgresql@16` already installs a LaunchAgent that runs at login. Confirm with `brew services list`. |
-| Companion | the launchd agent in §6 (`RunAtLoad` + `KeepAlive`). |
+| Web App | the launchd agent in §6 (`RunAtLoad` + `KeepAlive`). |
 
 After a reboot, verify all three with the day-2 commands below.
 
@@ -212,9 +212,9 @@ After a reboot, verify all three with the day-2 commands below.
 
 | Task | Linux | macOS |
 |---|---|---|
-| Restart Companion | `sudo systemctl restart ssc-companion` | `launchctl kickstart -k gui/$(id -u)/com.ssc.companion` |
-| Companion status | `systemctl status ssc-companion` | `launchctl print gui/$(id -u)/com.ssc.companion` |
-| Companion logs | `journalctl -u ssc-companion -f` | `tail -f ~/Library/Logs/ssc-companion.log` |
+| Restart Web App | `sudo systemctl restart ssc-web-app` | `launchctl kickstart -k gui/$(id -u)/com.ssc.web app` |
+| Web App status | `systemctl status ssc-web-app` | `launchctl print gui/$(id -u)/com.ssc.web app` |
+| Web App logs | `journalctl -u ssc-web-app -f` | `tail -f ~/Library/Logs/ssc-web-app.log` |
 | Orthanc up/down | `docker compose up -d` / `down` | identical |
 | Orthanc status | `scripts/orthanc/check_status.sh` | identical (works as-is) |
 | Postgres restart | `sudo systemctl restart postgresql` | `brew services restart postgresql@16` |
@@ -222,8 +222,8 @@ After a reboot, verify all three with the day-2 commands below.
 **Rebuild the frontend after code changes:**
 
 ```bash
-cd companion && npm run build
-launchctl kickstart -k gui/$(id -u)/com.ssc.companion
+cd web-app && npm run build
+launchctl kickstart -k gui/$(id -u)/com.ssc.web app
 ```
 
 **bash 3.2 caveat:** macOS ships an ancient `/bin/bash`. A few ops scripts use
@@ -243,7 +243,7 @@ cookies on `http://localhost`), so login works over loopback.
 ```bash
 docker compose ps
 scripts/orthanc/check_status.sh
-launchctl print gui/$(id -u)/com.ssc.companion | grep state
+launchctl print gui/$(id -u)/com.ssc.web app | grep state
 ```
 
 Browser checks: `http://localhost:8042/ui/app/`, `/ohif/`, and

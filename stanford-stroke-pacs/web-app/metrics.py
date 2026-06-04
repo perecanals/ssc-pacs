@@ -1,4 +1,4 @@
-"""Prometheus metrics for the companion service.
+"""Prometheus metrics for the web-app service.
 
 Metric catalogue (see `documentation/operations/observability.md`):
 

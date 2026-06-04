@@ -1,6 +1,6 @@
 """Reverse-proxy /ohif/* and /dicom-web/* to Orthanc.
 
-End users authenticate to Companion via JWT cookie. Companion forwards their
+End users authenticate to the web app via JWT cookie. The web app forwards their
 requests to Orthanc, attaching the service-account Basic auth from .env. Users
 no longer need entries in orthanc_users.json.
 """
@@ -31,7 +31,7 @@ _HOP_BY_HOP = frozenset({
 
 # Inbound request headers to drop in addition to hop-by-hop:
 #   host:            httpx sets from target URL
-#   cookie:          Orthanc doesn't use Companion's session cookie
+#   cookie:          Orthanc doesn't use the web app's session cookie
 #   authorization:   replaced by the client's BasicAuth (service account)
 #   content-length:  httpx recomputes from the forwarded body
 _DROP_REQUEST_HEADERS = _HOP_BY_HOP | {

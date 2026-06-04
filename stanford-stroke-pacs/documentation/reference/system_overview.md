@@ -1,7 +1,7 @@
 # System overview
 
 **Purpose:** One place to see the whole PACS stack — the custom SSC research
-database, Orthanc, OHIF, the Companion, and the cold-storage layer — and how
+database, Orthanc, OHIF, the web app, and the cold-storage layer — and how
 they fit together. Deliberately overview-level; link out for detail.
 
 - Narrative on service roles, portability: [`architecture.md`](architecture.md)
@@ -17,11 +17,11 @@ they fit together. Deliberately overview-level; link out for detail.
 
 A single host runs one PostgreSQL server (two logical DBs), one Docker
 container (Orthanc with a custom Folder Indexer), and one native service
-(the Companion, FastAPI + React). The DICOM payload lives on the host
+(the web app, FastAPI + React). The DICOM payload lives on the host
 filesystem — either as loose files (legacy mode) or as per-series
 `*.tar.zst` archives that are extracted on demand (`cold_path_cache` mode,
 current production). Orthanc serves OHIF and Orthanc Explorer 2 over its
-index of that filesystem. The Companion is a research UI that reads
+index of that filesystem. The Web App is a research UI that reads
 upstream metadata tables, writes multi-level annotations, and embeds OHIF
 for row-by-row image review. Users reach both services through an SSH
 tunnel.
@@ -34,7 +34,7 @@ tunnel.
             ┌─────────────────────────────────────────────────────────────────┐
             │                         Host: stroke                            │
             │                                                                 │
- Browser ───┼──► :8043  ssc-companion.service  (FastAPI + React, systemd)     │
+ Browser ───┼──► :8043  ssc-web-app.service  (FastAPI + React, systemd)     │
  (via SSH   │         │                                                       │
   tunnel)   │         │  ┌──────────── service-to-service ─────────────┐      │
             │         ▼  ▼                                              │     │
@@ -62,8 +62,8 @@ User-facing URLs:
 
 | URL | Served by |
 |-----|-----------|
-| `http://localhost:8043/` | Companion landing page |
-| `http://localhost:8043/app/` | Companion React app (annotation workflow) |
+| `http://localhost:8043/` | Web App landing page |
+| `http://localhost:8043/app/` | Web App React app (annotation workflow) |
 | `http://localhost:8042/ui/app/` | Orthanc Explorer 2 (native PACS browser) |
 | `http://localhost:8042/ohif/` | OHIF viewer (standalone) |
 | `http://localhost:8042/dicom-web/` | DICOMweb endpoint (used by OHIF) |
@@ -91,20 +91,20 @@ Orthanc Explorer 2 web apps.
 ### 3.2 OHIF
 
 OHIF is bundled with Orthanc as the `Ohif` plugin (`/ohif` route).
-It consumes DICOMweb (`/dicom-web/`) served by Orthanc. The Companion
+It consumes DICOMweb (`/dicom-web/`) served by Orthanc. The Web App
 does not embed its own OHIF build — it builds a URL to Orthanc's OHIF
 (`/ohif/viewer?StudyInstanceUIDs=...&SeriesInstanceUIDs=...`) and loads
-it in an iframe inside the Companion's preview pane.
+it in an iframe inside the Navigator's preview pane.
 
-### 3.3 Companion (`ssc-companion.service`)
+### 3.3 Web App (`ssc-web-app.service`)
 
 Role: research-oriented browsing + annotation UI that Orthanc Explorer 2
 doesn't cover.
 
-- FastAPI app (`companion/app.py`) served by uvicorn on `:8043`.
-- Serves the pre-built React frontend (`companion/dist/`) as static files.
-- systemd unit `ssc-companion.service`, runs in the `pacs` conda env.
-- Reads `companion/config.py` → repo-root `config.toml` for non-secrets
+- FastAPI app (`web-app/app.py`) served by uvicorn on `:8043`.
+- Serves the pre-built React frontend (`web-app/dist/`) as static files.
+- systemd unit `ssc-web-app.service`, runs in the `pacs` conda env.
+- Reads `web-app/config.py` → repo-root `config.toml` for non-secrets
   (storage mode, paths, session length).
 - Reads secrets from repo-root `.env`.
 - Talks to both `stanford-stroke` (research data + own tables) and Orthanc
@@ -164,7 +164,7 @@ One PostgreSQL server hosts both. Connection params and credentials are in
 │       ├── nifti_path           (legacy mode only)│
 │       └── import_id, import_label                │
 │                                                  │
-│  Companion-owned:                                │
+│  web-app-owned:                                │
 │  ├── users              (bcrypt + is_admin)      │
 │  ├── user_preferences   (JSONB, per-level)       │
 │  ├── annotations        (level='patient'|        │
@@ -238,13 +238,13 @@ See [`../cold_storage/design.md`](../cold_storage/design.md) for why
 
 ## 6. Request flows
 
-### 6.1 User opens a study from the Companion
+### 6.1 User opens a study from the web app
 
 ```
   click row in DataTable
       │
       ▼
-  Companion.jsx → resolveOhifViewerUrl(studyUID)
+  Navigator.jsx → resolveOhifViewerUrl(studyUID)
       │
       ├── GET /api/ohif-link/{studyUID}           → backend
       │     ├── read cache_state.status           (cold_path_cache mode)
@@ -368,17 +368,17 @@ Details: [`image_integration_protocol.md`](image_integration_protocol.md).
 
 ## 8. Auth model
 
-End users authenticate only to Companion. The PostgreSQL `users` table is the
+End users authenticate only to Web App. The PostgreSQL `users` table is the
 single source of truth for end-user identity.
 
 | Role | Credential store | Reaches |
 |---|---|---|
-| End user (any logged-in Companion user) | `users` table (bcrypt) + JWT cookie | Companion API, OHIF and DICOMweb via Companion's reverse proxy |
-| Admin (`users.is_admin = TRUE`) | `users` (Companion login) + entry in `orthanc_users.json` | Everything above, plus direct `:8042/ui/app/` and `:8042/ohif/` as themselves |
-| Service account (`ORTHANC_ADMIN_USER` in `.env`) | `orthanc_users.json` + `.env` | Companion's proxy attaches it on every upstream call; host-local scripts use it for direct Orthanc access |
+| End user (any logged-in Web App user) | `users` table (bcrypt) + JWT cookie | Web App API, OHIF and DICOMweb via Web App's reverse proxy |
+| Admin (`users.is_admin = TRUE`) | `users` (Web App login) + entry in `orthanc_users.json` | Everything above, plus direct `:8042/ui/app/` and `:8042/ohif/` as themselves |
+| Service account (`ORTHANC_ADMIN_USER` in `.env`) | `orthanc_users.json` + `.env` | Web App's proxy attaches it on every upstream call; host-local scripts use it for direct Orthanc access |
 
-Companion proxies `/ohif/*` and `/dicom-web/*` to Orthanc using the service
-account (see `companion/routes/proxy.py`). End users never present credentials
+Web App proxies `/ohif/*` and `/dicom-web/*` to Orthanc using the service
+account (see `web-app/routes/proxy.py`). End users never present credentials
 to Orthanc directly.
 
 `scripts/admin/manage_users.py`:
@@ -394,7 +394,7 @@ to Orthanc directly.
 | Layer | Portable | Site-specific |
 |---|---|---|
 | Orthanc + OHIF + Explorer 2 + custom indexer | ✅ | |
-| Companion app (FastAPI + React) | ✅ | |
+| Web App app (FastAPI + React) | ✅ | |
 | `cold_path_cache` stack (archiver, cleanup, cache_manager) | ✅ | |
 | `scripts/admin/manage_users.py`, `init_orthanc_db.sh` | ✅ | |
 | `stanford-stroke` schema (expects `lvo_clinical_data`, `image_study`, `image_series`) | schema shape portable | column conventions SSC-ish |
@@ -402,7 +402,7 @@ to Orthanc directly.
 | `scripts/orthanc/enrich_orthanc.py` | | ❌ specific to an anonymised-headers deployment |
 
 For a fresh deployment with an equivalent metadata-ingest pipeline, the
-Companion + Orthanc + cold storage stack drops in cleanly.
+Web App + Orthanc + cold storage stack drops in cleanly.
 
 ---
 
@@ -410,8 +410,8 @@ Companion + Orthanc + cold storage stack drops in cleanly.
 
 | If you need to... | Read |
 |---|---|
-| Trace an HTTP route end-to-end | [`architecture.md`](architecture.md) §4, [`companion.md`](companion.md) |
-| Understand the UI table / inline edit / preview | [`companion_frontend.md`](companion_frontend.md) |
+| Trace an HTTP route end-to-end | [`architecture.md`](architecture.md) §4, [`web_app.md`](web_app.md) |
+| Understand the UI table / inline edit / preview | [`web_app_frontend.md`](web_app_frontend.md) |
 | Query or migrate the schema | [`data_stores.md`](data_stores.md) |
 | Deploy fresh on a new host | [`../guides/installation_and_deployment.md`](../guides/installation_and_deployment.md) |
 | Build or patch the custom Orthanc image | [`../../../orthanc-indexer-patched/README.md`](../../../orthanc-indexer-patched/README.md) |

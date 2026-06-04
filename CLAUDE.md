@@ -6,8 +6,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ```
 pacs/
-├── stanford-stroke-pacs/     # Main PACS stack (Orthanc + Companion)
-│   ├── companion/            # FastAPI backend + React frontend (port 8043)
+├── stanford-stroke-pacs/     # Main PACS stack (Orthanc + Web App)
+│   ├── web-app/            # FastAPI backend + React frontend (port 8043)
 │   ├── scripts/              # Organized utility scripts (see subdirectory layout below)
 │   │   ├── admin/            # manage_users.py, remove_label.py/.sh, teardown.sh
 │   │   ├── backup/           # backup_pg_db.sh, check_backup_freshness.sh
@@ -21,7 +21,7 @@ pacs/
 │   ├── image_integration_protocols/  # Legacy SSC metadata ingestion (site-specific)
 │   ├── .env                  # Secrets (DB creds, JWT, Orthanc admin password)
 │   ├── config.toml           # Non-secret config (storage mode, paths, session TTL)
-│   ├── docker-compose.yml    # Orthanc only (Companion is NOT a Compose service)
+│   ├── docker-compose.yml    # Orthanc only (Web App is NOT a Compose service)
 │   ├── orthanc.json          # Orthanc structural config
 │   └── orthanc_users.json    # Service account + admin users only (managed by scripts/admin/manage_users.py — never edit manually)
 ├── ssc-sql-db/               # SQL table definitions and CSV import helpers
@@ -33,14 +33,14 @@ pacs/
 | Service | How it runs | Port |
 |---------|-------------|------|
 | Orthanc (`ssc-orthanc`) | Docker | HTTP `8042`, DICOM `4242` |
-| Companion | Native systemd (`ssc-companion.service`), uvicorn | HTTP `8043` |
+| Web App | Native systemd (`ssc-web-app.service`), uvicorn | HTTP `8043` |
 | PostgreSQL | Host (not in this repo) | from `.env` |
 
 User-facing URLs (via SSH tunnel or localhost):
 - `http://localhost:8042/ui/app/` — Orthanc Explorer 2
 - `http://localhost:8042/ohif/` — OHIF viewer
-- `http://localhost:8043/` — Companion landing page
-- `http://localhost:8043/app/` — Companion app
+- `http://localhost:8043/` — Web App landing page
+- `http://localhost:8043/app/` — Web App app
 
 ## Common commands
 
@@ -53,21 +53,21 @@ docker compose down
 scripts/orthanc/check_status.sh   # status, API, plugins
 ```
 
-### Companion (systemd)
+### Web App (systemd)
 ```bash
-sudo systemctl restart ssc-companion
-sudo systemctl status ssc-companion
-sudo journalctl -u ssc-companion -f
+sudo systemctl restart ssc-web-app
+sudo systemctl status ssc-web-app
+sudo journalctl -u ssc-web-app -f
 ```
 
-### Companion development (hot-reload)
+### Web App development (hot-reload)
 ```bash
 # Terminal 1 — FastAPI backend
 conda activate pacs
-cd companion && uvicorn app:app --port 8043 --reload
+cd web-app && uvicorn app:app --port 8043 --reload
 
 # Terminal 2 — Vite dev server (proxies /api to :8043)
-cd companion && npm run dev
+cd web-app && npm run dev
 # Browse at http://localhost:5173
 ```
 
@@ -77,13 +77,13 @@ make install-dev               # one-time: install Python+Node dev deps + pre-co
 make test                      # run all tests (backend + frontend)
 make test-backend              # pytest only (needs local Postgres)
 make test-frontend             # vitest only
-make lint                      # ruff check on companion/
+make lint                      # ruff check on web-app/
 ```
 
 ### Rebuild frontend
 ```bash
-cd companion && npm run build
-sudo systemctl restart ssc-companion
+cd web-app && npm run build
+sudo systemctl restart ssc-web-app
 ```
 
 ### User management
@@ -112,7 +112,7 @@ python scripts/data_integrity/reconcile.py --json --quiet # JSON only, no stdout
 
 ### Schema migrations (`stanford-stroke` DB only)
 ```bash
-cd companion && conda activate pacs
+cd web-app && conda activate pacs
 alembic current                  # show current revision
 alembic upgrade head             # apply pending revisions (also runs at app startup)
 alembic revision -m "<message>"  # scaffold a new revision
@@ -135,7 +135,7 @@ psql -d stanford-stroke -c "
 
 # Manually warm a study (Python — no CLI yet)
 conda activate pacs
-cd companion
+cd web-app
 python3 -c "from cache_manager import warm_study; print(warm_study('<uid>'))"
 
 # Check cache status
@@ -188,24 +188,24 @@ The stack has two services and two databases.
 
 **Orthanc** indexes the on-disk DICOM tree (read-only bind mount) into `orthanc_db`. It serves Orthanc Explorer 2, OHIF, and DICOMweb. It does not own the DICOM files. The deployment runs a **custom Orthanc image (`ssc-orthanc:patched-indexer`)** with a patched Folder Indexer plugin that honours `RemoveMissingFiles: false` — required for cold_path_cache. Source at `/home/perecanals/pacs/orthanc-indexer-patched/`.
 
-**Companion** is a FastAPI app that reads research metadata from the `stanford-stroke` PostgreSQL database and stores multi-level annotations. It serves a React frontend built with Vite + Tailwind CSS. In production, a single uvicorn process on `:8043` serves both the API and the pre-built `companion/dist/`. Node.js is only needed at build time.
+**Web App** is a FastAPI app that reads research metadata from the `stanford-stroke` PostgreSQL database and stores multi-level annotations. It serves a React frontend built with Vite + Tailwind CSS. In production, a single uvicorn process on `:8043` serves both the API and the pre-built `web-app/dist/`. Node.js is only needed at build time.
 
-**Companion backend modules** (under `companion/`):
+**Web App backend modules** (under `web-app/`):
 - `app.py` — entry point: lifespan (pool + migrations), middleware (sliding JWT, request-ID/metrics), rate limiter, router registration (~230 lines).
 - `db.py` — **single source of truth** for `DB_CONFIG` and the `ThreadedConnectionPool`. All modules import `get_conn` from here. Also exposes `audit_user_var` (contextvar) — when set by middleware, `get_conn()` auto-sets `SET LOCAL app.audit_user` so the annotation audit trigger can attribute changes.
 - `auth.py` — JWT utilities (`create_jwt`, `decode_jwt`, `get_current_user`).
 - `orthanc_client.py` — thin wrappers around Orthanc REST calls.
 - `common.py` — shared SQL builders (`build_label_filter_sql`), annotation helpers, constants.
-- `config.py` — loads `config.toml` (storage, companion settings).
+- `config.py` — loads `config.toml` (storage, web app settings).
 - `cache_manager.py` — cold-storage warm/evict logic.
 - `reconciliation.py` — two-DB reconciliation: compares `image_series` vs Orthanc index + disk path checks.
 - `routes/` — `APIRouter` submodules: `auth`, `preferences`, `studies`, `cold_storage`, `annotations`, `labels`, `admin`, `static`.
 
 **Two-database model:**
 - `orthanc_db` — Orthanc's internal index; do not query or mutate unless doing explicit Orthanc enrichment work.
-- `stanford-stroke` — upstream read-only tables (`lvo_clinical_data`, `image_study`, `image_series`) plus Companion-owned tables (`annotations`, `annotations_history`, `label_definitions`, `users`, `user_preferences`, snapshot tables). Connection from `.env`: `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`.
+- `stanford-stroke` — upstream read-only tables (`lvo_clinical_data`, `image_study`, `image_series`) plus web-app-owned tables (`annotations`, `annotations_history`, `label_definitions`, `users`, `user_preferences`, snapshot tables). Connection from `.env`: `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`.
 
-**Companion-owned tables** are created/migrated by `companion/app.py` on startup (via Alembic).
+**web-app-owned tables** are created/migrated by `web-app/app.py` on startup (via Alembic).
 
 **Annotation model:**
 - Three levels: `patient`, `study`, `series`.
@@ -219,19 +219,19 @@ The stack has two services and two databases.
 - `cold_path_cache` — canonical series are `*.tar.zst` archives under `cold_archive_root`. On warm, archives are extracted back to the **original** `dicom_dir_path` recorded in `image_series`. Orthanc's index (via the patched indexer) keeps pointing at those paths even when files are absent, so OHIF works immediately once files are restored — no re-ingestion. Eviction deletes the extracted files; the index stays intact. **Requires `ssc-orthanc:patched-indexer` image and `"RemoveMissingFiles": false` in `orthanc.json`.** See `documentation/cold_storage/`.
 
 **Auth:**
-- End users live in the PostgreSQL `users` table (bcrypt) — single source of truth. Companion login returns an HttpOnly JWT cookie.
-- Companion reverse-proxies `/ohif/*` and `/dicom-web/*` to Orthanc (`companion/routes/proxy.py`, async `httpx`) and attaches the service-account Basic auth from `.env` on every upstream call. End users never present credentials to Orthanc.
+- End users live in the PostgreSQL `users` table (bcrypt) — single source of truth. Web App login returns an HttpOnly JWT cookie.
+- Web App reverse-proxies `/ohif/*` and `/dicom-web/*` to Orthanc (`web-app/routes/proxy.py`, async `httpx`) and attaches the service-account Basic auth from `.env` on every upstream call. End users never present credentials to Orthanc.
 - `orthanc_users.json` holds only the service account + admin users (`users.is_admin=True`). Admins can reach `:8042/ui/app/` and `:8042/ohif/` directly as themselves.
 - `scripts/admin/manage_users.py` is the single provisioning tool: regular `add`/`passwd`/`remove` touch the DB (and mirror admin entries into the JSON); `rotate-service-account` rewrites `.env`'s `ORTHANC_ADMIN_PASSWORD` and the JSON service-account entry atomically.
 
-## Companion frontend layout
+## Web App frontend layout
 
 ```
-companion/src/
+web-app/src/
   App.jsx                  React Router (/ and /app)
   api/client.js            Fetch wrapper with 401 handling
   context/                 AuthContext
-  pages/                   Landing, Companion (page-level layout + preview state)
+  pages/                   Landing, Web App (page-level layout + preview state)
   utils/
     colors.js              Shared color palette (NOTION_COLORS, hashStr, valueColor)
     table.js               Table constants (LEVEL_CONFIG), formatters, filter helpers
@@ -304,7 +304,7 @@ storage workflow where files legitimately come and go. The fork adds a
 
 **Remaining task:**
 - Once satisfied with production behavior, delete the backup: `rm -rf /DATA2/pacs_imaging_data_loose_backup`
-- Set `eviction_ttl_hours` in `config.toml` to a production value (e.g. 24) and restart companion
+- Set `eviction_ttl_hours` in `config.toml` to a production value (e.g. 24) and restart web app
 
 **Archive format:** files are stored flat at the archive root (matching `scripts/cold_storage/archive_all_series.py` convention — no `DICOM/` subdirectory wrapper).
 
@@ -322,11 +322,11 @@ storage workflow where files legitimately come and go. The fork adds a
 
 All canonical docs are under `stanford-stroke-pacs/documentation/`. Start with `documentation/context.md` for a topic map. Key references:
 
-- `documentation/reference/system_overview.md` — end-to-end depiction of the whole stack (Companion + Orthanc + OHIF + cold storage + the two PostgreSQL DBs)
+- `documentation/reference/system_overview.md` — end-to-end depiction of the whole stack (Web App + Orthanc + OHIF + cold storage + the two PostgreSQL DBs)
 - `documentation/reference/architecture.md` — full topology, data flow, auth model
 - `documentation/reference/data_stores.md` — all table schemas and query patterns
-- `documentation/reference/companion.md` — Companion product rationale and features
-- `documentation/reference/companion_frontend.md` — React component detail
+- `documentation/reference/web_app.md` — Web App product rationale and features
+- `documentation/reference/web_app_frontend.md` — React component detail
 - `documentation/reference/image_integration_protocol.md` — ingesting new data, YAML config, per-mode behavior
 - `documentation/operations/commands.md` — day-2 operations cheat sheet
 - `documentation/operations/reconciliation.md` — two-DB reconciliation (image_series vs Orthanc), mismatch categories, admin endpoint

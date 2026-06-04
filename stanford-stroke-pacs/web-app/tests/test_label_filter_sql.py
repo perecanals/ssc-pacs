@@ -9,10 +9,10 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-# Ensure companion/ is importable.
-_COMPANION_DIR = Path(__file__).resolve().parent.parent
-if str(_COMPANION_DIR) not in sys.path:
-    sys.path.insert(0, str(_COMPANION_DIR))
+# Ensure web-app/ is importable.
+_WEB_APP_DIR = Path(__file__).resolve().parent.parent
+if str(_WEB_APP_DIR) not in sys.path:
+    sys.path.insert(0, str(_WEB_APP_DIR))
 
 from common import VALID_LEVELS, build_label_filter_sql  # noqa: E402
 

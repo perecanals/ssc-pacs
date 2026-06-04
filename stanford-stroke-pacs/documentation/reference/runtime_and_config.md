@@ -9,10 +9,10 @@
 | Piece | How it runs | Ports |
 |-------|-------------|-------|
 | Orthanc | Docker (`ssc-orthanc`), host networking, custom image `ssc-orthanc:patched-indexer` | HTTP `8042`, DICOM `4242` |
-| Companion | Native **systemd** (`ssc-companion.service`), uvicorn | HTTP `8043` |
+| Web App | Native **systemd** (`ssc-web-app.service`), uvicorn | HTTP `8043` |
 | PostgreSQL | Host server (not in this repo) | configured in `.env` |
 
-`docker-compose.yml` defines **Orthanc only**. The Companion is not a Compose service.
+`docker-compose.yml` defines **Orthanc only**. The Web App is not a Compose service.
 
 The Orthanc image is built locally from [`../../../orthanc-indexer-patched/`](../../../orthanc-indexer-patched/) —
 a fork of the upstream Folder Indexer plugin with a `RemoveMissingFiles` config
@@ -31,7 +31,7 @@ secret-bearing files:
   Folder Indexer config
 - **`orthanc_users.json`**: deploy-time `RegisteredUsers` file holding only the
   Orthanc service account plus admin users. End users do not have entries here —
-  they reach Orthanc via Companion's reverse proxy on `:8043`. Managed by
+  they reach Orthanc via Web App's reverse proxy on `:8043`. Managed by
   `scripts/admin/manage_users.py`; not meant for manual editing, and should stay
   out of version control
 - **`.env`**: PostgreSQL connection values passed into the container
@@ -69,24 +69,24 @@ change to the mount is needed. See [`../cold_storage/runbook.md`](../cold_storag
 
 ---
 
-## Companion runtime
+## Web App runtime
 
-The companion runs natively on the host, managed by **`ssc-companion.service`**:
+The web app runs natively on the host, managed by **`ssc-web-app.service`**:
 
 - Python dependencies: typically a conda env named `pacs` or a venv; install from
-  `companion/requirements.txt`
+  `web-app/requirements.txt`
 - `uvicorn app:app --host 0.0.0.0 --port 8043`
-- loads `.env` from the repo root via `python-dotenv` (the parent of `companion/`)
-- serves the React frontend from `companion/dist/` (pre-built by Vite)
+- loads `.env` from the repo root via `python-dotenv` (the parent of `web-app/`)
+- serves the React frontend from `web-app/dist/` (pre-built by Vite)
 - non-secret tuning (storage paths, session length) from repo-root **`config.toml`**
-  via `companion/config.py`
+  via `web-app/config.py`
 
 Frontend build:
 
-- `cd companion && npm install && npm run build`
+- `cd web-app && npm install && npm run build`
 - Node.js and npm are build-time only
 
-Restart after code changes: `sudo systemctl restart ssc-companion`.
+Restart after code changes: `sudo systemctl restart ssc-web-app`.
 
 ---
 
@@ -106,8 +106,8 @@ It:
 
 Runtime split:
 
-- End users authenticate to Companion (`:8043`) and reach OHIF and DICOMweb
-  through Companion's reverse proxy (`/ohif/*`, `/dicom-web/*`). They have no
+- End users authenticate to Web App (`:8043`) and reach OHIF and DICOMweb
+  through Web App's reverse proxy (`/ohif/*`, `/dicom-web/*`). They have no
   direct credentials at Orthanc.
 - Orthanc (`:8042`) is reachable directly only to admins (with their own
   `orthanc_users.json` entry) and to host-local scripts using the service
@@ -124,8 +124,8 @@ Runtime split:
 5. `./init_orthanc_db.sh`
 6. `python scripts/admin/manage_users.py add <user> --admin`
 7. `docker compose up -d` (Orthanc)
-8. `pip install -r companion/requirements.txt`, `cd companion && npm install && npm run build`
-9. Install and enable **`ssc-companion.service`**
+8. `pip install -r web-app/requirements.txt`, `cd web-app && npm install && npm run build`
+9. Install and enable **`ssc-web-app.service`**
 10. Wait for Orthanc indexing; optionally `scripts/orthanc/enrich_orthanc.py` / `scripts/orthanc/label_studies.py`
 11. Validate (see [`../guides/installation_and_deployment.md`](../guides/installation_and_deployment.md))
 
@@ -137,7 +137,7 @@ Runtime split:
 
 | File | Purpose |
 |------|---------|
-| `scripts/admin/manage_users.py` | Manage Companion users in PostgreSQL; mirror admin entries into `orthanc_users.json`; rotate the Orthanc service account |
+| `scripts/admin/manage_users.py` | Manage Web App users in PostgreSQL; mirror admin entries into `orthanc_users.json`; rotate the Orthanc service account |
 | `init_orthanc_db.sh` | Create the Orthanc PostgreSQL role and database; idempotent; sources `.env` |
 | `scripts/orthanc/check_status.sh` | Orthanc-focused status check for container, REST API, and plugin endpoints |
 | `scripts/connectivity/tunnel.sh` | SSH tunnel helper for remote access |
@@ -148,7 +148,7 @@ Runtime split:
 |------|---------|-------------|
 | `scripts/orthanc/enrich_orthanc.py` | Mutates Orthanc's PostgreSQL index so OE2 shows identifiers from source metadata | Optional; skip if DICOM headers are already usable |
 | `scripts/orthanc/label_studies.py` | Seeds Orthanc study labels from `study_type` + `modality` | Portable if columns exist |
-| `companion/labelled_table_sync.py` | Helpers for maintaining per-level labelled mirror tables | Imported by `companion/routes/labels.py` and `scripts/admin/remove_label.py` |
+| `web-app/labelled_table_sync.py` | Helpers for maintaining per-level labelled mirror tables | Imported by `web-app/routes/labels.py` and `scripts/admin/remove_label.py` |
 | `scripts/admin/remove_label.py` | Remove a label definition + annotation rows from DB | |
 | `scripts/admin/bulk_set_label_values.py` | Bulk-set annotation values from a CSV/Excel table; creates the label on demand | Requires `openpyxl` for `.xlsx` |
 | `image_integration_protocols/` | Legacy metadata pipeline | Not part of standard fresh deploy |
@@ -157,7 +157,7 @@ Runtime split:
 
 ## Known caveats
 
-- **`scripts/admin/teardown.sh`** is destructive (stops stack, removes volumes, drops Orthanc DB/role, edits `.env`). It does **not** stop the companion systemd service. It sources `.env` from two levels above the repo root (`../../.env`), **not** the repo-root `.env` used by everything else — use with care.
+- **`scripts/admin/teardown.sh`** is destructive (stops stack, removes volumes, drops Orthanc DB/role, edits `.env`). It does **not** stop the web app systemd service. It sources `.env` from two levels above the repo root (`../../.env`), **not** the repo-root `.env` used by everything else — use with care.
 - **`docker-compose.yml`** uses a relative `env_file: .env` which resolves to `stanford-stroke-pacs/.env`. That file must exist.
 - **Custom Orthanc image** — the stack references `ssc-orthanc:patched-indexer` which is not on a registry. Fresh deployments must build it locally first (`cd orthanc-indexer-patched && docker build -t ssc-orthanc:patched-indexer .`) before `docker compose up`.
 
@@ -184,8 +184,8 @@ stanford-stroke-pacs/
 ├── orthanc_users.json            # Service account + admin users only (managed by manage_users.py)
 ├── docker-compose.yml            # Orthanc only
 ├── orthanc.json                  # Orthanc structural config
-├── ssc-companion.service         # systemd unit for the companion
-├── companion/
+├── ssc-web-app.service         # systemd unit for the web app
+├── web-app/
 │   ├── app.py                    # FastAPI backend
 │   ├── cache_manager.py          # Cold storage warm/eviction
 │   ├── labelled_table_sync.py    # Per-level labelled mirror table helpers
@@ -215,4 +215,4 @@ stanford-stroke-pacs/
 └── requirements.txt
 ```
 
-For a fuller file tree of the Companion frontend, see [`companion.md`](companion.md) §8.
+For a fuller file tree of the web app frontend, see [`web_app.md`](web_app.md) §8.

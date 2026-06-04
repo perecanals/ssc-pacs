@@ -13,7 +13,7 @@
 Four security concerns identified by the audit, in descending order of
 severity:
 
-1. **SQL injection in snapshot rebuild.** `companion/app.py:1699–1722` builds
+1. **SQL injection in snapshot rebuild.** `web-app/app.py:1699–1722` builds
    DDL from user-supplied label names with only space/dash sanitization. A
    label named `value; DROP TABLE annotations;--` would execute.
 2. **Missing secret validation at startup.** `JWT_SECRET` and
@@ -54,7 +54,7 @@ See `AUDIT_FINDINGS.md` §4.3.
 
 ## 3. Findings
 
-- **F-03.1** — `companion/app.py:1699–1722` builds SQL via string
+- **F-03.1** — `web-app/app.py:1699–1722` builds SQL via string
   interpolation using label names:
   ```python
   safe_name = ld["name"].replace(" ", "_").replace("-", "_").lower()
@@ -75,13 +75,13 @@ See `AUDIT_FINDINGS.md` §4.3.
 ## 4. Tasks
 
 - [ ] **T1** — Fix the snapshot-rebuild SQL construction
-  (`companion/app.py:1699–1722`). Use
+  (`web-app/app.py:1699–1722`). Use
   `psycopg2.sql.Identifier(safe_name)` instead of string interpolation;
   validate `ld["name"]` against a regex allowlist (e.g.
   `^[a-zA-Z][a-zA-Z0-9_]{0,62}$`) and reject otherwise. Add a unit test that
   feeds a malicious label name and asserts the query is safely parameterized
   (add to pytest once WS 07 lands; for now add as an inline doctest or a
-  standalone `companion/tests/test_snapshot_sql.py`).
+  standalone `web-app/tests/test_snapshot_sql.py`).
 - [ ] **T2** — Add a `_require_env()` helper at the top of `app.py` that
   raises `RuntimeError("{VAR} must be set")` when a required secret is
   absent or empty. Apply to `JWT_SECRET`, `ORTHANC_ADMIN_USER`,
@@ -94,7 +94,7 @@ See `AUDIT_FINDINGS.md` §4.3.
   the JWT; on every request, reject if `now - iat >
   SESSION_ABSOLUTE_TIMEOUT_HOURS * 3600`. Sliding refresh continues to
   govern the `exp` claim.
-- [ ] **T5** — Add `slowapi` to `companion/requirements.txt` (pin the
+- [ ] **T5** — Add `slowapi` to `web-app/requirements.txt` (pin the
   version). Wire a per-IP limiter: 10 login attempts per 5 minutes,
   returning 429 with `Retry-After`.
 - [ ] **T6** — Write `documentation/operations/secret_rotation.md` (new
@@ -131,10 +131,10 @@ See `AUDIT_FINDINGS.md` §4.3.
 
 ```bash
 # SQL-injection regression
-python stanford-stroke-pacs/companion/tests/test_snapshot_sql.py  # T1
+python stanford-stroke-pacs/web-app/tests/test_snapshot_sql.py  # T1
 
 # Startup secret validation
-( cd stanford-stroke-pacs && JWT_SECRET= uvicorn companion.app:app --port 18043 ) \
+( cd stanford-stroke-pacs && JWT_SECRET= uvicorn web app.app:app --port 18043 ) \
   2>&1 | grep -q 'JWT_SECRET must be set'
 
 # Cookie flag (curl -v shows Set-Cookie header)
@@ -165,14 +165,14 @@ specific dev flow, but prefer keeping it on and fixing the dev flow.
 
 ## 8. Files touched
 
-- `stanford-stroke-pacs/companion/app.py` (edit — T1, T2, T4, T5)
-- `stanford-stroke-pacs/companion/config.py` (edit — T3, T4)
+- `stanford-stroke-pacs/web-app/app.py` (edit — T1, T2, T4, T5)
+- `stanford-stroke-pacs/web-app/config.py` (edit — T3, T4)
 - `stanford-stroke-pacs/config.toml` (edit — add
   `cookie_secure`, `session_absolute_timeout_hours`)
-- `stanford-stroke-pacs/companion/requirements.txt` (edit — add pinned
+- `stanford-stroke-pacs/web-app/requirements.txt` (edit — add pinned
   `slowapi==X.Y.Z`)
-- `stanford-stroke-pacs/companion/tests/test_snapshot_sql.py` (new, or move to
-  `companion/tests/` once WS 07 creates the tree)
+- `stanford-stroke-pacs/web-app/tests/test_snapshot_sql.py` (new, or move to
+  `web-app/tests/` once WS 07 creates the tree)
 - `stanford-stroke-pacs/documentation/operations/secret_rotation.md` (new)
 - `stanford-stroke-pacs/documentation/context.md` (edit — add link)
 
@@ -198,5 +198,5 @@ specific dev flow, but prefer keeping it on and fixing the dev flow.
   aware it breaks "keep me logged in forever" UX. Align with the user if
   there's a product preference.
 - Plaintext Orthanc users is a known limitation of the Orthanc image's
-  built-in auth. A longer-term fix is to put Orthanc behind the Companion's
+  built-in auth. A longer-term fix is to put Orthanc behind the web app's
   auth via a reverse proxy, which is a separate workstream not scoped here.

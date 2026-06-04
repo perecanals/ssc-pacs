@@ -12,7 +12,7 @@ make the fixes observable — but not blocking.
 ## 1. Context
 
 The cold-storage warm/evict subsystem
-(`stanford-stroke-pacs/companion/cache_manager.py`) is clever but has
+(`stanford-stroke-pacs/web-app/cache_manager.py`) is clever but has
 several failure modes that can corrupt operational state:
 
 - A process crash between "atomic rename of `.warming` → final" and
@@ -55,7 +55,7 @@ See `AUDIT_FINDINGS.md` §4.4 and §1.2.
 
 ## 3. Findings
 
-- **F-05.1** — `warm_study()` in `companion/cache_manager.py:134–320`
+- **F-05.1** — `warm_study()` in `web-app/cache_manager.py:134–320`
   sets `status='warming'` at start; if the process dies between line 240
   (atomic rename) and the `finish()` call at 147–150, the row stays
   `warming` forever. Subsequent warm attempts hit the hot-check at 163–182
@@ -143,7 +143,7 @@ See `AUDIT_FINDINGS.md` §4.4 and §1.2.
 ```bash
 # Warming timeout
 python3 -c "
-from companion.cache_manager import warm_study
+from web app.cache_manager import warm_study
 # inject a fault via monkeypatch — see scripts/test_warming_timeout.py
 "
 
@@ -159,7 +159,7 @@ python3 stanford-stroke-pacs/scripts/cold_storage/cold_storage_health.py
 echo $?
 
 # Structured logs (journalctl)
-sudo journalctl -u ssc-companion -n 100 | grep study_uid
+sudo journalctl -u ssc-web-app -n 100 | grep study_uid
 ```
 
 ---
@@ -173,14 +173,14 @@ stay (harmless if unused) or be dropped via an Alembic downgrade.
 
 ## 8. Files touched
 
-- `stanford-stroke-pacs/companion/cache_manager.py` (edit — T3, T4, T5, T6,
+- `stanford-stroke-pacs/web-app/cache_manager.py` (edit — T3, T4, T5, T6,
   T7)
-- `stanford-stroke-pacs/companion/app.py` (edit — T6 — update eviction
+- `stanford-stroke-pacs/web-app/app.py` (edit — T6 — update eviction
   loop logger)
-- `stanford-stroke-pacs/companion/config.py` (edit — add
+- `stanford-stroke-pacs/web-app/config.py` (edit — add
   `warming_timeout_minutes`)
 - `stanford-stroke-pacs/config.toml` (edit — add the same)
-- `stanford-stroke-pacs/companion/alembic/versions/000N_warming_started_at.py`
+- `stanford-stroke-pacs/web-app/alembic/versions/000N_warming_started_at.py`
   (new, if WS 04 landed) OR inline in `INIT_SQL`/`MIGRATE_SQL`
 - `stanford-stroke-pacs/scripts/cold_storage/cold_storage_health.py` (new)
 - `stanford-stroke-pacs/systemd/cold-storage-health.service` (new)

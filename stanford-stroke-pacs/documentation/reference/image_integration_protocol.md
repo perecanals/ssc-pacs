@@ -77,7 +77,7 @@ the batch, so you can later find everything that came in together.
 
 Storage paths and storage mode are read from `config.toml` by both
 `ImageIntegrationProtocol` and the `execute_image_integration_protocol.py`
-driver (via `companion/config.py`). This eliminates the previous hardcoded
+driver (via `web-app/config.py`). This eliminates the previous hardcoded
 `/DATA2/pacs_imaging_data` and the YAML's separate `cold_archive_root`. You
 no longer need to keep multiple files in sync; the only path you typically
 edit is `[storage]` in `config.toml`.
@@ -256,7 +256,7 @@ corruption that the fast path would miss.
 ## Configuration coupling with the rest of the stack
 
 The integration protocol reads `[storage].legacy_dicom_root`, `[storage].cold_archive_root`,
-and `[storage].mode` from `config.toml` via `companion/config.py`. There are
+and `[storage].mode` from `config.toml` via `web-app/config.py`. There are
 no hardcoded paths to keep in sync.
 
 **Checklist before running integration in `cold_path_cache` mode:**

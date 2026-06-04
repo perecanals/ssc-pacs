@@ -32,7 +32,7 @@ See `AUDIT_FINDINGS.md` §3.7, §3.9.
 ## 2. Scope
 
 **In scope:**
-- Parameterize `ssc-companion.service`.
+- Parameterize `ssc-web-app.service`.
 - Move hardcoded IP/user out of `scripts/connectivity/tunnel.sh` into `.env`.
 - Make `init_orthanc_db.sh` relative-path-safe.
 - Audit and eliminate all `/home/perecanals/` references outside
@@ -42,7 +42,7 @@ See `AUDIT_FINDINGS.md` §3.7, §3.9.
   cut-paste-portable.
 
 **Out of scope:**
-- Containerizing the Companion (replacing systemd with a container) —
+- Containerizing the web app (replacing systemd with a container) —
   separate architectural change.
 - Multi-host deployment (keeping a single-host design).
 - Moving the conda env to a virtualenv or uv env — separate choice.
@@ -51,7 +51,7 @@ See `AUDIT_FINDINGS.md` §3.7, §3.9.
 
 ## 3. Findings
 
-- **F-08.1** — `ssc-companion.service` hardcodes `User=perecanals`,
+- **F-08.1** — `ssc-web-app.service` hardcodes `User=perecanals`,
   `WorkingDirectory=/home/perecanals/...`, and the conda env path in
   `ExecStart`.
 - **F-08.2** — `stanford-stroke-pacs/scripts/connectivity/tunnel.sh:1` hardcodes
@@ -76,11 +76,11 @@ See `AUDIT_FINDINGS.md` §3.7, §3.9.
   ```
   Triage each occurrence: move to `.env`/`config.toml`, or leave as a
   locally-overridable default.
-- [ ] **T2** — Parameterize `ssc-companion.service`:
+- [ ] **T2** — Parameterize `ssc-web-app.service`:
   ```ini
   [Service]
   User=${SSC_USER}
-  WorkingDirectory=${SSC_REPO_ROOT}/stanford-stroke-pacs/companion
+  WorkingDirectory=${SSC_REPO_ROOT}/stanford-stroke-pacs/web-app
   EnvironmentFile=${SSC_REPO_ROOT}/stanford-stroke-pacs/.env
   ExecStart=${SSC_CONDA_PREFIX}/envs/pacs/bin/uvicorn app:app --port 8043
   ```
@@ -90,7 +90,7 @@ See `AUDIT_FINDINGS.md` §3.7, §3.9.
     `stanford-stroke-pacs/scripts/install_systemd_unit.sh` (new) reads
     `.env` and renders the unit file into `/etc/systemd/system/` via
     `envsubst`.
-  - Alternative: ship a hand-parameterized `ssc-companion.service.in`
+  - Alternative: ship a hand-parameterized `ssc-web-app.service.in`
     and a short generator.
 - [ ] **T3** — Add new `.env` variables: `SSC_USER`, `SSC_REPO_ROOT`,
   `SSC_CONDA_PREFIX`. Update `.env.example` with descriptions.
@@ -178,7 +178,7 @@ service file if reverting.
 
 ## 8. Files touched
 
-- `stanford-stroke-pacs/ssc-companion.service` (edit — or rename to
+- `stanford-stroke-pacs/ssc-web-app.service` (edit — or rename to
   `.service.in` and add a generator)
 - `stanford-stroke-pacs/scripts/install_systemd_unit.sh` (new)
 - `stanford-stroke-pacs/scripts/connectivity/tunnel.sh` (edit)
