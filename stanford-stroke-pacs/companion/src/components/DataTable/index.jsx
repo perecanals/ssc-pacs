@@ -392,7 +392,7 @@ function DataTableInner({
       <button onClick={() => {
         if (!currentUser) { alert("Please log in to create label types"); return; }
         setShowDefModal(true);
-      }} className="pill-btn">+ New Label Type</button>
+      }} className="pill-btn">+ New label</button>
     </>
   );
 
