@@ -29,6 +29,7 @@ EXPECTED_ROUTES = {
     ("GET", "/api/patients"),
     ("GET", "/api/patients/{patient_id}/studies"),
     ("GET", "/api/study-import-labels"),
+    ("GET", "/api/datasets"),
     ("GET", "/api/studies"),
     ("GET", "/api/studies/{studyinstanceuid}/series"),
     ("GET", "/api/series"),

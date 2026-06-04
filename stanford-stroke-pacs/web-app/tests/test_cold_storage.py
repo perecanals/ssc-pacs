@@ -65,6 +65,10 @@ def cold_env(db_conn, seeded_db):
                 (patient_id,),
             )
             cur.execute(
+                "INSERT INTO patient (patient_id) VALUES (%s) ON CONFLICT DO NOTHING",
+                (patient_id,),
+            )
+            cur.execute(
                 "INSERT INTO image_study (patient_id, studyinstanceuid, study_type, study_path) "
                 "VALUES (%s, %s, 'CTA', %s) ON CONFLICT DO NOTHING",
                 (patient_id, study_uid, str(legacy_root / patient_id / study_uid)),
@@ -101,6 +105,7 @@ def cold_env(db_conn, seeded_db):
             cur.execute("DELETE FROM image_series WHERE seriesinstanceuid = %s", (series_uid,))
             cur.execute("DELETE FROM image_study WHERE studyinstanceuid = %s", (study_uid,))
             cur.execute("DELETE FROM lvo_clinical_data WHERE study_id = %s", (patient_id,))
+            cur.execute("DELETE FROM patient WHERE patient_id = %s", (patient_id,))
         conn.commit()
     finally:
         conn.close()

@@ -54,6 +54,13 @@ def list_patients(
             "patient included if any study/series has this label."
         ),
     ),
+    dataset: str | None = Query(
+        None,
+        description=(
+            "Exact match on a cohort tag in patient.dataset (text[]); "
+            "patient included if this tag is a member of its dataset array."
+        ),
+    ),
     label: str | None = Query(None),
     label_level: str | None = Query(None),
     label_filters: str | None = Query(None),
@@ -68,15 +75,25 @@ def list_patients(
             conditions = []
             params: list = []
 
-            conditions.append(
-                f"p.{PATIENT_ID_COL} IN (SELECT DISTINCT patient_id FROM image_study)"
+            # Patient level is sourced from the `patient` registry (one row per
+            # patient, comprehensive). lvo_clinical_data is joined only to prefer
+            # the clinical stroke_date when the patient is clinically matched;
+            # otherwise the imaging-derived patient.stroke_date is shown.
+            from_clause = (
+                f"FROM patient p "
+                f"LEFT JOIN lvo_clinical_data c ON c.study_id = p.{PATIENT_ID_COL}"
             )
+            # lvo_clinical_data.stroke_date is TEXT (free-form clinical date);
+            # patient.stroke_date is a timestamp. Coalesce in text space — prefer
+            # the clinical string, fall back to the imaging date as YYYY-MM-DD —
+            # preserving the prior text contract and lexicographic date sort.
+            stroke_date_expr = "COALESCE(c.stroke_date, p.stroke_date::date::text)"
 
             if patient_id:
                 conditions.append(f"p.{PATIENT_ID_COL}::text LIKE %s")
                 params.append(f"%{patient_id}%")
             if stroke_date:
-                conditions.append("p.stroke_date::text LIKE %s")
+                conditions.append(f"{stroke_date_expr}::text LIKE %s")
                 params.append(f"%{stroke_date}%")
             sil = (study_import_label or "").strip()
             if sil:
@@ -88,6 +105,10 @@ def list_patients(
                 )
                 params.append(sil)
                 params.append(sil)
+            ds = (dataset or "").strip()
+            if ds:
+                conditions.append("%s = ANY(p.dataset)")
+                params.append(ds)
             if label:
                 conditions.append(
                     build_label_filter_sql("patient", label_level, f"p.{PATIENT_ID_COL}")
@@ -98,16 +119,17 @@ def list_patients(
                 "patient", f"p.{PATIENT_ID_COL}", conditions, params,
             )
 
-            where = "WHERE " + " AND ".join(conditions)
+            where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
             offset = (page - 1) * per_page
 
             cur.execute(
-                f"SELECT COUNT(*) FROM lvo_clinical_data p {where}", params
+                f"SELECT COUNT(*) {from_clause} {where}", params
             )
             total = cur.fetchone()["count"]
 
-            col_map = {"patient_id": PATIENT_ID_COL, "stroke_date": "stroke_date"}
-            col = col_map.get(sort_by, PATIENT_ID_COL)
+            order_expr = (
+                stroke_date_expr if sort_by == "stroke_date" else f"p.{PATIENT_ID_COL}"
+            )
             direction = "DESC" if sort_dir.lower() == "desc" else "ASC"
 
             study_labels_agg = (
@@ -126,9 +148,11 @@ def list_patients(
                 "), '') AS study_import_labels"
             )
             cur.execute(
-                f"SELECT p.{PATIENT_ID_COL} AS patient_id, p.stroke_date, {study_labels_agg} "
-                f"FROM lvo_clinical_data p {where} "
-                f"ORDER BY p.{col} {direction} NULLS LAST, p.{PATIENT_ID_COL} ASC "
+                f"SELECT p.{PATIENT_ID_COL} AS patient_id, "
+                f"{stroke_date_expr} AS stroke_date, {study_labels_agg}, "
+                f"array_to_string(p.dataset, ', ') AS dataset "
+                f"{from_clause} {where} "
+                f"ORDER BY {order_expr} {direction} NULLS LAST, p.{PATIENT_ID_COL} ASC "
                 f"LIMIT %s OFFSET %s",
                 params + [per_page, offset],
             )
@@ -206,6 +230,21 @@ def list_study_import_labels():
                 "  SELECT DISTINCT TRIM(import_label) AS import_label FROM image_series "
                 "  WHERE import_label IS NOT NULL AND TRIM(import_label) <> '' "
                 ") u ORDER BY import_label",
+            )
+            return [r[0] for r in cur.fetchall()]
+    finally:
+        conn.close()
+
+
+@router.get("/api/datasets")
+def list_datasets():
+    """Distinct cohort tags in `patient.dataset` (text[]) for patient-level filter UI."""
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT DISTINCT unnest(dataset) AS dataset FROM patient "
+                "WHERE dataset <> '{}' ORDER BY 1"
             )
             return [r[0] for r in cur.fetchall()]
     finally:

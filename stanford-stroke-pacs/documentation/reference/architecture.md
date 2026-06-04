@@ -22,6 +22,7 @@ flowchart TD
     Orthanc8042 --> DicomTree[DicomTreeReadOnly]
     WebApp8043 --> SscDb[stanford-stroke DB]
     WebApp8043 --> Orthanc8042
+    SscDb --> Patient[patient]
     SscDb --> LvoClinicalData[lvo_clinical_data]
     SscDb --> ImageSeries[image_series]
     SscDb --> ImageStudy[image_study]
@@ -70,8 +71,9 @@ annotation workflows that Orthanc Explorer 2 does not support.
 
 It is responsible for:
 
-- browsing patients (from `lvo_clinical_data`), studies (from `image_study`),
-  and series (from `image_series`, JOINing `image_study` for `study_type`)
+- browsing patients (from the `patient` registry, LEFT JOINing
+  `lvo_clinical_data` for the clinical `stroke_date`), studies (from
+  `image_study`), and series (from `image_series`, JOINing `image_study` for `study_type`)
 - storing multi-level annotations (patient, study, series) in `annotations`
 - storing level-aware label definitions in `label_definitions`
 - cross-level label filtering (e.g. filtering patients by a series-level label)
@@ -121,8 +123,8 @@ The second logical database is the research/application database, currently
 
 It contains:
 
-- the existing read-only source tables `lvo_clinical_data`, `image_series`,
-  and `image_study`
+- the existing read-only source tables `patient`, `lvo_clinical_data`,
+  `image_series`, and `image_study`
 - web-app-owned tables:
   - `annotations` — multi-level (patient/study/series) with shared partial
     unique indexes per level (one value per entity+label; `created_by`
@@ -178,8 +180,9 @@ Legacy loose files under `/DATA2/pacs_imaging_data` remain available when `mode 
 
 ### 4.2 Metadata and annotations
 
-1. `lvo_clinical_data`, `image_series`, and `image_study` provide the metadata
-   that drives the web app app.
+1. `patient`, `lvo_clinical_data`, `image_series`, and `image_study` provide the
+   metadata that drives the web app app (patient browsing from `patient`,
+   `lvo_clinical_data` joined for the clinical `stroke_date`).
 2. The web app reads these tables to build patient, study, and series browsers
    with filtering, sorting, and pagination. Series listings JOIN `image_study`
    for `study_type`.
@@ -331,13 +334,14 @@ If a new server already has:
 
 - a DICOM tree
 - a PostgreSQL server
-- metadata tables equivalent to `lvo_clinical_data`, `image_series`, and
-  `image_study`
+- metadata tables equivalent to `patient`, `image_series`, `image_study`, and
+  (optionally) `lvo_clinical_data`
 
 then the PACS stack can usually be redeployed without using
-`image_integration_protocols/`. The patient-level table
-(`lvo_clinical_data`) is optional — if absent, the patient tab in the
-web app will have no data, but study and series browsing will work normally.
+`image_integration_protocols/`. The patient tab is sourced from the `patient`
+registry; `lvo_clinical_data` is an optional clinical side-table — if absent,
+the patient tab still works and shows the imaging-derived `stroke_date` instead
+of the clinical one.
 
 If the new deployment does not already have equivalent metadata tables, that
 metadata-ingestion problem must be solved separately from the PACS deployment.

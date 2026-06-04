@@ -308,7 +308,9 @@ def _rebuild_snapshots(conn):
     counts = {}
 
     levels = [
-        ("patient", "lvo_clinical_data", "patient_id",
+        # Snapshot uses the imaging-derived patient.stroke_date directly (not the
+        # tab's COALESCE with lvo_clinical_data) — export-oriented, divergence ok.
+        ("patient", "patient", "patient_id",
          psql.SQL("{pid} AS patient_id, stroke_date").format(
              pid=psql.Identifier(PATIENT_ID_COL)
          )),

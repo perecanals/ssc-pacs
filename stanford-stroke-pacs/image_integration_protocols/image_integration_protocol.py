@@ -47,6 +47,7 @@ class ImageIntegrationProtocol:
         delete_originals_after_verification=False,
         import_id=None,
         import_label=None,
+        dataset=None,
         cold_archive_root=None,
     ):
         self.case_dir = case_dir
@@ -55,6 +56,9 @@ class ImageIntegrationProtocol:
         self.delete_originals_after_verification = delete_originals_after_verification
         self.import_id = import_id
         self.import_label = import_label
+        # Dataset/cohort tag for this batch (e.g. 'crisp2'). Lives only on the
+        # `patient` table (union-accumulated), not on image_study/image_series.
+        self.dataset = dataset
         self.cold_archive_root = cold_archive_root
 
         self.case_series_table = None
@@ -1209,7 +1213,7 @@ class ImageIntegrationProtocol:
             return [ImageIntegrationProtocol._normalize_for_sql(item) for item in value]
         return value
 
-    def _upsert_dataframe(self, table_name, key_column, dataframe):
+    def _upsert_dataframe(self, table_name, key_column, dataframe, connection):
         if dataframe.empty:
             return
 
@@ -1230,13 +1234,68 @@ class ImageIntegrationProtocol:
             index_elements=[key_column],
             set_=update_columns,
         )
+        connection.execute(upsert_stmt)
 
-        with self.postgres_engine.begin() as connection:
-            connection.execute(upsert_stmt)
+    def _upsert_patient(self, connection):
+        """Register/refresh one `patient` row per patient_id in this batch.
+
+        Must run AFTER the image_study upsert so MIN(acquisitiondatetime) sees
+        the new studies. stroke_date is recomputed from the DB (all of the
+        patient's studies, not just this batch). import_id/import_label keep
+        ORIGIN (first-seen) semantics — preserved on conflict; dataset is the
+        deduped union across batches; updated_at advances on every touch.
+
+        Patient ids come from case_series_table, not case_study_table: in pure
+        append-only runs (new series under an existing study) the study row is
+        dropped from case_study_table, but the patient still needs its dataset
+        unioned and stroke_date refreshed. case_series_table always carries
+        every patient touched this run.
+        """
+        if self.case_series_table is None or self.case_series_table.empty:
+            return
+        patient_ids = sorted(
+            {str(pid) for pid in self.case_series_table["patient_id"].dropna().unique()}
+        )
+        if not patient_ids:
+            return
+
+        dataset_arr = [self.dataset] if self.dataset else []
+        connection.execute(
+            text(
+                "INSERT INTO patient "
+                "(patient_id, stroke_date, import_id, import_label, dataset, "
+                " created_at, updated_at) "
+                "SELECT s.patient_id, MIN(s.acquisitiondatetime), "
+                "       :import_id, :import_label, :dataset, now(), now() "
+                "FROM image_study s "
+                "WHERE s.patient_id = ANY(:patient_ids) "
+                "GROUP BY s.patient_id "
+                "ON CONFLICT (patient_id) DO UPDATE SET "
+                "  stroke_date = EXCLUDED.stroke_date, "
+                "  dataset = ARRAY(SELECT DISTINCT unnest("
+                "      patient.dataset || EXCLUDED.dataset) ORDER BY 1), "
+                "  updated_at = now()"
+            ),
+            {
+                "import_id": self.import_id,
+                "import_label": self.import_label,
+                "dataset": dataset_arr,
+                "patient_ids": patient_ids,
+            },
+        )
 
     def update_postgres_tables(self):
-        self._upsert_dataframe("image_series", "seriesinstanceuid", self.case_series_table)
-        self._upsert_dataframe("image_study", "studyinstanceuid", self.case_study_table)
+        # One transaction for all three tables: image_study must be committed
+        # together with the patient registry, else a crash between them leaves
+        # studies with no patient row (the bug this table fixes).
+        with self.postgres_engine.begin() as connection:
+            self._upsert_dataframe(
+                "image_series", "seriesinstanceuid", self.case_series_table, connection
+            )
+            self._upsert_dataframe(
+                "image_study", "studyinstanceuid", self.case_study_table, connection
+            )
+            self._upsert_patient(connection)
 
     def _require_dicom_archive_path_column(self):
         """Add dicom_archive_path column to image_series if it does not exist."""

@@ -249,7 +249,7 @@ The web app can rebuild three snapshot tables on demand via
 that joins the source table with pivoted annotation columns for that level's
 label definitions:
 
-- `snapshot_patients` — from `lvo_clinical_data` + patient-level annotations
+- `snapshot_patients` — from `patient` + patient-level annotations
 - `snapshot_studies` — from `image_study` + study-level annotations
 - `snapshot_seriess` — from `image_series` + series-level annotations
 

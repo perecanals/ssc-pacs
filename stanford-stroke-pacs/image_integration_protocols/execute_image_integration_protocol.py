@@ -89,6 +89,7 @@ def load_config(config_path):
         "anonymize_files": False,
         "delete_originals_after_verification": False,
         "import_label": None,
+        "dataset": None,
         "cold_archive_root": config_toml_archive_root,
     }
     merged_config = {**defaults, **config}
@@ -132,6 +133,7 @@ def execute_image_integration_protocol(
     delete_originals_after_verification=False,
     import_id=None,
     import_label=None,
+    dataset=None,
     cold_archive_root=None,
 ):
     # Create an instance of the ImageIntegrationProtocol class
@@ -142,6 +144,7 @@ def execute_image_integration_protocol(
         delete_originals_after_verification=delete_originals_after_verification,
         import_id=import_id,
         import_label=import_label,
+        dataset=dataset,
         cold_archive_root=cold_archive_root,
     )
     # Execute the protocol
@@ -212,6 +215,7 @@ if __name__ == "__main__":
     logger.info(f"Env path: {env_path}")
     logger.info(f"Run import_id: {run_import_id}")
     logger.info(f"Import label: {config['import_label']}")
+    logger.info(f"Dataset: {config['dataset']}")
     logger.info(f"Anonymize files: {config['anonymize_files']}")
     logger.info(
         "Delete originals after verification: "
@@ -258,6 +262,7 @@ if __name__ == "__main__":
                         delete_originals_after_verification=config["delete_originals_after_verification"],
                         import_id=run_import_id,
                         import_label=config["import_label"],
+                        dataset=config["dataset"],
                         cold_archive_root=config.get("cold_archive_root"),
                     )
                     synced_study_ids.update(result["studyinstanceuids"])

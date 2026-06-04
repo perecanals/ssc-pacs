@@ -35,6 +35,7 @@ function groupLabelsByInstrument(labels) {
 export default function Sidebar({ level, filters, onFilterChange, open, onToggle }) {
   const [labelSummary, setLabelSummary] = useState([]);
   const [studyImportLabels, setStudyImportLabels] = useState([]);
+  const [datasets, setDatasets] = useState([]);
 
   const fetchLabels = async () => {
     try {
@@ -52,6 +53,7 @@ export default function Sidebar({ level, filters, onFilterChange, open, onToggle
   useEffect(() => {
     if (level !== "patient") {
       setStudyImportLabels([]);
+      setDatasets([]);
       return;
     }
     let cancelled = false;
@@ -61,6 +63,13 @@ export default function Sidebar({ level, filters, onFilterChange, open, onToggle
       })
       .catch(() => {
         if (!cancelled) setStudyImportLabels([]);
+      });
+    apiGet("/api/datasets")
+      .then((data) => {
+        if (!cancelled && Array.isArray(data)) setDatasets(data);
+      })
+      .catch(() => {
+        if (!cancelled) setDatasets([]);
       });
     return () => { cancelled = true; };
   }, [level]);
@@ -116,6 +125,30 @@ export default function Sidebar({ level, filters, onFilterChange, open, onToggle
       <aside className={`sidebar${open ? "" : " sidebar--closed"}`} aria-hidden={!open}>
         <div className="sidebar__inner">
           <h1 className="sidebar__group-title">Quick Filters</h1>
+
+          {/* Dataset (patient view only) */}
+          {level === "patient" && (
+            <div className="sidebar__section">
+              <h2 className="sidebar__section-title">Dataset</h2>
+              <div className="sidebar__filter-group">
+                <select
+                  id="sidebar-dataset"
+                  value={filters.dataset || ""}
+                  onChange={(e) =>
+                    onFilterChange({ dataset: e.target.value || null })
+                  }
+                  className="sidebar__modality-select"
+                >
+                  <option value="">All datasets</option>
+                  {datasets.map((ds) => (
+                    <option key={ds} value={ds}>
+                      {ds}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+          )}
 
           {/* Study Import Label (patient view only) */}
           {level === "patient" && (

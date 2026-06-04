@@ -98,7 +98,8 @@ At runtime:
 
 1. the browser loads the Navigator UI from FastAPI
 2. the frontend requests metadata and annotations from Web App API endpoints
-3. the backend reads source rows from `lvo_clinical_data`, `image_study`, and
+3. the backend reads source rows from `patient` (patient tab, joined to
+   `lvo_clinical_data` for the clinical `stroke_date`), `image_study`, and
    `image_series`
 4. the backend reads/writes web-app-owned tables such as `annotations`,
    `label_definitions`, and `users`

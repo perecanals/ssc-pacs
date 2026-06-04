@@ -77,6 +77,7 @@ UPSTREAM_TABLES = frozenset({
     "image_series",
     "image_study",
     "lvo_clinical_data",
+    "patient",
 })
 
 # Tables created/maintained by labelled_table_sync.py at runtime based on
@@ -85,7 +86,7 @@ UPSTREAM_TABLES = frozenset({
 LABELLED_TABLES = frozenset({
     "image_series_labelled",
     "image_study_labelled",
-    "lvo_clinical_data_labelled",
+    "patient_labelled",
     "snapshot_patients",
     "snapshot_studys",
     "snapshot_seriess",

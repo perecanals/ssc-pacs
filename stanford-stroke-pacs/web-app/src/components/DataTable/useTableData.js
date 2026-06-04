@@ -46,6 +46,9 @@ export default function useTableData({ level, config, filters, sortBy, sortDir, 
     if (level === "patient" && filters.studyImportLabel?.trim()) {
       params.set("study_import_label", filters.studyImportLabel.trim());
     }
+    if (level === "patient" && filters.dataset?.trim()) {
+      params.set("dataset", filters.dataset.trim());
+    }
 
     const labelFilters = [];
     for (const [key, val] of Object.entries(columnFilters)) {

@@ -31,8 +31,19 @@ This is where the web app reads metadata and stores annotations and preferences.
 
 These tables drive browsing in the Navigator UI:
 
-- **`lvo_clinical_data`** (patient-level clinical table)
-  - used fields include: `study_id` (mapped to `patient_id` in the web app API), `stroke_date`
+- **`patient`** (patient-level registry — the patient-tab spine)
+  - one row per patient in the database, populated equivalently to
+    `image_study`/`image_series` by the ingest pipeline (idempotent upsert) and
+    backfillable from imaging. Comprehensive: a patient appears here whether or
+    not a clinical row exists in `lvo_clinical_data`.
+  - fields: `patient_id` (PK), `stroke_date` (imaging-derived =
+    `MIN(image_study.acquisitiondatetime)`), `import_id`/`import_label` (origin
+    batch, preserved on conflict), `dataset` (`text[]`, union-accumulated),
+    `created_at`, `updated_at`
+- **`lvo_clinical_data`** (clinical side-table — *not* the patient spine)
+  - clinical variables (demographics, outcomes, etc.). The patient tab joins it
+    only to prefer its `stroke_date` when a patient is clinically matched.
+  - key fields: `study_id` (the patient id; joined as `c.study_id = patient.patient_id`), `stroke_date` (TEXT)
 - **`image_study`** (study-level imaging metadata)
   - typical fields: `patient_id`, `studyinstanceuid`, `studydescription`, `study_type`, `study_path`, `acquisitiondatetime`, `import_id`, `import_label`
 - **`image_series`** (series-level imaging metadata)
@@ -196,7 +207,7 @@ Populated by `annotations_audit_trg` trigger (PL/pgSQL). See [`../operations/ann
 
 ## How the web app queries the DB
 
-- **Patients**: listed from `lvo_clinical_data` (patient tab).
+- **Patients**: listed from the `patient` registry, LEFT JOINing `lvo_clinical_data` on `c.study_id = p.patient_id` to display `COALESCE(c.stroke_date, p.stroke_date::date::text)` — the clinical date when matched, the imaging-derived date otherwise.
 - **Studies**: listed from `image_study`, and modality is aggregated from `image_series` by `studyinstanceuid`.
 - **Series**: listed from `image_series` and LEFT JOINs `image_study` to include `study_type`.
 - **Annotations** are joined/attached per row and **inherit downward** (patient → study → series) in API responses.

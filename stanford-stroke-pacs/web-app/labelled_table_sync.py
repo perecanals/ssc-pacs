@@ -20,9 +20,9 @@ class LevelConfig:
 
 LEVEL_CONFIGS = {
     "patient": LevelConfig(
-        source_table="lvo_clinical_data",
-        labelled_table="lvo_clinical_data_labelled",
-        source_key="study_id",
+        source_table="patient",
+        labelled_table="patient_labelled",
+        source_key="patient_id",
         annotation_key="patient_id",
     ),
     "study": LevelConfig(

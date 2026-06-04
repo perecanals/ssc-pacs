@@ -20,7 +20,7 @@ Takes a directory of per-patient source DICOMs, and for each case:
 4. Copies DICOMs to the canonical layout under `legacy_dicom_root`
 5. Optionally compresses each series to a `*.tar.zst` archive under `cold_archive_root`
 6. Converts selected series to NIfTI alongside the DICOM tree
-7. Upserts `image_study` and `image_series` rows
+7. Upserts `image_study`, `image_series`, and `patient` rows (one transaction)
 8. Optionally deletes the source directory after verifying the copy
 
 All of this is wrapped in a per-case try/except so a failure in one case does
@@ -56,6 +56,7 @@ overwrite_if_exists: false
 anonymize_files: false
 delete_originals_after_verification: false
 import_label: "2026-04-batch"               # optional, tags all rows in this run
+dataset: "crisp2"                           # optional, cohort tag recorded on the patient table
 ```
 
 | Key | Purpose |
@@ -67,6 +68,7 @@ import_label: "2026-04-batch"               # optional, tags all rows in this ru
 | `anonymize_files` | Strip identifying DICOM headers during copy |
 | `delete_originals_after_verification` | After verifying every file copied successfully, remove the source case directory |
 | `import_label` | Free-text tag written to `import_label` column in both tables — useful for filtering a batch later |
+| `dataset` | Optional cohort/dataset tag. Recorded only on the `patient` table (`dataset text[]`, union-accumulated across batches); not written to `image_study`/`image_series`. |
 | `cold_archive_root` | **Optional override.** Defaults to `[storage].cold_archive_root` from `config.toml` when `mode = "cold_path_cache"`, or `null` in legacy mode. The script warns if you override and the override differs from `config.toml`. |
 
 `execute_image_integration_protocol.py` picks a single monotonic `import_id`
@@ -146,7 +148,7 @@ the tar.
 | 9 | `create_nifti_files` | In `legacy` mode: runs DICOM→NIFTI conversion for select series and writes `{seriesUID}/NIFTI/image.nii.gz`. In `cold_path_cache` mode: **skipped.** NIFTIs would accumulate orphaned once their sibling loose DICOMs are cleaned up. Generate on demand via `scripts/dicom/dicom_to_nifti.py` (see [`../recipes/dicom_processing.md`](../recipes/dicom_processing.md)). |
 | 10 | `format_column_names` | Normalizes DataFrame column names, including adding `dicom_archive_path` to the set of columns to upsert |
 | 11 | `_require_import_id_columns` / `_require_import_label_columns` / `_require_number_of_slices_column` / `_require_dicom_archive_path_column` | Auto-DDL: `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` for any columns the protocol writes that don't yet exist. Safe to run against a fresh DB. |
-| 12 | `update_postgres_tables` | Upserts `image_study` and `image_series` |
+| 12 | `update_postgres_tables` | Upserts `image_series`, `image_study`, then `patient` — all in one transaction. `_upsert_patient` registers one row per patient: `stroke_date = MIN(image_study.acquisitiondatetime)` (recomputed across all of the patient's studies), `import_id`/`import_label` keep the **origin** (first-seen, preserved on conflict), and `dataset` is the deduped union of the `dataset` config across batches. |
 | 13 | `verify_integrated_case` + `delete_original_case_dir` | **Only if `delete_originals_after_verification=true`.** Byte-compares each copied file against its source, then removes the source case directory. |
 
 Return value: `{"studyinstanceuids": [...], "seriesinstanceuids": [...]}` —

@@ -203,7 +203,8 @@ The stack has two services and two databases.
 
 **Two-database model:**
 - `orthanc_db` — Orthanc's internal index; do not query or mutate unless doing explicit Orthanc enrichment work.
-- `stanford-stroke` — upstream read-only tables (`lvo_clinical_data`, `image_study`, `image_series`) plus web-app-owned tables (`annotations`, `annotations_history`, `label_definitions`, `users`, `user_preferences`, snapshot tables). Connection from `.env`: `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`.
+- `stanford-stroke` — upstream read-only tables (`patient`, `image_study`, `image_series`, and the clinical side-table `lvo_clinical_data`) plus web-app-owned tables (`annotations`, `annotations_history`, `label_definitions`, `users`, `user_preferences`, snapshot tables). Connection from `.env`: `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`.
+  - `patient` is the **patient-level spine** (one row per patient, comprehensive, populated by the ingest pipeline). `lvo_clinical_data` is no longer the patient roster — it's joined only to prefer its clinical `stroke_date` when a patient is matched (`COALESCE(c.stroke_date, p.stroke_date)`). Patient-level upstream DDL lives in `ssc-sql-db/create_patient.sql`; a `CREATE TABLE IF NOT EXISTS` bootstrap is also in Alembic revision `0006`.
 
 **web-app-owned tables** are created/migrated by `web-app/app.py` on startup (via Alembic).
 
@@ -269,6 +270,7 @@ python execute_image_integration_protocol.py [--config path/to/config.yaml]
 **YAML config keys** (`execute_image_integration_protocol.yaml`):
 - `src_dir` — directory of patient subdirectories to ingest
 - `import_label` — tag all rows in this run with a label
+- `dataset` — optional cohort tag recorded on the `patient` table only (`dataset text[]`, union-accumulated across batches)
 - `overwrite_if_exists` — re-integrate studies already in the DB
 - `anonymize_files` — strip patient identifiers from DICOM headers before copying
 - `delete_originals_after_verification` — remove the source `case_dir` after copy verification
@@ -280,7 +282,7 @@ python execute_image_integration_protocol.py [--config path/to/config.yaml]
 3. Copy DICOMs to `legacy_dicom_root/{patient_id}/{StudyUID}/{SeriesDesc}/{SeriesUID}/DICOM/`
 4. If `cold_archive_root` set: compress each series dir to `cold_archive_root/.../DICOM.tar.zst`, record path in `image_series.dicom_archive_path`
 5. Convert select series to NIfTI
-6. Upsert into `image_series` and `image_study`
+6. Upsert into `image_series`, `image_study`, and `patient` (one transaction). The `patient` upsert recomputes `stroke_date = MIN(image_study.acquisitiondatetime)`, preserves origin `import_id`/`import_label`, and unions the `dataset` tag.
 
 `image_integration_protocols/` is site-specific (SSC directory layout and metadata conventions). It is not part of a standard fresh deployment.
 

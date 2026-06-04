@@ -13,7 +13,10 @@ VALID_LEVELS = ("patient", "study", "series")
 
 LABEL_NAME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_]{0,62}$")
 
-PATIENT_ID_COL = "study_id"
+# Patient-id column on the `patient` registry table (the patient-level spine).
+# lvo_clinical_data still names its equivalent column "study_id"; it is joined
+# explicitly on c.study_id = p.patient_id where clinical fields are needed.
+PATIENT_ID_COL = "patient_id"
 
 SERIES_FROM_CLAUSE = (
     "image_series s "
@@ -77,7 +80,7 @@ def build_label_filter_sql(
     label_level : str | None
         Level of the annotation to filter on.  Falls back to *entity_level*.
     entity_id_expr : str
-        Column expression to match (e.g. ``"p.study_id"``, ``"st.studyinstanceuid"``).
+        Column expression to match (e.g. ``"p.patient_id"``, ``"st.studyinstanceuid"``).
     operator : str
         ``"IN"`` or ``"NOT IN"`` — for boolean false filters.
     value_predicate : str

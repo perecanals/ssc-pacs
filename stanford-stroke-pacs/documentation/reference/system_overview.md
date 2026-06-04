@@ -156,7 +156,8 @@ One PostgreSQL server hosts both. Connection params and credentials are in
 
 ┌─ stanford-stroke ────────────────────────────────┐
 │  upstream / research metadata (read-only to app):│
-│  ├── lvo_clinical_data     (patient level)       │
+│  ├── patient               (patient level)       │
+│  ├── lvo_clinical_data     (clinical side-table)  │
 │  ├── image_study           (study level)         │
 │  └── image_series          (series level)        │
 │       ├── dicom_dir_path                         │
@@ -397,7 +398,7 @@ to Orthanc directly.
 | Web App app (FastAPI + React) | ✅ | |
 | `cold_path_cache` stack (archiver, cleanup, cache_manager) | ✅ | |
 | `scripts/admin/manage_users.py`, `init_orthanc_db.sh` | ✅ | |
-| `stanford-stroke` schema (expects `lvo_clinical_data`, `image_study`, `image_series`) | schema shape portable | column conventions SSC-ish |
+| `stanford-stroke` schema (expects `patient`, `image_study`, `image_series`; `lvo_clinical_data` optional clinical side-table) | schema shape portable | column conventions SSC-ish |
 | `image_integration_protocols/` | | ❌ assumes SSC layout + metadata rules |
 | `scripts/orthanc/enrich_orthanc.py` | | ❌ specific to an anonymised-headers deployment |
 

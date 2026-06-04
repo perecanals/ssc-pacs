@@ -33,6 +33,7 @@ export default function Navigator() {
     modality: null,
     description: null,
     studyImportLabel: null,
+    dataset: null,
   });
 
   const [previewSelection, setPreviewSelection] = useState(null);
@@ -70,6 +71,7 @@ export default function Navigator() {
       modality: null,
       description: null,
       studyImportLabel: null,
+      dataset: null,
     });
   }, []);
 
@@ -82,6 +84,7 @@ export default function Navigator() {
       modality: null,
       description: null,
       studyImportLabel: null,
+      dataset: null,
     });
     clearPreview();
   }, [clearPreview]);

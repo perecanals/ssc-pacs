@@ -32,7 +32,7 @@ Three things must travel, and they are keyed differently:
 ## 1. Port the SQL cluster
 
 The deployment has **two databases in one PostgreSQL server**:
-`stanford-stroke` (users, `image_series`/`image_study`/`lvo_clinical_data`,
+`stanford-stroke` (users, `patient`/`image_series`/`image_study`/`lvo_clinical_data`,
 annotations, all web-app-owned tables) and `orthanc_db` (Orthanc's index).
 
 `scripts/backup/backup_pg_db.sh` runs `pg_dump` on **one database at a time**.

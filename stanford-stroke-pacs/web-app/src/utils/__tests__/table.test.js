@@ -94,8 +94,12 @@ describe("buildBuiltinColumnCatalog", () => {
 
   it("marks patient-level columns as visible when activeLevel is patient", () => {
     const cols = buildBuiltinColumnCatalog("patient");
-    const patientCols = cols.filter((c) => c.level === "patient");
+    // Columns flagged defaultVisible:false (e.g. the opt-in "dataset" column)
+    // stay hidden even at their own level; all others default to visible.
+    const patientCols = cols.filter((c) => c.level === "patient" && c.sourceKey !== "dataset");
     expect(patientCols.every((c) => c.defaultVisible === true)).toBe(true);
+    const dataset = cols.find((c) => c.level === "patient" && c.sourceKey === "dataset");
+    expect(dataset.defaultVisible).toBe(false);
   });
 
   it("keys are prefixed with builtin:", () => {

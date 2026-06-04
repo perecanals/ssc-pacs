@@ -143,18 +143,43 @@ def seeded_db(test_db):
                 (TEST_USER, pw_hash),
             )
             # Minimal reference rows so browsing endpoints don't 500 on empty tables.
+            # P-0001: clinically matched. Its clinical stroke_date (2025-01-01)
+            # differs from its imaging date (2025-02-02) so we can assert the tab
+            # prefers the clinical value via COALESCE.
             cur.execute(
                 "INSERT INTO lvo_clinical_data (study_id, stroke_date) "
                 "VALUES ('P-0001', '2025-01-01') ON CONFLICT DO NOTHING"
             )
             cur.execute(
-                "INSERT INTO image_study (patient_id, studyinstanceuid, study_type) "
-                "VALUES ('P-0001', '1.2.3.4.5', 'CTA') ON CONFLICT DO NOTHING"
+                "INSERT INTO image_study "
+                "(patient_id, studyinstanceuid, study_type, acquisitiondatetime) "
+                "VALUES ('P-0001', '1.2.3.4.5', 'CTA', '2025-02-02') "
+                "ON CONFLICT DO NOTHING"
             )
             cur.execute(
                 "INSERT INTO image_series "
                 "(patient_id, studyinstanceuid, seriesinstanceuid, modality, seriesdescription) "
                 "VALUES ('P-0001', '1.2.3.4.5', '1.2.3.4.5.6', 'CT', 'Axial') "
+                "ON CONFLICT DO NOTHING"
+            )
+            # P-0002: imaging integrated but NO lvo_clinical_data row — the
+            # regression fixture. Must still appear in /api/patients, with
+            # stroke_date falling back to the earliest study date.
+            cur.execute(
+                "INSERT INTO image_study "
+                "(patient_id, studyinstanceuid, study_type, acquisitiondatetime) "
+                "VALUES ('P-0002', '2.2.2.2.2', 'CTA', '2024-03-03') "
+                "ON CONFLICT DO NOTHING"
+            )
+            # Patient registry (the patient-level spine). Mirrors what the ingest
+            # pipeline / backfill produce: stroke_date is the imaging-derived MIN.
+            # dataset is the cohort-tag set membership (text[]) the patient-level
+            # /api/datasets filter narrows on: P-0001 is in {lvo, crisp2}, P-0002
+            # only in {lvo}, so 'crisp2' isolates P-0001.
+            cur.execute(
+                "INSERT INTO patient (patient_id, stroke_date, dataset) VALUES "
+                "('P-0001', '2025-02-02', '{lvo,crisp2}'), "
+                "('P-0002', '2024-03-03', '{lvo}') "
                 "ON CONFLICT DO NOTHING"
             )
         conn.commit()

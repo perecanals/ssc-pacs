@@ -10,3 +10,6 @@ overwrite_if_exists: false
 anonymize_files: false
 delete_originals_after_verification: false
 import_label: crisp2_390
+# Dataset/cohort tag for this batch. Recorded on the `patient` table only
+# (union-accumulated across batches); not stored on image_study/image_series.
+dataset: crisp2
