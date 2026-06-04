@@ -41,7 +41,7 @@
 }
 
 /* OHIF preview controls, docked in the footer as tabs that stem from the
-   pane below. mb-[-0.375rem] cancels the .companion__content gap-1.5 so the
+   pane below. mb-[-0.375rem] cancels the .navigator__content gap-1.5 so the
    tab's flat bottom meets the pane's (squared) top edge; #090C29 matches
    OHIF's backdrop so they read as one surface. */
 .dt__pane-tabs {

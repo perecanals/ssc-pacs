@@ -39,14 +39,14 @@ vi.mock("../api/warmOhif", () => ({
 }));
 
 import { AuthProvider } from "../context/AuthContext";
-import Companion from "../pages/Companion";
+import Navigator from "../pages/Navigator";
 
 describe("Reset Filters button", () => {
   it("clears the sidebar quick filter (and is wired to clear column filters)", async () => {
     render(
       <MemoryRouter>
         <AuthProvider>
-          <Companion />
+          <Navigator />
         </AuthProvider>
       </MemoryRouter>,
     );

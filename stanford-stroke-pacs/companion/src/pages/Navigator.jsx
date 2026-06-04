@@ -5,7 +5,7 @@ import TopBar from "../components/TopBar";
 import Sidebar from "../components/Sidebar";
 import DataTable from "../components/DataTable";
 import PreviewPane from "../components/PreviewPane";
-import "./Companion.css";
+import "./Navigator.css";
 
 const LEVELS = [
   { key: "patient", label: "Patients" },
@@ -13,7 +13,7 @@ const LEVELS = [
   { key: "series", label: "Series" },
 ];
 
-export default function Companion() {
+export default function Navigator() {
   const { loading: authLoading } = useAuth();
   const [level, setLevel] = useState("patient");
   const [sidebarOpen, setSidebarOpen] = useState(
@@ -152,14 +152,14 @@ export default function Companion() {
   if (authLoading) return null;
 
   return (
-    <div className="companion">
+    <div className="navigator">
       <TopBar
         levels={LEVELS}
         level={level}
         onLevelChange={handleLevelChange}
         toolbarHostRef={setToolbarHostEl}
       />
-      <div className={`companion__layout${sidebarOpen ? "" : " companion__layout--sidebar-closed"}`}>
+      <div className={`navigator__layout${sidebarOpen ? "" : " navigator__layout--sidebar-closed"}`}>
         <Sidebar
           level={level}
           filters={filters}
@@ -167,8 +167,8 @@ export default function Companion() {
           open={sidebarOpen}
           onToggle={toggleSidebar}
         />
-        <main className="companion__main">
-          <div className="companion__content">
+        <main className="navigator__main">
+          <div className="navigator__content">
             <DataTable
               key={level}
               level={level}

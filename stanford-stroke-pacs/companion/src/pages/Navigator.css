@@ -1,25 +1,25 @@
 @reference "../app.css";
 
-.companion {
+.navigator {
   @apply min-h-screen bg-bg text-text text-sm;
 }
 
-.companion__layout {
+.navigator__layout {
   @apply flex pt-9;
   --sidebar-width: 15rem;
 }
 
-.companion__layout--sidebar-closed {
+.navigator__layout--sidebar-closed {
   --sidebar-width: 0rem;
 }
 
-.companion__main {
+.navigator__main {
   @apply flex-1 px-4 pt-1 pb-1.5 min-h-0 overflow-hidden;
   margin-left: var(--sidebar-width);
   transition: margin-left 180ms ease;
   height: calc(100vh - 2.25rem);
 }
 
-.companion__content {
+.navigator__content {
   @apply h-full min-h-0 flex flex-col gap-1.5;
 }

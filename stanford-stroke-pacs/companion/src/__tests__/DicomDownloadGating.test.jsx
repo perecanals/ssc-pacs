@@ -43,13 +43,13 @@ vi.mock("../api/warmOhif", () => ({
 }));
 
 import { AuthProvider } from "../context/AuthContext";
-import Companion from "../pages/Companion";
+import Navigator from "../pages/Navigator";
 
 async function renderSeriesLevel() {
   render(
     <MemoryRouter>
       <AuthProvider>
-        <Companion />
+        <Navigator />
       </AuthProvider>
     </MemoryRouter>,
   );

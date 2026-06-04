@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 
-// Mock the API client so Companion doesn't hit a real backend.
+// Mock the API client so Navigator doesn't hit a real backend.
 vi.mock("../api/client", () => ({
   apiFetch: vi.fn().mockResolvedValue({ ok: true, json: () => Promise.resolve({}) }),
   apiGet: vi.fn().mockImplementation((path) => {
@@ -20,21 +20,21 @@ vi.mock("../api/client", () => ({
   getLastApiActivityAt: vi.fn(() => Date.now()),
 }));
 
-// Companion uses warmOhif which also calls fetch-based APIs
+// Navigator uses warmOhif which also calls fetch-based APIs
 vi.mock("../api/warmOhif", () => ({
   getStorageMode: vi.fn().mockResolvedValue("legacy"),
   resolveOhifViewerUrl: vi.fn().mockResolvedValue(null),
 }));
 
 import { AuthProvider } from "../context/AuthContext";
-import Companion from "../pages/Companion";
+import Navigator from "../pages/Navigator";
 
-describe("Companion page", () => {
+describe("Navigator page", () => {
   it("renders without crashing and shows the level switcher", async () => {
     render(
       <MemoryRouter>
         <AuthProvider>
-          <Companion />
+          <Navigator />
         </AuthProvider>
       </MemoryRouter>,
     );

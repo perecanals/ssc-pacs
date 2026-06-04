@@ -366,7 +366,7 @@ function DataTableInner({
   };
 
   // Clears only filters — the per-column table filters here plus the
-  // sidebar quick filters (via the Companion callback). Distinct from
+  // sidebar quick filters (via the Navigator callback). Distinct from
   // "Reset View", which also resets column visibility/order/sort/etc.
   const handleResetFilters = () => {
     setColumnFilters({});

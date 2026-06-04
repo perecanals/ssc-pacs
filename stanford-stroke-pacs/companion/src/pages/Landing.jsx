@@ -10,10 +10,10 @@ const baseCards = [
     to: "/app",
     internal: true,
     icon: "\u{1F517}",
-    title: "Companion",
+    title: "Navigator",
     description:
       "Browse series, create annotation labels, and tag imaging data for research filtering.",
-    hint: "Open Companion",
+    hint: "Open Navigator",
   },
 ];
 

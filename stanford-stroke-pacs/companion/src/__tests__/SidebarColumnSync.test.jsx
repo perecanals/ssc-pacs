@@ -43,14 +43,14 @@ vi.mock("../api/warmOhif", () => ({
 }));
 
 import { AuthProvider } from "../context/AuthContext";
-import Companion from "../pages/Companion";
+import Navigator from "../pages/Navigator";
 
 describe("Sidebar label filter <-> ColumnSelector sync", () => {
   it("activating a sidebar label checks its column; it can be hidden while the filter stays active", async () => {
     const { container } = render(
       <MemoryRouter>
         <AuthProvider>
-          <Companion />
+          <Navigator />
         </AuthProvider>
       </MemoryRouter>,
     );

@@ -144,7 +144,7 @@
 }
 
 /* Collapse toggle tab — sits in the main-content padding gutter on the left.
-   When sidebar is open: x = sidebar-width (in the 16px gutter of .companion__main).
+   When sidebar is open: x = sidebar-width (in the 16px gutter of .navigator__main).
    When closed:         x = 0           (in the same 16px gutter, now at the viewport edge).
    Never overlaps the table (the table starts after the gutter). */
 .sidebar__toggle {

@@ -45,12 +45,12 @@ describe("Landing page", () => {
 
   it("renders all three navigation cards for an admin user", async () => {
     renderLanding();
-    // "Companion" is a base card rendered before auth resolves, so waiting on
+    // "Navigator" is a base card rendered before auth resolves, so waiting on
     // it does not gate on the async /api/me. Wait on an admin-only card.
     await waitFor(() => {
       expect(screen.getByText("Orthanc Explorer")).toBeInTheDocument();
     });
     expect(screen.getByText("OHIF Viewer")).toBeInTheDocument();
-    expect(screen.getByText("Companion")).toBeInTheDocument();
+    expect(screen.getByText("Navigator")).toBeInTheDocument();
   });
 });
