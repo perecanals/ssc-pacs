@@ -480,6 +480,28 @@ cd web-app && npm run build
 sudo systemctl restart ssc-web-app
 ```
 
+Enable scheduled backups (one-time — do this on any real deployment). The stack
+ships nightly jobs for **both** PostgreSQL databases **and** the Orthanc storage
+volume — the latter holds OHIF-authored SR annotations (the **only copy**) plus
+the Folder Indexer DB, so it is not optional:
+
+```bash
+sudo cp systemd/pg-backup-stanford-stroke.service systemd/pg-backup-stanford-stroke.timer \
+        systemd/pg-backup-orthanc.service systemd/pg-backup-orthanc.timer \
+        systemd/orthanc-storage-backup.service systemd/orthanc-storage-backup.timer \
+        systemd/pg-backup-freshness.service systemd/pg-backup-freshness.timer \
+        /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now \
+    pg-backup-stanford-stroke.timer pg-backup-orthanc.timer \
+    orthanc-storage-backup.timer pg-backup-freshness.timer
+systemctl list-timers 'pg-backup-*' 'orthanc-storage-backup*'
+```
+
+Backups land in `/DATA2/pg_backups/`. Full mechanism, retention, and recovery:
+[`../operations/backup_strategy.md`](../operations/backup_strategy.md) and
+[`../operations/restore_runbook.md`](../operations/restore_runbook.md).
+
 ---
 
 ## 10. What is not part of standard redeployment

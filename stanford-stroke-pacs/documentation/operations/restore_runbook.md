@@ -10,15 +10,40 @@ step is unclear, fix the doc, not your memory.
 
 ---
 
+## What a complete recovery restores
+
+A full recovery touches four independent backup artifacts (all under
+`/DATA2/pg_backups/`, except the cold mirror). Restore whichever you lost, in
+this order:
+
+1. **`stanford-stroke`** — Web App data: annotations, users, labels, prefs — §1.
+   *Fatal loss; no other copy.*
+2. **`orthanc_db`** — Orthanc's index — §2.
+3. **Orthanc storage volume** (`<project>_ssc-orthanc-storage`) — the **only
+   copy** of OHIF-authored SR annotations + the Folder Indexer `indexer-plugin.db`
+   — §2d. Restore it **together with `orthanc_db`**: they reference each other by
+   attachment UUID, and the indexer DB's container-relative paths
+   (`/dicom-data/...`) make the volume portable as long as the mount point stays
+   `/dicom-data`.
+4. **Cold DICOM archives** — §3 (dev: re-ingest from source instead; prod: from
+   the Tier 2 mirror).
+
+Pre-flight (§0) and the acceptance drill (§5) apply to all of them. For moving
+everything to a **new host**, see [`cluster_migration.md`](cluster_migration.md).
+
+---
+
 ## 0. Pre-flight (every restore)
 
 ```bash
 # 1. Confirm latest backups exist and are recent
-ls -lh /DATA2/pg_backups/stanford-stroke/ /DATA2/pg_backups/orthanc_db/
+ls -lh /DATA2/pg_backups/stanford-stroke/ /DATA2/pg_backups/orthanc_db/ \
+       /DATA2/pg_backups/orthanc_storage/
 
 # 2. Verify checksums (catches silent disk corruption)
 cd /DATA2/pg_backups/stanford-stroke && sha256sum -c latest.dump.sha256
 cd /DATA2/pg_backups/orthanc_db     && sha256sum -c latest.dump.sha256
+cd /DATA2/pg_backups/orthanc_storage && sha256sum -c latest.tar.gz.sha256   # if restoring the volume
 
 # 3. Confirm the PG client major matches the server major
 psql -h localhost -U perecanals -d postgres -c 'SHOW server_version;'
@@ -171,6 +196,46 @@ let Orthanc recreate the schema on first boot, and let the patched
 Folder Indexer re-scan `/DATA2/pacs_imaging_data` (or the cold-warmed
 copies). This takes hours and re-creates labels — read
 `documentation/cold_storage/` and `scripts/orthanc/enrich_orthanc.py` first.
+
+### 2d. Restore the Orthanc storage volume (OHIF SR annotations + indexer DB)
+
+The `ssc-orthanc-storage` volume holds the **only copy** of OHIF-authored SR
+annotations plus the Folder Indexer's `indexer-plugin.db`. Restore it **together
+with `orthanc_db` (§2)** — they reference each other by attachment UUID. The
+indexer DB's stored paths are container-relative (`/dicom-data/...`), so the
+restored volume is portable across hosts as long as the new container keeps the
+DICOM bind-mount at `/dicom-data` (no reindex needed).
+
+```bash
+ARCHIVE=/DATA2/pg_backups/orthanc_storage/latest.tar.gz
+sha256sum -c "${ARCHIVE}.sha256"          # pre-flight integrity
+
+COMPOSE=/home/perecanals/pacs/stanford-stroke-pacs/docker-compose.yml
+VOL=stanford-stroke-pacs_ssc-orthanc-storage
+
+# Stop Orthanc so nothing is using the volume
+docker compose -f "$COMPOSE" down
+
+# Wipe + reload the named volume. busybox tar reads the gzip stream; running as
+# root in-container avoids host permission issues with the volume's files.
+docker run --rm -i -v "$VOL:/vol" alpine sh -c 'rm -rf /vol/* && tar -xzf - -C /vol' < "$ARCHIVE"
+
+docker compose -f "$COMPOSE" up -d
+docker logs -f ssc-orthanc | grep -i 'index\|ready\|http'
+```
+
+Verify the SR annotations are back (expect the pre-incident count, e.g. 98):
+
+```bash
+set -a; . /home/perecanals/pacs/stanford-stroke-pacs/.env; set +a
+curl -s -u "$ORTHANC_ADMIN_USER:$ORTHANC_ADMIN_PASSWORD" \
+     -X POST http://localhost:8042/tools/find \
+     -d '{"Level":"Series","Query":{"Modality":"SR"},"Expand":false}' \
+  | python3 -c 'import sys,json; print("SR series:", len(json.load(sys.stdin)))'
+```
+
+To restore into a **scratch** volume instead (drill, no prod impact), swap `VOL`
+for a throwaway name and skip the compose down/up.
 
 ---
 

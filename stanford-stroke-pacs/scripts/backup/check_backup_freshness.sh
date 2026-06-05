@@ -5,8 +5,9 @@
 # MAX_AGE_HOURS, default 36). Designed to be wired into a systemd unit
 # so OnFailure= can fire an alert hook.
 #
-# By default checks PostgreSQL backups for orthanc_db and stanford-stroke
-# under BACKUP_ROOT (default /DATA2/pg_backups).
+# By default checks PostgreSQL backups for orthanc_db and stanford-stroke,
+# plus the Orthanc storage-volume backup (orthanc_storage), under BACKUP_ROOT
+# (default /DATA2/pg_backups).
 #
 # Pass --include-cold-archive to additionally check the cold-archive
 # mirror destination. On the dev host this flag is NOT passed (Tier 2
@@ -71,6 +72,10 @@ check_path_age() {
 for db in "${DBS[@]}"; do
     check_path_age "pg_backup[$db]" "$BACKUP_ROOT/$db/latest.dump" "$max_age_sec"
 done
+
+# Orthanc storage volume backup (OHIF SR annotations + indexer DB). Runs nightly
+# on dev like the pg dumps, so it's checked unconditionally.
+check_path_age "orthanc_storage" "$BACKUP_ROOT/orthanc_storage/latest.tar.gz" "$max_age_sec"
 
 if (( INCLUDE_COLD == 1 )); then
     : "${COLD_MIRROR_DEST:?--include-cold-archive set but COLD_MIRROR_DEST not exported}"

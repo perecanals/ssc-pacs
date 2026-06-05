@@ -227,10 +227,13 @@ launchctl kickstart -k gui/$(id -u)/com.ssc.web app
 ```
 
 **bash 3.2 caveat:** macOS ships an ancient `/bin/bash`. A few ops scripts use
-bash 4+ features — e.g. `scripts/backup/backup_pg_db.sh` uses `mapfile` and
-will fail under it. That is why §2 installs Homebrew `bash`; invoke those
-scripts with it (`/opt/homebrew/bin/bash scripts/backup/backup_pg_db.sh ...`)
-or put it first on `PATH`.
+bash 4+ features — e.g. `scripts/backup/backup_pg_db.sh` and
+`scripts/backup/backup_orthanc_storage.sh` use `mapfile` and will fail under it.
+That is why §2 installs Homebrew `bash`; invoke those scripts with it
+(`/opt/homebrew/bin/bash scripts/backup/backup_pg_db.sh ...`) or put it first on
+`PATH`. There is no `systemd` on macOS, so the nightly backups must be wired
+through `launchd` (or `cron`) the same way the web app uses a launchd job —
+the backup **scripts** themselves are platform-agnostic.
 
 ---
 

@@ -10,7 +10,8 @@ you trust it:
     2. Orthanc is reachable and its index (orthanc_db) was restored
        (non-zero study/series counts).
     3. The Folder Indexer's SQLite state volume is present
-       (``indexer-plugin.db`` inside the ``ssc-orthanc-storage`` volume) —
+       (``indexer-plugin.db`` inside the ``<project>_ssc-orthanc-storage``
+       volume, which also holds the only copy of OHIF SR annotations) —
        without it Orthanc cannot serve a single instance.
     4. ``image_series`` host-path columns were re-pointed to the new host:
        no row still carries an old-host prefix, and the ``*.tar.zst``
@@ -227,7 +228,10 @@ def main() -> int:
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
     ap.add_argument("--limit", type=int, default=0, help="Examine only N image_series rows (0 = all)")
-    ap.add_argument("--volume", default="ssc-orthanc-storage", help="Orthanc storage Docker volume name")
+    ap.add_argument("--volume", default="stanford-stroke-pacs_ssc-orthanc-storage",
+                    help="Orthanc storage Docker volume name (Compose prefixes the "
+                         "docker-compose.yml key with the project dir name; override "
+                         "if your project name differs)")
     ap.add_argument("--skip-orthanc", action="store_true", help="Skip the Orthanc reachability check")
     ap.add_argument("--skip-volume", action="store_true", help="Skip the indexer-volume check")
     args = ap.parse_args()

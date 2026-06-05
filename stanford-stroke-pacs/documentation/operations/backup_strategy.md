@@ -18,7 +18,8 @@ and how to recover. Restore steps live in
 | `orthanc_db` PostgreSQL DB | host PostgreSQL 16 | **Yes — Tier 1, daily** | Orthanc's index — rebuildable from disk but slow; cheap to back up |
 | Cold DICOM archives `/DATA2/pacs_imaging_data_compressed/` | local disk | **No on dev**, mirror script implemented for production (Tier 2) | Dev: re-ingest from source is acceptable. Production: requires a destination |
 | Hot cache `/DATA2/pacs_hot_cache/` and `/DATA2/pacs_imaging_data/` | local disk | No | Reconstructible from cold archives on demand |
-| Orthanc container filesystem | docker | No | Stateless; rebuilt from `docker compose up` + image |
+| Orthanc storage volume (`…_ssc-orthanc-storage` at `/var/lib/orthanc/db`) | docker volume | **Yes — Tier 1, daily** | Holds OHIF-authored DICOM SR annotations (**no other copy**) + the Folder Indexer `indexer-plugin.db` (rebuild = full cold-archive decompression + reindex) |
+| Orthanc container filesystem (rootfs) | docker | No | Stateless; rebuilt from `docker compose up` + the `ssc-orthanc:patched-indexer` image |
 | Web App `dist/` build output | local | No | Reproducible via `npm run build` |
 | `.env`, `config.toml`, `orthanc.json`, `orthanc_users.json` | repo / host | Out of scope here | Tracked separately (git for non-secrets, secret management for `.env`) |
 
@@ -32,12 +33,14 @@ and how to recover. Restore steps live in
 | `stanford-stroke` RTO | 4 h | 4 h |
 | `orthanc_db` RPO | 24 h | 24 h |
 | `orthanc_db` RTO | 4 h (or "rebuild from disk", which is hours) | 4 h |
+| Orthanc storage volume RPO | 24 h | 24 h |
+| Orthanc storage volume RTO | 4 h (or "decompress + reindex", which is hours) | 4 h |
 | Cold archives RPO | n/a — re-ingest from source | 24 h |
 | Cold archives RTO | n/a | TBD (depends on chosen offsite target) |
 
 ---
 
-## 3. Tier 1 — PostgreSQL backups (active on dev)
+## 3. Tier 1 — PostgreSQL DBs + Orthanc storage volume (active on dev)
 
 ### Tooling
 
@@ -81,27 +84,60 @@ When the server is upgraded, install the matching client major.
 │   ├── 20260415T024500Z.dump.sha256
 │   ├── latest.dump  -> 20260415T024500Z.dump
 │   └── latest.dump.sha256 -> ...
-└── stanford-stroke/
-    ├── 20260415T024500Z.dump
-    ├── 20260415T024500Z.dump.sha256
-    ├── latest.dump  -> ...
-    └── latest.dump.sha256 -> ...
+├── stanford-stroke/
+│   ├── 20260415T024500Z.dump
+│   ├── 20260415T024500Z.dump.sha256
+│   ├── latest.dump  -> ...
+│   └── latest.dump.sha256 -> ...
+└── orthanc_storage/
+    ├── 20260415T024500Z.tar.gz
+    ├── 20260415T024500Z.tar.gz.sha256
+    ├── latest.tar.gz  -> ...
+    └── latest.tar.gz.sha256 -> ...
 ```
 
-- One file per night per DB.
-- `latest.dump` symlink always points at the newest dump.
-- `.sha256` sidecar written immediately after the dump.
-- Retention: dumps older than `RETENTION_DAYS` (default 60) are deleted,
-  but at least one dump is always kept.
+- One file per night per DB / per volume.
+- `latest.dump` / `latest.tar.gz` symlinks always point at the newest archive.
+- `.sha256` sidecar written immediately after each archive.
+- Retention: archives older than `RETENTION_DAYS` (default 60) are deleted,
+  but at least one is always kept.
+
+### Orthanc storage volume — how the snapshot stays zero-downtime
+
+`orthanc_db` (the index) is dumped by `pg_dump`, but the index points at file
+payloads in the Orthanc storage Docker volume (`<project>_ssc-orthanc-storage`,
+i.e. `stanford-stroke-pacs_ssc-orthanc-storage` here — Compose prefixes the
+`docker-compose.yml` `volumes:` key with the project name) — including the
+**only copy** of OHIF-authored SR annotations. `backup_orthanc_storage.sh`
+captures that volume **without pausing Orthanc**:
+
+- a throwaway helper container mounts the volume **read-only** and runs
+  `scripts/backup/orthanc_storage_snapshot.py` (pure Python stdlib);
+- the helper copies the live SQLite trio (`indexer-plugin.db{,-wal,-shm}`) into
+  its own ephemeral space, lets SQLite WAL-recover + `checkpoint(TRUNCATE)` it in
+  isolation, runs `PRAGMA integrity_check`, and streams a **gzip tar** of all the
+  immutable volume files **plus** that consistent DB to stdout;
+- the host redirects the stream to `<ts>.tar.gz` and does the same
+  sha256 / `latest` symlink / retention bookkeeping as the pg dumps.
+
+The production volume is never written. The irreplaceable SR DICOMs are always
+captured cleanly; the only residual risk — a torn copy of the live ~1 GB DB → a
+one-off degraded snapshot (helper exits 5, logged) — affects only the
+*rebuildable* index and self-heals on the next run. This is the same
+cross-snapshot non-atomicity already accepted between the separate pg-dump and
+volume-backup timers; no `docker pause` is used.
 
 ### Files
 
 | Path | Role |
 |---|---|
 | `scripts/backup/backup_pg_db.sh` | dump one DB, write sha256, rotate retention |
-| `scripts/backup/check_backup_freshness.sh` | exit nonzero if any latest dump is older than `MAX_AGE_HOURS` (default 36) |
+| `scripts/backup/backup_orthanc_storage.sh` | snapshot the storage volume via a `:ro` helper container, write sha256, rotate retention |
+| `scripts/backup/orthanc_storage_snapshot.py` | in-container helper: consistent SQLite snapshot + gzip-tar stream to stdout |
+| `scripts/backup/check_backup_freshness.sh` | exit nonzero if any latest dump/archive is older than `MAX_AGE_HOURS` (default 36) |
 | `systemd/pg-backup-stanford-stroke.{service,timer}` | nightly dump of `stanford-stroke` (02:15 + jitter) |
 | `systemd/pg-backup-orthanc.{service,timer}` | nightly dump of `orthanc_db` (02:30 + jitter) |
+| `systemd/orthanc-storage-backup.{service,timer}` | nightly snapshot of the Orthanc storage volume (02:45 + jitter) |
 | `systemd/pg-backup-freshness.{service,timer}` | hourly freshness check |
 
 The backup script reads connection details from the same `.env` the
@@ -118,6 +154,8 @@ sudo cp systemd/pg-backup-stanford-stroke.service \
         systemd/pg-backup-stanford-stroke.timer \
         systemd/pg-backup-orthanc.service \
         systemd/pg-backup-orthanc.timer \
+        systemd/orthanc-storage-backup.service \
+        systemd/orthanc-storage-backup.timer \
         systemd/pg-backup-freshness.service \
         systemd/pg-backup-freshness.timer \
         /etc/systemd/system/
@@ -127,17 +165,18 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now \
     pg-backup-stanford-stroke.timer \
     pg-backup-orthanc.timer \
+    orthanc-storage-backup.timer \
     pg-backup-freshness.timer
 
 # Verify
-systemctl list-timers 'pg-backup-*'
+systemctl list-timers 'pg-backup-*' 'orthanc-storage-backup*'
 ```
 
 ### Verification
 
 ```bash
-# Latest dumps on disk
-ls -lh /DATA2/pg_backups/orthanc_db/ /DATA2/pg_backups/stanford-stroke/
+# Latest archives on disk
+ls -lh /DATA2/pg_backups/orthanc_db/ /DATA2/pg_backups/stanford-stroke/ /DATA2/pg_backups/orthanc_storage/
 
 # Run the freshness monitor manually
 /home/perecanals/pacs/stanford-stroke-pacs/scripts/backup/check_backup_freshness.sh
@@ -146,6 +185,7 @@ echo "exit=$?"   # 0 = fresh, 2 = stale or missing
 # Run a backup on demand (any time)
 /home/perecanals/pacs/stanford-stroke-pacs/scripts/backup/backup_pg_db.sh stanford-stroke
 /home/perecanals/pacs/stanford-stroke-pacs/scripts/backup/backup_pg_db.sh orthanc_db
+/home/perecanals/pacs/stanford-stroke-pacs/scripts/backup/backup_orthanc_storage.sh
 ```
 
 ### Monitoring / alerting (TODO)

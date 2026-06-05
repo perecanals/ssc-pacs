@@ -1,0 +1,21 @@
+[Unit]
+Description=PACS — backup of the Orthanc storage volume (OHIF SR annotations + indexer DB)
+Documentation=file:/home/perecanals/ssc-pacs/stanford-stroke-pacs/documentation/operations/backup_strategy.md
+Wants=network-online.target
+After=network-online.target docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+User=perecanals
+Group=perecanals
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
+ExecStart=/home/perecanals/ssc-pacs/stanford-stroke-pacs/scripts/backup/backup_orthanc_storage.sh
+# Exit 5 = archive written but the (rebuildable) indexer DB snapshot was
+# degraded; the irreplaceable SR files are still backed up. Treated as success
+# for the run so the timer isn't marked failed, but the WARNING is in the journal.
+SuccessExitStatus=5
+StandardOutput=journal
+StandardError=journal

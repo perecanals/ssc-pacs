@@ -24,7 +24,7 @@ Three things must travel, and they are keyed differently:
 |---|---|---|---|
 | Research/app DB (`stanford-stroke`) | PostgreSQL | — | host paths fixed via SQL backfill (§3) |
 | Orthanc index (`orthanc_db`) | PostgreSQL | container path `/dicom-data` | no — keep mount point |
-| Folder Indexer state (`indexer-plugin.db`) | `ssc-orthanc-storage` Docker volume | container path `/dicom-data` | no |
+| Folder Indexer state (`indexer-plugin.db`) **+ OHIF SR annotations** | `<project>_ssc-orthanc-storage` Docker volume | container path `/dicom-data` | no |
 | Archive tree (`*.tar.zst`) | filesystem | relative layout | rsync preserving layout |
 
 ---
@@ -75,20 +75,39 @@ So: **copy the index and reset the path — do not reindex.** "The index" is two
 stores, both already covered above:
 
 1. **`orthanc_db`** — restored in §1.
-2. **`indexer-plugin.db`** — the Folder Indexer's SQLite state, which maps each
-   attachment UUID ↔ `/dicom-data/...` path. It lives at
-   `/var/lib/orthanc/db/indexer-plugin.db` **inside the `ssc-orthanc-storage`
-   Docker named volume**. Without it Orthanc knows the studies exist but cannot
-   read a single image. Migrate the volume explicitly:
+2. **`indexer-plugin.db` + the OHIF SR annotations** — the Folder Indexer's
+   SQLite state (maps each attachment UUID ↔ `/dicom-data/...` path) **and** the
+   **only copy** of OHIF-authored DICOM SR annotations both live inside the
+   Orthanc storage volume at `/var/lib/orthanc/db`. Without it Orthanc knows the
+   studies exist but cannot read a single image, and the annotations are gone.
+
+   **Use the real volume name.** Compose prefixes the `docker-compose.yml`
+   `volumes:` key with the project (the compose directory name), so the volume is
+   `<project>_ssc-orthanc-storage` — e.g. `stanford-stroke-pacs_ssc-orthanc-storage`,
+   **not** the bare `ssc-orthanc-storage`. Confirm before touching it:
 
    ```bash
-   # Source host — export the volume:
-   docker run --rm -v ssc-orthanc-storage:/v -v "$PWD":/out alpine \
+   docker inspect ssc-orthanc \
+     --format '{{range .Mounts}}{{.Name}} -> {{.Destination}}{{"\n"}}{{end}}' \
+     | grep /var/lib/orthanc/db        # prints the actual volume name
+   ```
+
+   Migrate it explicitly — or simply reuse the **nightly backup artifact** if one
+   exists (`/DATA2/pg_backups/orthanc_storage/latest.tar.gz`; see
+   [`backup_strategy.md`](backup_strategy.md) and `restore_runbook.md` §2d), which
+   is already a consistent gzip tar of this volume:
+
+   ```bash
+   SRC_VOL=stanford-stroke-pacs_ssc-orthanc-storage   # ← from the inspect above
+   DST_VOL=stanford-stroke-pacs_ssc-orthanc-storage   # target project name may differ
+
+   # Source host — export the live volume (read-only), or copy latest.tar.gz:
+   docker run --rm -v "$SRC_VOL":/v:ro -v "$PWD":/out alpine \
      tar czf /out/orthanc-vol.tgz -C /v .
 
    # Target host — after `docker compose up` once created the empty volume:
    docker compose down
-   docker run --rm -v ssc-orthanc-storage:/v -v "$PWD":/in alpine \
+   docker run --rm -v "$DST_VOL":/v -v "$PWD":/in alpine \
      sh -c "rm -rf /v/* && tar xzf /in/orthanc-vol.tgz -C /v"
    ```
 
@@ -162,9 +181,9 @@ the four things that a port can get wrong:
 2. **Orthanc index restored** — Orthanc is reachable and `/statistics` reports
    non-zero study/series counts (proves `orthanc_db` came over and the
    container is up).
-3. **Indexer state volume** — `indexer-plugin.db` is present inside the
-   `ssc-orthanc-storage` volume (the §2 step that is easy to forget). Skipped
-   with `--skip-volume` if Docker is unavailable.
+3. **Indexer state volume** — `indexer-plugin.db` (and the OHIF SR annotations)
+   are present inside the `<project>_ssc-orthanc-storage` volume (the §2 step
+   that is easy to forget). Skipped with `--skip-volume` if Docker is unavailable.
 4. **Host paths re-pointed** — no `image_series` row still carries an
    un-migrated prefix, and every recorded `dicom_archive_path` exists on disk.
 
@@ -198,7 +217,8 @@ metadata, and the files on disk all agree after the port.
 
 ## 5. Order of operations (summary)
 
-1. On source: `pg_dump` both DBs; export the `ssc-orthanc-storage` volume.
+1. On source: `pg_dump` both DBs; export the `<project>_ssc-orthanc-storage`
+   volume (or copy its nightly backup `latest.tar.gz`).
 2. On target: build/pull the patched Orthanc image; create empty DBs; restore
    both dumps.
 3. rsync the archive tree to the new host paths.
