@@ -177,7 +177,6 @@ export default function ChildRows({
             ? `series:${child.seriesinstanceuid}`
             : `study:${child.studyinstanceuid}`;
           const isActivePreview = activeRowKey === childPreviewKey;
-          const childLevel = childConfig === grandChildConfig ? "series" : (childConfig.expandable ? "study" : "series");
           return (
             <Fragment key={childId}>
               <tr

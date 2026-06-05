@@ -21,6 +21,21 @@ export async function getStorageMode() {
 }
 
 /**
+ * Poll cache-status until the study is hot. Returns true once hot, false on
+ * timeout. Throws if the backend reports an error status.
+ */
+async function pollCacheUntilHot(studyinstanceuid, maxMs = 600_000) {
+  const t0 = Date.now();
+  while (Date.now() - t0 < maxMs) {
+    const st = await apiGet(`/api/studies/${encodeURIComponent(studyinstanceuid)}/cache-status`);
+    if (st.status === "hot") return true;
+    if (st.status === "error") throw new Error(st.error_message || "Cache warming failed");
+    await new Promise((r) => setTimeout(r, 2000));
+  }
+  return false;
+}
+
+/**
  * POST warm and poll cache-status until hot. Throws on auth failure, backend
  * error, or timeout. Called automatically by resolveOhifViewerUrl when the
  * study is cold; can also be called explicitly.
@@ -36,15 +51,7 @@ export async function warmStudy(studyinstanceuid) {
     throw new Error(t || "Warm request failed");
   }
 
-  const maxMs = 600_000;
-  const t0 = Date.now();
-  while (Date.now() - t0 < maxMs) {
-    const st = await apiGet(`/api/studies/${encodeURIComponent(studyinstanceuid)}/cache-status`);
-    if (st.status === "hot") return;
-    if (st.status === "error") throw new Error(st.error_message || "Cache warming failed");
-    await new Promise((r) => setTimeout(r, 2000));
-  }
-  throw new Error("Warming timed out");
+  if (!(await pollCacheUntilHot(studyinstanceuid))) throw new Error("Warming timed out");
 }
 
 /**
@@ -66,15 +73,8 @@ export async function resolveOhifViewerUrl(studyinstanceuid, seriesinstanceuid =
     if (data.status === "cold") {
       await warmStudy(studyinstanceuid);
     } else {
-      // Already warming — just poll until hot.
-      const maxMs = 600_000;
-      const t0 = Date.now();
-      while (Date.now() - t0 < maxMs) {
-        const st = await apiGet(`/api/studies/${encodeURIComponent(studyinstanceuid)}/cache-status`);
-        if (st.status === "hot") break;
-        if (st.status === "error") throw new Error(st.error_message || "Cache warming failed");
-        await new Promise((r) => setTimeout(r, 2000));
-      }
+      // Already warming — just poll until hot (retry below settles a timeout).
+      await pollCacheUntilHot(studyinstanceuid);
     }
 
     const retryRes = await apiFetch(path);

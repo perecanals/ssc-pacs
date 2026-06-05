@@ -1,5 +1,6 @@
 const LEVEL_RANK = { patient: 0, study: 1, series: 2 };
 const LEVEL_ORDER = ["patient", "study", "series"];
+const LEVEL_LABELS = { patient: "Patient", study: "Study", series: "Series" };
 
 const LEVEL_CONFIG = {
   patient: {
@@ -72,7 +73,7 @@ const LEVEL_CONFIG = {
   },
 };
 
-export { LEVEL_RANK, LEVEL_ORDER, LEVEL_CONFIG };
+export { LEVEL_RANK, LEVEL_ORDER, LEVEL_LABELS, LEVEL_CONFIG };
 
 export const PER_PAGE = 50;
 

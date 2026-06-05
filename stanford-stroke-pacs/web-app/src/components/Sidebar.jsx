@@ -1,12 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 import PropTypes from "prop-types";
 import { apiGet } from "../api/client";
-import { compareLabelDefsDefault } from "../utils/table";
+import { compareLabelDefsDefault, LEVEL_ORDER, LEVEL_LABELS } from "../utils/table";
 import "./Sidebar.css";
 
 const MODALITIES = ["CT", "MR", "CR", "US", "DX", "PT", "NM", "XA", "MG", "RF"];
-const LEVEL_ORDER = ["patient", "study", "series"];
-const LEVEL_LABELS = { patient: "Patient", study: "Study", series: "Series" };
 const UNASSIGNED = "__unassigned__";
 
 // Same default ordering as the data table's columns: instrument groups

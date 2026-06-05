@@ -1,14 +1,12 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import PropTypes from "prop-types";
-import { compareLabelDefsDefault } from "../utils/table";
+import { compareLabelDefsDefault, LEVEL_ORDER, LEVEL_LABELS } from "../utils/table";
 import "./ColumnSelector.css";
 
 const COLUMN_KEY_MIGRATIONS = {
   integration_id: "import_id",
 };
 
-const LEVEL_LABELS = { patient: "Patient", study: "Study", series: "Series" };
-const LEVEL_ORDER = ["patient", "study", "series"];
 const UNASSIGNED = "__unassigned__";
 
 export function useColumnPrefs(labelDefs, builtinCols, level, initialPrefs = {}) {
