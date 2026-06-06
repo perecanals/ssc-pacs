@@ -7,7 +7,7 @@ from dataclasses import dataclass
 
 from psycopg2 import sql
 
-VALID_LEVELS = ("patient", "study", "series")
+from common import VALID_LEVELS
 
 
 @dataclass(frozen=True)

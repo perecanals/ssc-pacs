@@ -6,7 +6,7 @@ import psycopg2.extras
 from fastapi import APIRouter, Cookie, Depends, HTTPException
 from pydantic import BaseModel
 
-from auth import get_current_user
+from auth import get_current_user, require_admin
 from common import VALID_LEVELS
 from db import get_conn
 from labelled_table_sync import sync_labelled_rows
@@ -149,23 +149,9 @@ def delete_annotation(annotation_id: int, auth_token: str | None = Cookie(None))
 # Annotation history (admin-only)
 # ---------------------------------------------------------------------------
 
-def _require_admin(username: str) -> None:
-    """Raise 403 if the user is not an admin."""
-    conn = get_conn()
-    try:
-        with conn.cursor() as cur:
-            cur.execute("SELECT is_admin FROM users WHERE username = %s", (username,))
-            row = cur.fetchone()
-    finally:
-        conn.close()
-    if not row or not row[0]:
-        raise HTTPException(status_code=403, detail="Admin access required")
-
-
 @router.get("/api/annotations/{annotation_id}/history")
-def annotation_history(annotation_id: int, user: str = Depends(get_current_user)):
+def annotation_history(annotation_id: int, user: str = Depends(require_admin)):
     """Return the audit history for a single annotation, newest first."""
-    _require_admin(user)
     conn = get_conn()
     try:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:

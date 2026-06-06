@@ -10,7 +10,6 @@ Default layout matches the evaluation script:
 from __future__ import annotations
 
 import argparse
-import os
 import sys
 import tarfile
 import time
@@ -28,8 +27,9 @@ load_dotenv(REPO_ROOT / ".env")
 
 # Paths from repo-root config.toml (see web-app/config.py)
 sys.path.insert(0, str(REPO_ROOT / "web-app"))
+from cache_manager import archive_path_for_series_dir  # noqa: E402
 from config import COLD_ARCHIVE_ROOT, LEGACY_DICOM_ROOT  # noqa: E402
-from db import DB_CONFIG, get_conn  # noqa: E402
+from db import DB_CONFIG  # noqa: E402
 
 DEFAULT_LEGACY = LEGACY_DICOM_ROOT
 DEFAULT_COLD = COLD_ARCHIVE_ROOT
@@ -51,13 +51,6 @@ def tar_zst_dir(src: Path, out_path: Path, level: int) -> None:
             with tarfile.open(fileobj=z_out, mode="w|") as tf:
                 for f in iter_files(src):
                     tf.add(f, arcname=str(f.relative_to(src)))
-
-
-def archive_path_for_series_dir(dicom_dir: Path, legacy_root: Path, cold_root: Path) -> Path:
-    dicom_dir = dicom_dir.resolve()
-    legacy_root = legacy_root.resolve()
-    rel = dicom_dir.relative_to(legacy_root)
-    return cold_root / rel.parent / f"{rel.name}.tar.zst"
 
 
 def compress_one_job(args: tuple[str, str, str, str, int]) -> dict[str, Any]:

@@ -91,19 +91,16 @@ def resolve_series_archive(dicom_archive_path: str | None, dicom_dir_path: str |
         return None
 
 
-def iter_files(root: Path):
-    for p in root.rglob("*"):
-        if p.is_file():
-            yield p
-
-
 def untar_zst(archive: Path, dest: Path) -> None:
     dest.mkdir(parents=True, exist_ok=True)
     dctx = zstd.ZstdDecompressor()
     with archive.open("rb") as f_in:
         with dctx.stream_reader(f_in) as z_in:
             with tarfile.open(fileobj=z_in, mode="r|") as tf:
-                tf.extractall(dest)
+                # filter="data" rejects absolute paths / ".." arcnames (defense in
+                # depth — archives are produced internally) and is required to avoid
+                # the extractall default becoming a hard error in Python 3.14.
+                tf.extractall(dest, filter="data")
 
 
 def _is_series_dir_warm(dicom_dir_path: str) -> bool:

@@ -29,9 +29,7 @@ ORTHANC_URL = os.getenv("ORTHANC_URL", "http://localhost:8042")
 ORTHANC_USER = os.getenv("ORTHANC_ADMIN_USER", "")
 ORTHANC_PASS = os.getenv("ORTHANC_ADMIN_PASSWORD", "")
 
-# Maximum number of individual /series/{id} lookups per run to avoid
-# hammering Orthanc on very large instances.
-_ORTHANC_BATCH_LIMIT = 500
+# Page size for paginating Orthanc's /series listing.
 _ORTHANC_PAGE_SIZE = 500
 
 

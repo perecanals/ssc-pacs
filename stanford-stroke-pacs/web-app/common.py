@@ -27,11 +27,6 @@ SERIES_SORT_WHITELIST = {
     "patient_id", "import_id", "import_label", "acquisitiondatetime",
     "modality", "seriesdescription", "number_of_slices",
 }
-STUDY_SORT_WHITELIST = {
-    "patient_id", "import_id", "import_label", "acquisitiondatetime",
-    "studyinstanceuid", "study_type",
-}
-PATIENT_SORT_WHITELIST = {"patient_id", "stroke_date"}
 
 # ---------------------------------------------------------------------------
 # Unified label-filter SQL builder  (replaces _label_filter_sql,
@@ -224,8 +219,6 @@ def format_ann(a: dict) -> dict:
 def attach_annotations(cur, rows, level, id_col):
     """Fetch annotations for a batch of rows keyed by *id_col* at *level*."""
     if not rows:
-        for r in rows:
-            r["annotations"] = []
         return
     ids = [r[id_col] for r in rows]
     cur.execute(

@@ -29,7 +29,7 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent
 _WEB_APP_DIR = _REPO_ROOT / "web-app"
 if str(_WEB_APP_DIR) not in sys.path:
     sys.path.insert(0, str(_WEB_APP_DIR))
-from config import COLD_ARCHIVE_ROOT, LEGACY_DICOM_ROOT, STORAGE_MODE  # noqa: E402
+from config import LEGACY_DICOM_ROOT, STORAGE_MODE  # noqa: E402
 
 import warnings
 warnings.filterwarnings(
@@ -314,8 +314,8 @@ class ImageIntegrationProtocol:
             return None
         if isinstance(value, float) and pd.isna(value):
             return None
-        text = str(value).strip()
-        return text if text else None
+        cleaned = str(value).strip()
+        return cleaned if cleaned else None
 
     @staticmethod
     def _safe_int(value):
