@@ -78,7 +78,7 @@ The web app runs natively on the host, managed by **`ssc-web-app.service`**:
 - `uvicorn app:app --host 0.0.0.0 --port 8043`
 - loads `.env` from the repo root via `python-dotenv` (the parent of `web-app/`)
 - serves the React frontend from `web-app/dist/` (pre-built by Vite)
-- non-secret tuning (storage paths, session length) from repo-root **`config.toml`**
+- non-secret tuning (storage paths, session length, `[backup]` settings) from repo-root **`config.toml`**
   via `web-app/config.py`
 
 Frontend build:
@@ -180,7 +180,7 @@ Runtime split:
 stanford-stroke-pacs/
 ├── .env                          # Local secrets and connection settings
 ├── .env.example                  # Template for .env (secrets only)
-├── config.toml                   # Non-secret paths, storage mode, session length
+├── config.toml                   # Non-secret paths, storage mode, session length, backup settings
 ├── orthanc_users.json            # Service account + admin users only (managed by manage_users.py)
 ├── docker-compose.yml            # Orthanc only
 ├── orthanc.json                  # Orthanc structural config

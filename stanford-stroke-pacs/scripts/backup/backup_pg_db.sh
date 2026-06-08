@@ -3,11 +3,11 @@
 #
 # Usage: backup_pg_db.sh <db-name>
 #
-# Reads connection details from BACKUP_ENV_FILE (default:
-# /home/perecanals/pacs/stanford-stroke-pacs/.env). Required keys:
+# Reads connection details from BACKUP_ENV_FILE (default: <stack>/.env resolved
+# from the script location). Required keys:
 #   DB_HOST, DB_PORT, DB_USER, DB_PASSWORD
-# Optional override: BACKUP_ROOT (default: /DATA2/pg_backups).
-# Optional override: RETENTION_DAYS (default: 60).
+# Optional override: BACKUP_ROOT (default: config.toml [backup].backup_root, else /DATA2/pg_backups).
+# Optional override: RETENTION_DAYS (default: config.toml [backup].retention_days, else 60).
 #
 # Output layout:
 #   $BACKUP_ROOT/<db>/<utc-timestamp>.dump      # pg_dump custom format
@@ -29,9 +29,15 @@ if [[ -z "$TARGET_DB" ]]; then
     exit 1
 fi
 
-BACKUP_ENV_FILE="${BACKUP_ENV_FILE:-/home/perecanals/pacs/stanford-stroke-pacs/.env}"
-BACKUP_ROOT="${BACKUP_ROOT:-/DATA2/pg_backups}"
-RETENTION_DAYS="${RETENTION_DAYS:-60}"
+# _lib.sh defines STACK_DIR (repo-relative) and config_get (reads config.toml),
+# so paths/settings are deployable anywhere without editing this script.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=_lib.sh
+. "$SCRIPT_DIR/_lib.sh"
+
+BACKUP_ENV_FILE="${BACKUP_ENV_FILE:-$STACK_DIR/.env}"
+BACKUP_ROOT="${BACKUP_ROOT:-$(config_get backup backup_root /DATA2/pg_backups)}"
+RETENTION_DAYS="${RETENTION_DAYS:-$(config_get backup retention_days 60)}"
 
 if [[ ! -r "$BACKUP_ENV_FILE" ]]; then
     echo "env file not readable: $BACKUP_ENV_FILE" >&2

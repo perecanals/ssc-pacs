@@ -14,8 +14,8 @@
 # is dormant); production cutover enables it.
 #
 # Env overrides:
-#   BACKUP_ROOT       (default /DATA2/pg_backups)
-#   MAX_AGE_HOURS     (default 36)
+#   BACKUP_ROOT       (default: config.toml [backup].backup_root, else /DATA2/pg_backups)
+#   MAX_AGE_HOURS     (default: config.toml [backup].max_age_hours, else 36)
 #   COLD_MIRROR_DEST  (required if --include-cold-archive)
 #   COLD_MIRROR_MAX_AGE_HOURS (default 36)
 #
@@ -41,8 +41,12 @@ for arg in "$@"; do
     esac
 done
 
-BACKUP_ROOT="${BACKUP_ROOT:-/DATA2/pg_backups}"
-MAX_AGE_HOURS="${MAX_AGE_HOURS:-36}"
+# _lib.sh defines config_get (reads config.toml) so defaults stay in one place.
+# shellcheck source=_lib.sh
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_lib.sh"
+
+BACKUP_ROOT="${BACKUP_ROOT:-$(config_get backup backup_root /DATA2/pg_backups)}"
+MAX_AGE_HOURS="${MAX_AGE_HOURS:-$(config_get backup max_age_hours 36)}"
 DBS=("orthanc_db" "stanford-stroke")
 
 now_epoch=$(date +%s)

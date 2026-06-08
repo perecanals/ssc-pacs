@@ -99,8 +99,8 @@ When the server is upgraded, install the matching client major.
 - One file per night per DB / per volume.
 - `latest.dump` / `latest.tar.gz` symlinks always point at the newest archive.
 - `.sha256` sidecar written immediately after each archive.
-- Retention: archives older than `RETENTION_DAYS` (default 60) are deleted,
-  but at least one is always kept.
+- Retention: archives older than `RETENTION_DAYS` (default from `config.toml`
+  `[backup].retention_days`, else 60) are deleted, but at least one is always kept.
 
 ### Orthanc storage volume — how the snapshot stays zero-downtime
 
@@ -134,15 +134,35 @@ volume-backup timers; no `docker pause` is used.
 | `scripts/backup/backup_pg_db.sh` | dump one DB, write sha256, rotate retention |
 | `scripts/backup/backup_orthanc_storage.sh` | snapshot the storage volume via a `:ro` helper container, write sha256, rotate retention |
 | `scripts/backup/orthanc_storage_snapshot.py` | in-container helper: consistent SQLite snapshot + gzip-tar stream to stdout |
-| `scripts/backup/check_backup_freshness.sh` | exit nonzero if any latest dump/archive is older than `MAX_AGE_HOURS` (default 36) |
+| `scripts/backup/check_backup_freshness.sh` | exit nonzero if any latest dump/archive is older than `MAX_AGE_HOURS` (default from `config.toml` `[backup].max_age_hours`, else 36) |
 | `systemd/pg-backup-stanford-stroke.{service,timer}` | nightly dump of `stanford-stroke` (02:15 + jitter) |
 | `systemd/pg-backup-orthanc.{service,timer}` | nightly dump of `orthanc_db` (02:30 + jitter) |
 | `systemd/orthanc-storage-backup.{service,timer}` | nightly snapshot of the Orthanc storage volume (02:45 + jitter) |
 | `systemd/pg-backup-freshness.{service,timer}` | hourly freshness check |
 
-The backup script reads connection details from the same `.env` the
-Web App uses (`DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`).
-Override the env file with `BACKUP_ENV_FILE=...` if needed.
+### Configuration
+
+The scripts carry **no hardcoded host paths** — they are deployable on any
+checkout. Settings resolve in this precedence order:
+
+1. **Explicit env override** (per-invocation): `BACKUP_ROOT`, `RETENTION_DAYS`,
+   `MAX_AGE_HOURS`, `BACKUP_ENV_FILE`.
+2. **`config.toml` `[backup]`** — the single source of truth for the deployment
+   default:
+   ```toml
+   [backup]
+   backup_root   = "/DATA2/pg_backups"
+   retention_days = 60
+   max_age_hours  = 36
+   ```
+3. **Built-in fallback** baked into each script (matches the values above).
+
+Path resolution is location-relative: `scripts/backup/_lib.sh` derives
+`STACK_DIR` (the `stanford-stroke-pacs/` root) from its own path and reads
+`config.toml` via `python3` (`tomllib`). The DB credentials still come from
+`.env` (`DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`), which defaults to
+`$STACK_DIR/.env` — i.e. the repo's own `.env`, found without editing any
+absolute path. Override with `BACKUP_ENV_FILE=...` for a non-standard location.
 
 ### Installation on the dev host
 

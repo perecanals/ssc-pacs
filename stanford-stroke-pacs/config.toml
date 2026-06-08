@@ -23,6 +23,19 @@ warming_disk_min_free_bytes = 104857600  # 100 MiB
 # under burst load — extra POSTs queue rather than thrashing the filesystem.
 warm_workers = 2
 
+[backup]
+# Single source of truth for the backup scripts (scripts/backup/*). Each script
+# still honours an explicit env override (BACKUP_ROOT / RETENTION_DAYS /
+# MAX_AGE_HOURS) for one-off runs; these values are the deployment default.
+# Root directory for all backups. Each target (orthanc_db, stanford-stroke,
+# orthanc_storage) gets its own subdirectory here.
+backup_root = "/DATA2/pg_backups"
+# Days to keep dated dumps/archives before pruning (always keeps >= 1).
+retention_days = 60
+# Freshness-monitor alert threshold: a backup older than this many hours is
+# reported stale by check_backup_freshness.sh.
+max_age_hours = 36
+
 [web-app]
 # Sliding idle timeout. Cookie is refreshed on every authenticated request; if
 # no request is made for this many hours the session is dead. The SPA proactively

@@ -12,9 +12,9 @@
 # Usage: backup_orthanc_storage.sh
 #
 # Optional env overrides:
-#   BACKUP_ENV_FILE          (default /home/perecanals/pacs/stanford-stroke-pacs/.env; sourced if present)
-#   BACKUP_ROOT              (default /DATA2/pg_backups)
-#   RETENTION_DAYS           (default 60)
+#   BACKUP_ENV_FILE          (default: <stack>/.env resolved from the script location; sourced if present)
+#   BACKUP_ROOT              (default: config.toml [backup].backup_root, else /DATA2/pg_backups)
+#   RETENTION_DAYS           (default: config.toml [backup].retention_days, else 60)
 #   ORTHANC_STORAGE_VOLUME   (default stanford-stroke-pacs_ssc-orthanc-storage)
 #   BACKUP_HELPER_IMAGE      (default python:3.12-slim)
 #
@@ -35,10 +35,14 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SNAP_PY="$SCRIPT_DIR/orthanc_storage_snapshot.py"
+# _lib.sh defines STACK_DIR (repo-relative) and config_get (reads config.toml),
+# so paths/settings are deployable anywhere without editing this script.
+# shellcheck source=_lib.sh
+. "$SCRIPT_DIR/_lib.sh"
 
-BACKUP_ENV_FILE="${BACKUP_ENV_FILE:-/home/perecanals/pacs/stanford-stroke-pacs/.env}"
-BACKUP_ROOT="${BACKUP_ROOT:-/DATA2/pg_backups}"
-RETENTION_DAYS="${RETENTION_DAYS:-60}"
+BACKUP_ENV_FILE="${BACKUP_ENV_FILE:-$STACK_DIR/.env}"
+BACKUP_ROOT="${BACKUP_ROOT:-$(config_get backup backup_root /DATA2/pg_backups)}"
+RETENTION_DAYS="${RETENTION_DAYS:-$(config_get backup retention_days 60)}"
 ORTHANC_STORAGE_VOLUME="${ORTHANC_STORAGE_VOLUME:-stanford-stroke-pacs_ssc-orthanc-storage}"
 BACKUP_HELPER_IMAGE="${BACKUP_HELPER_IMAGE:-python:3.12-slim}"
 TARGET="orthanc_storage"
