@@ -4,9 +4,9 @@
 [storage]
 # "legacy" | "cold_path_cache"
 mode = "cold_path_cache"
-legacy_dicom_root = "/DATA2/pacs_imaging_data"
-cold_archive_root = "/DATA2/pacs_imaging_data_compressed"
-hot_cache_dir = "/DATA2/pacs_hot_cache"
+legacy_dicom_root = "/Volumes/ThunderBay_RAID1/ssc-pacs-data/imaging_data"
+cold_archive_root = "/Volumes/ThunderBay_RAID1/ssc-pacs-data/compressed"
+hot_cache_dir = "/Volumes/ThunderBay_RAID1/ssc-pacs-data/hot_cache"
 eviction_ttl_hours = 336
 # Cold-storage warm watchdog: a `cache_state` row stuck in status='warming'
 # longer than this is treated as cold by the next warm attempt (recovers
@@ -29,7 +29,7 @@ warm_workers = 2
 # MAX_AGE_HOURS) for one-off runs; these values are the deployment default.
 # Root directory for all backups. Each target (orthanc_db, stanford-stroke,
 # orthanc_storage) gets its own subdirectory here.
-backup_root = "/DATA2/pg_backups"
+backup_root = "/Volumes/ThunderBay_RAID1/ssc-pacs-backups"
 # Days to keep dated dumps/archives before pruning (always keeps >= 1).
 retention_days = 60
 # Freshness-monitor alert threshold: a backup older than this many hours is

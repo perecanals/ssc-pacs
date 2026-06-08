@@ -120,7 +120,9 @@ Runtime split:
 1. Host prerequisites: Docker, PostgreSQL, Python, Node/npm for builds, DICOM tree
 2. Create `.env`
 3. `python3 -m pip install -r requirements.txt`
-4. Adjust `docker-compose.yml` DICOM bind mount if needed
+4. Adjust `docker-compose.yml` DICOM bind mount if needed (Linux). On macOS, leave
+   the base file unedited and use `docker-compose.override.yml` — see
+   [`../guides/deployment_on_mac.md`](../guides/deployment_on_mac.md) §4.
 5. `./init_orthanc_db.sh`
 6. `python scripts/admin/manage_users.py add <user> --admin`
 7. `docker compose up -d` (Orthanc)

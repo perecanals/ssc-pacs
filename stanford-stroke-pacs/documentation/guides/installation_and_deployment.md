@@ -150,6 +150,13 @@ The current `docker-compose.yml` mounts this host path into Orthanc:
 On a new server you will likely need to edit `docker-compose.yml` so the left
 side matches the real DICOM path on that machine.
 
+> **This runbook targets Linux** (host networking). On **macOS** the base
+> `docker-compose.yml` is left **unedited** — a `docker-compose.override.yml` drops
+> host networking and re-points the mount instead (Docker runs in a VM there, so
+> host networking doesn't reach the Mac). Follow
+> [`deployment_on_mac.md`](deployment_on_mac.md) §4 for the override and the rest of
+> the macOS-specific deltas.
+
 `docker-compose.yml` loads secrets via `env_file: .env`, a path relative to the
 compose file. Ensure `stanford-stroke-pacs/.env` exists before `docker compose up`.
 

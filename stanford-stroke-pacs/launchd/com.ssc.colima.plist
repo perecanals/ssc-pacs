@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Boot persistence for the Colima Docker VM (headless macOS).
+
+  Runs scripts/macos/colima_start.sh once at login so the Docker daemon is up
+  before the web-app LaunchAgent and the backup jobs need it. KeepAlive is false
+  because `colima start` returns after the VM is up (it is not a long-running
+  foreground process); the VM stays up on its own.
+
+  Install (per-user, GUI session):
+    cp launchd/com.ssc.colima.plist ~/Library/LaunchAgents/
+    launchctl load -w ~/Library/LaunchAgents/com.ssc.colima.plist
+
+  NOTE: a LaunchAgent starts at user login. If this server must run Docker
+  *before* anyone logs in, install this as a LaunchDaemon in
+  /Library/LaunchDaemons/ with an explicit <UserName>pere</UserName> key instead
+  (Colima stores state under that user's ~/.colima).
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>            <string>com.ssc.colima</string>
+  <key>UserName</key>         <string>pere</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/opt/ssc-pacs/ssc-pacs/stanford-stroke-pacs/scripts/macos/colima_start.sh</string>
+  </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key><string>/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    <key>HOME</key><string>/Users/pere</string>
+  </dict>
+  <key>RunAtLoad</key>        <true/>
+  <key>KeepAlive</key>        <false/>
+  <key>StandardOutPath</key>  <string>/Users/pere/Library/Logs/ssc-colima.log</string>
+  <key>StandardErrorPath</key><string>/Users/pere/Library/Logs/ssc-colima.err</string>
+</dict>
+</plist>

@@ -18,7 +18,7 @@ setup must be adapted.
 
 | # | Linux assumption | Why it breaks on macOS | Fix (section) |
 |---|---|---|---|
-| 1 | `network_mode: host` in `docker-compose.yml` | Docker Desktop runs Linux in a VM; host networking does **not** publish container ports to the Mac, and the container can't reach `localhost` Postgres | §4 |
+| 1 | `network_mode: host` in `docker-compose.yml` | Docker (Colima) runs Linux in a VM; host networking does **not** publish container ports to the Mac, and the container can't reach `localhost` Postgres | §4 |
 | 2 | Image is Linux/amd64 | Apple Silicon is arm64; `orthancteam/orthanc` may be amd64-only | §3 |
 | 3 | Web App runs under **systemd** (`ssc-web-app.service`) | macOS has no systemd | §6 |
 | 4 | `/DATA2/...` paths, `sudo -u postgres` | Those paths don't exist; Homebrew Postgres has no `postgres` system user (your Mac user is the superuser) | §5 |
@@ -27,20 +27,38 @@ On an **Intel Mac**, difference #2 disappears.
 
 ---
 
-## 2. Prerequisites (Homebrew)
+## 2. Prerequisites (Homebrew + Colima)
+
+This server runs **headless** (no GUI), so it uses **Colima** — a CLI-only Docker
+engine on a Lima VM (Apple's Virtualization.framework) — instead of Docker Desktop.
+No GUI, no root, no Docker-Desktop licensing.
 
 ```bash
-xcode-select --install                       # clang/make
-brew install --cask docker                   # Docker Desktop
+xcode-select --install                       # clang/make (skip if already present)
+brew install colima docker docker-compose    # headless engine + docker CLI + compose v2
 brew install node postgresql@16 bash         # bash 5.x — see §7
 brew install --cask miniconda                # or reuse an existing conda
 ```
 
-In Docker Desktop **Settings → Resources → File Sharing**, add the folder you
-will use for DICOM data (anything under your home dir is shared by default;
-external `/Volumes/...` drives are **not** and must be added). Enable
-**VirtioFS** there — bind-mount I/O on macOS is far slower than Linux without
-it, and this stack scans the DICOM tree continuously.
+Start the VM with the host paths the stack bind-mounts. Colima shares only `$HOME`
+by default, so the repo dir (under `/opt`) and the external `/Volumes` DICOM drive
+must be added explicitly. VirtioFS (default on vz) keeps the continuous DICOM-tree
+scan fast. The exact invocation is captured in
+[`scripts/macos/colima_start.sh`](../../scripts/macos/colima_start.sh) — idempotent,
+and it waits for the RAID to mount before starting:
+
+```bash
+scripts/macos/colima_start.sh
+# equivalent to:
+#   colima start --cpu 4 --memory 8 --disk 100 --mount-type virtiofs \
+#     --mount /opt/ssc-pacs/ssc-pacs/stanford-stroke-pacs:r \
+#     --mount /Volumes/ThunderBay_RAID1:w
+```
+
+`docker` / `docker compose` then talk to Colima automatically (socket
+`~/.colima/default/docker.sock`, context `colima`). There is no Docker Desktop
+file-sharing dialog — the `--mount` flags replace it. Verify the mounts are visible
+inside the VM with `colima ssh -- ls /opt/ssc-pacs/ssc-pacs/stanford-stroke-pacs`.
 
 ---
 
@@ -74,10 +92,12 @@ docker manifest inspect orthancteam/orthanc | grep -E 'architecture'
 
 The base `docker-compose.yml` stays **unchanged** — it keeps `network_mode: host`
 for Linux. Do not edit it. macOS needs explicit port publishing and must reach
-the host's Postgres via `host.docker.internal` (the DNS name Docker Desktop
-resolves to the Mac host; it is **not** `localhost` from inside the container).
-Isolate that divergence in a `docker-compose.override.yml` next to the base file
-— Docker Compose merges it automatically on `docker compose up`:
+the host's Postgres via `host.docker.internal` (the DNS name **Colima** — and
+Docker Desktop — resolve to the Mac host; it is **not** `localhost` from inside the
+container). Under Colima this address NATs to the host **loopback**, so Postgres
+needs **no `pg_hba`/`listen_addresses` change** — see §5. Isolate this divergence in
+a `docker-compose.override.yml` next to the base file — Docker Compose merges it
+automatically on `docker compose up`:
 
 ```yaml
 # docker-compose.override.yml — macOS only. Auto-merged over docker-compose.yml.
@@ -180,19 +200,26 @@ username):
 </plist>
 ```
 
-Load and manage it:
+**Headless servers (no console login): use LaunchDaemons, not LaunchAgents.**
+A per-user LaunchAgent only loads inside a GUI login session — on a headless box
+accessed over SSH, `launchctl bootstrap gui/$UID …` (and `brew services`) fail with
+*"Domain does not support specified action"*. Install as **system LaunchDaemons**
+instead. This repo ships ready-made daemon plists in
+[`launchd/`](../../launchd/) (run as `pere`) and an installer that does the whole
+cutover — Colima, Postgres, the Web App, **and** the nightly backup/reconciliation/
+health jobs:
 
 ```bash
-launchctl load -w ~/Library/LaunchAgents/com.ssc.webapp.plist   # enable + start
-launchctl kickstart -k gui/$(id -u)/com.ssc.webapp              # restart (≈ systemctl restart)
-launchctl print gui/$(id -u)/com.ssc.webapp                     # status
-launchctl unload ~/Library/LaunchAgents/com.ssc.webapp.plist    # stop + disable
-log show --predicate 'process == "uvicorn"' --last 5m             # logs (or tail the StandardOutPath file)
+sudo scripts/macos/install_launchd.sh        # stops the manual instances, then
+                                             # bootstraps every com.ssc.* daemon
+# manage individual daemons (system domain):
+sudo launchctl kickstart -k system/com.ssc.webapp     # restart  (≈ systemctl restart)
+sudo launchctl print        system/com.ssc.webapp     # status
+tail -f ~/Library/Logs/ssc-web-app.log                 # logs
 ```
 
-A **LaunchAgent** runs in your GUI session (it starts when you log in). If the
-machine must serve before anyone logs in, install the same plist as a
-**LaunchDaemon** in `/Library/LaunchDaemons/` with an explicit `UserName` key.
+Orthanc is **not** a daemon — its `restart: unless-stopped` container returns
+automatically once Colima's Docker engine is up at boot (`com.ssc.colima`).
 
 ---
 
@@ -200,9 +227,9 @@ machine must serve before anyone logs in, install the same plist as a
 
 | Component | Boot persistence on macOS |
 |---|---|
-| Orthanc (Docker) | `restart: unless-stopped` in compose **plus** Docker Desktop set to **start at login** (Settings → General → "Start Docker Desktop when you sign in"). The container will not come back without the Docker daemon running. |
-| PostgreSQL | `brew services start postgresql@16` already installs a LaunchAgent that runs at login. Confirm with `brew services list`. |
-| Web App | the launchd agent in §6 (`RunAtLoad` + `KeepAlive`). |
+| Orthanc (Docker) | `restart: unless-stopped` in compose **plus** the Colima VM started at boot via the `com.ssc.colima` LaunchAgent ([`launchd/com.ssc.colima.plist`](../../launchd/com.ssc.colima.plist), which runs [`scripts/macos/colima_start.sh`](../../scripts/macos/colima_start.sh)). The container will not come back without the Colima daemon running. For pre-login boot, install the plist as a LaunchDaemon with `<UserName>pere</UserName>` instead. |
+| PostgreSQL | `com.ssc.postgres` LaunchDaemon (installed by `install_launchd.sh`). On a headless box `brew services` can't load a `gui/$UID` agent, so a system daemon running `postgres -D <datadir>` as `pere` is used instead. |
+| Web App | `com.ssc.webapp` LaunchDaemon (§6, `RunAtLoad` + `KeepAlive`). |
 
 After a reboot, verify all three with the day-2 commands below.
 
@@ -212,10 +239,11 @@ After a reboot, verify all three with the day-2 commands below.
 
 | Task | Linux | macOS |
 |---|---|---|
-| Restart Web App | `sudo systemctl restart ssc-web-app` | `launchctl kickstart -k gui/$(id -u)/com.ssc.webapp` |
-| Web App status | `systemctl status ssc-web-app` | `launchctl print gui/$(id -u)/com.ssc.webapp` |
+| Restart Web App | `sudo systemctl restart ssc-web-app` | `sudo launchctl kickstart -k system/com.ssc.webapp` |
+| Web App status | `systemctl status ssc-web-app` | `sudo launchctl print system/com.ssc.webapp` |
 | Web App logs | `journalctl -u ssc-web-app -f` | `tail -f ~/Library/Logs/ssc-web-app.log` |
-| Orthanc up/down | `docker compose up -d` / `down` | identical |
+| Docker engine | (systemd `docker.service`) | `colima status` / `colima start` (or `scripts/macos/colima_start.sh`) / `colima stop` |
+| Orthanc up/down | `docker compose up -d` / `down` | identical (once Colima is up) |
 | Orthanc status | `scripts/orthanc/check_status.sh` | identical (works as-is) |
 | Postgres restart | `sudo systemctl restart postgresql` | `brew services restart postgresql@16` |
 

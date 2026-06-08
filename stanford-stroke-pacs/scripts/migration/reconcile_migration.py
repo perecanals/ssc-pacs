@@ -167,7 +167,7 @@ def check_indexer_volume(r: Reporter, volume: str) -> None:
 # ---------------------------------------------------------------------------
 
 def check_paths(r: Reporter, limit: int) -> None:
-    _section("[4/4] image_series host paths")
+    _section("[4/4] host paths re-pointed")
     expected_prefixes = tuple(str(p) for p in (LEGACY_DICOM_ROOT, HOT_CACHE_DIR, COLD_ARCHIVE_ROOT))
     sql = "SELECT patient_id, seriesinstanceuid, dicom_dir_path, dicom_archive_path FROM image_series"
     if limit:
@@ -221,6 +221,50 @@ def check_paths(r: Reporter, limit: int) -> None:
             r.fail(f"{archive_missing} archives recorded in DB are missing on disk")
             for p in sample_missing:
                 r.info(f"    e.g. {p}")
+
+    # Other host-path columns a port must also re-point. Backfilling only
+    # image_series.dicom_dir_path leaves these on the old prefix — silent until
+    # warm (study_path -> cache_path), NIfTI generation, or a labelled export
+    # reads them. Each entry is existence-guarded so the check stays portable.
+    extra_cols = [
+        ("image_study", "study_path"),
+        ("image_series", "nifti_path"),
+        ("cache_state", "cache_path"),
+        ("image_series_labelled", "dicom_dir_path"),
+        ("image_series_labelled", "nifti_path"),
+        ("image_series_labelled", "dicom_archive_path"),
+        ("image_study_labelled", "study_path"),
+    ]
+    off_extra: list[tuple[str, str, int]] = []
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            for tbl, col in extra_cols:
+                cur.execute(
+                    "SELECT 1 FROM information_schema.columns WHERE table_schema='public' "
+                    "AND table_name=%s AND column_name=%s",
+                    (tbl, col),
+                )
+                if not cur.fetchone():
+                    continue  # column absent in this deployment
+                cond = " AND ".join(f"{col} NOT LIKE %s" for _ in expected_prefixes)
+                cur.execute(
+                    # Empty string == "no path recorded" (e.g. nifti_path for series
+                    # with no NIfTI); treat it like NULL, not an un-migrated prefix.
+                    f"SELECT count(*) FROM {tbl} WHERE {col} IS NOT NULL AND {col} <> '' AND {cond}",  # noqa: S608 (cols are a fixed allow-list)
+                    tuple(f"{p}%" for p in expected_prefixes),
+                )
+                n = cur.fetchone()[0]
+                if n:
+                    off_extra.append((tbl, col, n))
+    finally:
+        conn.close()
+
+    if not off_extra:
+        r.ok("study_path / nifti_path / *_labelled paths all under a configured root")
+    else:
+        for tbl, col, n in off_extra:
+            r.fail(f"{n} rows in {tbl}.{col} still point at an un-migrated host prefix")
 
 
 def main() -> int:
