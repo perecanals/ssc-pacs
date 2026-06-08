@@ -5,7 +5,7 @@ Most of these assume the `pacs` conda environment is active:
 
 ```bash
 conda activate pacs
-cd /home/perecanals/pacs/stanford-stroke-pacs
+cd /home/perecanals/ssc-pacs/stanford-stroke-pacs
 ```
 
 ---
@@ -154,6 +154,6 @@ python scripts/cold_storage/cleanup_loose_dicoms.py --execute --no-deep-verify
 Suitable for cron:
 
 ```cron
-*/15 * * * * cd /home/perecanals/pacs/stanford-stroke-pacs && \
+*/15 * * * * cd /home/perecanals/ssc-pacs/stanford-stroke-pacs && \
   /opt/miniconda3/envs/pacs/bin/python scripts/cold_storage/cleanup_loose_dicoms.py --execute
 ```

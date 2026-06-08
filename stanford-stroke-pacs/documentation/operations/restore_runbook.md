@@ -57,7 +57,7 @@ previous timestamped dump in the same directory.
 Always source `.env` for credentials rather than typing the password:
 
 ```bash
-set -a; . /home/perecanals/pacs/stanford-stroke-pacs/.env; set +a
+set -a; . /home/perecanals/ssc-pacs/stanford-stroke-pacs/.env; set +a
 export PGPASSWORD="$DB_PASSWORD"
 ```
 
@@ -178,14 +178,14 @@ psql -h "$DB_HOST" -U "$DB_USER" -d "$DEST" -c "
 
 ```bash
 # Stop Orthanc so it lets go of orthanc_db
-docker compose -f /home/perecanals/pacs/stanford-stroke-pacs/docker-compose.yml down
+docker compose -f /home/perecanals/ssc-pacs/stanford-stroke-pacs/docker-compose.yml down
 
 psql -h "$DB_HOST" -U "$DB_USER" -d postgres -c "
   ALTER DATABASE orthanc_db RENAME TO orthanc_db_broken_$(date -u +%Y%m%dT%H%M);
   ALTER DATABASE \"$DEST\" RENAME TO orthanc_db;
 "
 
-docker compose -f /home/perecanals/pacs/stanford-stroke-pacs/docker-compose.yml up -d
+docker compose -f /home/perecanals/ssc-pacs/stanford-stroke-pacs/docker-compose.yml up -d
 docker logs -f ssc-orthanc | grep -i 'index\|ready\|http'
 ```
 
@@ -210,7 +210,7 @@ DICOM bind-mount at `/dicom-data` (no reindex needed).
 ARCHIVE=/DATA2/pg_backups/orthanc_storage/latest.tar.gz
 sha256sum -c "${ARCHIVE}.sha256"          # pre-flight integrity
 
-COMPOSE=/home/perecanals/pacs/stanford-stroke-pacs/docker-compose.yml
+COMPOSE=/home/perecanals/ssc-pacs/stanford-stroke-pacs/docker-compose.yml
 VOL=stanford-stroke-pacs_ssc-orthanc-storage
 
 # Stop Orthanc so nothing is using the volume
@@ -227,7 +227,7 @@ docker logs -f ssc-orthanc | grep -i 'index\|ready\|http'
 Verify the SR annotations are back (expect the pre-incident count, e.g. 98):
 
 ```bash
-set -a; . /home/perecanals/pacs/stanford-stroke-pacs/.env; set +a
+set -a; . /home/perecanals/ssc-pacs/stanford-stroke-pacs/.env; set +a
 curl -s -u "$ORTHANC_ADMIN_USER:$ORTHANC_ADMIN_PASSWORD" \
      -X POST http://localhost:8042/tools/find \
      -d '{"Level":"Series","Query":{"Modality":"SR"},"Expand":false}' \

@@ -150,9 +150,8 @@ The current `docker-compose.yml` mounts this host path into Orthanc:
 On a new server you will likely need to edit `docker-compose.yml` so the left
 side matches the real DICOM path on that machine.
 
-Additionally, `docker-compose.yml` contains a hardcoded absolute `env_file` path
-(currently `/home/perecanals/pacs/.env`). Update it to point to the `.env` file
-in the repo root or the correct location for your deployment.
+`docker-compose.yml` loads secrets via `env_file: .env`, a path relative to the
+compose file. Ensure `stanford-stroke-pacs/.env` exists before `docker compose up`.
 
 Requirements:
 

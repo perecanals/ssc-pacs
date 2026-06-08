@@ -31,7 +31,7 @@ not stop the batch; errors are written to `logs/error_log_*.json`.
 ## Entry point
 
 ```bash
-cd /home/perecanals/pacs/stanford-stroke-pacs/image_integration_protocols
+cd /home/perecanals/ssc-pacs/stanford-stroke-pacs/image_integration_protocols
 conda activate pacs
 python execute_image_integration_protocol.py [--config path/to/config.yaml]
 ```
@@ -223,7 +223,7 @@ Use **`scripts/cold_storage/cleanup_loose_dicoms.py`** to do this safely. The sc
    The NIFTI sibling (`.../<seriesUID>/NIFTI/`) is preserved.
 
 ```bash
-cd /home/perecanals/pacs/stanford-stroke-pacs
+cd /home/perecanals/ssc-pacs/stanford-stroke-pacs
 conda activate pacs
 
 # Dry-run by default — see what would be cleaned
@@ -245,7 +245,7 @@ repeatedly and is suitable for cron — for example, to clean up loose
 DICOMs from any new ingestion within 5 minutes:
 
 ```cron
-*/5 * * * * cd /home/perecanals/pacs/stanford-stroke-pacs && \
+*/5 * * * * cd /home/perecanals/ssc-pacs/stanford-stroke-pacs && \
   /home/perecanals/miniconda3/envs/pacs/bin/python scripts/cold_storage/cleanup_loose_dicoms.py \
   --execute --no-deep-verify --quiet >> logs/cleanup_loose_dicoms.log 2>&1
 ```
@@ -302,7 +302,7 @@ ls /path/to/new_cases_root/
 #    - import_label: "2026-04-research-batch"
 
 # 3. Run
-cd /home/perecanals/pacs/stanford-stroke-pacs/image_integration_protocols
+cd /home/perecanals/ssc-pacs/stanford-stroke-pacs/image_integration_protocols
 conda activate pacs
 python execute_image_integration_protocol.py
 

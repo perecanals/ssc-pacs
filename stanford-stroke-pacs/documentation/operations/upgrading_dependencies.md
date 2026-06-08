@@ -38,11 +38,11 @@ for the rationale.
    pip install -r requirements.txt
    pip install -r stanford-stroke-pacs/web-app/requirements.txt
    ```
-4. (When WS 07 lands) re-run the test suite. Until then, smoke-test:
+4. Re-run the test suite (`make test` from the repo root), then smoke-test:
    ```bash
    sudo systemctl restart ssc-web-app
    sudo journalctl -u ssc-web-app -n 50
-   curl -sf http://localhost:8043/api/health
+   curl -sf http://localhost:8043/healthz
    ```
 5. Commit the pin change.
 

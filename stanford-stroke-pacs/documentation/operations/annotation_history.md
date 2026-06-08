@@ -144,11 +144,11 @@ DROP FUNCTION annotations_audit();
 DROP TABLE annotations_history;
 ```
 
-Or via Alembic:
-
-```bash
-cd web-app && alembic downgrade 0002_warming_started_at
-```
+Prefer the manual SQL above. The audit trail was added in revision
+`0003_annotations_history`, but later revisions (`0004`–`0006`) stack on top
+of it, so `alembic downgrade 0002_warming_started_at` would also roll back
+every migration after `0003` — not just the history table. Only use the
+Alembic path if you genuinely intend to unwind to the `0002` schema.
 
 ---
 

@@ -147,7 +147,7 @@ Override the env file with `BACKUP_ENV_FILE=...` if needed.
 ### Installation on the dev host
 
 ```bash
-cd /home/perecanals/pacs/stanford-stroke-pacs
+cd /home/perecanals/ssc-pacs/stanford-stroke-pacs
 
 # Stage units in /etc
 sudo cp systemd/pg-backup-stanford-stroke.service \
@@ -179,13 +179,13 @@ systemctl list-timers 'pg-backup-*' 'orthanc-storage-backup*'
 ls -lh /DATA2/pg_backups/orthanc_db/ /DATA2/pg_backups/stanford-stroke/ /DATA2/pg_backups/orthanc_storage/
 
 # Run the freshness monitor manually
-/home/perecanals/pacs/stanford-stroke-pacs/scripts/backup/check_backup_freshness.sh
+/home/perecanals/ssc-pacs/stanford-stroke-pacs/scripts/backup/check_backup_freshness.sh
 echo "exit=$?"   # 0 = fresh, 2 = stale or missing
 
 # Run a backup on demand (any time)
-/home/perecanals/pacs/stanford-stroke-pacs/scripts/backup/backup_pg_db.sh stanford-stroke
-/home/perecanals/pacs/stanford-stroke-pacs/scripts/backup/backup_pg_db.sh orthanc_db
-/home/perecanals/pacs/stanford-stroke-pacs/scripts/backup/backup_orthanc_storage.sh
+/home/perecanals/ssc-pacs/stanford-stroke-pacs/scripts/backup/backup_pg_db.sh stanford-stroke
+/home/perecanals/ssc-pacs/stanford-stroke-pacs/scripts/backup/backup_pg_db.sh orthanc_db
+/home/perecanals/ssc-pacs/stanford-stroke-pacs/scripts/backup/backup_orthanc_storage.sh
 ```
 
 ### Monitoring / alerting (TODO)
@@ -253,7 +253,7 @@ loss is recoverable via re-ingestion.
    ```ini
    [Service]
    ExecStart=
-   ExecStart=/home/perecanals/pacs/stanford-stroke-pacs/scripts/backup/check_backup_freshness.sh --include-cold-archive
+   ExecStart=/home/perecanals/ssc-pacs/stanford-stroke-pacs/scripts/backup/check_backup_freshness.sh --include-cold-archive
    EnvironmentFile=/etc/default/pacs-cold-mirror
    ```
 

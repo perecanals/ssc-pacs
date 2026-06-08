@@ -258,7 +258,7 @@ The **SSC Web App** dashboard is auto-provisioned when Grafana starts
 | Copy | Purpose |
 |------|---------|
 | `documentation/operations/grafana_dashboard.json` | Portable template with `${DS_PROMETHEUS}` variable (for manual import into a different Grafana) |
-| `~/monitoring/dashboards/ssc-web-app.json` | Provisioned copy with the datasource UID hard-coded to `ssc-prometheus` (loaded automatically) |
+| `~/monitoring/dashboards/ssc-companion.json` | Provisioned copy with the datasource UID hard-coded to `ssc-prometheus` (loaded automatically). The filename predates the Companion→Navigator/Web App rename and was kept to avoid disturbing the running Grafana provisioning. |
 
 **Panels:** request rate, p50/p95 latency, warm/evict success rate,
 cold-storage disk free, warming rows over time.
@@ -303,7 +303,7 @@ _Dashboards_ > _SSC Web App_.
 │   └── dashboards/
 │       └── default.yml         # Tells Grafana to load from /dashboards/
 └── dashboards/
-    └── ssc-web-app.json      # Auto-provisioned dashboard
+    └── ssc-companion.json    # Auto-provisioned dashboard (legacy filename)
 ```
 
 ### Common operations

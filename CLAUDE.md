@@ -5,7 +5,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Repository layout
 
 ```
-pacs/
+ssc-pacs/
 ├── stanford-stroke-pacs/     # Main PACS stack (Orthanc + Web App)
 │   ├── web-app/            # FastAPI backend + React frontend (port 8043)
 │   ├── scripts/              # Organized utility scripts (see subdirectory layout below)
@@ -169,15 +169,15 @@ python scripts/dicom/dicom_to_nifti.py --series-uid <uid> --warm-if-cold
 ### Patched Orthanc image (cold storage)
 
 Cold storage depends on a custom Orthanc image with a patched Folder Indexer
-plugin. Source: `/home/perecanals/pacs/orthanc-indexer-patched/`.
+plugin. Source: `/home/perecanals/ssc-pacs/orthanc-indexer-patched/`.
 
 ```bash
 # Rebuild after editing the patch
-cd /home/perecanals/pacs/orthanc-indexer-patched
+cd /home/perecanals/ssc-pacs/orthanc-indexer-patched
 docker build -t ssc-orthanc:patched-indexer .
 
 # Deploy (swap into docker-compose.yml and restart Orthanc)
-cd /home/perecanals/pacs/stanford-stroke-pacs
+cd /home/perecanals/ssc-pacs/stanford-stroke-pacs
 docker compose down && docker compose up -d
 docker logs ssc-orthanc | grep RemoveMissingFiles   # should print the patch's startup banner
 ```
@@ -186,12 +186,12 @@ docker logs ssc-orthanc | grep RemoveMissingFiles   # should print the patch's s
 
 The stack has two services and two databases.
 
-**Orthanc** indexes the on-disk DICOM tree (read-only bind mount) into `orthanc_db`. It serves Orthanc Explorer 2, OHIF, and DICOMweb. It does not own the DICOM files. The deployment runs a **custom Orthanc image (`ssc-orthanc:patched-indexer`)** with a patched Folder Indexer plugin that honours `RemoveMissingFiles: false` — required for cold_path_cache. Source at `/home/perecanals/pacs/orthanc-indexer-patched/`.
+**Orthanc** indexes the on-disk DICOM tree (read-only bind mount) into `orthanc_db`. It serves Orthanc Explorer 2, OHIF, and DICOMweb. It does not own the DICOM files. The deployment runs a **custom Orthanc image (`ssc-orthanc:patched-indexer`)** with a patched Folder Indexer plugin that honours `RemoveMissingFiles: false` — required for cold_path_cache. Source at `/home/perecanals/ssc-pacs/orthanc-indexer-patched/`.
 
 **Web App** is a FastAPI app that reads research metadata from the `stanford-stroke` PostgreSQL database and stores multi-level annotations. It serves a React frontend built with Vite + Tailwind CSS. In production, a single uvicorn process on `:8043` serves both the API and the pre-built `web-app/dist/`. Node.js is only needed at build time.
 
 **Web App backend modules** (under `web-app/`):
-- `app.py` — entry point: lifespan (pool + migrations), middleware (sliding JWT, request-ID/metrics), rate limiter, router registration (~230 lines).
+- `app.py` — entry point: lifespan (pool + migrations), middleware (sliding JWT, request-ID/metrics), rate limiter, router registration (~300 lines).
 - `db.py` — **single source of truth** for `DB_CONFIG` and the `ThreadedConnectionPool`. All modules import `get_conn` from here. Also exposes `audit_user_var` (contextvar) — when set by middleware, `get_conn()` auto-sets `SET LOCAL app.audit_user` so the annotation audit trigger can attribute changes.
 - `auth.py` — JWT utilities (`create_jwt`, `decode_jwt`, `get_current_user`).
 - `orthanc_client.py` — thin wrappers around Orthanc REST calls.
@@ -199,7 +199,7 @@ The stack has two services and two databases.
 - `config.py` — loads `config.toml` (storage, web app settings).
 - `cache_manager.py` — cold-storage warm/evict logic.
 - `reconciliation.py` — two-DB reconciliation: compares `image_series` vs Orthanc index + disk path checks.
-- `routes/` — `APIRouter` submodules: `auth`, `preferences`, `studies`, `cold_storage`, `annotations`, `labels`, `admin`, `static`.
+- `routes/` — `APIRouter` submodules: `auth`, `preferences`, `studies`, `cold_storage`, `annotations`, `labels`, `admin`, `static`, `proxy` (async OHIF / DICOMweb reverse proxy to Orthanc).
 
 **Two-database model:**
 - `orthanc_db` — Orthanc's internal index; do not query or mutate unless doing explicit Orthanc enrichment work.
@@ -232,7 +232,7 @@ web-app/src/
   App.jsx                  React Router (/ and /app)
   api/client.js            Fetch wrapper with 401 handling
   context/                 AuthContext
-  pages/                   Landing, Web App (page-level layout + preview state)
+  pages/                   Landing, Navigator (page-level layout + preview state), Login, ChangePassword
   utils/
     colors.js              Shared color palette (NOTION_COLORS, hashStr, valueColor)
     table.js               Table constants (LEVEL_CONFIG), formatters, filter helpers

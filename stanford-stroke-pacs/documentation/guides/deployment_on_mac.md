@@ -154,7 +154,7 @@ Two Mac-specific adaptations to the documented bootstrap:
 
 There is no systemd; `ssc-web-app.service` does not apply. Create a **launchd
 agent** so Web App starts at login and restarts on crash. Write
-`~/Library/LaunchAgents/com.ssc.web app.plist` (adjust the conda path and
+`~/Library/LaunchAgents/com.ssc.webapp.plist` (adjust the conda path and
 username):
 
 ```xml
@@ -163,7 +163,7 @@ username):
   "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-  <key>Label</key>            <string>com.ssc.web app</string>
+  <key>Label</key>            <string>com.ssc.webapp</string>
   <key>ProgramArguments</key>
   <array>
     <string>/Users/you/miniconda3/envs/pacs/bin/uvicorn</string>
@@ -183,10 +183,10 @@ username):
 Load and manage it:
 
 ```bash
-launchctl load -w ~/Library/LaunchAgents/com.ssc.web app.plist   # enable + start
-launchctl kickstart -k gui/$(id -u)/com.ssc.web app              # restart (≈ systemctl restart)
-launchctl print gui/$(id -u)/com.ssc.web app                     # status
-launchctl unload ~/Library/LaunchAgents/com.ssc.web app.plist    # stop + disable
+launchctl load -w ~/Library/LaunchAgents/com.ssc.webapp.plist   # enable + start
+launchctl kickstart -k gui/$(id -u)/com.ssc.webapp              # restart (≈ systemctl restart)
+launchctl print gui/$(id -u)/com.ssc.webapp                     # status
+launchctl unload ~/Library/LaunchAgents/com.ssc.webapp.plist    # stop + disable
 log show --predicate 'process == "uvicorn"' --last 5m             # logs (or tail the StandardOutPath file)
 ```
 
@@ -212,8 +212,8 @@ After a reboot, verify all three with the day-2 commands below.
 
 | Task | Linux | macOS |
 |---|---|---|
-| Restart Web App | `sudo systemctl restart ssc-web-app` | `launchctl kickstart -k gui/$(id -u)/com.ssc.web app` |
-| Web App status | `systemctl status ssc-web-app` | `launchctl print gui/$(id -u)/com.ssc.web app` |
+| Restart Web App | `sudo systemctl restart ssc-web-app` | `launchctl kickstart -k gui/$(id -u)/com.ssc.webapp` |
+| Web App status | `systemctl status ssc-web-app` | `launchctl print gui/$(id -u)/com.ssc.webapp` |
 | Web App logs | `journalctl -u ssc-web-app -f` | `tail -f ~/Library/Logs/ssc-web-app.log` |
 | Orthanc up/down | `docker compose up -d` / `down` | identical |
 | Orthanc status | `scripts/orthanc/check_status.sh` | identical (works as-is) |
@@ -223,7 +223,7 @@ After a reboot, verify all three with the day-2 commands below.
 
 ```bash
 cd web-app && npm run build
-launchctl kickstart -k gui/$(id -u)/com.ssc.web app
+launchctl kickstart -k gui/$(id -u)/com.ssc.webapp
 ```
 
 **bash 3.2 caveat:** macOS ships an ancient `/bin/bash`. A few ops scripts use
@@ -246,7 +246,7 @@ cookies on `http://localhost`), so login works over loopback.
 ```bash
 docker compose ps
 scripts/orthanc/check_status.sh
-launchctl print gui/$(id -u)/com.ssc.web app | grep state
+launchctl print gui/$(id -u)/com.ssc.webapp | grep state
 ```
 
 Browser checks: `http://localhost:8042/ui/app/`, `/ohif/`, and

@@ -250,7 +250,7 @@ that joins the source table with pivoted annotation columns for that level's
 label definitions:
 
 - `snapshot_patients` — from `patient` + patient-level annotations
-- `snapshot_studies` — from `image_study` + study-level annotations
+- `snapshot_studys` — from `image_study` + study-level annotations
 - `snapshot_seriess` — from `image_series` + series-level annotations
 
 These tables are dropped and recreated on each refresh and are intended for

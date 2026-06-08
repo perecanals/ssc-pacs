@@ -49,7 +49,7 @@ These tables drive browsing in the Navigator UI:
 - **`image_series`** (series-level imaging metadata)
   - typical fields: `patient_id`, `studyinstanceuid`, `seriesinstanceuid`, `seriesdescription`, `modality`, `acquisitiondatetime`
   - file pointers: `dicom_dir_path`, `nifti_path`
-  - optional cold storage: **`dicom_archive_path`** — path to per-series `*.tar.zst` when using `cold_cache` mode
+  - optional cold storage: **`dicom_archive_path`** — path to per-series `*.tar.zst` when using `cold_path_cache` mode
   - ingestion bookkeeping: `import_id`, `import_label`
   - geometry-derived: `imageshape`, **`number_of_slices`**
 
@@ -69,7 +69,7 @@ for the workflow when adding a new revision.
 - **`annotations`**: multi-level (patient / study / series) annotations.
 - **`label_definitions`**: label registry (level-aware; supports bool/int/text/select).
 - **`user_preferences`**: per-user persisted table layout/state (JSONB).
-- **`snapshot_patients` / `snapshot_studies` / `snapshot_seriess`**: refreshable export-oriented snapshot tables.
+- **`snapshot_patients` / `snapshot_studys` / `snapshot_seriess`**: refreshable export-oriented snapshot tables.
 
 Audit:
 
@@ -82,7 +82,7 @@ Cold storage / hot cache (when enabled):
 
 ### `image_series.dicom_archive_path`
 
-Nullable `TEXT`. Populated by the offline archiver (`scripts/cold_storage/archive_all_series.py`) when series are packed to `*.tar.zst`. Used when `[storage].mode = "cold_cache"` in `config.toml`.
+Nullable `TEXT`. Populated by the offline archiver (`scripts/cold_storage/archive_all_series.py`) when series are packed to `*.tar.zst`. Used when `[storage].mode = "cold_path_cache"` in `config.toml`.
 
 ### `cache_state`
 

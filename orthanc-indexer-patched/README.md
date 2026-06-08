@@ -63,7 +63,7 @@ The Dockerfile uses a two-stage build: Ubuntu 25.10 (matching
 official Orthanc image.
 
 ```bash
-cd /home/perecanals/pacs/orthanc-indexer-patched
+cd /home/perecanals/ssc-pacs/orthanc-indexer-patched
 docker build -t ssc-orthanc:patched-indexer .
 ```
 

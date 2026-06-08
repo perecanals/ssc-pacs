@@ -42,7 +42,7 @@ re-ingest) has been removed. See [`design.md`](design.md) §Migration history.
 ## Build the patched Orthanc image
 
 ```bash
-cd /home/perecanals/pacs/orthanc-indexer-patched
+cd /home/perecanals/ssc-pacs/orthanc-indexer-patched
 docker build -t ssc-orthanc:patched-indexer .
 ```
 
@@ -71,7 +71,7 @@ Orthanc indexed.**
 ### 1. Archive everything
 
 ```bash
-cd /home/perecanals/pacs/stanford-stroke-pacs
+cd /home/perecanals/ssc-pacs/stanford-stroke-pacs
 conda activate pacs
 
 # Preview first
@@ -110,7 +110,7 @@ the on-demand workflow via `scripts/dicom/dicom_to_nifti.py`.
 
 ```bash
 # Build (once)
-cd /home/perecanals/pacs/orthanc-indexer-patched
+cd /home/perecanals/ssc-pacs/orthanc-indexer-patched
 docker build -t ssc-orthanc:patched-indexer .
 
 # Edit docker-compose.yml
@@ -119,7 +119,7 @@ docker build -t ssc-orthanc:patched-indexer .
 # Edit orthanc.json — add "RemoveMissingFiles": false to the Indexer block
 
 # Swap
-cd /home/perecanals/pacs/stanford-stroke-pacs
+cd /home/perecanals/ssc-pacs/stanford-stroke-pacs
 docker compose down
 docker compose up -d
 
@@ -183,7 +183,7 @@ hold:
    table (i.e. the patched Folder Indexer has indexed it)
 
 ```bash
-cd /home/perecanals/pacs/stanford-stroke-pacs
+cd /home/perecanals/ssc-pacs/stanford-stroke-pacs
 conda activate pacs
 
 # Dry-run by default — see exactly what would be deleted

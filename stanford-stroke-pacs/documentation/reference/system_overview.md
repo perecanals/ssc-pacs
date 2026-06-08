@@ -79,7 +79,7 @@ Orthanc Explorer 2 web apps.
 
 - Runs as a Docker container in host-network mode.
 - Uses a **custom image** `ssc-orthanc:patched-indexer` built locally from
-  [`/home/perecanals/pacs/orthanc-indexer-patched/`](../../../orthanc-indexer-patched/README.md).
+  [`/home/perecanals/ssc-pacs/orthanc-indexer-patched/`](../../../orthanc-indexer-patched/README.md).
 - Image = `orthancteam/orthanc:latest` + a patched Folder Indexer `.so`
   that honours `RemoveMissingFiles: false` (required by `cold_path_cache`).
 - Storage backend is the Folder Indexer plugin itself
@@ -113,7 +113,7 @@ doesn't cover.
 
 ### 3.4 Custom Folder Indexer plugin
 
-Lives at `/home/perecanals/pacs/orthanc-indexer-patched/`. Upstream is the
+Lives at `/home/perecanals/ssc-pacs/orthanc-indexer-patched/`. Upstream is the
 [Orthanc Folder Indexer plugin](https://orthanc.uclouvain.be/book/plugins/indexer.html);
 the fork adds one config flag:
 

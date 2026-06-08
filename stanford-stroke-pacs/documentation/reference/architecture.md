@@ -27,7 +27,7 @@ flowchart TD
     SscDb --> ImageSeries[image_series]
     SscDb --> ImageStudy[image_study]
     SscDb --> AnnotationTables[annotations / label_definitions / users / user_preferences]
-    SscDb --> SnapshotTables[snapshot_patients / snapshot_studies / snapshot_seriess]
+    SscDb --> SnapshotTables[snapshot_patients / snapshot_studys / snapshot_seriess]
 ```
 
 User-facing entry points:
@@ -135,7 +135,7 @@ It contains:
   - `user_preferences` — per-user JSONB table display preferences (column
     visibility, order, sort, filters, frozen state) keyed by username and
     level
-- refreshable snapshot tables: `snapshot_patients`, `snapshot_studies`,
+- refreshable snapshot tables: `snapshot_patients`, `snapshot_studys`,
   `snapshot_seriess`
 
 Optional cold-storage support adds columns and tables documented in
@@ -169,11 +169,15 @@ The two-database design keeps responsibilities clean:
 
 The DICOM Application Entity Title (AE Title) is configured as `SSC`.
 
-**Optional cold storage mode** (`mode = "cold_cache"` under `[storage]` in repo-root `config.toml`):
-canonical series payloads live as `*.tar.zst` under `/DATA2/pacs_imaging_data_compressed`;
-the web app warms a whole study into `/DATA2/pacs_hot_cache` and POSTs DICOMs to Orthanc;
-Orthanc’s Folder Indexer bind-mount should target the hot cache instead of the legacy tree.
-Legacy loose files under `/DATA2/pacs_imaging_data` remain available when `mode = "legacy"`.
+**Optional cold storage mode** (`mode = "cold_path_cache"` under `[storage]` in repo-root `config.toml`):
+canonical series payloads live as `*.tar.zst` under `cold_archive_root` (`/DATA2/pacs_imaging_data_compressed`).
+On warm, the web app extracts an archive back to the **original** `dicom_dir_path` recorded in
+`image_series`; on evict it deletes those extracted files. This requires the custom
+`ssc-orthanc:patched-indexer` image with `"RemoveMissingFiles": false`, so Orthanc's index keeps
+pointing at the original paths even while the files are absent — no re-ingestion is needed.
+Legacy loose files under `/DATA2/pacs_imaging_data` are read directly when `mode = "legacy"`.
+(An earlier `cold_cache` design that warmed into a separate `/DATA2/pacs_hot_cache` and re-POSTed
+DICOMs to Orthanc was removed — see [`../cold_storage/design.md`](../cold_storage/design.md).)
 
 - Design rationale and benchmarks: [`../cold_storage/design.md`](../cold_storage/design.md)
 - Operator steps and component map: [`../cold_storage/runbook.md`](../cold_storage/runbook.md)
