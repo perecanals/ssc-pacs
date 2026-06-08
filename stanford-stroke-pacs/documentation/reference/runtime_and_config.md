@@ -184,7 +184,6 @@ stanford-stroke-pacs/
 ├── orthanc_users.json            # Service account + admin users only (managed by manage_users.py)
 ├── docker-compose.yml            # Orthanc only
 ├── orthanc.json                  # Orthanc structural config
-├── ssc-web-app.service         # systemd unit for the web app
 ├── web-app/
 │   ├── app.py                    # FastAPI backend
 │   ├── cache_manager.py          # Cold storage warm/eviction
@@ -203,6 +202,7 @@ stanford-stroke-pacs/
 │   ├── dicom/                    # dicom_to_nifti
 │   ├── one_off/                  # backfill_annotation_history, orthanc_holdout_case, etc.
 │   └── orthanc/                  # enrich_orthanc, label_studies, check_status
+├── systemd/                      # systemd units + timers (ssc-web-app.service, pg backups, cold storage, reconciliation)
 ├── benchmarks/                   # Cold storage benchmarks
 ├── image_integration_protocols/  # Legacy metadata pipeline
 ├── documentation/

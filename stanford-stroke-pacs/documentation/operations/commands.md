@@ -42,7 +42,7 @@ sudo systemctl status ssc-web-app
 sudo journalctl -u ssc-web-app -f
 
 # Enable auto-start on boot (one-time setup)
-sudo cp ssc-web-app.service /etc/systemd/system/
+sudo cp systemd/ssc-web-app.service /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable --now ssc-web-app
 
@@ -257,7 +257,7 @@ sudo bash scripts/admin/bulk_set_label_values.sh \
 
 1. Stop and disable the service: `sudo systemctl disable --now ssc-web-app`
 2. Remove the unit file: `sudo rm /etc/systemd/system/ssc-web-app.service`
-3. Delete the `web-app/` folder and `ssc-web-app.service`
+3. Delete the `web-app/` folder and `systemd/ssc-web-app.service`
 4. (Optional) drop web-app-owned tables in `stanford-stroke` if you no longer need them
 
 Orthanc is unaffected.

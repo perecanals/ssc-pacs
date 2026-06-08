@@ -236,7 +236,7 @@ cd web-app && npm ci && npm run build
 ### Step 8. Install and start the web app (systemd)
 
 ```bash
-sudo cp ssc-web-app.service /etc/systemd/system/
+sudo cp systemd/ssc-web-app.service /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable --now ssc-web-app
 ```
