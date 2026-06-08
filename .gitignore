@@ -53,3 +53,6 @@ Thumbs.db
 # Embedded upstream VCS metadata (orthanc-indexer-patched vendors Mercurial source)
 .hg/
 **/.hg/
+
+# macOS/Colima local Docker override (do not ship to Linux host)
+# *.override.yml
