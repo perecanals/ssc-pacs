@@ -53,7 +53,7 @@ def _init_db():
 
 
 async def _eviction_loop() -> None:
-    from cache_manager import run_eviction
+    from cache_manager import reap_stale_warming, run_eviction
 
     while True:
         await asyncio.sleep(900)
@@ -68,6 +68,15 @@ async def _eviction_loop() -> None:
                 )
         except Exception:
             logger.exception("eviction_loop: cold cache eviction failed")
+        try:
+            reaped = reap_stale_warming()
+            if reaped:
+                logger.info(
+                    "eviction_loop: reset %d stale-warming studies to cold (sample=%s)",
+                    len(reaped), reaped[:10],
+                )
+        except Exception:
+            logger.exception("eviction_loop: stale-warming reap failed")
 
 
 @asynccontextmanager
@@ -88,6 +97,22 @@ async def lifespan(application: FastAPI):
     )
     ev_task: asyncio.Task | None = None
     if STORAGE_MODE == "cold_path_cache":
+        # A fresh process has an empty warm executor and holds no warm locks, so
+        # any 'warming'/'queued' row is orphaned (e.g. a restart killed in-flight
+        # extractions). Reset them to 'cold' immediately instead of leaving them
+        # stuck — and disabled in the UI — until the eviction-loop timeout fires.
+        # The reaper's try-advisory-lock guard still spares a warm running in
+        # another live process.
+        from cache_manager import reap_stale_warming
+        try:
+            orphaned = reap_stale_warming(min_age_minutes=0)
+            if orphaned:
+                logger.info(
+                    "startup: reset %d orphaned warming/queued studies to cold (sample=%s)",
+                    len(orphaned), orphaned[:10],
+                )
+        except Exception:
+            logger.exception("startup: orphaned-warm reset failed")
         ev_task = asyncio.create_task(_eviction_loop())
     try:
         yield

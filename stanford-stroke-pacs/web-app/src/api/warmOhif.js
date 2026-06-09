@@ -1,4 +1,4 @@
-import { apiGet, apiFetch } from "./client";
+import { apiGet, apiFetch, apiPost } from "./client";
 
 function buildOhifLinkPath(studyinstanceuid, seriesinstanceuid) {
   const params = new URLSearchParams();
@@ -52,6 +52,54 @@ export async function warmStudy(studyinstanceuid) {
   }
 
   if (!(await pollCacheUntilHot(studyinstanceuid))) throw new Error("Warming timed out");
+}
+
+/**
+ * Fire-and-forget warm of a single study. Returns once the 202 is accepted;
+ * progress is observed separately via batch cache-status polling. Throws on
+ * auth failure or insufficient disk space so the caller can surface it.
+ */
+export async function queueWarmStudy(studyinstanceuid) {
+  const res = await apiFetch(
+    `/api/studies/${encodeURIComponent(studyinstanceuid)}/warm`,
+    { method: "POST" },
+  );
+  if (!res.ok) {
+    if (res.status === 401) throw new Error("Log in to decompress studies.");
+    if (res.status === 507) throw new Error("Not enough disk space to decompress this study.");
+    throw new Error((await res.text()) || "Decompress request failed");
+  }
+}
+
+/**
+ * Fire-and-forget warm of every study under a patient. Returns the queued
+ * count from the 202 response.
+ */
+export async function queueWarmPatient(patientId) {
+  const res = await apiPost(`/api/patients/${encodeURIComponent(patientId)}/warm`);
+  if (!res.ok) {
+    if (res.status === 401) throw new Error("Log in to decompress studies.");
+    throw new Error((await res.text()) || "Decompress request failed");
+  }
+  return res.json();
+}
+
+/** Aggregate cache status for a patient: {total, cold, warming, hot, error}. */
+export async function getPatientCacheStatus(patientId) {
+  return apiGet(`/api/patients/${encodeURIComponent(patientId)}/cache-status`);
+}
+
+/**
+ * Cache status for many studies and/or patients in one request. Returns
+ * {studies: {uid: status}, patients: {id: {total, cold, warming, hot, error}}}.
+ */
+export async function getBatchCacheStatus(uids = [], patientIds = []) {
+  if (uids.length === 0 && patientIds.length === 0) {
+    return { studies: {}, patients: {} };
+  }
+  const res = await apiPost("/api/cache-status/batch", { uids, patient_ids: patientIds });
+  if (!res.ok) throw new Error(`Batch cache-status failed: ${res.status}`);
+  return res.json();
 }
 
 /**

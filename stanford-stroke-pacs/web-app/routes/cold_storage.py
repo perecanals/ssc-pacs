@@ -4,13 +4,18 @@ from __future__ import annotations
 
 import asyncio
 
-from fastapi import APIRouter, Cookie, HTTPException, Request
+from fastapi import APIRouter, Body, Cookie, HTTPException, Request
 
 from auth import get_current_user
 from cache_manager import (
     estimate_warm_disk_space,
     evict_study,
+    get_batch_cache_status,
     get_cache_status,
+    get_patient_cache_status,
+    get_patients_cache_status,
+    list_patient_study_uids,
+    mark_queued,
     warm_study,
 )
 from config import STORAGE_MODE
@@ -73,6 +78,9 @@ async def api_warm_study(
             },
         )
 
+    # Persist the 'queued' marker before submitting so the badge survives a
+    # reload and is visible to other users (the executor queue is in-process).
+    mark_queued([studyinstanceuid])
     loop = asyncio.get_running_loop()
     loop.run_in_executor(
         request.app.state.warm_executor,
@@ -100,3 +108,57 @@ def api_evict_study(studyinstanceuid: str, auth_token: str | None = Cookie(None)
 @router.get("/api/studies/{studyinstanceuid}/cache-status")
 def api_cache_status(studyinstanceuid: str):
     return get_cache_status(studyinstanceuid)
+
+
+@router.post("/api/patients/{patient_id}/warm", status_code=202)
+async def api_warm_patient(
+    patient_id: str,
+    request: Request,
+    auth_token: str | None = Cookie(None),
+):
+    """Queue every study of a patient for warming. Returns 202 immediately.
+
+    Fans each study into the same bounded ``app.state.warm_executor`` pool as
+    the per-study endpoint. Per-study disk-space prechecks run inside the
+    worker (``warm_study``), so a single study failing for space does not block
+    the rest; clients observe progress via
+    ``GET /api/patients/{id}/cache-status``.
+    """
+    get_current_user(auth_token)
+
+    uids = list_patient_study_uids(patient_id)
+    # Persist 'queued' markers up front so the whole patient shows Queued
+    # immediately and durably, even before the workers start draining them.
+    mark_queued(uids)
+    loop = asyncio.get_running_loop()
+    for uid in uids:
+        loop.run_in_executor(
+            request.app.state.warm_executor,
+            _run_warm_with_metrics,
+            uid,
+        )
+    return {"ok": True, "queued": len(uids), "patient_id": patient_id}
+
+
+@router.get("/api/patients/{patient_id}/cache-status")
+def api_patient_cache_status(patient_id: str):
+    return get_patient_cache_status(patient_id)
+
+
+@router.post("/api/cache-status/batch")
+def api_batch_cache_status(
+    uids: list[str] = Body(default=[]),
+    patient_ids: list[str] = Body(default=[]),
+):
+    """Cache status for many study UIDs and/or patients in one round-trip.
+
+    Lets the table poll every visible row at once instead of one request per
+    row. Returns ``{"studies": {uid: status}, "patients": {id: counts}}``.
+    Bounded to keep the ``ANY(%s)`` queries and response small.
+    """
+    if len(uids) > 500 or len(patient_ids) > 500:
+        raise HTTPException(status_code=413, detail="too_many_ids")
+    return {
+        "studies": get_batch_cache_status(uids),
+        "patients": get_patients_cache_status(patient_ids),
+    }

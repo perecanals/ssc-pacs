@@ -55,10 +55,18 @@ and it waits for the RAID to mount before starting:
 ```bash
 scripts/macos/colima_start.sh
 # equivalent to:
-#   colima start --cpu 4 --memory 8 --disk 100 --mount-type virtiofs \
+#   colima start --cpu 4 --memory 4 --disk 100 --mount-type virtiofs \
 #     --mount /opt/ssc-pacs/ssc-pacs/stanford-stroke-pacs:r \
 #     --mount /Volumes/ThunderBay_RAID1:w
 ```
+
+The VM is sized at 4 vCPU / 4 GB. Memory stays modest — Orthanc only uses
+~0.7 GB — but vCPUs matter when a study loads in OHIF, which fires many parallel
+DICOMweb frame requests; 2 vCPU made the viewer sluggish. vCPUs are a *cap*, not
+a hard reservation, so the host still reclaims them for cold-storage warm
+extractions and Postgres whenever Orthanc is idle. Tune per-host via `COLIMA_CPU`
+/ `COLIMA_MEMORY`; resizing takes effect on the next `colima stop && colima
+start` (or the watchdog's next restart).
 
 `docker` / `docker compose` then talk to Colima automatically (socket
 `~/.colima/default/docker.sock`, context `colima`). There is no Docker Desktop

@@ -20,8 +20,11 @@ import {
 import useTableData from "./useTableData";
 import usePreferencePersistence from "./usePreferencePersistence";
 import useDragColumns from "./useDragColumns";
+import useWarmStatus from "./useWarmStatus";
 import TableHeader from "./TableHeader";
 import ChildRows, { DownloadIcon } from "./ChildRows";
+import WarmButton from "./WarmButton";
+import { getStorageMode } from "../../api/warmOhif";
 import "../DataTable.css";
 
 function DataTableInner({
@@ -135,6 +138,16 @@ function DataTableInner({
 
   const [downloadingSeries, setDownloadingSeries] = useState(null);
 
+  // Cold-storage decompress controls only make sense in cold_path_cache mode
+  // and for authenticated raters (warming requires auth).
+  const [storageMode, setStorageMode] = useState(null);
+  useEffect(() => {
+    let cancelled = false;
+    getStorageMode().then((m) => { if (!cancelled) setStorageMode(m); });
+    return () => { cancelled = true; };
+  }, []);
+  const canWarm = storageMode === "cold_path_cache" && !!currentUser;
+
   useEffect(() => {
     if (level !== "patient") return;
     setChildRowsData({});
@@ -143,6 +156,30 @@ function DataTableInner({
 
   const childConfig = config.expandable ? LEVEL_CONFIG[config.childLevel] : null;
   const grandChildConfig = childConfig?.expandable ? LEVEL_CONFIG[childConfig.childLevel] : null;
+
+  // Rows currently on screen that carry a decompress control: patient main
+  // rows (aggregate) and study rows (main rows at study level, or expanded
+  // study children at patient level). Series rows are intentionally excluded.
+  const visiblePatientIds = useMemo(
+    () => (level === "patient" ? items.map((r) => r.patient_id).filter(Boolean) : []),
+    [level, items],
+  );
+  const visibleStudyUids = useMemo(() => {
+    if (level === "study") return items.map((r) => r.studyinstanceuid).filter(Boolean);
+    if (level === "patient") {
+      return Object.entries(childRowsData)
+        .filter(([pid]) => expanded[pid])
+        .flatMap(([, studies]) => (studies || []).map((s) => s.studyinstanceuid))
+        .filter(Boolean);
+    }
+    return [];
+  }, [level, items, childRowsData, expanded]);
+
+  const { studyStatus, patientStatus, warmStudy, warmPatient } = useWarmStatus({
+    enabled: canWarm,
+    studyUids: visibleStudyUids,
+    patientIds: visiblePatientIds,
+  });
 
   const handleMutated = () => {
     reload();
@@ -300,11 +337,20 @@ function DataTableInner({
   };
 
   const renderActions = (row, rowLevel) => {
+    if (rowLevel === "patient") {
+      if (!canWarm || !row.patient_id) return null;
+      return (
+        <WarmButton summary={patientStatus[row.patient_id]} onWarm={() => warmPatient(row.patient_id)} />
+      );
+    }
     const uid = row.studyinstanceuid;
     if (uid && (rowLevel === "study" || rowLevel === "series")) {
       return (
         <>
           <button onClick={() => handleOhifLink(uid, rowLevel === "series" ? row.seriesinstanceuid : null)} className="link-btn">OHIF</button>
+          {rowLevel === "study" && canWarm && (
+            <WarmButton status={studyStatus[uid]} onWarm={() => warmStudy(uid)} />
+          )}
           {rowLevel === "series" && row.seriesinstanceuid && isAdmin && (
             <button onClick={() => handleDicomDownload(row.seriesinstanceuid)} className="link-btn"
               title="Download DICOM as zip" disabled={downloadingSeries === row.seriesinstanceuid}>
@@ -327,7 +373,9 @@ function DataTableInner({
   const mainTableCols = visibleCols.filter(
     (c) => (c.builtin ? c.level === level : LEVEL_RANK[c.level] <= LEVEL_RANK[level]),
   );
-  const showActions = level !== "patient";
+  // Patient rows normally have no Actions column; cold-storage decompress is
+  // the one patient-level action, so the column appears only when warmable.
+  const showActions = level !== "patient" || canWarm;
   const parentColSpan = mainTableCols.length + (config.expandable ? 1 : 0) + (showActions ? 1 : 0);
   const childIsExpandable = !!grandChildConfig;
   // +1 for the child table's trailing spacer column so the grandchild
@@ -494,6 +542,9 @@ function DataTableInner({
                         activeRowKey={activeRowKey}
                         isAdmin={isAdmin}
                         downloadingSeries={downloadingSeries}
+                        canWarm={canWarm}
+                        studyStatus={studyStatus}
+                        onWarmStudy={warmStudy}
                         onChildRowClick={handleChildRowClick}
                         onGrandChildRowClick={handleGrandChildRowClick}
                         onResolveOhifLink={handleOhifLink}
