@@ -56,6 +56,9 @@ function DataTableInner({
   );
   const filterTimeout = useRef(null);
   const [frozenFirstCol, setFrozenFirstCol] = useState(!!serverPrefs.freezeFirstCol);
+  // Patient-level Status (warm) column visibility — defaults on (incl. for
+  // users with existing saved prefs), hideable via the Displayed Columns menu.
+  const [statusColVisible, setStatusColVisible] = useState(serverPrefs.statusColVisible !== false);
   const [fontScale, setFontScale] = useState(() => {
     const v = Number(serverPrefs.fontScale);
     return Number.isFinite(v) && v >= 0.85 && v <= 1.25 ? v : 1;
@@ -134,6 +137,7 @@ function DataTableInner({
 
   usePreferencePersistence({
     currentUser, level, visibleKeys, columnOrder, sortBy, sortDir, columnFilters, frozenFirstCol, fontScale,
+    statusColVisible,
   });
 
   const [downloadingSeries, setDownloadingSeries] = useState(null);
@@ -374,8 +378,10 @@ function DataTableInner({
     (c) => (c.builtin ? c.level === level : LEVEL_RANK[c.level] <= LEVEL_RANK[level]),
   );
   // Patient rows normally have no Actions column; cold-storage decompress is
-  // the one patient-level action, so the column appears only when warmable.
-  const showActions = level !== "patient" || canWarm;
+  // the one patient-level action (labelled "Status"), shown only when warmable
+  // and not hidden via the Displayed Columns menu. Studies/series keep the
+  // always-on "Actions" column.
+  const showActions = level === "patient" ? (canWarm && statusColVisible) : true;
   const parentColSpan = mainTableCols.length + (config.expandable ? 1 : 0) + (showActions ? 1 : 0);
   const childIsExpandable = !!grandChildConfig;
   // +1 for the child table's trailing spacer column so the grandchild
@@ -411,6 +417,7 @@ function DataTableInner({
     setColumnFilters({});
     setFrozenFirstCol(false);
     setFontScale(1);
+    setStatusColVisible(true);
   };
 
   // Clears only filters — the per-column table filters here plus the
@@ -434,6 +441,9 @@ function DataTableInner({
         onToggle={toggle}
         onSetKeysVisible={setKeysVisible}
         onEditLabel={handleEditLabel}
+        showStatusColumn={level === "patient" && canWarm}
+        statusColumnVisible={statusColVisible}
+        onToggleStatusColumn={() => setStatusColVisible((v) => !v)}
       />
       <button onClick={handleResetFilters} className="pill-btn">Reset Filters</button>
       <button onClick={handleResetDefaults} className="pill-btn">Reset View</button>
