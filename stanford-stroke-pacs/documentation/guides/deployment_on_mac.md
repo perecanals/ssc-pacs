@@ -219,7 +219,10 @@ tail -f ~/Library/Logs/ssc-web-app.log                 # logs
 ```
 
 Orthanc is **not** a daemon — its `restart: unless-stopped` container returns
-automatically once Colima's Docker engine is up at boot (`com.ssc.colima`).
+automatically once Colima's Docker engine is up. The `com.ssc.colima` daemon runs
+a **watchdog** ([`scripts/macos/colima_watchdog.sh`](../../scripts/macos/colima_watchdog.sh))
+that brings the VM up at boot and **restarts it within ~30s if it ever crashes or
+stops**, so Orthanc recovers on its own from a VM crash, not just a clean reboot.
 
 ---
 
@@ -227,7 +230,7 @@ automatically once Colima's Docker engine is up at boot (`com.ssc.colima`).
 
 | Component | Boot persistence on macOS |
 |---|---|
-| Orthanc (Docker) | `restart: unless-stopped` in compose **plus** the Colima VM started at boot via the `com.ssc.colima` LaunchAgent ([`launchd/com.ssc.colima.plist`](../../launchd/com.ssc.colima.plist), which runs [`scripts/macos/colima_start.sh`](../../scripts/macos/colima_start.sh)). The container will not come back without the Colima daemon running. For pre-login boot, install the plist as a LaunchDaemon with `<UserName>pere</UserName>` instead. |
+| Orthanc (Docker) | `restart: unless-stopped` in compose **plus** the Colima VM supervised by the `com.ssc.colima` LaunchDaemon ([`launchd/com.ssc.colima.plist`](../../launchd/com.ssc.colima.plist), `KeepAlive` + `ThrottleInterval=30`). It runs a watchdog ([`scripts/macos/colima_watchdog.sh`](../../scripts/macos/colima_watchdog.sh)) that starts the VM at boot via the idempotent [`scripts/macos/colima_start.sh`](../../scripts/macos/colima_start.sh) and restarts it within ~30s on crash/stop. The container will not come back without the Colima VM running. (Do **not** point the daemon at `colima_start.sh` directly — it exits 0 once the VM is up, which `KeepAlive` would busy-loop.) |
 | PostgreSQL | `com.ssc.postgres` LaunchDaemon (installed by `install_launchd.sh`). On a headless box `brew services` can't load a `gui/$UID` agent, so a system daemon running `postgres -D <datadir>` as `pere` is used instead. |
 | Web App | `com.ssc.webapp` LaunchDaemon (§6, `RunAtLoad` + `KeepAlive`). |
 

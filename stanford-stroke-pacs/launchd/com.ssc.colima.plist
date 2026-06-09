@@ -2,21 +2,20 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
   "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <!--
-  Boot persistence for the Colima Docker VM (headless macOS).
+  Boot persistence + crash recovery for the Colima Docker VM (headless macOS).
 
-  Runs scripts/macos/colima_start.sh once at login so the Docker daemon is up
-  before the web-app LaunchAgent and the backup jobs need it. KeepAlive is false
-  because `colima start` returns after the VM is up (it is not a long-running
-  foreground process); the VM stays up on its own.
+  Runs scripts/macos/colima_watchdog.sh, a long-lived supervisor that brings the
+  VM up at boot (via the idempotent colima_start.sh) and restarts it within
+  CHECK_INTERVAL seconds if it ever crashes or stops. Orthanc (restart:
+  unless-stopped) then returns on its own once dockerd is back.
 
-  Install (per-user, GUI session):
-    cp launchd/com.ssc.colima.plist ~/Library/LaunchAgents/
-    launchctl load -w ~/Library/LaunchAgents/com.ssc.colima.plist
+  KeepAlive is TRUE here because the watchdog is a never-exiting process: if the
+  watchdog itself is killed, launchd revives it after ThrottleInterval. (Do NOT
+  point this at colima_start.sh directly — that exits 0 once the VM is up, which
+  KeepAlive would treat as "finished" and relaunch in a busy loop.)
 
-  NOTE: a LaunchAgent starts at user login. If this server must run Docker
-  *before* anyone logs in, install this as a LaunchDaemon in
-  /Library/LaunchDaemons/ with an explicit <UserName>pere</UserName> key instead
-  (Colima stores state under that user's ~/.colima).
+  Install as a LaunchDaemon (system domain — required, this box is headless with
+  no login session): sudo scripts/macos/install_launchd.sh
 -->
 <plist version="1.0">
 <dict>
@@ -24,7 +23,7 @@
   <key>UserName</key>         <string>pere</string>
   <key>ProgramArguments</key>
   <array>
-    <string>/opt/ssc-pacs/ssc-pacs/stanford-stroke-pacs/scripts/macos/colima_start.sh</string>
+    <string>/opt/ssc-pacs/ssc-pacs/stanford-stroke-pacs/scripts/macos/colima_watchdog.sh</string>
   </array>
   <key>EnvironmentVariables</key>
   <dict>
@@ -32,7 +31,8 @@
     <key>HOME</key><string>/Users/pere</string>
   </dict>
   <key>RunAtLoad</key>        <true/>
-  <key>KeepAlive</key>        <false/>
+  <key>KeepAlive</key>        <true/>
+  <key>ThrottleInterval</key> <integer>30</integer>
   <key>StandardOutPath</key>  <string>/Users/pere/Library/Logs/ssc-colima.log</string>
   <key>StandardErrorPath</key><string>/Users/pere/Library/Logs/ssc-colima.err</string>
 </dict>
