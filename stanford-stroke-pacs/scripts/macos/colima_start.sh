@@ -25,14 +25,14 @@ export PATH="/opt/homebrew/bin:$PATH"
 REPO_MOUNT="/opt/ssc-pacs/ssc-pacs/stanford-stroke-pacs"
 RAID_MOUNT="/Volumes/ThunderBay_RAID1"
 
-# Orthanc is light on memory (~0.7 GB used of the limit) but OHIF/DICOMweb fires
-# many parallel frame requests when a study loads, which wants vCPUs. 4 vCPU
-# keeps the viewer responsive; 4 GB is ample (the guest barely touches it). vCPUs
-# are a *cap*, not a hard reservation — the host reclaims them whenever Orthanc is
-# idle, so this leaves plenty for the cold-storage warm extractions (zstd) and
-# host Postgres. Override per-host with COLIMA_CPU / COLIMA_MEMORY.
+# OHIF/DICOMweb fires many parallel frame requests when a study loads, which
+# wants vCPUs, so 4 keeps the viewer responsive. vCPUs are a *cap*, not a hard
+# reservation — the host reclaims them whenever Orthanc is idle, so this leaves
+# plenty for the cold-storage warm extractions and host Postgres. 8 GB gives
+# Orthanc headroom for indexing/caching under load. Override per-host with
+# COLIMA_CPU / COLIMA_MEMORY.
 CPU="${COLIMA_CPU:-4}"
-MEMORY="${COLIMA_MEMORY:-4}"
+MEMORY="${COLIMA_MEMORY:-8}"
 DISK="${COLIMA_DISK:-100}"
 
 # Already up? Make sure the docker CLI points at it and exit.
