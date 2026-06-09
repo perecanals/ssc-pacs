@@ -12,6 +12,11 @@
 #   2. installs + bootstraps the daemons in dependency order
 #   3. Orthanc is NOT a daemon — its `restart: unless-stopped` container comes
 #      back automatically once Colima's Docker daemon is up.
+#
+# IMPORTANT: if your data is on an EXTERNAL volume, the daemons ALSO need Full Disk
+# Access granted once in the GUI (this script cannot do it) or warm/backups fail with
+# "Operation not permitted". See documentation/guides/deployment_on_mac.md §6,
+# "Full Disk Access". Restart the daemons after granting.
 set -euo pipefail
 
 [[ $EUID -eq 0 ]] || { echo "Run with sudo." >&2; exit 1; }

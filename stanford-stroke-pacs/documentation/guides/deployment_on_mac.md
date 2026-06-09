@@ -25,6 +25,11 @@ setup must be adapted.
 
 On an **Intel Mac**, difference #2 disappears.
 
+> **Plus, if the box is headless and data lives on an external volume:** background
+> LaunchDaemons are denied access to that volume until granted **Full Disk Access** —
+> warm and backups fail with `Operation not permitted` otherwise. This is a manual,
+> GUI-only one-time step; see §6, *"Full Disk Access"*.
+
 ---
 
 ## 2. Prerequisites (Homebrew + Colima)
@@ -36,7 +41,7 @@ No GUI, no root, no Docker-Desktop licensing.
 ```bash
 xcode-select --install                       # clang/make (skip if already present)
 brew install colima docker docker-compose    # headless engine + docker CLI + compose v2
-brew install node postgresql@16 bash         # bash 5.x — see §7
+brew install node postgresql@16 bash coreutils   # bash 5.x (§8); coreutils = GNU sha256sum/stat the backup jobs need
 brew install --cask miniconda                # or reuse an existing conda
 ```
 
@@ -143,8 +148,13 @@ published ports make Orthanc reachable from the Mac host.
 
 ## 5. PostgreSQL on the host
 
+Start Postgres for the bootstrap. On a **headless** box `brew services` can't load
+its `gui/$UID` agent (*"Domain does not support specified action"*), so start it
+directly; **boot persistence is handled later by the `com.ssc.postgres` LaunchDaemon**
+(§6 / `install_launchd.sh`), not `brew services`:
+
 ```bash
-brew services start postgresql@16
+pg_ctl -D "$(brew --prefix)/var/postgresql@16" start   # headless; (`brew services start postgresql@16` only on a GUI Mac)
 createdb stanford-stroke          # your Mac user is the PG superuser
 ```
 
@@ -156,12 +166,14 @@ Two Mac-specific adaptations to the documented bootstrap:
   `CREATEDB`/`CREATEROLE`); on Homebrew Postgres your Mac user is superuser by
   default, so use it for `DB_USER` or grant those roles. There is no
   `sudo -u postgres` step on a Mac.
-- **Let the Orthanc container reach Postgres.** Connections from
-  `host.docker.internal` arrive over TCP from the Docker VM's subnet, which the
-  default Homebrew config rejects. In `$(brew --prefix)/var/postgresql@16`:
-  - `postgresql.conf`: `listen_addresses = '*'`
-  - `pg_hba.conf`: add `host all all 192.168.0.0/16 scram-sha-256`
-  - then `brew services restart postgresql@16`
+- **Orthanc container → Postgres: no config change under Colima.** Colima NATs
+  `host.docker.internal` to the host **loopback**, so Postgres sees the container
+  connection as `127.0.0.1` and the default Homebrew `host 127.0.0.1/32 trust` rule
+  accepts it — **no `listen_addresses` / `pg_hba` edit needed** (verified: a
+  `postgres:16-alpine` container read `orthanc_db` over `host.docker.internal` with
+  no extra config). Postgres stays bound to loopback, not the LAN. *(Docker Desktop
+  would instead arrive from a `192.168.65/24` subnet needing a `scram` rule — that
+  does **not** apply to Colima.)*
 
 > **Simpler alternative for an eval/dev box:** run Postgres as a Docker service
 > in the same compose file instead. Orthanc then reaches it by service name and
@@ -172,33 +184,13 @@ Two Mac-specific adaptations to the documented bootstrap:
 
 ## 6. Web App as a launchd service (start on boot)
 
-There is no systemd; `ssc-web-app.service` does not apply. Create a **launchd
-agent** so Web App starts at login and restarts on crash. Write
-`~/Library/LaunchAgents/com.ssc.webapp.plist` (adjust the conda path and
-username):
-
-```xml
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
-  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-  <key>Label</key>            <string>com.ssc.webapp</string>
-  <key>ProgramArguments</key>
-  <array>
-    <string>/Users/you/miniconda3/envs/pacs/bin/uvicorn</string>
-    <string>app:app</string>
-    <string>--host</string><string>0.0.0.0</string>
-    <string>--port</string><string>8043</string>
-  </array>
-  <key>WorkingDirectory</key> <string>/Users/you/ssc-pacs/stanford-stroke-pacs/web-app</string>
-  <key>RunAtLoad</key>        <true/>
-  <key>KeepAlive</key>        <true/>
-  <key>StandardOutPath</key>  <string>/Users/you/Library/Logs/ssc-web-app.log</string>
-  <key>StandardErrorPath</key><string>/Users/you/Library/Logs/ssc-web-app.err</string>
-</dict>
-</plist>
-```
+There is no systemd; `ssc-web-app.service` does not apply. The repo ships
+ready-made plists in [`launchd/`](../../launchd/) — `com.ssc.colima`,
+`com.ssc.postgres`, `com.ssc.webapp`, and the nightly `com.ssc.pg-backup-*`,
+`com.ssc.orthanc-storage-backup`, `com.ssc.reconciliation`,
+`com.ssc.cold-storage-health` jobs — so you don't hand-write them. The web-app plist
+runs `…/envs/ssc-pacs/bin/uvicorn app:app --host 0.0.0.0 --port 8043` with
+`RunAtLoad` + `KeepAlive`.
 
 **Headless servers (no console login): use LaunchDaemons, not LaunchAgents.**
 A per-user LaunchAgent only loads inside a GUI login session — on a headless box
@@ -223,6 +215,45 @@ automatically once Colima's Docker engine is up. The `com.ssc.colima` daemon run
 a **watchdog** ([`scripts/macos/colima_watchdog.sh`](../../scripts/macos/colima_watchdog.sh))
 that brings the VM up at boot and **restarts it within ~30s if it ever crashes or
 stops**, so Orthanc recovers on its own from a VM crash, not just a clean reboot.
+
+### Full Disk Access — REQUIRED when data lives on an external volume
+
+macOS blocks **background LaunchDaemons** from reading/writing **external/removable
+volumes** (e.g. the ThunderBay RAID) — a process in a login/SSH session is allowed, a
+daemon is **not**. Installing the daemons is not enough; without this grant the
+failures are silent and misleading:
+
+- Web app warm fails with `extraction_produced_no_warm_series` — look for
+  `Operation not permitted` / EPERM under `/Volumes/...` in `~/Library/Logs/ssc-web-app.err`.
+- The nightly backups can't write to the backup volume.
+
+There is **no CLI way** to grant this on a non-MDM Mac — do it once in the GUI
+(Screen Sharing / VNC is fine; enable it over SSH if needed). In **System Settings →
+Privacy & Security → Full Disk Access**, click **`+`** and add these binaries. The
+picker hides `/opt`, so either run `open -R "<path>"` in Terminal and **drag** the
+revealed binary in, or press **⌘⇧G** in the picker and paste the full path:
+
+| Binary | For | Note |
+|---|---|---|
+| `<conda base>/envs/ssc-pacs/bin/python3.12` | web app warm/evict | stable across brew upgrades |
+| `/opt/homebrew/Cellar/bash/<ver>/bin/bash` | backup scripts (`>` redirects) | **re-add after `brew upgrade bash`** |
+| `/opt/homebrew/Cellar/postgresql@16/<ver>/bin/pg_dump` | `pg_dump` writes the `.dump` | **re-add after `brew upgrade postgresql@16`** |
+
+`/opt/homebrew/bin/{bash,pg_dump}` are symlinks — grant the **resolved** Cellar path
+(`readlink -f /opt/homebrew/bin/bash`). The Cellar paths carry the version number, so
+they change on upgrade; the conda `python3.12` does not.
+
+**TCC only applies to a freshly-launched process — restart the daemons after
+granting** (an already-running daemon keeps failing against its old, un-granted
+process):
+
+```bash
+sudo launchctl kickstart -k system/com.ssc.webapp                      # picks up FDA for warm
+sudo launchctl kickstart -k system/com.ssc.pg-backup-stanford-stroke   # verify the backup path too
+```
+
+Verify: warm a study in the UI (files appear under `legacy_dicom_root`), and
+`tail ~/Library/Logs/com.ssc.pg-backup-stanford-stroke.log` should show `OK …`.
 
 ---
 
