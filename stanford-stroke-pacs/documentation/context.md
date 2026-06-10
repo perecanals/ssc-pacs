@@ -9,6 +9,7 @@ One **Orthanc** container (`ssc-orthanc`), one **Web App** service on the host (
 | **End-to-end system overview (start here)** | [`reference/system_overview.md`](reference/system_overview.md) |
 | Architecture / data flow | [`reference/architecture.md`](reference/architecture.md) |
 | Runtime, config files, ports, scripts | [`reference/runtime_and_config.md`](reference/runtime_and_config.md) |
+| **Config sources of truth + sync points (deploy map)** | [`reference/configuration_sources.md`](reference/configuration_sources.md) |
 | Schema / tables / SQL behavior | [`reference/data_stores.md`](reference/data_stores.md) |
 | Web App product + UI model | [`reference/web_app.md`](reference/web_app.md) |
 | Web App React / `DataTable` detail | [`reference/web_app_frontend.md`](reference/web_app_frontend.md) |

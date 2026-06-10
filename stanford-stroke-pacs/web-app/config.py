@@ -1,12 +1,19 @@
 """Load general-purpose settings from repo-root `config.toml` (non-secrets).
 
-Secrets and docker-compose variables remain in `.env`.
+`config.toml` is the single source of truth for non-secret operational settings
+(storage mode + paths, cold-cache tuning, session/auth). It is required and ships
+in the repo — a fresh deployment edits it in place rather than relying on these
+built-in fallbacks. Secrets and docker-compose variables remain in `.env`.
+See documentation/reference/configuration_sources.md.
 """
 
 from __future__ import annotations
 
+import logging
 import tomllib
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 _WEB_APP_DIR = Path(__file__).resolve().parent
 _REPO_ROOT = _WEB_APP_DIR.parent
@@ -31,21 +38,44 @@ _DEFAULT_WEB_APP = {
 }
 
 
+# Keys that fell back to a built-in default because they were absent from a
+# present config.toml (populated by _merge, reported once below).
+_fellback_keys: list[str] = []
+
+
+def _merge(name: str, defaults: dict, raw: dict) -> dict:
+    """Overlay config.toml [name] over `defaults`, recording missing keys."""
+    merged = dict(defaults)
+    section = raw.get(name)
+    if isinstance(section, dict):
+        merged.update(section)
+        _fellback_keys.extend(f"{name}.{k}" for k in defaults if k not in section)
+    else:
+        _fellback_keys.extend(f"{name}.{k}" for k in defaults)
+    return merged
+
+
 def _load_toml() -> tuple[dict, dict]:
-    storage = dict(_DEFAULT_STORAGE)
-    web_app = dict(_DEFAULT_WEB_APP)
     if not _CONFIG_PATH.is_file():
-        return storage, web_app
+        raise RuntimeError(
+            f"Required config file not found: {_CONFIG_PATH}. "
+            "config.toml is the source of truth for non-secret settings and ships "
+            "in the repo — copy/edit it for this host. "
+            "See documentation/reference/configuration_sources.md."
+        )
     with _CONFIG_PATH.open("rb") as f:
         raw = tomllib.load(f)
-    if isinstance(raw.get("storage"), dict):
-        storage.update(raw["storage"])
-    if isinstance(raw.get("web-app"), dict):
-        web_app.update(raw["web-app"])
-    return storage, web_app
+    return _merge("storage", _DEFAULT_STORAGE, raw), _merge("web-app", _DEFAULT_WEB_APP, raw)
 
 
 _storage, _web_app = _load_toml()
+
+if _fellback_keys:
+    logger.warning(
+        "config.toml is missing %d key(s); using built-in defaults: %s",
+        len(_fellback_keys),
+        ", ".join(sorted(_fellback_keys)),
+    )
 
 STORAGE_MODE = str(_storage.get("mode", "legacy")).strip().lower()
 LEGACY_DICOM_ROOT = Path(str(_storage.get("legacy_dicom_root", _DEFAULT_STORAGE["legacy_dicom_root"]))).resolve()
@@ -81,3 +111,24 @@ LOGIN_RATE_LIMIT_PER_5MIN = int(
         _DEFAULT_WEB_APP["login_rate_limit_per_5min"],
     )
 )
+
+
+def effective_config_summary() -> dict:
+    """Resolved non-secret settings, for a one-line startup log.
+
+    Lets operators confirm from the journal which config.toml actually took
+    effect (catches a stale file, wrong path, or fallback drift).
+    """
+    return {
+        "config_path": str(_CONFIG_PATH),
+        "storage_mode": STORAGE_MODE,
+        "legacy_dicom_root": str(LEGACY_DICOM_ROOT),
+        "cold_archive_root": str(COLD_ARCHIVE_ROOT),
+        "hot_cache_dir": str(HOT_CACHE_DIR),
+        "eviction_ttl_hours": EVICTION_TTL_HOURS,
+        "warm_workers": WARM_WORKERS,
+        "session_timeout_hours": SESSION_TIMEOUT_HOURS,
+        "session_absolute_timeout_hours": SESSION_ABSOLUTE_TIMEOUT_HOURS,
+        "cookie_secure": COOKIE_SECURE,
+        "login_rate_limit_per_5min": LOGIN_RATE_LIMIT_PER_5MIN,
+    }

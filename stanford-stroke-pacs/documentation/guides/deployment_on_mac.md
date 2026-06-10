@@ -100,55 +100,59 @@ docker manifest inspect orthancteam/orthanc | grep -E 'architecture'
 
 ---
 
-## 4. Docker networking changes (via an override file)
+## 4. Docker networking changes (via the macOS override)
 
 The base `docker-compose.yml` stays **unchanged** — it keeps `network_mode: host`
 for Linux. Do not edit it. macOS needs explicit port publishing and must reach
 the host's Postgres via `host.docker.internal` (the DNS name **Colima** — and
 Docker Desktop — resolve to the Mac host; it is **not** `localhost` from inside the
 container). Under Colima this address NATs to the host **loopback**, so Postgres
-needs **no `pg_hba`/`listen_addresses` change** — see §5. Isolate this divergence in
-a `docker-compose.override.yml` next to the base file — Docker Compose merges it
-automatically on `docker compose up`:
+needs **no `pg_hba`/`listen_addresses` change** — see §5.
+
+These deltas ship in the tracked **`docker-compose.override.macos.yml`**, which
+`scripts/orthanc/dc.sh` applies automatically on macOS (`-f docker-compose.yml -f
+docker-compose.override.macos.yml`). **Always bring the stack up via the wrapper:**
+
+```bash
+scripts/orthanc/dc.sh up -d
+scripts/orthanc/dc.sh config     # inspect the merged result before up
+```
+
+The override (already in the repo) is:
 
 ```yaml
-# docker-compose.override.yml — macOS only. Auto-merged over docker-compose.yml.
 services:
   orthanc:
     # platform: linux/amd64          # only if you emulated the build (§3)
     network_mode: !reset null        # drop the base file's `network_mode: host`
     ports:
-      - "8042:8042"
-      - "4242:4242"
+      - "${ORTHANC_HTTP_PORT:-8042}:${ORTHANC_HTTP_PORT:-8042}"
+      - "${ORTHANC_DICOM_PORT:-4242}:${ORTHANC_DICOM_PORT:-4242}"
     environment:
       ORTHANC__POSTGRESQL__HOST: "host.docker.internal"   # overrides ${DB_HOST}
-    volumes:
-      - ~/pacs/imaging_data:/dicom-data:ro                # your Mac DICOM path
 ```
+
+The DICOM mount is **not** re-declared here — it is inherited from the base file's
+`${DICOM_MOUNT_SOURCE}`, which `dc.sh` exports from `config.toml` (set
+`[storage].hot_cache_dir` / `legacy_dicom_root` to your Mac DICOM path there, §
+[configuration_sources.md](../reference/configuration_sources.md)).
 
 The `!reset` tag (Compose ≥ v2.24) is required: a plain `network_mode: null`
 is treated as "no value" and the base's `host` wins, which would silently keep
-host networking and ignore your `ports:`. With `!reset null`, Orthanc falls
-back to the default bridge network and the ports take effect — verify the
-merged result with `docker compose config` before `up`.
+host networking and ignore your `ports:`.
 
-Merge behavior, confirmed via `docker compose config`: `ports:` is additive,
-and `volumes:` is keyed by **target** (container path) — so the override's
-`…:/dicom-data` *replaces* the base bind mount at `/dicom-data` while the named
-volume and the `orthanc.json`/`orthanc_users.json` mounts from the base are kept.
-
-Keep this override file Mac-local (e.g. `.gitignore` it, or name it
-`docker-compose.mac.yml` and pass `-f docker-compose.yml -f docker-compose.mac.yml`)
-so it never lands on the Linux host.
+> **Selection is explicit, not auto-merge.** The wrapper passes `-f` for the
+> macOS override; compose then does **not** auto-load a `docker-compose.override.yml`.
+> That deprecated auto-merge name is gitignored — delete any local copy so it can
+> never silently drop host networking on a Linux host.
 
 Leave `DB_HOST=localhost` in `.env`: that value is still correct for the
 **native** Web App process and host-local scripts. Only the container needs
-`host.docker.internal`, which is why it is overridden literally here rather
-than via `${DB_HOST}`. `ORTHANC_URL` stays `http://localhost:8042` — the
+`host.docker.internal`. `ORTHANC_URL` stays `http://localhost:8042` — the
 published ports make Orthanc reachable from the Mac host.
 
 > The container mount point stays `/dicom-data`. Orthanc only ever sees that
-> path, never the host path — keep this in mind for migration (§see
+> path, never the host path — keep this in mind for migration (see
 > `cluster_migration.md`).
 
 ---
@@ -164,6 +168,13 @@ directly; **boot persistence is handled later by the `com.ssc.postgres` LaunchDa
 pg_ctl -D "$(brew --prefix)/var/postgresql@16" start   # headless; (`brew services start postgresql@16` only on a GUI Mac)
 createdb stanford-stroke          # your Mac user is the PG superuser
 ```
+
+This only creates the empty `stanford-stroke` database. For the rest of the
+PostgreSQL setup — the `orthanc_db` database, and the upstream table schema
+(`patient` / `image_study` / `image_series` from `ssc-sql-db/`) — follow
+[`installation_and_deployment.md`](installation_and_deployment.md) §5 Step 3
+(3b–3d). On a Mac your user is the superuser, so you can skip the separate
+role-creation in 3a.
 
 Two Mac-specific adaptations to the documented bootstrap:
 
@@ -203,14 +214,16 @@ runs `…/envs/ssc-pacs/bin/uvicorn app:app --host 0.0.0.0 --port 8043` with
 A per-user LaunchAgent only loads inside a GUI login session — on a headless box
 accessed over SSH, `launchctl bootstrap gui/$UID …` (and `brew services`) fail with
 *"Domain does not support specified action"*. Install as **system LaunchDaemons**
-instead. This repo ships ready-made daemon plists in
-[`launchd/`](../../launchd/) (run as `pere`) and an installer that does the whole
-cutover — Colima, Postgres, the Web App, **and** the nightly backup/reconciliation/
-health jobs:
+instead. This repo ships daemon **templates** in [`launchd/`](../../launchd/)
+(`*.plist.in`, with `__TOKENS__` for user/home/Homebrew prefix/conda env/repo
+path) and an installer that resolves those for this host (auto-derived; override
+in `deploy.env`), renders them, and does the whole cutover — Colima, Postgres, the
+Web App, **and** the nightly backup/reconciliation/health jobs:
 
 ```bash
-sudo scripts/macos/install_launchd.sh        # stops the manual instances, then
-                                             # bootstraps every com.ssc.* daemon
+scripts/macos/install_launchd.sh --dry-run   # preview rendered plists (plutil-linted)
+sudo scripts/macos/install_launchd.sh        # render, stop manual instances, then
+                                             # bootstrap every com.ssc.* daemon
 # manage individual daemons (system domain):
 sudo launchctl kickstart -k system/com.ssc.webapp     # restart  (≈ systemctl restart)
 sudo launchctl print        system/com.ssc.webapp     # status
@@ -284,7 +297,7 @@ After a reboot, verify all three with the day-2 commands below.
 | Web App status | `systemctl status ssc-web-app` | `sudo launchctl print system/com.ssc.webapp` |
 | Web App logs | `journalctl -u ssc-web-app -f` | `tail -f ~/Library/Logs/ssc-web-app.log` |
 | Docker engine | (systemd `docker.service`) | `colima status` / `colima start` (or `scripts/macos/colima_start.sh`) / `colima stop` |
-| Orthanc up/down | `docker compose up -d` / `down` | identical (once Colima is up) |
+| Orthanc up/down | `scripts/orthanc/dc.sh up -d` / `down` | identical (once Colima is up) |
 | Orthanc status | `scripts/orthanc/check_status.sh` | identical (works as-is) |
 | Postgres restart | `sudo systemctl restart postgresql` | `brew services restart postgresql@16` |
 
@@ -292,7 +305,7 @@ After a reboot, verify all three with the day-2 commands below.
 
 ```bash
 cd web-app && npm run build
-launchctl kickstart -k gui/$(id -u)/com.ssc.webapp
+sudo launchctl kickstart -k system/com.ssc.webapp
 ```
 
 **bash 3.2 caveat:** macOS ships an ancient `/bin/bash`. A few ops scripts use
@@ -313,9 +326,9 @@ already `false` in `config.toml` (with a note that Safari rejects Secure
 cookies on `http://localhost`), so login works over loopback.
 
 ```bash
-docker compose ps
+scripts/orthanc/dc.sh ps
 scripts/orthanc/check_status.sh
-launchctl print gui/$(id -u)/com.ssc.webapp | grep state
+sudo launchctl print system/com.ssc.webapp | grep state
 ```
 
 Browser checks: `http://localhost:8042/ui/app/`, `/ohif/`, and

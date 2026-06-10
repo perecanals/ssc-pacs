@@ -1,17 +1,17 @@
 [Unit]
 Description=PACS — pg_dump backup of stanford-stroke DB
-Documentation=file:/home/perecanals/ssc-pacs/stanford-stroke-pacs/documentation/operations/backup_strategy.md
+Documentation=file:__REPO_ROOT__/documentation/operations/backup_strategy.md
 Wants=network-online.target
 After=network-online.target
 
 [Service]
 Type=oneshot
-User=perecanals
-Group=perecanals
+User=__DEPLOY_USER__
+Group=__DEPLOY_GROUP__
 Nice=10
 IOSchedulingClass=best-effort
 IOSchedulingPriority=7
-ExecStart=/home/perecanals/ssc-pacs/stanford-stroke-pacs/scripts/backup/backup_pg_db.sh stanford-stroke
+ExecStart=__REPO_ROOT__/scripts/backup/backup_pg_db.sh stanford-stroke
 # Restart-on-failure has no meaning for oneshot timer-driven units; the
 # next scheduled run handles transient failures and OnFailure= alerts in
 # the meantime.

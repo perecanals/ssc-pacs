@@ -308,6 +308,40 @@ def cmd_rotate_service_account(_args: argparse.Namespace) -> None:
     print("  sudo systemctl restart ssc-web-app")
 
 
+def cmd_check_service_account(_args: argparse.Namespace) -> None:
+    """Verify the service-account password matches across .env and the JSON.
+
+    The web-app proxy authenticates to Orthanc with ORTHANC_ADMIN_PASSWORD from
+    .env; Orthanc accepts it because orthanc_users.json holds the same value.
+    These two are the one config pair not enforced by code at runtime, so a
+    manual edit to either file can silently break OHIF/DICOMweb. This is the
+    detector. Exits non-zero on mismatch (usable from a healthcheck).
+    """
+    username = _orthanc_admin_user()
+    env_pw = os.getenv("ORTHANC_ADMIN_PASSWORD")
+    json_pw = load_orthanc_users().get(username)
+
+    problems = []
+    if not env_pw:
+        problems.append(f"ORTHANC_ADMIN_PASSWORD is unset/empty in {ENV_FILE}")
+    if json_pw is None:
+        problems.append(f"no entry for '{username}' in {ORTHANC_USERS_FILE}")
+    if env_pw and json_pw is not None and env_pw != json_pw:
+        problems.append(
+            "ORTHANC_ADMIN_PASSWORD in .env does not match orthanc_users.json "
+            f"for '{username}'"
+        )
+
+    if problems:
+        print(f"Service-account '{username}': OUT OF SYNC", file=sys.stderr)
+        for p in problems:
+            print(f"  - {p}", file=sys.stderr)
+        print("Fix with:  python scripts/admin/manage_users.py rotate-service-account",
+              file=sys.stderr)
+        sys.exit(1)
+    print(f"Service-account '{username}': .env and orthanc_users.json are in sync.")
+
+
 # -- Entrypoint ----------------------------------------------------------------
 
 def main() -> None:
@@ -341,12 +375,15 @@ def main() -> None:
         help="Rotate the Orthanc service-account password (.env + orthanc_users.json)",
     )
 
+    sub.add_parser(
+        "check-service-account",
+        help="Verify .env and orthanc_users.json agree on the service-account password",
+    )
+
     args = parser.parse_args()
     if not args.command:
         parser.print_help()
         sys.exit(1)
-
-    ensure_table()
 
     cmds = {
         "list": cmd_list,
@@ -354,7 +391,13 @@ def main() -> None:
         "passwd": cmd_passwd,
         "remove": cmd_remove,
         "rotate-service-account": cmd_rotate_service_account,
+        "check-service-account": cmd_check_service_account,
     }
+
+    # File-only commands don't need (and shouldn't require) a live DB.
+    if args.command not in {"check-service-account"}:
+        ensure_table()
+
     cmds[args.command](args)
 
 

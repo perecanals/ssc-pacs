@@ -48,8 +48,9 @@ Run from `stanford-stroke-pacs/` unless noted.
 
 ### Orthanc (Docker)
 ```bash
-docker compose up -d
-docker compose down
+scripts/orthanc/dc.sh up -d       # wrapper: resolves the DICOM mount from config.toml
+scripts/orthanc/dc.sh down        # and selects the macOS override. Use instead of bare
+                                  # `docker compose` (which errors that DICOM_MOUNT_SOURCE is unset).
 scripts/orthanc/check_status.sh   # status, API, plugins
 ```
 
@@ -93,6 +94,7 @@ python scripts/admin/manage_users.py add <user> [--admin]   # --admin also mirro
 python scripts/admin/manage_users.py passwd <user>
 python scripts/admin/manage_users.py remove <user>
 python scripts/admin/manage_users.py rotate-service-account # rotates Orthanc service account (.env + orthanc_users.json)
+python scripts/admin/manage_users.py check-service-account  # verify .env and orthanc_users.json agree (exits non-zero on drift)
 # Restart Orthanc only when orthanc_users.json was touched (admin user changes or service-account rotation):
 docker restart ssc-orthanc
 ```
@@ -178,7 +180,7 @@ docker build -t ssc-orthanc:patched-indexer .
 
 # Deploy (swap into docker-compose.yml and restart Orthanc)
 cd /home/perecanals/ssc-pacs/stanford-stroke-pacs
-docker compose down && docker compose up -d
+scripts/orthanc/dc.sh down && scripts/orthanc/dc.sh up -d
 docker logs ssc-orthanc | grep RemoveMissingFiles   # should print the patch's startup banner
 ```
 
@@ -326,6 +328,7 @@ All canonical docs are under `stanford-stroke-pacs/documentation/`. Start with `
 
 - `documentation/reference/system_overview.md` — end-to-end depiction of the whole stack (Web App + Orthanc + OHIF + cold storage + the two PostgreSQL DBs)
 - `documentation/reference/architecture.md` — full topology, data flow, auth model
+- `documentation/reference/configuration_sources.md` — map of every config source of truth + sync points (the deploy/configurability reference)
 - `documentation/reference/data_stores.md` — all table schemas and query patterns
 - `documentation/reference/web_app.md` — Web App product rationale and features
 - `documentation/reference/web_app_frontend.md` — React component detail

@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.ssc.pg-backup-orthanc</string>
+  <key>UserName</key><string>__DEPLOY_USER__</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key><string>__BREW_PREFIX__/opt/coreutils/libexec/gnubin:__BREW_PREFIX__/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    <key>HOME</key><string>__HOME_DIR__</string>
+    <key>LANG</key><string>en_US.UTF-8</string>
+    <key>LC_ALL</key><string>en_US.UTF-8</string>
+  </dict>
+  <key>StandardOutPath</key><string>__HOME_DIR__/Library/Logs/com.ssc.pg-backup-orthanc.log</string>
+  <key>StandardErrorPath</key><string>__HOME_DIR__/Library/Logs/com.ssc.pg-backup-orthanc.err</string>
+  <key>ProgramArguments</key><array><string>__BREW_PREFIX__/bin/bash</string><string>__REPO_ROOT__/scripts/backup/backup_pg_db.sh</string><string>orthanc_db</string></array>
+  <key>StartCalendarInterval</key><dict><key>Hour</key><integer>2</integer><key>Minute</key><integer>30</integer></dict>
+  <key>RunAtLoad</key><false/>
+</dict></plist>

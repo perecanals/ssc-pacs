@@ -118,10 +118,10 @@ docker build -t ssc-orthanc:patched-indexer .
 
 # Edit orthanc.json — add "RemoveMissingFiles": false to the Indexer block
 
-# Swap
+# Swap (use the dc.sh wrapper — it resolves the DICOM mount from config.toml)
 cd /home/perecanals/ssc-pacs/stanford-stroke-pacs
-docker compose down
-docker compose up -d
+scripts/orthanc/dc.sh down
+scripts/orthanc/dc.sh up -d
 
 # Verify the patch banner at startup
 docker logs ssc-orthanc | grep -i RemoveMissingFiles

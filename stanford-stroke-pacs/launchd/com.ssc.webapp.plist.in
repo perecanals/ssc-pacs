@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Web App (uvicorn on :8043) service — macOS replacement for systemd/ssc-web-app.service.
+
+  This is a TEMPLATE (.plist.in). Do not edit __TOKENS__ or install it by hand —
+  scripts/macos/install_launchd.sh renders the tokens for this host and installs
+  all daemons as system LaunchDaemons (system domain, loaded at boot):
+
+    sudo scripts/macos/install_launchd.sh
+    sudo launchctl kickstart -k system/com.ssc.webapp     # restart one
+    sudo launchctl print system/com.ssc.webapp            # status
+
+  HEADLESS NOTE: this Mac has no console/GUI login session, so a per-user
+  LaunchAgent (gui/$UID domain) will NOT load (`brew services`/`launchctl
+  bootstrap gui/...` fail with "Domain does not support specified action") — hence
+  the system-domain LaunchDaemon. It runs as DEPLOY_USER (UserName) so it shares
+  Postgres loopback-trust and the conda env. Depends on Postgres + Colima being up
+  first (com.ssc.colima + Postgres LaunchDaemon) — KeepAlive restarts it until the
+  DB pool connects.
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>            <string>com.ssc.webapp</string>
+  <key>UserName</key>         <string>__DEPLOY_USER__</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>__CONDA_ENV_BIN__/uvicorn</string>
+    <string>app:app</string>
+    <string>--host</string><string>0.0.0.0</string>
+    <string>--port</string><string>8043</string>
+  </array>
+  <key>WorkingDirectory</key> <string>__REPO_ROOT__/web-app</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key><string>__BREW_PREFIX__/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    <key>HOME</key><string>__HOME_DIR__</string>
+    <key>LANG</key><string>en_US.UTF-8</string>
+    <key>LC_ALL</key><string>en_US.UTF-8</string>
+  </dict>
+  <key>RunAtLoad</key>        <true/>
+  <key>KeepAlive</key>        <true/>
+  <key>StandardOutPath</key>  <string>__HOME_DIR__/Library/Logs/ssc-web-app.log</string>
+  <key>StandardErrorPath</key><string>__HOME_DIR__/Library/Logs/ssc-web-app.err</string>
+</dict>
+</plist>

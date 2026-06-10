@@ -1,6 +1,6 @@
 [Unit]
 Description=PACS — nightly cold-archive mirror (Tier 2, dormant on dev)
-Documentation=file:/home/perecanals/ssc-pacs/stanford-stroke-pacs/documentation/operations/backup_strategy.md
+Documentation=file:__REPO_ROOT__/documentation/operations/backup_strategy.md
 
 [Timer]
 # Daily at 03:30. Stays inactive on dev — the unit ships with

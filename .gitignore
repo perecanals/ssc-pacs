@@ -54,5 +54,13 @@ Thumbs.db
 .hg/
 **/.hg/
 
-# macOS/Colima local Docker override (do not ship to Linux host)
-# *.override.yml
+# Deprecated compose auto-merge override. macOS deltas now live in the tracked
+# docker-compose.override.macos.yml, selected explicitly by scripts/orthanc/dc.sh.
+# Ignore the auto-merge name so a stray copy never silently breaks a Linux host.
+docker-compose.override.yml
+**/docker-compose.override.yml
+
+# Per-host deployment identity overrides for the unit installers (auto-derived
+# by default; see deploy.env.example).
+deploy.env
+**/deploy.env
