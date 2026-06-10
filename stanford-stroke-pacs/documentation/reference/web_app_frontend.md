@@ -181,9 +181,14 @@ The Navigator page is decomposed into focused React components:
   - **Inline editing with stopPropagation**: Label cells in all table levels
     use `stopPropagation` to prevent expand/collapse when interacting with
     label controls.
-  - **Live subtable refresh**: After any annotation mutation, `handleMutated`
-    re-fetches the main table and all currently expanded child and grandchild
-    rows so changes are immediately visible.
+  - **Live subtable refresh**: After a successful annotation mutation,
+    `handleMutated` re-fetches the main table and all currently expanded child
+    and grandchild rows. The edited cell itself updates optimistically (see
+    `InlineEdit` below), so this re-fetch is the authoritative reconcile rather
+    than the source of the visible change. Note the `*_labelled` mirror columns
+    are refreshed in the background after each write, so any labelled-pivot views
+    are eventually consistent — but the live table reads `annotations` directly,
+    so annotation values are always immediate.
   - **Snapshot refresh**: Authenticated users can trigger a full snapshot
     rebuild from the table summary row.
 - `InlineEdit` — handles `bool` (checkbox), `int` (number input), `text`
@@ -191,6 +196,12 @@ The Navigator page is decomposed into focused React components:
   types. Accepts a `level` and generic `entity` prop so it can annotate at
   any level. Annotations are shared across all users (one value per
   entity+label); `created_by` is shown as a tooltip for audit traceability.
+  Edits are **optimistic**: `BoolEdit`/`SelectEdit` keep a local `pending`
+  override that shows the new value immediately and yields to the reloaded
+  `ann` prop once it catches up (a `useEffect` clears the override only when the
+  prop matches, avoiding a flicker); `ValueEdit` already renders from local
+  input state. On a non-`ok` POST/DELETE the cell rolls back and an `alert`
+  fires, and `onMutated` is skipped (nothing new to refresh).
 - `ColumnSelector` — dropdown for toggling columns. Labels are grouped by
   their level with headings (Patient labels, Study labels, Series labels).
   Column visibility and order are persisted server-side in
