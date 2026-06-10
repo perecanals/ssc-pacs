@@ -39,6 +39,10 @@ EXPECTED_ROUTES = {
     ("POST", "/api/studies/{studyinstanceuid}/warm"),
     ("POST", "/api/studies/{studyinstanceuid}/evict"),
     ("GET", "/api/studies/{studyinstanceuid}/cache-status"),
+    # Patient-level warm + batch cache-status (cold-storage decompress UI).
+    ("POST", "/api/patients/{patient_id}/warm"),
+    ("GET", "/api/patients/{patient_id}/cache-status"),
+    ("POST", "/api/cache-status/batch"),
     ("GET", "/api/series/{seriesinstanceuid}/annotations"),
     ("POST", "/api/annotations"),
     ("DELETE", "/api/annotations/{annotation_id}"),

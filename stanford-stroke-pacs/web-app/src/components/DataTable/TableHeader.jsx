@@ -94,7 +94,7 @@ export default function TableHeader({
         ))}
         {showActions && (
           <th className="dt__th">
-            Actions
+            {level === "patient" ? "Status" : "Actions"}
           </th>
         )}
       </tr>

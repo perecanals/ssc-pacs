@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import logging
+
 import psycopg2.extras
-from fastapi import APIRouter, Cookie, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Cookie, Depends, HTTPException
 from pydantic import BaseModel
 
 from auth import get_current_user, require_admin
@@ -11,7 +13,31 @@ from common import VALID_LEVELS
 from db import get_conn
 from labelled_table_sync import sync_labelled_rows
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter()
+
+
+def _sync_labelled_rows_bg(level: str, entity_id: str | None) -> None:
+    """Refresh the *_labelled mirror table for one entity, off the request path.
+
+    Runs after the response is sent, on its own pooled connection — the annotation
+    write has already committed, so this reads the latest state and a failure here
+    only logs (it can never roll back or block the user's save). The mirror tables
+    have no audit trigger, so the absence of `app.audit_user` on this connection is
+    irrelevant; audit attribution happens on the in-request annotations write.
+    """
+    conn = get_conn()
+    try:
+        sync_labelled_rows(conn, level, [entity_id])
+        conn.commit()
+    except Exception:
+        logger.exception(
+            "labelled-table sync failed (level=%s, entity_id=%s)", level, entity_id
+        )
+        conn.rollback()
+    finally:
+        conn.close()
 
 
 class AnnotationCreate(BaseModel):
@@ -78,7 +104,11 @@ def get_annotations(seriesinstanceuid: str):
 
 
 @router.post("/api/annotations", status_code=201)
-def create_annotation(body: AnnotationCreate, auth_token: str | None = Cookie(None)):
+def create_annotation(
+    body: AnnotationCreate,
+    background_tasks: BackgroundTasks,
+    auth_token: str | None = Cookie(None),
+):
     username = get_current_user(auth_token)
     if body.level not in VALID_LEVELS:
         raise HTTPException(status_code=400, detail="level must be patient, study, or series")
@@ -109,18 +139,24 @@ def create_annotation(body: AnnotationCreate, auth_token: str | None = Cookie(No
                 )
             cur.execute(sql, params)
             row = cur.fetchone()
+        # Commit the annotation write independently; refresh the labelled mirror
+        # table off the request path so it never blocks (or rolls back) the save.
+        conn.commit()
         entity_id = body.seriesinstanceuid if body.level == "series" else (
             body.studyinstanceuid if body.level == "study" else body.patient_id
         )
-        sync_labelled_rows(conn, body.level, [entity_id])
-        conn.commit()
+        background_tasks.add_task(_sync_labelled_rows_bg, body.level, entity_id)
         return row
     finally:
         conn.close()
 
 
 @router.delete("/api/annotations/{annotation_id}", status_code=204)
-def delete_annotation(annotation_id: int, auth_token: str | None = Cookie(None)):
+def delete_annotation(
+    annotation_id: int,
+    background_tasks: BackgroundTasks,
+    auth_token: str | None = Cookie(None),
+):
     get_current_user(auth_token)
     conn = get_conn()
     try:
@@ -136,11 +172,14 @@ def delete_annotation(annotation_id: int, auth_token: str | None = Cookie(None))
             cur.execute(
                 "DELETE FROM annotations WHERE id = %s", (annotation_id,)
             )
+        # Commit the delete independently; refresh the labelled mirror table off the
+        # request path. entity_id/level are plain values captured from `row` above,
+        # so they survive the connection close in `finally`.
+        conn.commit()
         entity_id = row["seriesinstanceuid"] if row["level"] == "series" else (
             row["studyinstanceuid"] if row["level"] == "study" else row["patient_id"]
         )
-        sync_labelled_rows(conn, row["level"], [entity_id])
-        conn.commit()
+        background_tasks.add_task(_sync_labelled_rows_bg, row["level"], entity_id)
     finally:
         conn.close()
 

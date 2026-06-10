@@ -223,6 +223,14 @@ across all users**: there is one value per entity+label, and any
 authenticated user can edit it (last-write-wins). The `created_by` field
 tracks who last modified each annotation and is shown as a tooltip.
 
+Edits apply **optimistically**: the cell updates instantly on click and the
+write is sent in the background, so editing never waits on the round-trip. If
+the save fails the cell rolls back to its previous value and an alert is shown.
+The per-level `*_labelled` mirror tables are refreshed in the background after
+each write (they are eventually consistent, not synchronous), but nothing in
+the live table read path depends on them — the table reads `annotations`
+directly, so edits are always reflected immediately.
+
 Supported data types currently include:
 
 - `bool`

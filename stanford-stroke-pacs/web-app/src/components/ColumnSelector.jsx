@@ -148,6 +148,9 @@ export default function ColumnSelector({
   onToggle,
   onSetKeysVisible,
   onEditLabel,
+  showStatusColumn = false,
+  statusColumnVisible = true,
+  onToggleStatusColumn,
 }) {
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
@@ -204,6 +207,16 @@ export default function ColumnSelector({
                   {c.label}
                 </label>
               ))}
+              {showStatusColumn && lvl === "patient" && (
+                <label className="col-selector__item">
+                  <input
+                    type="checkbox"
+                    checked={statusColumnVisible}
+                    onChange={onToggleStatusColumn}
+                  />
+                  Status
+                </label>
+              )}
             </div>
           ))}
           <div className="col-selector__divider" />
@@ -282,4 +295,7 @@ ColumnSelector.propTypes = {
   onToggle: PropTypes.func.isRequired,
   onSetKeysVisible: PropTypes.func.isRequired,
   onEditLabel: PropTypes.func,
+  showStatusColumn: PropTypes.bool,
+  statusColumnVisible: PropTypes.bool,
+  onToggleStatusColumn: PropTypes.func,
 };

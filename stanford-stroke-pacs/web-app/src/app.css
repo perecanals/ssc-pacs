@@ -44,6 +44,19 @@
   @apply text-primary text-xs font-medium bg-transparent border-none cursor-pointer hover:underline;
 }
 
+/* Cold-storage decompress / readiness control. Extends .link-btn (or the
+   grandchild link variant) with a per-state color so one button serves as both
+   the trigger and the at-a-glance readiness badge. */
+.dt__warm-btn {
+  @apply inline-flex items-center whitespace-nowrap;
+}
+.dt__warm-btn--cold { @apply text-primary; }
+.dt__warm-btn--queued { @apply text-text-muted; }
+.dt__warm-btn--warming { @apply text-amber-600; }
+.dt__warm-btn--hot { @apply text-emerald-600; }
+.dt__warm-btn--error { @apply text-red-600; }
+.dt__warm-btn:disabled { @apply cursor-default hover:no-underline; }
+
 /* Shared pill button — same shape and at-rest state as the topbar level pills
    (Patients / Studies / Series), minus the per-level accent color. Used for
    toolbar actions, pagination, and footer controls so all secondary chrome

@@ -96,14 +96,32 @@ export default function InlineEdit({
 
 function BoolEdit({ level, entity, labelName, ann, onMutated }) {
   const [saving, setSaving] = useState(false);
+  // Optimistic override: undefined = trust the `ann` prop; true/false = show this
+  // value immediately while the request is in flight.
+  const [pending, setPending] = useState(undefined);
+
+  const annChecked = !!ann;
+
+  // Drop the override once the reloaded prop catches up to what we optimistically
+  // showed, so the cell switches to prop-sourced rendering without a flicker.
+  useEffect(() => {
+    if (pending !== undefined && pending === annChecked) setPending(undefined);
+  }, [annChecked, pending]);
 
   const handleChange = async (e) => {
+    const next = e.target.checked;
+    setPending(next);
     setSaving(true);
     try {
-      if (e.target.checked) {
-        await apiPost("/api/annotations", buildPayload(level, entity, labelName, null));
-      } else if (ann) {
-        await apiDelete(`/api/annotations/${ann.id}`);
+      const res = next
+        ? await apiPost("/api/annotations", buildPayload(level, entity, labelName, null))
+        : ann
+          ? await apiDelete(`/api/annotations/${ann.id}`)
+          : { ok: true };
+      if (!res.ok) {
+        setPending(undefined);
+        alert("Could not save annotation");
+        return;
       }
       onMutated();
     } finally {
@@ -115,7 +133,7 @@ function BoolEdit({ level, entity, labelName, ann, onMutated }) {
     <span title={ann?.created_by ? `Last edited by ${ann.created_by}` : undefined}>
       <input
         type="checkbox"
-        checked={!!ann}
+        checked={pending ?? annChecked}
         onChange={handleChange}
         disabled={saving}
         className="bool-edit__checkbox"
@@ -129,7 +147,17 @@ function SelectEdit({ level, entity, labelName, defOptions = [], ann, onMutated 
   const [annValues, setAnnValues] = useState([]);
   const [search, setSearch] = useState("");
   const [saving, setSaving] = useState(false);
+  // Optimistic override: undefined = trust the `ann` prop; otherwise the selected
+  // string, or null when the value was cleared.
+  const [pending, setPending] = useState(undefined);
   const ref = useRef(null);
+
+  const annValue = ann?.value ?? null;
+
+  // Drop the override once the reloaded prop catches up, without a flicker.
+  useEffect(() => {
+    if (pending !== undefined && pending === annValue) setPending(undefined);
+  }, [annValue, pending]);
 
   useEffect(() => {
     const close = (e) => {
@@ -155,22 +183,28 @@ function SelectEdit({ level, entity, labelName, defOptions = [], ann, onMutated 
   const showCreate = trimmed && !allOptions.some((v) => v.toLowerCase() === trimmed.toLowerCase());
 
   const handleSelect = async (value) => {
+    const isClear = value === ann?.value;
+    // Reflect the choice immediately and close the dropdown so the new pill shows.
+    setPending(isClear ? null : value);
+    setOpen(false);
+    setSearch("");
     setSaving(true);
     try {
-      if (value === ann?.value) {
-        await apiDelete(`/api/annotations/${ann.id}`);
-      } else {
-        await apiPost("/api/annotations", buildPayload(level, entity, labelName, value));
+      const res = isClear
+        ? await apiDelete(`/api/annotations/${ann.id}`)
+        : await apiPost("/api/annotations", buildPayload(level, entity, labelName, value));
+      if (!res.ok) {
+        setPending(undefined);
+        alert("Could not save annotation");
+        return;
       }
       onMutated();
     } finally {
       setSaving(false);
-      setOpen(false);
-      setSearch("");
     }
   };
 
-  const currentValue = ann?.value;
+  const currentValue = pending !== undefined ? pending : ann?.value;
 
   return (
     <span className="select-edit" ref={ref} title={ann?.created_by ? `Last edited by ${ann.created_by}` : undefined}>
@@ -266,10 +300,22 @@ function ValueEdit({
           setValue(originalRef.current);
           return;
         }
-        await apiPost("/api/annotations", buildPayload(level, entity, labelName, trimmed));
+        const res = await apiPost("/api/annotations", buildPayload(level, entity, labelName, trimmed));
+        if (!res.ok) {
+          setValue(originalRef.current);
+          alert("Could not save annotation");
+          return;
+        }
       } else if (ann) {
-        await apiDelete(`/api/annotations/${ann.id}`);
+        const res = await apiDelete(`/api/annotations/${ann.id}`);
+        if (!res.ok) {
+          setValue(originalRef.current);
+          alert("Could not save annotation");
+          return;
+        }
       }
+      // Commit the new baseline only on success, so a failed save can't bake in
+      // an unsaved value.
       originalRef.current = trimmed;
       onMutated();
     } finally {

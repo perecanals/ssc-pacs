@@ -48,6 +48,17 @@ _conn = get_conn  # Backward-compat alias used throughout this module.
 
 ADV_LOCK_KEY = 8741002
 
+# Reusable SQL fragment: an entity's *effective* cache status, where a
+# 'warming'/'queued' row stuck past the warming timeout is reported as 'cold'
+# (abandoned warm — worker died, or a queue dropped on app restart). Assumes the
+# cache_state row is aliased `cs` (LEFT JOIN-friendly: a missing row also reads
+# 'cold'). Takes one %s param: the timeout in minutes.
+_EFFECTIVE_STATUS_SQL = (
+    "CASE WHEN cs.status IN ('warming', 'queued') "
+    "AND cs.warming_started_at < now() - (%s * interval '1 minute') "
+    "THEN 'cold' ELSE COALESCE(cs.status, 'cold') END"
+)
+
 
 class InsufficientDiskSpaceError(RuntimeError):
     """Raised when the target filesystem cannot fit the estimated extraction.
@@ -231,6 +242,203 @@ def get_cache_status(studyinstanceuid: str) -> dict[str, Any]:
         conn.close()
 
 
+def list_patient_study_uids(patient_id: str) -> list[str]:
+    """Return every studyinstanceuid belonging to a patient (warm-all fan-out)."""
+    conn = _conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT studyinstanceuid FROM image_study WHERE patient_id = %s",
+                (patient_id,),
+            )
+            return [r[0] for r in cur.fetchall()]
+    finally:
+        conn.close()
+
+
+def get_batch_cache_status(uids: list[str]) -> dict[str, str]:
+    """Map each requested study UID to its cache status (default 'cold').
+
+    A single round-trip for the table's visible rows, so the frontend polls
+    once per tick instead of once per row. Studies with no ``cache_state``
+    row are reported ``cold``.
+    """
+    out = {uid: "cold" for uid in uids}
+    if not uids:
+        return out
+    conn = _conn()
+    try:
+        with conn.cursor() as cur:
+            # A 'warming'/'queued' row past the timeout is an abandoned warm
+            # (worker died, or a queue dropped on app restart); report it 'cold'
+            # so the UI offers a clickable "Decompress" again rather than a stuck,
+            # disabled badge. reap_stale_warming() cleans the row in the background.
+            cur.execute(
+                "SELECT studyinstanceuid, "
+                "CASE WHEN status IN ('warming', 'queued') "
+                "AND warming_started_at < now() - (%s * interval '1 minute') "
+                "THEN 'cold' ELSE status END "
+                "FROM cache_state WHERE studyinstanceuid = ANY(%s)",
+                (WARMING_TIMEOUT_MINUTES, uids),
+            )
+            for uid, status in cur.fetchall():
+                out[uid] = status
+        return out
+    finally:
+        conn.close()
+
+
+def get_patient_cache_status(patient_id: str) -> dict[str, Any]:
+    """Aggregate cache status across all of a patient's studies.
+
+    Returns per-status counts plus ``total`` so the patient row can render a
+    single readiness summary (e.g. ``Ready 4/4``). A study with no
+    ``cache_state`` row counts as ``cold``.
+    """
+    counts = {"cold": 0, "queued": 0, "warming": 0, "hot": 0, "error": 0}
+    conn = _conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"SELECT {_EFFECTIVE_STATUS_SQL} AS status "
+                "FROM image_study st "
+                "LEFT JOIN cache_state cs ON cs.studyinstanceuid = st.studyinstanceuid "
+                "WHERE st.patient_id = %s",
+                (WARMING_TIMEOUT_MINUTES, patient_id),
+            )
+            for (status,) in cur.fetchall():
+                counts[status] = counts.get(status, 0) + 1
+    finally:
+        conn.close()
+    total = sum(counts.values())
+    return {"patient_id": patient_id, "total": total, **counts}
+
+
+def get_patients_cache_status(patient_ids: list[str]) -> dict[str, dict[str, Any]]:
+    """Aggregate cache status for many patients in one grouped query.
+
+    Backs the batch endpoint so a page of patient rows polls without N+1.
+    """
+    out = {
+        pid: {"patient_id": pid, "total": 0, "cold": 0, "queued": 0, "warming": 0, "hot": 0, "error": 0}
+        for pid in patient_ids
+    }
+    if not patient_ids:
+        return out
+    conn = _conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"SELECT st.patient_id, {_EFFECTIVE_STATUS_SQL} AS status, COUNT(*) "
+                "FROM image_study st "
+                "LEFT JOIN cache_state cs ON cs.studyinstanceuid = st.studyinstanceuid "
+                f"WHERE st.patient_id = ANY(%s) GROUP BY st.patient_id, {_EFFECTIVE_STATUS_SQL}",
+                (WARMING_TIMEOUT_MINUTES, patient_ids, WARMING_TIMEOUT_MINUTES),
+            )
+            for pid, status, count in cur.fetchall():
+                entry = out.setdefault(
+                    pid,
+                    {"patient_id": pid, "total": 0, "cold": 0, "queued": 0, "warming": 0, "hot": 0, "error": 0},
+                )
+                entry[status] = entry.get(status, 0) + count
+                entry["total"] += count
+        return out
+    finally:
+        conn.close()
+
+
+def mark_queued(studyinstanceuids: list[str]) -> None:
+    """Persist a 'queued' marker for studies submitted to the warm executor.
+
+    Makes the Queued state durable across page reloads and visible to other
+    users — the in-process executor queue itself is not observable. Only
+    promotes rows that are currently cold/error/absent; never downgrades a
+    'hot' or an in-progress 'warming' row. ``warm_study()`` flips
+    'queued'->'warming' when a worker actually starts (re-stamping
+    ``warming_started_at``), and :func:`reap_stale_warming` ages out orphaned
+    'queued' rows if the app restarts and drops its in-memory queue.
+    """
+    if STORAGE_MODE != "cold_path_cache" or not studyinstanceuids:
+        return
+    conn = _conn()
+    try:
+        with conn.cursor() as cur:
+            cur.executemany(
+                """
+                INSERT INTO cache_state (studyinstanceuid, status, warming_started_at)
+                VALUES (%s, 'queued', now())
+                ON CONFLICT (studyinstanceuid) DO UPDATE
+                SET status = 'queued', warming_started_at = now(), error_message = NULL
+                WHERE cache_state.status IN ('cold', 'error')
+                """,
+                [(u,) for u in studyinstanceuids],
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def reap_stale_warming(min_age_minutes: float | None = None) -> list[str]:
+    """Reset abandoned 'warming'/'queued' rows back to 'cold'.
+
+    A warm whose worker died mid-extraction (e.g. the app was restarted) leaves
+    its row stuck in 'warming' forever; likewise a 'queued' row whose enqueue
+    never ran (the in-memory executor queue is dropped on restart). The UI would
+    render either as a permanently disabled badge — a dead end for the rater.
+    This sweep returns such studies to 'cold' so they can be decompressed again.
+
+    ``min_age_minutes`` defaults to ``WARMING_TIMEOUT_MINUTES`` for the periodic
+    eviction-loop sweep. Pass ``0`` at app startup: a freshly started process has
+    an empty executor and holds no warm locks, so *every* warming/queued row is
+    orphaned and should be reset immediately rather than waiting out the timeout.
+
+    Each candidate is only reset if ``pg_try_advisory_lock`` succeeds. A warm
+    that is genuinely still running (in this or another live process) holds that
+    lock for the whole extraction, so it is never clobbered — only truly
+    abandoned rows reaped.
+    """
+    if STORAGE_MODE != "cold_path_cache":
+        return []
+    age = WARMING_TIMEOUT_MINUTES if min_age_minutes is None else min_age_minutes
+    reaped: list[str] = []
+    conn = _conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT studyinstanceuid FROM cache_state "
+                "WHERE status IN ('warming', 'queued') "
+                "AND warming_started_at < now() - (%s * interval '1 minute')",
+                (age,),
+            )
+            candidates = [r[0] for r in cur.fetchall()]
+            for uid in candidates:
+                cur.execute(
+                    "SELECT pg_try_advisory_lock(%s, (abs(hashtext(%s::text)))::integer)",
+                    (ADV_LOCK_KEY, uid),
+                )
+                if not cur.fetchone()[0]:
+                    continue  # a warm is genuinely still in progress — leave it
+                try:
+                    cur.execute(
+                        "UPDATE cache_state SET status = 'cold', "
+                        "warming_started_at = NULL, error_message = NULL "
+                        "WHERE studyinstanceuid = %s AND status IN ('warming', 'queued')",
+                        (uid,),
+                    )
+                    if cur.rowcount:
+                        reaped.append(uid)
+                    conn.commit()
+                finally:
+                    cur.execute(
+                        "SELECT pg_advisory_unlock(%s, (abs(hashtext(%s::text)))::integer)",
+                        (ADV_LOCK_KEY, uid),
+                    )
+                    conn.commit()
+    finally:
+        conn.close()
+    return reaped
+
+
 def touch_access(studyinstanceuid: str) -> None:
     conn = _conn()
     try:
@@ -391,7 +599,11 @@ def warm_study(studyinstanceuid: str) -> dict[str, Any]:
         conn.commit()
         logger.info("warm_study: starting extraction (%d archives)", len(archives), extra=log_extra)
 
-        # Per-series extraction.
+        # Per-series extraction. Serial by design: warming is disk-bandwidth
+        # bound, not CPU-bound, so extracting series concurrently only divides
+        # the same throughput and adds contention (measured: no speedup, slight
+        # regression). The real lever is reducing competing disk I/O, not adding
+        # threads.
         t_extract = 0.0
         for dicom_dir_path, arch_path in archives:
             dicom_dir = Path(dicom_dir_path)
