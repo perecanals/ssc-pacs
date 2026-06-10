@@ -52,7 +52,7 @@ production on 2026-04-15. They fall in three groups:
 |---|---|---|
 | web-app-owned | `annotations`, `label_definitions`, `users`, `user_preferences`, `cache_state`, `orthanc_resource_map` | Future Alembic revisions |
 | Upstream raw | `patient`, `image_series`, `image_study`, `lvo_clinical_data` | External ingest pipeline (out of scope for Alembic; `patient` also has a `CREATE TABLE IF NOT EXISTS` bootstrap in revision `0006`) |
-| Dynamic labelled / snapshot | `image_series_labelled`, `image_study_labelled`, `patient_labelled`, `snapshot_patients`, `snapshot_studys`, `snapshot_seriess` | `web-app/labelled_table_sync.py` at runtime, based on `label_definitions` |
+| Dynamic labelled / snapshot | `image_series_labelled`, `image_study_labelled`, `patient_labelled`, `snapshot_patients`, `snapshot_studys`, `snapshot_seriess` | `web-app/labelled_table_sync.py`, based on `label_definitions`. The `*_labelled` mirrors are refreshed **in the background after each annotation write** (eventually consistent — not in the request transaction) plus on demand via the "Refresh Labelled Tables" button, bulk-label scripts, and image ingest |
 
 The upstream and dynamic groups are excluded from Alembic's `--autogenerate`
 proposals via `include_object` in `alembic/env.py` — autogenerate will

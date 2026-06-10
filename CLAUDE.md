@@ -63,7 +63,7 @@ sudo journalctl -u ssc-web-app -f
 ### Web App development (hot-reload)
 ```bash
 # Terminal 1 — FastAPI backend
-conda activate pacs
+conda activate ssc-pacs
 cd web-app && uvicorn app:app --port 8043 --reload
 
 # Terminal 2 — Vite dev server (proxies /api to :8043)
@@ -112,7 +112,7 @@ python scripts/data_integrity/reconcile.py --json --quiet # JSON only, no stdout
 
 ### Schema migrations (`stanford-stroke` DB only)
 ```bash
-cd web-app && conda activate pacs
+cd web-app && conda activate ssc-pacs
 alembic current                  # show current revision
 alembic upgrade head             # apply pending revisions (also runs at app startup)
 alembic revision -m "<message>"  # scaffold a new revision
@@ -125,7 +125,7 @@ Workflow + production-stamp procedure: `documentation/operations/schema_migratio
 python scripts/cold_storage/archive_all_series.py --dry-run
 
 # Run archiver (parallel, pick worker count to taste)
-conda activate pacs
+conda activate ssc-pacs
 python scripts/cold_storage/archive_all_series.py --workers 4
 
 # Check archive coverage in DB
@@ -134,7 +134,7 @@ psql -d stanford-stroke -c "
          COUNT(*) AS total FROM image_series;"
 
 # Manually warm a study (Python — no CLI yet)
-conda activate pacs
+conda activate ssc-pacs
 cd web-app
 python3 -c "from cache_manager import warm_study; print(warm_study('<uid>'))"
 
@@ -263,7 +263,7 @@ New imaging data is ingested via `stanford-stroke-pacs/image_integration_protoco
 ```bash
 cd stanford-stroke-pacs/image_integration_protocols
 # Edit execute_image_integration_protocol.yaml, then:
-conda activate pacs
+conda activate ssc-pacs
 python execute_image_integration_protocol.py [--config path/to/config.yaml]
 ```
 

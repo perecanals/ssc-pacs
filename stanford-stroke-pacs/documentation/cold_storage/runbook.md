@@ -235,18 +235,26 @@ during burst load.
 ### Stuck-warming watchdog
 
 If a process crashes between archive extraction and the final
-`status='hot'` mark, the row stays in `status='warming'`. The next call
-to `warm_study()` for that UID:
+`status='hot'` mark, the row stays in `status='warming'`. Three layers
+recover from this — no manual action is normally needed:
 
-1. Acquires the per-study advisory lock (the previous warmer's lock was
-   released when its connection died).
-2. Reads the row; sees `status='warming'` with
-   `warming_started_at < now() - warming_timeout_minutes`.
-3. Logs a structured warning (`warm_study: warming watchdog fired …`)
-   and proceeds to re-warm.
+1. **On-demand (`warm_study()`):** the next warm for that UID acquires the
+   per-study advisory lock (the dead warmer's lock was released when its
+   connection died), sees `status='warming'` with
+   `warming_started_at < now() - warming_timeout_minutes`, logs
+   `warm_study: warming watchdog fired …`, and re-warms.
+2. **Background reaper (`reap_stale_warming()`):** the eviction loop
+   (every 15 min) resets any `warming` row past `warming_timeout_minutes`
+   back to `status='cold'` — but only if `pg_try_advisory_lock` succeeds,
+   so a genuinely in-progress (slow) warm is never clobbered. This means a
+   stuck row self-heals even if no one warms it again.
+3. **UI / status reads:** `get_batch_cache_status` / the patient
+   aggregates report a stale `warming` row as `cold`, so the Decompress
+   button becomes clickable again immediately (it never gets wedged on a
+   permanently disabled "Warming…").
 
-If you want to clear a stuck row without waiting for an inbound warm
-request, just trigger one manually:
+If you want to clear a stuck row without waiting for the reaper, just
+trigger a warm manually:
 
 ```bash
 source .env

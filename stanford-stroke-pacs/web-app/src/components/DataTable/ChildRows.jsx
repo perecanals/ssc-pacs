@@ -1,6 +1,7 @@
 import { Fragment } from "react";
 import PropTypes from "prop-types";
 import InlineEdit from "../InlineEdit";
+import WarmButton from "./WarmButton";
 import { formatDatetime } from "../../utils/table";
 
 const DownloadIcon = () => (
@@ -133,6 +134,9 @@ export default function ChildRows({
   activeRowKey,
   isAdmin,
   downloadingSeries,
+  canWarm,
+  studyStatus,
+  onWarmStudy,
   onChildRowClick,
   onGrandChildRowClick,
   onResolveOhifLink,
@@ -228,6 +232,12 @@ export default function ChildRows({
                       OHIF
                     </button>
                   )}
+                  {childConfig.idCol === "studyinstanceuid" && child.studyinstanceuid && canWarm && (
+                    <WarmButton
+                      status={studyStatus[child.studyinstanceuid]}
+                      onWarm={() => onWarmStudy(child.studyinstanceuid)}
+                    />
+                  )}
                   {childConfig.idCol === "seriesinstanceuid" && child.seriesinstanceuid && isAdmin && (
                     <button
                       onClick={() => onDicomDownload(child.seriesinstanceuid)}
@@ -289,6 +299,9 @@ ChildRows.propTypes = {
   activeRowKey: PropTypes.string,
   isAdmin: PropTypes.bool,
   downloadingSeries: PropTypes.string,
+  canWarm: PropTypes.bool,
+  studyStatus: PropTypes.object,
+  onWarmStudy: PropTypes.func,
   onChildRowClick: PropTypes.func.isRequired,
   onGrandChildRowClick: PropTypes.func.isRequired,
   onResolveOhifLink: PropTypes.func.isRequired,

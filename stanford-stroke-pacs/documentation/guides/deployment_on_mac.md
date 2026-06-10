@@ -60,6 +60,13 @@ scripts/macos/colima_start.sh
 #     --mount /Volumes/ThunderBay_RAID1:w
 ```
 
+The VM is sized at 4 vCPU / 8 GB. vCPUs matter when a study loads in OHIF, which
+fires many parallel DICOMweb frame requests; 2 vCPU made the viewer sluggish.
+vCPUs are a *cap*, not a hard reservation, so the host still reclaims them for
+cold-storage warm extractions and Postgres whenever Orthanc is idle. Tune
+per-host via `COLIMA_CPU` / `COLIMA_MEMORY`; resizing takes effect on the next
+`colima stop && colima start` (or the watchdog's next restart).
+
 `docker` / `docker compose` then talk to Colima automatically (socket
 `~/.colima/default/docker.sock`, context `colima`). There is no Docker Desktop
 file-sharing dialog — the `--mount` flags replace it. Verify the mounts are visible
