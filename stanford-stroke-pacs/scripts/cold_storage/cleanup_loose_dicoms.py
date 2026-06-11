@@ -47,7 +47,7 @@ load_dotenv(REPO_ROOT / ".env")
 
 # Read paths from web-app/config.py so cleanup matches the running stack.
 sys.path.insert(0, str(REPO_ROOT / "web-app"))
-from config import LEGACY_DICOM_ROOT, STORAGE_MODE  # noqa: E402
+from config import DICOM_DATA_ROOT, STORAGE_MODE  # noqa: E402
 from db import DB_CONFIG, get_conn  # noqa: E402
 
 ORTHANC_DB_CONFIG = dict(
@@ -141,7 +141,7 @@ def main() -> int:
         return 1
 
     print(f"Mode: {'EXECUTE' if args.execute else 'DRY RUN'}")
-    print(f"Legacy root: {LEGACY_DICOM_ROOT}")
+    print(f"DICOM data root: {DICOM_DATA_ROOT}")
 
     print("Fetching candidate series from image_series ...")
     candidates = fetch_candidate_series(args.patient, args.study)

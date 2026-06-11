@@ -10,7 +10,7 @@ ingested see [`../reference/image_integration_protocol.md`](../reference/image_i
 
 Controlled by `[storage].mode` in `config.toml` at the repo root:
 
-- **`legacy`** — Orthanc indexes loose DICOMs under `legacy_dicom_root`. No
+- **`legacy`** — Orthanc indexes loose DICOMs under `dicom_data_root`. No
   cache manager, no archives involved at runtime. Integration protocol writes
   loose files only (compression step skipped).
 - **`cold_path_cache`** (current production mode) — Canonical payload is
@@ -118,10 +118,10 @@ docker build -t ssc-orthanc:patched-indexer .
 
 # Edit orthanc.json — add "RemoveMissingFiles": false to the Indexer block
 
-# Swap
+# Swap (use the dc.sh wrapper — it resolves the DICOM mount from config.toml)
 cd /home/perecanals/ssc-pacs/stanford-stroke-pacs
-docker compose down
-docker compose up -d
+scripts/orthanc/dc.sh down
+scripts/orthanc/dc.sh up -d
 
 # Verify the patch banner at startup
 docker logs ssc-orthanc | grep -i RemoveMissingFiles
@@ -139,7 +139,7 @@ Edit `config.toml`:
 ```toml
 [storage]
 mode = "cold_path_cache"
-legacy_dicom_root = "/DATA2/pacs_imaging_data"
+dicom_data_root = "/DATA2/pacs_imaging_data"
 cold_archive_root = "/DATA2/pacs_imaging_data_compressed"
 eviction_ttl_hours = 24
 ```
@@ -329,7 +329,7 @@ returns 500. The operator must clear the underlying cause and retry.
 `scripts/cold_storage/cold_storage_health.py` reports:
 - count of stuck-warming rows;
 - count of orphan `*.warming` directories on disk;
-- free disk on `legacy_dicom_root`;
+- free disk on `dicom_data_root`;
 - distribution of `cache_state` rows by `last_accessed_at` bucket.
 
 ```bash

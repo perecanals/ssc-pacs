@@ -17,7 +17,12 @@ from slowapi.util import get_remote_address
 
 import auth as _auth
 from auth import create_jwt, decode_jwt
-from config import LOGIN_RATE_LIMIT_PER_5MIN, STORAGE_MODE, WARM_WORKERS
+from config import (
+    LOGIN_RATE_LIMIT_PER_5MIN,
+    STORAGE_MODE,
+    WARM_WORKERS,
+    effective_config_summary,
+)
 from db import audit_user_var, close_pool, get_conn, init_pool
 from logging_config import configure_logging, request_id_ctx, user_ctx
 from metrics import http_request_duration_seconds, http_requests_total
@@ -86,6 +91,7 @@ async def lifespan(application: FastAPI):
     # Alembic's env.py calls logging.config.fileConfig() during the startup
     # migration run, which wipes the JSON handler.  Re-install it.
     configure_logging()
+    logger.info("startup: effective config", extra=effective_config_summary())
     proxy.init_client()
     # Bounded executor for backgrounded cold-storage warms. The route
     # handler for POST /api/studies/{uid}/warm submits the extraction here

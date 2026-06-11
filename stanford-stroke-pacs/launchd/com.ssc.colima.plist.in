@@ -20,20 +20,20 @@
 <plist version="1.0">
 <dict>
   <key>Label</key>            <string>com.ssc.colima</string>
-  <key>UserName</key>         <string>pere</string>
+  <key>UserName</key>         <string>__DEPLOY_USER__</string>
   <key>ProgramArguments</key>
   <array>
-    <string>/opt/ssc-pacs/ssc-pacs/stanford-stroke-pacs/scripts/macos/colima_watchdog.sh</string>
+    <string>__REPO_ROOT__/scripts/macos/colima_watchdog.sh</string>
   </array>
   <key>EnvironmentVariables</key>
   <dict>
-    <key>PATH</key><string>/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
-    <key>HOME</key><string>/Users/pere</string>
+    <key>PATH</key><string>__BREW_PREFIX__/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    <key>HOME</key><string>__HOME_DIR__</string>
   </dict>
   <key>RunAtLoad</key>        <true/>
   <key>KeepAlive</key>        <true/>
   <key>ThrottleInterval</key> <integer>30</integer>
-  <key>StandardOutPath</key>  <string>/Users/pere/Library/Logs/ssc-colima.log</string>
-  <key>StandardErrorPath</key><string>/Users/pere/Library/Logs/ssc-colima.err</string>
+  <key>StandardOutPath</key>  <string>__HOME_DIR__/Library/Logs/ssc-colima.log</string>
+  <key>StandardErrorPath</key><string>__HOME_DIR__/Library/Logs/ssc-colima.err</string>
 </dict>
 </plist>

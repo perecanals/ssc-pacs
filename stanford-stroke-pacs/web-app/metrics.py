@@ -107,7 +107,7 @@ def update_reconciliation_metrics(summary: dict, duration: float) -> None:
     reconciliation_duration_seconds.set(duration)
 
 
-def refresh_cold_storage_gauges(get_conn, legacy_dicom_root) -> None:
+def refresh_cold_storage_gauges(get_conn, dicom_data_root) -> None:
     """Refresh the scrape-time gauges.
 
     Called from the /metrics handler so the values reflect current state
@@ -131,8 +131,8 @@ def refresh_cold_storage_gauges(get_conn, legacy_dicom_root) -> None:
 
     try:
         # shutil.disk_usage walks up to the nearest existing ancestor so
-        # this works even when legacy_dicom_root is transiently empty.
-        p = legacy_dicom_root
+        # this works even when dicom_data_root is transiently empty.
+        p = dicom_data_root
         while not p.exists():
             if p.parent == p:
                 break

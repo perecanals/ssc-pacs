@@ -11,14 +11,18 @@ Run commands from the **repo root** unless noted.
 ### Orthanc (Docker)
 
 ```bash
+# Use the dc.sh wrapper instead of bare `docker compose`: it resolves the DICOM
+# mount from config.toml and selects the macOS override. Bare `docker compose up`
+# errors that DICOM_MOUNT_SOURCE is unset.
+
 # Start Orthanc
-docker compose up -d
+scripts/orthanc/dc.sh up -d
 
 # Stop Orthanc
-docker compose down
+scripts/orthanc/dc.sh down
 
 # Restart Orthanc
-docker compose restart
+scripts/orthanc/dc.sh restart
 
 # Full status check (Docker, API, plugins, stats)
 ./scripts/orthanc/check_status.sh

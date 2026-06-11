@@ -1,6 +1,6 @@
 # Runtime, packaging, and configuration
 
-**Purpose:** How services run, which files hold config, ports, and operator-facing script inventory. For architecture narrative see [`architecture.md`](architecture.md). For install steps see [`../guides/installation_and_deployment.md`](../guides/installation_and_deployment.md).
+**Purpose:** How services run, which files hold config, ports, and operator-facing script inventory. For the map of *where every config value lives and what must stay in sync* see [`configuration_sources.md`](configuration_sources.md). For architecture narrative see [`architecture.md`](architecture.md). For install steps see [`../guides/installation_and_deployment.md`](../guides/installation_and_deployment.md).
 
 ---
 
@@ -63,9 +63,12 @@ primary owner of the DICOM files.
 - the named Docker volume `ssc-orthanc-storage` is still present because Orthanc
   uses `/var/lib/orthanc/db`, but image duplication is disabled (`ENABLE_STORAGE=false`)
 
-In `cold_path_cache` mode the Docker mount stays on `/DATA2/pacs_imaging_data` (same as legacy).
-On warm, compressed series archives are extracted back to their original `dicom_dir_path` — no
-change to the mount is needed. See [`../cold_storage/runbook.md`](../cold_storage/runbook.md).
+The `/dicom-data` bind-mount **source** is not hardcoded in `docker-compose.yml`: it
+comes from `config.toml` via `scripts/orthanc/dc.sh`, which exports
+`[storage].dicom_data_root` (the uncompressed DICOM tree, used in both modes) as
+`DICOM_MOUNT_SOURCE`. Bring the stack up through that wrapper.
+On warm, compressed series archives are extracted back into the active tree — no
+mount change is needed. See [`../cold_storage/runbook.md`](../cold_storage/runbook.md).
 
 ---
 
@@ -103,6 +106,8 @@ It:
 - provides a separate `rotate-service-account` subcommand that rotates the
   service-account password in both `.env` (`ORTHANC_ADMIN_PASSWORD`) and the
   matching entry in `orthanc_users.json`. It does not touch the DB.
+- provides `check-service-account` to verify those two stay in sync (exits
+  non-zero on mismatch — the one config pair not enforced at runtime).
 
 Runtime split:
 
@@ -118,18 +123,17 @@ Runtime split:
 ## Deployment order (high level)
 
 1. Host prerequisites: Docker, PostgreSQL, Python, Node/npm for builds, DICOM tree
-2. Create `.env`
+2. Create `.env`; set storage mode + paths in `config.toml`
 3. `python3 -m pip install -r requirements.txt`
-4. Adjust `docker-compose.yml` DICOM bind mount if needed (Linux). On macOS, leave
-   the base file unedited and use `docker-compose.override.yml` — see
-   [`../guides/deployment_on_mac.md`](../guides/deployment_on_mac.md) §4.
-5. `./init_orthanc_db.sh`
-6. `python scripts/admin/manage_users.py add <user> --admin`
-7. `docker compose up -d` (Orthanc)
-8. `pip install -r web-app/requirements.txt`, `cd web-app && npm install && npm run build`
-9. Install and enable **`ssc-web-app.service`**
-10. Wait for Orthanc indexing; optionally `scripts/orthanc/enrich_orthanc.py` / `scripts/orthanc/label_studies.py`
-11. Validate (see [`../guides/installation_and_deployment.md`](../guides/installation_and_deployment.md))
+4. `./init_orthanc_db.sh`
+5. `python scripts/admin/manage_users.py add <user> --admin` + `rotate-service-account`
+6. `scripts/orthanc/dc.sh up -d` (Orthanc — wrapper resolves the DICOM mount from
+   `config.toml` and applies the macOS override automatically)
+7. `pip install -r web-app/requirements.txt`, `cd web-app && npm install && npm run build`
+8. Install the service units from templates: `sudo scripts/linux/install_systemd.sh`
+   (macOS: `sudo scripts/macos/install_launchd.sh`) — enables the web app + timers
+9. Wait for Orthanc indexing; optionally `scripts/orthanc/enrich_orthanc.py` / `scripts/orthanc/label_studies.py`
+10. Validate (see [`../guides/installation_and_deployment.md`](../guides/installation_and_deployment.md))
 
 ---
 
@@ -139,7 +143,10 @@ Runtime split:
 
 | File | Purpose |
 |------|---------|
-| `scripts/admin/manage_users.py` | Manage Web App users in PostgreSQL; mirror admin entries into `orthanc_users.json`; rotate the Orthanc service account |
+| `scripts/admin/manage_users.py` | Manage Web App users in PostgreSQL; mirror admin entries into `orthanc_users.json`; rotate **and verify** the Orthanc service account |
+| `scripts/orthanc/dc.sh` | `docker compose` wrapper: resolves the DICOM mount from `config.toml`, selects the macOS override; use instead of bare `docker compose` |
+| `scripts/linux/install_systemd.sh` | Render `systemd/*.in` templates for this host (auto-derived identity; `deploy.env` overrides) and install/enable the units |
+| `scripts/macos/install_launchd.sh` | Same, for the macOS `launchd/*.plist.in` daemons |
 | `init_orthanc_db.sh` | Create the Orthanc PostgreSQL role and database; idempotent; sources `.env` |
 | `scripts/orthanc/check_status.sh` | Orthanc-focused status check for container, REST API, and plugin endpoints |
 | `scripts/connectivity/tunnel.sh` | SSH tunnel helper for remote access |
@@ -182,9 +189,11 @@ Runtime split:
 stanford-stroke-pacs/
 ├── .env                          # Local secrets and connection settings
 ├── .env.example                  # Template for .env (secrets only)
-├── config.toml                   # Non-secret paths, storage mode, session length, backup settings
+├── config.toml                   # Non-secret paths, storage mode, session length, backup settings (REQUIRED)
+├── deploy.env.example            # Per-host service-unit identity overrides (copy → deploy.env, gitignored)
 ├── orthanc_users.json            # Service account + admin users only (managed by manage_users.py)
-├── docker-compose.yml            # Orthanc only
+├── docker-compose.yml            # Orthanc only (Linux base; DICOM mount via ${DICOM_MOUNT_SOURCE})
+├── docker-compose.override.macos.yml  # macOS deltas, selected by scripts/orthanc/dc.sh
 ├── orthanc.json                  # Orthanc structural config
 ├── web-app/
 │   ├── app.py                    # FastAPI backend
@@ -202,9 +211,12 @@ stanford-stroke-pacs/
 │   ├── connectivity/             # tunnel
 │   ├── data_integrity/           # reconcile, dicom_path_sql_fs_audit
 │   ├── dicom/                    # dicom_to_nifti
+│   ├── linux/                    # install_systemd.sh (renders systemd/*.in)
+│   ├── macos/                    # colima_*, install_launchd.sh (renders launchd/*.plist.in)
 │   ├── one_off/                  # backfill_annotation_history, orthanc_holdout_case, etc.
-│   └── orthanc/                  # enrich_orthanc, label_studies, check_status
-├── systemd/                      # systemd units + timers (ssc-web-app.service, pg backups, cold storage, reconciliation)
+│   └── orthanc/                  # enrich_orthanc, label_studies, check_status, dc.sh
+├── systemd/                      # systemd unit TEMPLATES (*.in) — rendered by scripts/linux/install_systemd.sh
+├── launchd/                      # macOS LaunchDaemon TEMPLATES (*.plist.in) — rendered by scripts/macos/install_launchd.sh
 ├── benchmarks/                   # Cold storage benchmarks
 ├── image_integration_protocols/  # Legacy metadata pipeline
 ├── documentation/

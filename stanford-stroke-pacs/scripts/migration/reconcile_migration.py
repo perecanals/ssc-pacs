@@ -46,8 +46,7 @@ sys.path.insert(0, str(REPO_ROOT / "web-app"))
 
 from config import (  # noqa: E402
     COLD_ARCHIVE_ROOT,
-    HOT_CACHE_DIR,
-    LEGACY_DICOM_ROOT,
+    DICOM_DATA_ROOT,
     STORAGE_MODE,
 )
 from db import DB_CONFIG, get_conn  # noqa: E402
@@ -91,15 +90,14 @@ def check_config(r: Reporter) -> None:
     _section("[1/4] Storage configuration")
     r.info(f"mode={STORAGE_MODE}")
     roots = {
-        "legacy_dicom_root": LEGACY_DICOM_ROOT,
+        "dicom_data_root": DICOM_DATA_ROOT,
         "cold_archive_root": COLD_ARCHIVE_ROOT,
-        "hot_cache_dir": HOT_CACHE_DIR,
     }
     for name, path in roots.items():
         if path.is_dir():
             r.ok(f"{name} exists: {path}")
         else:
-            # archive root is mandatory in cold mode; the others are the
+            # archive root is mandatory in cold mode; dicom_data_root is the
             # bind-mount source and may legitimately be empty but must exist.
             mandatory = name == "cold_archive_root" and STORAGE_MODE == "cold_path_cache"
             (r.fail if mandatory else r.warn)(f"{name} not found on disk: {path}")
@@ -168,7 +166,7 @@ def check_indexer_volume(r: Reporter, volume: str) -> None:
 
 def check_paths(r: Reporter, limit: int) -> None:
     _section("[4/4] host paths re-pointed")
-    expected_prefixes = tuple(str(p) for p in (LEGACY_DICOM_ROOT, HOT_CACHE_DIR, COLD_ARCHIVE_ROOT))
+    expected_prefixes = tuple(str(p) for p in (DICOM_DATA_ROOT, COLD_ARCHIVE_ROOT))
     sql = "SELECT patient_id, seriesinstanceuid, dicom_dir_path, dicom_archive_path FROM image_series"
     if limit:
         sql += f" LIMIT {int(limit)}"

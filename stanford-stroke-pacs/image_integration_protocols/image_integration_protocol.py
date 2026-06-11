@@ -29,7 +29,7 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent
 _WEB_APP_DIR = _REPO_ROOT / "web-app"
 if str(_WEB_APP_DIR) not in sys.path:
     sys.path.insert(0, str(_WEB_APP_DIR))
-from config import LEGACY_DICOM_ROOT, STORAGE_MODE  # noqa: E402
+from config import DICOM_DATA_ROOT, STORAGE_MODE  # noqa: E402
 
 import warnings
 warnings.filterwarnings(
@@ -70,9 +70,9 @@ class ImageIntegrationProtocol:
         self.clinical_data = None
 
         # Canonical destination for loose DICOMs. Read from repo-root config.toml
-        # (web-app/config.py LEGACY_DICOM_ROOT) so the protocol always agrees
+        # (web-app/config.py DICOM_DATA_ROOT) so the protocol always agrees
         # with the running stack about where files live.
-        self.base_dir = str(LEGACY_DICOM_ROOT)
+        self.base_dir = str(DICOM_DATA_ROOT)
 
     def execute_image_integration_protocol(self, overwrite_if_exists=False):
         case_name = os.path.basename(os.path.normpath(self.case_dir))

@@ -4,7 +4,7 @@ Offline job: build one tar.zst per series from image_series.dicom_dir_path and
 populate dicom_archive_path. Does not delete loose DICOMs.
 
 Default layout matches the evaluation script:
-  archive = COLD_ROOT / relpath(dicom_dir, LEGACY_ROOT).parent / f"{leaf}.tar.zst"
+  archive = COLD_ROOT / relpath(dicom_dir, DICOM_ROOT).parent / f"{leaf}.tar.zst"
 """
 
 from __future__ import annotations
@@ -28,10 +28,10 @@ load_dotenv(REPO_ROOT / ".env")
 # Paths from repo-root config.toml (see web-app/config.py)
 sys.path.insert(0, str(REPO_ROOT / "web-app"))
 from cache_manager import archive_path_for_series_dir  # noqa: E402
-from config import COLD_ARCHIVE_ROOT, LEGACY_DICOM_ROOT  # noqa: E402
+from config import COLD_ARCHIVE_ROOT, DICOM_DATA_ROOT  # noqa: E402
 from db import DB_CONFIG  # noqa: E402
 
-DEFAULT_LEGACY = LEGACY_DICOM_ROOT
+DEFAULT_DICOM_ROOT = DICOM_DATA_ROOT
 DEFAULT_COLD = COLD_ARCHIVE_ROOT
 
 
@@ -54,11 +54,11 @@ def tar_zst_dir(src: Path, out_path: Path, level: int) -> None:
 
 
 def compress_one_job(args: tuple[str, str, str, str, int]) -> dict[str, Any]:
-    """Worker: (series_uid, dicom_dir_str, legacy_root_str, cold_root_str, zstd_level)."""
-    series_uid, dicom_dir_s, legacy_root_s, cold_root_s, zstd_level = args
+    """Worker: (series_uid, dicom_dir_str, data_root_str, cold_root_str, zstd_level)."""
+    series_uid, dicom_dir_s, data_root_s, cold_root_s, zstd_level = args
     dicom_dir = Path(dicom_dir_s)
     cold_root = Path(cold_root_s)
-    legacy_root = Path(legacy_root_s)
+    data_root = Path(data_root_s)
     t0 = time.perf_counter()
     out: dict[str, Any] = {
         "seriesinstanceuid": series_uid,
@@ -71,7 +71,7 @@ def compress_one_job(args: tuple[str, str, str, str, int]) -> dict[str, Any]:
         if not dicom_dir.is_dir():
             out["error"] = "not_a_dir"
             return out
-        arch = archive_path_for_series_dir(dicom_dir, legacy_root, cold_root)
+        arch = archive_path_for_series_dir(dicom_dir, data_root, cold_root)
         if arch.is_file() and arch.stat().st_size > 0:
             out["ok"] = True
             out["archive_path"] = str(arch)
@@ -111,7 +111,12 @@ def update_archive_path(conn, series_uid: str, archive_path: str) -> None:
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--legacy-root", type=Path, default=DEFAULT_LEGACY)
+    ap.add_argument(
+        "--dicom-root", "--legacy-root", dest="dicom_root", type=Path,
+        default=DEFAULT_DICOM_ROOT,
+        help="Uncompressed DICOM root (config.toml dicom_data_root). "
+             "--legacy-root is a deprecated alias.",
+    )
     ap.add_argument("--cold-root", type=Path, default=DEFAULT_COLD)
     ap.add_argument("--patient", help="Only series for this patient_id")
     ap.add_argument("--dry-run", action="store_true")
@@ -123,7 +128,7 @@ def main() -> int:
         print("DB_USER not set", file=sys.stderr)
         return 1
 
-    legacy_root = args.legacy_root.resolve()
+    data_root = args.dicom_root.resolve()
     cold_root = args.cold_root.resolve()
     cold_root.mkdir(parents=True, exist_ok=True)
 
@@ -137,7 +142,7 @@ def main() -> int:
     if args.dry_run:
         for suid, dpath in rows[:20]:
             try:
-                arch = archive_path_for_series_dir(Path(dpath), legacy_root, cold_root)
+                arch = archive_path_for_series_dir(Path(dpath), data_root, cold_root)
                 print(f"  {suid} -> {arch}")
             except Exception as e:
                 print(f"  {suid} SKIP {e}")
@@ -171,7 +176,7 @@ def main() -> int:
             for i, (suid, dpath) in enumerate(rows):
                 dicom_dir = Path(dpath)
                 try:
-                    arch = archive_path_for_series_dir(dicom_dir, legacy_root, cold_root)
+                    arch = archive_path_for_series_dir(dicom_dir, data_root, cold_root)
                     if arch.is_file() and arch.stat().st_size > 0:
                         update_archive_path(conn, suid, str(arch))
                         conn.commit()
@@ -199,7 +204,7 @@ def main() -> int:
             conn.close()
     else:
         jobs = [
-            (suid, dpath, str(legacy_root), str(cold_root), args.zstd_level)
+            (suid, dpath, str(data_root), str(cold_root), args.zstd_level)
             for suid, dpath in rows
         ]
         with ProcessPoolExecutor(max_workers=args.workers) as ex:

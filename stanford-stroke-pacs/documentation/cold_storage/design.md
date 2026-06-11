@@ -82,7 +82,7 @@ which is `orthancteam/orthanc:latest` with the patched `.so` layered on top.
 
 ### `legacy`
 
-All DICOMs sit uncompressed under `legacy_dicom_root`. Orthanc Folder Indexer
+All DICOMs sit uncompressed under `dicom_data_root`. Orthanc Folder Indexer
 reads them directly. No cache manager involvement. Baseline pre-migration.
 
 ### `cold_path_cache` (current production mode)
@@ -113,7 +113,7 @@ cold_archive_root/                    (canonical — never moves)
         {series_uid}/
           DICOM.tar.zst               (one archive per series, flat file tree inside)
 
-legacy_dicom_root/                    (transient — files come and go)
+dicom_data_root/                    (transient — files come and go)
   {patient_id}/
     {study_uid}/
       {series_desc}/
@@ -122,12 +122,12 @@ legacy_dicom_root/                    (transient — files come and go)
             <instance UIDs>
 ```
 
-The archive naming preserves the series' full legacy path (except the leaf
+The archive naming preserves the series' full uncompressed path (except the leaf
 `DICOM/` directory becomes `DICOM.tar.zst`). That means we can compute either
 direction deterministically without a lookup:
 
 ```python
-archive_path = cold_root / dicom_dir.relative_to(legacy_root).parent / f"{dicom_dir.name}.tar.zst"
+archive_path = cold_root / dicom_dir.relative_to(data_root).parent / f"{dicom_dir.name}.tar.zst"
 ```
 
 ---
@@ -288,11 +288,11 @@ The patched Folder Indexer picks up the new files on its next scan
 No Orthanc restart is required for routine ingestion.
 
 After indexing is confirmed, loose files for the newly-ingested studies can
-be moved out of `legacy_dicom_root` (they're already in the archive).
+be moved out of `dicom_data_root` (they're already in the archive).
 
 ### Disk budget
 
-In steady state, `legacy_dicom_root` only holds studies that are currently
+In steady state, `dicom_data_root` only holds studies that are currently
 warm. Plan for peak working-set size based on expected concurrent viewers.
 
 ---

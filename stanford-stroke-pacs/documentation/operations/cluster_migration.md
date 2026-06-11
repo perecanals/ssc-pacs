@@ -105,8 +105,8 @@ stores, both already covered above:
    docker run --rm -v "$SRC_VOL":/v:ro -v "$PWD":/out alpine \
      tar czf /out/orthanc-vol.tgz -C /v .
 
-   # Target host — after `docker compose up` once created the empty volume:
-   docker compose down
+   # Target host — after `scripts/orthanc/dc.sh up -d` once created the empty volume:
+   scripts/orthanc/dc.sh down
    docker run --rm -v "$DST_VOL":/v -v "$PWD":/in alpine \
      sh -c "rm -rf /v/* && tar xzf /in/orthanc-vol.tgz -C /v"
    ```
@@ -121,13 +121,14 @@ stores, both already covered above:
      user@source:/DATA2/pacs_imaging_data_compressed/  /Users/you/pacs/compressed/
    ```
 
-**The only Orthanc config change** is the *host* side of the bind mount and the
-storage paths — nothing inside the container changes:
+**The only Orthanc config change** is the storage paths in `config.toml` —
+nothing in `docker-compose.yml`, `orthanc.json`, or inside the container changes:
 
-- `docker-compose.yml`: the `volumes:` left-hand side → the new host path
-  (right-hand side stays `/dicom-data`).
-- `config.toml` `[storage]`: reset `legacy_dicom_root`, `cold_archive_root`,
-  `hot_cache_dir` to the new host paths.
+- `config.toml` `[storage]`: reset `mode`, `dicom_data_root`, and
+  `cold_archive_root` to the new host paths. The Orthanc
+  `/dicom-data` bind-mount **source** is derived from these by
+  `scripts/orthanc/dc.sh` (exported as `DICOM_MOUNT_SOURCE`) — you no longer edit
+  the compose `volumes:` by hand.
 - `orthanc.json`: leave `RemoveMissingFiles: false` and `Folders: ["/dicom-data"]`
   unchanged.
 
@@ -267,8 +268,13 @@ metadata, and the files on disk all agree after the port.
 2. On target: build/pull the patched Orthanc image; create empty DBs; restore
    both dumps.
 3. rsync the archive tree to the new host paths.
-4. Edit `docker-compose.yml` (mount source) and `config.toml` (storage roots);
-   `docker compose up -d`; import the volume; `docker compose up -d` again.
+4. Set `config.toml` (storage mode + roots — the DICOM mount derives from it);
+   `scripts/orthanc/dc.sh up -d`; import the volume; `scripts/orthanc/dc.sh up -d` again.
 5. Backfill `image_series` host paths (§3).
-6. `reconcile_migration.py`, then `reconcile.py`.
-7. Smoke-test: click a study in Web App → it warms → OHIF renders.
+6. Stand up the service layer exactly as a fresh install — build the web app
+   frontend and install the service units — per
+   [`../guides/installation_and_deployment.md`](../guides/installation_and_deployment.md)
+   §5 Steps 6–8 (`pip install -r web-app/requirements.txt`, `npm ci && npm run
+   build`, `sudo scripts/linux/install_systemd.sh` / `scripts/macos/install_launchd.sh`).
+7. `reconcile_migration.py`, then `reconcile.py`.
+8. Smoke-test: click a study in Web App → it warms → OHIF renders.
