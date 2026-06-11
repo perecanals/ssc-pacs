@@ -17,7 +17,7 @@ if str(WEB_APP_DIR) not in sys.path:
     sys.path.insert(0, str(WEB_APP_DIR))
 
 from labelled_table_sync import sync_labelled_rows
-from config import COLD_ARCHIVE_ROOT, LEGACY_DICOM_ROOT, STORAGE_MODE  # noqa: E402
+from config import COLD_ARCHIVE_ROOT, DICOM_DATA_ROOT, STORAGE_MODE  # noqa: E402
 
 DEFAULT_ENV_PATH = str(ROOT_DIR / ".env")
 
@@ -95,7 +95,7 @@ def load_config(config_path):
     merged_config = {**defaults, **config}
     merged_config["config_path"] = str(config_path)
     merged_config["_storage_mode"] = STORAGE_MODE
-    merged_config["_legacy_dicom_root"] = str(LEGACY_DICOM_ROOT)
+    merged_config["_dicom_data_root"] = str(DICOM_DATA_ROOT)
     merged_config["_config_toml_cold_archive_root"] = config_toml_archive_root
 
     # Validate consistency with config.toml.
@@ -223,7 +223,7 @@ if __name__ == "__main__":
     )
     logger.info(f"Overwrite existing studies: {config['overwrite_if_exists']}")
     logger.info(f"Storage mode (config.toml): {config['_storage_mode']}")
-    logger.info(f"Legacy DICOM root (config.toml): {config['_legacy_dicom_root']}")
+    logger.info(f"DICOM data root (config.toml): {config['_dicom_data_root']}")
     logger.info(f"Cold archive root (resolved): {config.get('cold_archive_root')}")
 
     error_log_file_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'logs', f"error_log_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json")

@@ -21,9 +21,8 @@ _CONFIG_PATH = _REPO_ROOT / "config.toml"
 
 _DEFAULT_STORAGE = {
     "mode": "legacy",
-    "legacy_dicom_root": "/DATA2/pacs_imaging_data",
+    "dicom_data_root": "/DATA2/pacs_imaging_data",
     "cold_archive_root": "/DATA2/pacs_imaging_data_compressed",
-    "hot_cache_dir": "/DATA2/pacs_hot_cache",
     "eviction_ttl_hours": 24.0,
     "warming_timeout_minutes": 30.0,
     "warming_disk_safety_factor": 3.0,
@@ -78,9 +77,8 @@ if _fellback_keys:
     )
 
 STORAGE_MODE = str(_storage.get("mode", "legacy")).strip().lower()
-LEGACY_DICOM_ROOT = Path(str(_storage.get("legacy_dicom_root", _DEFAULT_STORAGE["legacy_dicom_root"]))).resolve()
+DICOM_DATA_ROOT = Path(str(_storage.get("dicom_data_root", _DEFAULT_STORAGE["dicom_data_root"]))).resolve()
 COLD_ARCHIVE_ROOT = Path(str(_storage.get("cold_archive_root", _DEFAULT_STORAGE["cold_archive_root"]))).resolve()
-HOT_CACHE_DIR = Path(str(_storage.get("hot_cache_dir", _DEFAULT_STORAGE["hot_cache_dir"]))).resolve()
 EVICTION_TTL_HOURS = float(_storage.get("eviction_ttl_hours", _DEFAULT_STORAGE["eviction_ttl_hours"]))
 WARMING_TIMEOUT_MINUTES = float(
     _storage.get("warming_timeout_minutes", _DEFAULT_STORAGE["warming_timeout_minutes"])
@@ -122,9 +120,8 @@ def effective_config_summary() -> dict:
     return {
         "config_path": str(_CONFIG_PATH),
         "storage_mode": STORAGE_MODE,
-        "legacy_dicom_root": str(LEGACY_DICOM_ROOT),
+        "dicom_data_root": str(DICOM_DATA_ROOT),
         "cold_archive_root": str(COLD_ARCHIVE_ROOT),
-        "hot_cache_dir": str(HOT_CACHE_DIR),
         "eviction_ttl_hours": EVICTION_TTL_HOURS,
         "warm_workers": WARM_WORKERS,
         "session_timeout_hours": SESSION_TIMEOUT_HOURS,

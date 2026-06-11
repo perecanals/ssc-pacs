@@ -64,9 +64,9 @@ primary owner of the DICOM files.
   uses `/var/lib/orthanc/db`, but image duplication is disabled (`ENABLE_STORAGE=false`)
 
 The `/dicom-data` bind-mount **source** is not hardcoded in `docker-compose.yml`: it
-comes from `config.toml` via `scripts/orthanc/dc.sh`, which reads `[storage].mode`
-and exports the matching path (`legacy_dicom_root` in `legacy`, `hot_cache_dir` in
-`cold_path_cache`) as `DICOM_MOUNT_SOURCE`. Bring the stack up through that wrapper.
+comes from `config.toml` via `scripts/orthanc/dc.sh`, which exports
+`[storage].dicom_data_root` (the uncompressed DICOM tree, used in both modes) as
+`DICOM_MOUNT_SOURCE`. Bring the stack up through that wrapper.
 On warm, compressed series archives are extracted back into the active tree — no
 mount change is needed. See [`../cold_storage/runbook.md`](../cold_storage/runbook.md).
 

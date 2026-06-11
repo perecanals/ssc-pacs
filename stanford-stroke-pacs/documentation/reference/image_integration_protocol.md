@@ -17,7 +17,7 @@ Takes a directory of per-patient source DICOMs, and for each case:
 1. Discovers DICOM series under the case directory
 2. Groups series into studies
 3. Validates studies against `lvo_clinical_data` (clinical DB table)
-4. Copies DICOMs to the canonical layout under `legacy_dicom_root`
+4. Copies DICOMs to the canonical layout under `dicom_data_root`
 5. Optionally compresses each series to a `*.tar.zst` archive under `cold_archive_root`
 6. Converts selected series to NIfTI alongside the DICOM tree
 7. Upserts `image_study`, `image_series`, and `patient` rows (one transaction)
@@ -99,7 +99,7 @@ The driver validates the resolved configuration at startup:
 Each series ends up at:
 
 ```
-{legacy_dicom_root}/
+{dicom_data_root}/
   {patient_id}/
     {studyinstanceuid}/
       {seriesdescription_normalized}/
@@ -143,7 +143,7 @@ the tar.
 | 4 | `load_clinical_data_table` | Reads `lvo_clinical_data` |
 | 5 | `validate_studies_against_clinical_data` | Drops studies whose `patient_id` doesn't match a clinical row or whose `studydate` is outside the allowed stroke-date window |
 | 6 | `assign_import_id` / `assign_import_label` | Tags all rows with the batch import_id/label |
-| 7 | `add_paths_and_copy_dicom_files` | **Copies DICOMs** from source → `{legacy_dicom_root}/{patient_id}/{studyUID}/{seriesDesc}/{seriesUID}/DICOM/`. Optionally anonymizes. Sets `dicom_dir_path` on each row. |
+| 7 | `add_paths_and_copy_dicom_files` | **Copies DICOMs** from source → `{dicom_data_root}/{patient_id}/{studyUID}/{seriesDesc}/{seriesUID}/DICOM/`. Optionally anonymizes. Sets `dicom_dir_path` on each row. |
 | 8 | `compress_cold_archives` | **Only if `cold_archive_root` is set.** For each series, creates `{cold_archive_root}/.../DICOM.tar.zst`. Sets `dicom_archive_path` on each row. **Per-series strict, batch soft**: each archive is built to a `.tmp` sibling, member-count verified, and atomically renamed — so a published archive is always valid. A failure on one series does NOT abort the case; the loop continues and failures are collected. After the loop, a WARNING is printed summarizing `N/M` failed, and a JSON report is written to `image_integration_protocols/logs/compression_failures_<timestamp>.json` (includes seriesinstanceuid, studyinstanceuid, dicom_dir_path, error). Failed rows keep `dicom_archive_path = NULL` — retriable via `scripts/cold_storage/archive_all_series.py --patient <id>`. Idempotent: existing archives are re-verified rather than rebuilt; corrupted ones are detected and rebuilt. |
 | 9 | `create_nifti_files` | In `legacy` mode: runs DICOM→NIFTI conversion for select series and writes `{seriesUID}/NIFTI/image.nii.gz`. In `cold_path_cache` mode: **skipped.** NIFTIs would accumulate orphaned once their sibling loose DICOMs are cleaned up. Generate on demand via `scripts/dicom/dicom_to_nifti.py` (see [`../recipes/dicom_processing.md`](../recipes/dicom_processing.md)). |
 | 10 | `format_column_names` | Normalizes DataFrame column names, including adding `dicom_archive_path` to the set of columns to upsert |
@@ -257,13 +257,13 @@ corruption that the fast path would miss.
 
 ## Configuration coupling with the rest of the stack
 
-The integration protocol reads `[storage].legacy_dicom_root`, `[storage].cold_archive_root`,
+The integration protocol reads `[storage].dicom_data_root`, `[storage].cold_archive_root`,
 and `[storage].mode` from `config.toml` via `web-app/config.py`. There are
 no hardcoded paths to keep in sync.
 
 **Checklist before running integration in `cold_path_cache` mode:**
 1. `config.toml` has `mode = "cold_path_cache"` with the right
-   `legacy_dicom_root` and `cold_archive_root`
+   `dicom_data_root` and `cold_archive_root`
 2. The custom `ssc-orthanc:patched-indexer` image is deployed and running
 3. `orthanc.json` has `"RemoveMissingFiles": false`
 

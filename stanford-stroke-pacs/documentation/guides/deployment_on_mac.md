@@ -134,7 +134,7 @@ services:
 
 The DICOM mount is **not** re-declared here — it is inherited from the base file's
 `${DICOM_MOUNT_SOURCE}`, which `dc.sh` exports from `config.toml` (set
-`[storage].hot_cache_dir` / `legacy_dicom_root` to your Mac DICOM path there, §
+`[storage].dicom_data_root` to your Mac DICOM path there, §
 [configuration_sources.md](../reference/configuration_sources.md)).
 
 The `!reset` tag (Compose ≥ v2.24) is required: a plain `network_mode: null`
@@ -272,7 +272,7 @@ sudo launchctl kickstart -k system/com.ssc.webapp                      # picks u
 sudo launchctl kickstart -k system/com.ssc.pg-backup-stanford-stroke   # verify the backup path too
 ```
 
-Verify: warm a study in the UI (files appear under `legacy_dicom_root`), and
+Verify: warm a study in the UI (files appear under `dicom_data_root`), and
 `tail ~/Library/Logs/com.ssc.pg-backup-stanford-stroke.log` should show `OK …`.
 
 ---

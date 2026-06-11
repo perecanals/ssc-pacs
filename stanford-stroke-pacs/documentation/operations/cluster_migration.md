@@ -124,8 +124,8 @@ stores, both already covered above:
 **The only Orthanc config change** is the storage paths in `config.toml` —
 nothing in `docker-compose.yml`, `orthanc.json`, or inside the container changes:
 
-- `config.toml` `[storage]`: reset `mode`, `legacy_dicom_root`,
-  `cold_archive_root`, `hot_cache_dir` to the new host paths. The Orthanc
+- `config.toml` `[storage]`: reset `mode`, `dicom_data_root`, and
+  `cold_archive_root` to the new host paths. The Orthanc
   `/dicom-data` bind-mount **source** is derived from these by
   `scripts/orthanc/dc.sh` (exported as `DICOM_MOUNT_SOURCE`) — you no longer edit
   the compose `volumes:` by hand.

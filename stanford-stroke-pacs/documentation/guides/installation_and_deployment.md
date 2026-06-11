@@ -181,15 +181,16 @@ This installs the dependencies needed by root-level helper scripts such as:
 ### Step 2. Set the DICOM path in `config.toml` (not in compose)
 
 The Orthanc `/dicom-data` bind mount is **not** hardcoded in `docker-compose.yml`.
-Its source comes from `config.toml`: `scripts/orthanc/dc.sh` reads `[storage].mode`
-and exports the matching path (`legacy_dicom_root` in `legacy` mode,
-`hot_cache_dir` in `cold_path_cache` mode) as `DICOM_MOUNT_SOURCE`. So on a new
-server you set the path **once**, in `config.toml`:
+Its source comes from `config.toml`: `scripts/orthanc/dc.sh` reads
+`[storage].dicom_data_root` (the uncompressed DICOM tree — the loose tree in
+`legacy` mode, the warm cache that archives extract into in `cold_path_cache`
+mode) and exports it as `DICOM_MOUNT_SOURCE`. So on a new server you set the path
+**once**, in `config.toml`:
 
 ```toml
 [storage]
 mode = "legacy"                       # or "cold_path_cache"
-legacy_dicom_root = "/your/dicom/path"
+dicom_data_root = "/your/dicom/path"
 ```
 
 Always bring Orthanc up through the wrapper (`scripts/orthanc/dc.sh up -d`) — bare

@@ -33,8 +33,8 @@ import zstandard as zstd
 
 from config import (
     COLD_ARCHIVE_ROOT,
+    DICOM_DATA_ROOT,
     EVICTION_TTL_HOURS,
-    LEGACY_DICOM_ROOT,
     STORAGE_MODE,
     WARMING_DISK_MIN_FREE_BYTES,
     WARMING_DISK_SAFETY_FACTOR,
@@ -80,10 +80,10 @@ def _log_extra(studyinstanceuid: str) -> dict[str, str]:
     return {"study_uid": studyinstanceuid}
 
 
-def archive_path_for_series_dir(dicom_dir: Path, legacy_root: Path, cold_root: Path) -> Path:
+def archive_path_for_series_dir(dicom_dir: Path, data_root: Path, cold_root: Path) -> Path:
     dicom_dir = dicom_dir.resolve()
-    legacy_root = legacy_root.resolve()
-    rel = dicom_dir.relative_to(legacy_root)
+    data_root = data_root.resolve()
+    rel = dicom_dir.relative_to(data_root)
     return cold_root / rel.parent / f"{rel.name}.tar.zst"
 
 
@@ -96,9 +96,9 @@ def resolve_series_archive(dicom_archive_path: str | None, dicom_dir_path: str |
         return None
     dicom_dir = Path(dicom_dir_path)
     try:
-        return archive_path_for_series_dir(dicom_dir, LEGACY_DICOM_ROOT, COLD_ARCHIVE_ROOT)
+        return archive_path_for_series_dir(dicom_dir, DICOM_DATA_ROOT, COLD_ARCHIVE_ROOT)
     except ValueError:
-        logger.warning("dicom_dir_path not under LEGACY_DICOM_ROOT: %s", dicom_dir_path)
+        logger.warning("dicom_dir_path not under DICOM_DATA_ROOT: %s", dicom_dir_path)
         return None
 
 

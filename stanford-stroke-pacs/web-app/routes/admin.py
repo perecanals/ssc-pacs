@@ -12,7 +12,7 @@ from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
 
 from auth import require_admin
-from config import LEGACY_DICOM_ROOT, STORAGE_MODE
+from config import DICOM_DATA_ROOT, STORAGE_MODE
 from db import DB_CONFIG, get_conn
 from orthanc_client import orthanc_system_check
 
@@ -102,16 +102,16 @@ def healthz():
         body["orthanc_api_error"] = orthanc_err
 
     try:
-        p = LEGACY_DICOM_ROOT
+        p = DICOM_DATA_ROOT
         while not p.exists():
             if p.parent == p:
                 break
             p = p.parent
         du = shutil.disk_usage(p)
-        body["disk_free_percent_legacy_dicom_root"] = round(du.free * 100.0 / du.total, 1)
-        body["disk_free_bytes_legacy_dicom_root"] = int(du.free)
+        body["disk_free_percent_dicom_data_root"] = round(du.free * 100.0 / du.total, 1)
+        body["disk_free_bytes_dicom_data_root"] = int(du.free)
     except Exception as e:
-        body["disk_free_percent_legacy_dicom_root"] = None
+        body["disk_free_percent_dicom_data_root"] = None
         body["disk_error"] = str(e)[:200]
 
     critical_ok = body["db_stanford_stroke"] == "ok"
@@ -133,7 +133,7 @@ def metrics_endpoint():
     from metrics import REGISTRY as METRICS_REGISTRY
     from metrics import refresh_cold_storage_gauges
 
-    refresh_cold_storage_gauges(get_conn, LEGACY_DICOM_ROOT)
+    refresh_cold_storage_gauges(get_conn, DICOM_DATA_ROOT)
     return _Response(
         content=generate_latest(METRICS_REGISTRY),
         media_type=CONTENT_TYPE_LATEST,

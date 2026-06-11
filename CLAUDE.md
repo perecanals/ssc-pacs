@@ -218,7 +218,7 @@ The stack has two services and two databases.
 - **Audit trail:** every INSERT/UPDATE/DELETE on `annotations` is captured in `annotations_history` by a PL/pgSQL trigger. See `documentation/operations/annotation_history.md`.
 
 **Storage modes** (set in `config.toml` `[storage].mode`):
-- `legacy` — Orthanc Folder Indexer reads loose DICOM files from `legacy_dicom_root`.
+- `legacy` — Orthanc Folder Indexer reads loose DICOM files from `dicom_data_root`.
 - `cold_path_cache` — canonical series are `*.tar.zst` archives under `cold_archive_root`. On warm, archives are extracted back to the **original** `dicom_dir_path` recorded in `image_series`. Orthanc's index (via the patched indexer) keeps pointing at those paths even when files are absent, so OHIF works immediately once files are restored — no re-ingestion. Eviction deletes the extracted files; the index stays intact. **Requires `ssc-orthanc:patched-indexer` image and `"RemoveMissingFiles": false` in `orthanc.json`.** See `documentation/cold_storage/`.
 
 **Auth:**
@@ -281,7 +281,7 @@ python execute_image_integration_protocol.py [--config path/to/config.yaml]
 **Integration steps** (in order):
 1. Scan source dirs for readable DICOM series
 2. Group into studies, validate against `lvo_clinical_data`
-3. Copy DICOMs to `legacy_dicom_root/{patient_id}/{StudyUID}/{SeriesDesc}/{SeriesUID}/DICOM/`
+3. Copy DICOMs to `dicom_data_root/{patient_id}/{StudyUID}/{SeriesDesc}/{SeriesUID}/DICOM/`
 4. If `cold_archive_root` set: compress each series dir to `cold_archive_root/.../DICOM.tar.zst`, record path in `image_series.dicom_archive_path`
 5. Convert select series to NIfTI
 6. Upsert into `image_series`, `image_study`, and `patient` (one transaction). The `patient` upsert recomputes `stroke_date = MIN(image_study.acquisitiondatetime)`, preserves origin `import_id`/`import_label`, and unions the `dataset` tag.

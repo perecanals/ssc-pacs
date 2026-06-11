@@ -2,11 +2,13 @@
 # docker compose wrapper — single source of truth for the Orthanc DICOM mount.
 #
 # Bare `docker compose up` cannot know which host directory to bind to
-# /dicom-data: that depends on [storage].mode in config.toml (the loose tree in
-# `legacy` mode, the warm cache in `cold_path_cache` mode). This wrapper reads
-# config.toml, exports DICOM_MOUNT_SOURCE for the compose `${DICOM_MOUNT_SOURCE}`
-# interpolation, selects the right per-platform override, and execs docker
-# compose from the stack dir. Use it instead of bare `docker compose`:
+# /dicom-data: that path lives in [storage].dicom_data_root in config.toml. It is
+# the uncompressed DICOM tree in both modes — the loose tree in `legacy` mode and
+# the warm cache (where archives extract on warm) in `cold_path_cache` mode. This
+# wrapper reads config.toml, exports DICOM_MOUNT_SOURCE for the compose
+# `${DICOM_MOUNT_SOURCE}` interpolation, selects the right per-platform override,
+# and execs docker compose from the stack dir. Use it instead of bare
+# `docker compose`:
 #
 #     scripts/orthanc/dc.sh up -d
 #     scripts/orthanc/dc.sh config        # render the effective compose
@@ -23,8 +25,10 @@ source "$SCRIPT_DIR/../backup/_lib.sh"
 
 mode="$(config_get storage mode legacy)"
 case "$mode" in
-  cold_path_cache) DICOM_MOUNT_SOURCE="$(config_get storage hot_cache_dir "")" ;;
-  legacy)          DICOM_MOUNT_SOURCE="$(config_get storage legacy_dicom_root "")" ;;
+  cold_path_cache|legacy)
+    # Both modes index the same uncompressed DICOM tree; cold_path_cache warms
+    # archives back into it, so the mount source is the same key either way.
+    DICOM_MOUNT_SOURCE="$(config_get storage dicom_data_root "")" ;;
   *)
     echo "dc.sh: unknown [storage].mode '$mode' in $CONFIG_TOML" >&2
     exit 1

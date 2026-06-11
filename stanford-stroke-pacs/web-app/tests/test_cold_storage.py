@@ -18,15 +18,15 @@ def cold_env(db_conn, seeded_db):
     """Set up a temporary cold-storage environment with a mock archive.
 
     Creates:
-      - A temporary dir as the "legacy dicom root"
+      - A temporary dir as the "dicom data root"
       - A tar.zst archive containing a single dummy DICOM file
       - An image_series row pointing at both paths
       - An image_study row for the study
     """
     tmpdir = tempfile.mkdtemp(prefix="cold_test_")
-    legacy_root = Path(tmpdir) / "imaging"
+    dicom_root = Path(tmpdir) / "imaging"
     cold_root = Path(tmpdir) / "cold"
-    legacy_root.mkdir()
+    dicom_root.mkdir()
     cold_root.mkdir()
 
     study_uid = "1.2.999.test.cold"
@@ -34,7 +34,7 @@ def cold_env(db_conn, seeded_db):
     patient_id = "P-COLD"
 
     # The dicom_dir_path where files would be extracted.
-    dicom_dir = legacy_root / patient_id / study_uid / "Axial" / series_uid / "DICOM"
+    dicom_dir = dicom_root / patient_id / study_uid / "Axial" / series_uid / "DICOM"
     dicom_dir.mkdir(parents=True, exist_ok=True)
 
     # Create a mock tar.zst archive with one dummy file.
@@ -71,7 +71,7 @@ def cold_env(db_conn, seeded_db):
             cur.execute(
                 "INSERT INTO image_study (patient_id, studyinstanceuid, study_type, study_path) "
                 "VALUES (%s, %s, 'CTA', %s) ON CONFLICT DO NOTHING",
-                (patient_id, study_uid, str(legacy_root / patient_id / study_uid)),
+                (patient_id, study_uid, str(dicom_root / patient_id / study_uid)),
             )
             cur.execute(
                 "INSERT INTO image_series "
@@ -86,7 +86,7 @@ def cold_env(db_conn, seeded_db):
 
     yield {
         "tmpdir": tmpdir,
-        "legacy_root": legacy_root,
+        "dicom_root": dicom_root,
         "cold_root": cold_root,
         "study_uid": study_uid,
         "series_uid": series_uid,
@@ -121,7 +121,7 @@ def test_warm_evict_cycle(cold_env, seeded_db):
     # Patch config paths + storage mode.
     with (
         patch.object(cm, "STORAGE_MODE", "cold_path_cache"),
-        patch.object(cm, "LEGACY_DICOM_ROOT", cold_env["legacy_root"]),
+        patch.object(cm, "DICOM_DATA_ROOT", cold_env["dicom_root"]),
         patch.object(cm, "COLD_ARCHIVE_ROOT", cold_env["cold_root"]),
     ):
         # 1. Status should be cold.
@@ -164,7 +164,7 @@ def test_warm_no_archives_returns_error(cold_env, seeded_db):
 
     with (
         patch.object(cm, "STORAGE_MODE", "cold_path_cache"),
-        patch.object(cm, "LEGACY_DICOM_ROOT", cold_env["legacy_root"]),
+        patch.object(cm, "DICOM_DATA_ROOT", cold_env["dicom_root"]),
         patch.object(cm, "COLD_ARCHIVE_ROOT", cold_env["cold_root"]),
     ):
         result = cm.warm_study(study_uid)
@@ -186,7 +186,7 @@ def test_warm_endpoint_returns_202_and_eventually_hot(cold_env, logged_in_client
 
     with (
         patch.object(cm, "STORAGE_MODE", "cold_path_cache"),
-        patch.object(cm, "LEGACY_DICOM_ROOT", cold_env["legacy_root"]),
+        patch.object(cm, "DICOM_DATA_ROOT", cold_env["dicom_root"]),
         patch.object(cm, "COLD_ARCHIVE_ROOT", cold_env["cold_root"]),
     ):
         t0 = time.perf_counter()

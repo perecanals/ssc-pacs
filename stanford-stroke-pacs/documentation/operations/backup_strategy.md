@@ -17,7 +17,7 @@ and how to recover. Restore steps live in
 | `stanford-stroke` PostgreSQL DB | host PostgreSQL 16 | **Yes — Tier 1, daily** | Authored content (annotations, users, label defs, preferences) cannot be reconstructed |
 | `orthanc_db` PostgreSQL DB | host PostgreSQL 16 | **Yes — Tier 1, daily** | Orthanc's index — rebuildable from disk but slow; cheap to back up |
 | Cold DICOM archives `/DATA2/pacs_imaging_data_compressed/` | local disk | **No on dev**, mirror script implemented for production (Tier 2) | Dev: re-ingest from source is acceptable. Production: requires a destination |
-| Hot cache `/DATA2/pacs_hot_cache/` and `/DATA2/pacs_imaging_data/` | local disk | No | Reconstructible from cold archives on demand |
+| Uncompressed/warm DICOM tree (`dicom_data_root`, e.g. `/DATA2/pacs_imaging_data/`) | local disk | No | Reconstructible from cold archives on demand |
 | Orthanc storage volume (`…_ssc-orthanc-storage` at `/var/lib/orthanc/db`) | docker volume | **Yes — Tier 1, daily** | Holds OHIF-authored DICOM SR annotations (**no other copy**) + the Folder Indexer `indexer-plugin.db` (rebuild = full cold-archive decompression + reindex) |
 | Orthanc container filesystem (rootfs) | docker | No | Stateless; rebuilt from `docker compose up` + the `ssc-orthanc:patched-indexer` image |
 | Web App `dist/` build output | local | No | Reproducible via `npm run build` |

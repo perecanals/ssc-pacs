@@ -33,7 +33,7 @@ sys.path.insert(0, str(REPO_ROOT / "web-app"))
 from db import DB_CONFIG, get_conn  # noqa: E402
 
 
-def load_legacy_dicom_root() -> Path:
+def load_dicom_data_root() -> Path:
     cfg = REPO_ROOT / "config.toml"
     if cfg.is_file():
         try:
@@ -41,12 +41,12 @@ def load_legacy_dicom_root() -> Path:
 
             with cfg.open("rb") as f:
                 data = tomllib.load(f)
-            s = data.get("storage", {}).get("legacy_dicom_root")
+            s = data.get("storage", {}).get("dicom_data_root")
             if isinstance(s, str) and s.strip():
                 return Path(s)
         except OSError:
             pass
-    return Path(os.getenv("LEGACY_DICOM_ROOT", "/DATA2/pacs_imaging_data"))
+    return Path(os.getenv("DICOM_DATA_ROOT", "/DATA2/pacs_imaging_data"))
 
 
 def path_parts(p: str) -> list[str]:
@@ -184,7 +184,7 @@ def main() -> int:
         "--fs-root",
         type=Path,
         default=None,
-        help=f"Filesystem root to compare against (default: config.toml legacy_dicom_root or env)",
+        help=f"Filesystem root to compare against (default: config.toml dicom_data_root or env)",
     )
     ap.add_argument(
         "--sample-rows",
@@ -207,7 +207,7 @@ def main() -> int:
     )
     args = ap.parse_args()
 
-    fs_root = (args.fs_root or load_legacy_dicom_root()).resolve()
+    fs_root = (args.fs_root or load_dicom_data_root()).resolve()
 
     if not DB_CONFIG.get("user"):
         print("DB_USER not set in .env", file=sys.stderr)
@@ -215,7 +215,7 @@ def main() -> int:
 
     print("dicom_path SQL ↔ filesystem audit (read-only)")
     print(f"  PostgreSQL: {DB_CONFIG['host']} db={DB_CONFIG['dbname']}")
-    print(f"  FS root:    {fs_root} (from --fs-root or config.toml / LEGACY_DICOM_ROOT)")
+    print(f"  FS root:    {fs_root} (from --fs-root or config.toml / DICOM_DATA_ROOT)")
 
     conn = psycopg2.connect(**DB_CONFIG)
     try:
