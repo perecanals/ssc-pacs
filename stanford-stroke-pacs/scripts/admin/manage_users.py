@@ -177,8 +177,28 @@ def cmd_list(_args: argparse.Namespace) -> None:
         print(f"{username:<20} {admin_str:<8} {date_str}")
 
 
+def _user_exists(username: str) -> bool:
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT 1 FROM users WHERE username = %s",
+                (username,),
+            )
+            return cur.fetchone() is not None
+    finally:
+        conn.close()
+
+
 def cmd_add(args: argparse.Namespace) -> None:
     _refuse_service_account(args.username)
+    if _user_exists(args.username):
+        print(
+            f"User '{args.username}' is already added. "
+            "Use `passwd` to reset their password or `remove` to delete them.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
     print(
         "Set a temporary password. The user will be required to change it on "
         "first login."
