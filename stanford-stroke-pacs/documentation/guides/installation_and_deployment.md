@@ -1,6 +1,12 @@
 # Installation and Deployment
 
-**Purpose:** Fresh-server runbook only. For packaging facts and config file roles see [`../reference/runtime_and_config.md`](../reference/runtime_and_config.md). For architecture see [`../reference/architecture.md`](../reference/architecture.md).
+**Purpose:** Fresh-server runbook only. For the full map of *where every config value lives and what must stay in sync* see [`../reference/configuration_sources.md`](../reference/configuration_sources.md). For packaging facts and config file roles see [`../reference/runtime_and_config.md`](../reference/runtime_and_config.md). For architecture see [`../reference/architecture.md`](../reference/architecture.md).
+
+> **Three files, two installers.** A fresh deploy edits only `.env` (secrets),
+> `config.toml` (non-secret ops), and optionally `deploy.env` (per-host identity),
+> then runs `scripts/orthanc/dc.sh up -d` and the unit installer for the platform.
+> Compose, service units, and `orthanc.json` are not hand-edited — see the
+> [config sources map](../reference/configuration_sources.md).
 
 This document is the operator runbook for deploying the PACS stack on a fresh
 server.
@@ -9,32 +15,52 @@ It assumes the target deployment wants the same overall architecture:
 
 - Orthanc + OE2 + OHIF in Docker (**Orthanc only** in `docker-compose.yml`)
 - Web App app as a **native systemd service** on port `8043` (not Docker)
-- PostgreSQL on the host
+- PostgreSQL on the host (both databases — see §3)
 - DICOM files kept on disk and indexed read-only (or hot cache when using cold storage)
+
+---
+
+## 0. Two install paths — pick one
+
+| Path | Use when | Follow |
+|---|---|---|
+| **Fresh install** | New server with **no existing PACS data** — you create the databases, roles, and schema from scratch and ingest data afterwards | This document (all sections) |
+| **Migration install** | You are **porting an existing deployment** to a new host (its PostgreSQL data, the Orthanc index, and the DICOM archives already exist and must travel **without reindexing**) | [`../operations/cluster_migration.md`](../operations/cluster_migration.md) §§1–4, then return to §5 here (Steps 5–8: bring-up, web app, service units) + §6 validation |
+
+The two paths share the host prerequisites (§2), the config files (§3), and the
+service bring-up (§5 Steps 5–8). They differ only in **how the databases get
+their contents**: a fresh install creates empty databases and the schema (§5
+Step 3); a migration `pg_restore`s both databases from the source host instead.
+If unsure, you are doing a fresh install.
 
 ---
 
 ## 1. What must already exist
 
-Before using this repo on another server, decide whether the new environment
-already has the source metadata layer that the web app app expects.
+For a **fresh install**, this runbook creates the databases, roles, and schema
+for you (§3) — you do **not** need a pre-existing metadata layer. What you must
+supply is the *content*: real rows in the upstream `patient` / `image_study` /
+`image_series` tables and the matching DICOM tree on disk.
 
 Minimum required inputs:
 
 - a Linux host
 - Docker Engine with `docker compose`
-- PostgreSQL reachable from the host
+- a PostgreSQL **server** reachable from the host (installed; the databases
+  themselves are created in §3)
+- a superuser or a role with `CREATEDB`/`CREATEROLE` to bootstrap the databases
 - `python3` and `pip`
 - Node.js and npm (for building the web app frontend)
 - a DICOM directory tree on disk
-- a metadata table equivalent to `image_series` (and `image_study` for study
-  metadata) if you want to use the web app app and the metadata-driven helper
-  scripts
+- the **data** to populate `image_series` / `image_study` / `patient` (the
+  schema is created in §3; loading rows is the ingestion step, not part of the
+  service bootstrap)
 
 Important:
 
-- this repo does **not** build `image_series` / `image_study` as part of
-  standard PACS deployment
+- this repo creates the upstream **table schema** (§3, from `ssc-sql-db/`) but
+  does **not** generate the upstream **data** — that comes from your source
+  metadata or the ingestion pipeline
 - `image_integration_protocols/` is legacy/site-specific pipeline code, not the
   normal bootstrap path for a fresh PACS install
 
@@ -47,8 +73,10 @@ The host should satisfy all of the following:
 - Linux host compatible with Docker host networking
 - Docker daemon running
 - Docker Compose plugin available
-- PostgreSQL installed and running
-- ability to execute `sudo -u postgres psql` for `init_orthanc_db.sh`
+- PostgreSQL **server** installed and running (a single server hosts both the
+  `stanford-stroke` and `orthanc_db` databases)
+- PostgreSQL admin access to bootstrap the databases — either `sudo -u postgres
+  psql`, or a role with `CREATEDB`/`CREATEROLE` you can connect as (§3)
 - free host ports:
   - `8042` for Orthanc HTTP
   - `4242` for Orthanc DICOM
@@ -82,14 +110,25 @@ Variables expected by the current codebase:
 | `ORTHANC_ADMIN_PASSWORD` | Password for the Orthanc service account |
 | `JWT_SECRET` | Secret used to sign web app JWT cookies |
 
-Non-secret web app tuning (storage paths, storage mode, session length) lives in repo-root `config.toml` (loaded by `web-app/config.py`).
+Optional: `ORTHANC_HTTP_PORT` / `ORTHANC_DICOM_PORT` change the Orthanc ports in
+one place (default `8042` / `4242` if unset).
+
+Non-secret web app tuning (storage paths, storage mode, session length) lives in
+repo-root **`config.toml`** (loaded by `web-app/config.py`). `config.toml` is
+**required** — the web app fails fast at startup if it is missing — and ships in
+the repo; edit it in place for this host. Per-host service-unit identity (OS user,
+repo path, conda python) is auto-derived by the installers and overridable in
+`deploy.env` (`cp deploy.env.example deploy.env`). See the
+[config sources map](../reference/configuration_sources.md).
 
 ---
 
 ## 4. Expected source metadata tables
 
-If you want the full web app workflow, the source database should provide
-tables compatible with `image_series` and `image_study`.
+The upstream table **schema** is created in §5 Step 3c (from `ssc-sql-db/`). This
+section documents the **columns the code actually reads**, so you can map your
+source data onto them when loading rows (§5 Step 3d). For the full web app
+workflow `image_series` and `image_study` must be populated.
 
 At minimum, the current scripts rely on these columns:
 
@@ -139,26 +178,31 @@ This installs the dependencies needed by root-level helper scripts such as:
 - `scripts/orthanc/enrich_orthanc.py`
 - `scripts/orthanc/label_studies.py`
 
-### Step 2. Confirm the DICOM mount path and `env_file` path
+### Step 2. Set the DICOM path in `config.toml` (not in compose)
 
-The current `docker-compose.yml` mounts this host path into Orthanc:
+The Orthanc `/dicom-data` bind mount is **not** hardcoded in `docker-compose.yml`.
+Its source comes from `config.toml`: `scripts/orthanc/dc.sh` reads
+`[storage].dicom_data_root` (the uncompressed DICOM tree — the loose tree in
+`legacy` mode, the warm cache that archives extract into in `cold_path_cache`
+mode) and exports it as `DICOM_MOUNT_SOURCE`. So on a new server you set the path
+**once**, in `config.toml`:
 
-```text
-/DATA2/pacs_imaging_data:/dicom-data:ro
+```toml
+[storage]
+mode = "legacy"                       # or "cold_path_cache"
+dicom_data_root = "/your/dicom/path"
 ```
 
-On a new server you will likely need to edit `docker-compose.yml` so the left
-side matches the real DICOM path on that machine.
+Always bring Orthanc up through the wrapper (`scripts/orthanc/dc.sh up -d`) — bare
+`docker compose up` errors that `DICOM_MOUNT_SOURCE` is unset.
 
-> **This runbook targets Linux** (host networking). On **macOS** the base
-> `docker-compose.yml` is left **unedited** — a `docker-compose.override.yml` drops
-> host networking and re-points the mount instead (Docker runs in a VM there, so
-> host networking doesn't reach the Mac). Follow
-> [`deployment_on_mac.md`](deployment_on_mac.md) §4 for the override and the rest of
-> the macOS-specific deltas.
+> **This runbook targets Linux** (host networking). On **macOS** the wrapper also
+> applies `docker-compose.override.macos.yml` automatically (drops host networking,
+> publishes ports, points Postgres at `host.docker.internal`). Follow
+> [`deployment_on_mac.md`](deployment_on_mac.md) §4 for the rest of the macOS deltas.
 
 `docker-compose.yml` loads secrets via `env_file: .env`, a path relative to the
-compose file. Ensure `stanford-stroke-pacs/.env` exists before `docker compose up`.
+compose file. Ensure `stanford-stroke-pacs/.env` exists before bring-up.
 
 Requirements:
 
@@ -168,25 +212,70 @@ Requirements:
 
 For cold storage / hot cache, follow [`../cold_storage/runbook.md`](../cold_storage/runbook.md) instead of the default legacy mount once you are ready.
 
-### Step 3. Create the Orthanc PostgreSQL database and role
+### Step 3. Create the PostgreSQL databases, roles, and upstream tables
 
-Run:
+The stack uses **two databases on one PostgreSQL server** (see
+[`../reference/configuration_sources.md`](../reference/configuration_sources.md)):
 
-```bash
-./init_orthanc_db.sh
+- **`stanford-stroke`** — the research/app DB. Holds the upstream metadata
+  (`patient`, `image_study`, `image_series`, optional `lvo_clinical_data`) **and**
+  the web-app-owned tables (`users`, `annotations`, `label_definitions`,
+  `user_preferences`, snapshots).
+- **`orthanc_db`** — Orthanc's internal index.
+
+> **Migration install:** skip the *create + schema* sub-steps below — you
+> `pg_restore` both databases from the source host instead. Follow
+> [`../operations/cluster_migration.md`](../operations/cluster_migration.md) §1,
+> then continue at Step 4.
+
+**3a. Create the `stanford-stroke` database and app role.** Use the credentials
+you put in `.env` (`DB_NAME`, `DB_USER`, `DB_PASSWORD`). As a PostgreSQL admin
+(e.g. `sudo -u postgres psql`):
+
+```sql
+-- CREATEDB/CREATEROLE let DB_USER bootstrap orthanc_db in 3b; revoke afterwards
+-- if you prefer a least-privilege runtime role (the app itself needs neither).
+CREATE ROLE "<DB_USER>" WITH LOGIN CREATEDB CREATEROLE PASSWORD '<DB_PASSWORD>';
+CREATE DATABASE "stanford-stroke" OWNER "<DB_USER>";
 ```
 
-What it does:
+(On a single-user dev box where your OS user is already the PG superuser, a plain
+`createdb stanford-stroke` is enough — that role then doubles as `DB_USER`.)
 
-- sources the repo `.env`
-- creates `PG_ORTHANC_USER` if missing
-- creates `PG_ORTHANC_DB` if missing
-- grants privileges on the Orthanc index database
+**3b. Create the Orthanc database and role.** This one is scripted and idempotent
+— it reads `.env` and connects via TCP as `DB_USER` (which is why 3a grants it
+`CREATEDB`/`CREATEROLE`; alternatively run it as the superuser):
 
-Important caveat:
+```bash
+./init_orthanc_db.sh        # creates PG_ORTHANC_USER + PG_ORTHANC_DB, grants privileges
+```
 
-- the script assumes local PostgreSQL administration via `sudo -u postgres psql`
-- it is not a generic remote-database provisioning script
+Optionally tighten the runtime role afterwards: `ALTER ROLE "<DB_USER>" NOCREATEDB NOCREATEROLE;`
+
+**3c. Create the upstream table schema in `stanford-stroke`.** The DDL lives in
+`ssc-sql-db/` (table definitions only — no data, each script `\connect`s to the
+DB):
+
+```bash
+# Run from stanford-stroke-pacs/ (ssc-sql-db/ lives at the repo root, one level up):
+psql -d stanford-stroke -f ../ssc-sql-db/create_patient.sql
+psql -d stanford-stroke -f ../ssc-sql-db/create_image_study.sql
+psql -d stanford-stroke -f ../ssc-sql-db/create_image_series.sql
+# Optional, site-specific clinical side-table (load via ssc-sql-db/import_lvo_table_to_psql.sh):
+#   creates public.lvo_clinical_data
+```
+
+> The **web-app-owned** tables are **not** created here — `web-app/app.py` runs
+> Alembic `upgrade head` automatically at first startup (Step 8) and creates
+> them, including a `CREATE TABLE IF NOT EXISTS patient` safety net (revision
+> `0006`). Running 3c first is still recommended so the upstream spine exists
+> before you load data.
+
+**3d. Load the upstream data.** Creating the tables does **not** populate them.
+Load your real `patient` / `image_study` / `image_series` rows from your source
+(CSV import via `ssc-sql-db/import_csv_to_postgres.py`, a dump from an existing
+system, or the site-specific `image_integration_protocols/` pipeline). The web
+app browses these tables, so it will be empty until they are populated.
 
 ### Step 4. Create the first admin user and the Orthanc service account
 
@@ -201,6 +290,9 @@ python scripts/admin/manage_users.py add <username> --admin
 
 # 2. Set the Orthanc service-account password (.env + orthanc_users.json):
 python scripts/admin/manage_users.py rotate-service-account
+
+# 3. (optional) confirm .env and orthanc_users.json agree:
+python scripts/admin/manage_users.py check-service-account
 ```
 
 What this step accomplishes:
@@ -221,10 +313,12 @@ Why this matters before first start:
 Run:
 
 ```bash
-docker compose up -d
+scripts/orthanc/dc.sh up -d
 ```
 
-This starts **`ssc-orthanc`** only. `docker-compose.yml` does not define a Web App container.
+Use the `dc.sh` wrapper, not bare `docker compose`: it resolves the DICOM mount
+from `config.toml` and (on macOS) applies the override. This starts
+**`ssc-orthanc`** only. `docker-compose.yml` does not define a Web App container.
 
 ### Step 6. Install Web App Python dependencies
 
@@ -240,13 +334,21 @@ python3 -m pip install -r web-app/requirements.txt
 cd web-app && npm ci && npm run build
 ```
 
-### Step 8. Install and start the web app (systemd)
+### Step 8. Install and start the web app + timers (systemd)
+
+The units ship as **templates** (`systemd/*.in`) with `__TOKENS__` for the
+per-host bits. The installer resolves user/repo/python automatically (override in
+`deploy.env`), renders the templates into `/etc/systemd/system/`, and enables the
+web app plus the backup/reconciliation/health timers:
 
 ```bash
-sudo cp systemd/ssc-web-app.service /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable --now ssc-web-app
+scripts/linux/install_systemd.sh --dry-run    # preview the rendered units
+sudo scripts/linux/install_systemd.sh         # render + install + enable
 ```
+
+This replaces the old `sudo cp systemd/ssc-web-app.service …` step (and the
+separate backup-timer copy in §9) — one command installs everything. The dormant
+`cold-archive-mirror.timer` is left disabled by default.
 
 ### Step 9. Wait for Orthanc indexing
 
@@ -486,25 +588,17 @@ cd web-app && npm run build
 sudo systemctl restart ssc-web-app
 ```
 
-Enable scheduled backups (one-time — do this on any real deployment). The stack
-ships nightly jobs for **both** PostgreSQL databases **and** the Orthanc storage
-volume — the latter holds OHIF-authored SR annotations (the **only copy**) plus
-the Folder Indexer DB, so it is not optional:
+Scheduled backups are installed **automatically** by
+`scripts/linux/install_systemd.sh` (§8) — the nightly jobs for **both** PostgreSQL
+databases **and** the Orthanc storage volume (the latter holds OHIF-authored SR
+annotations, the **only copy**, plus the Folder Indexer DB). Confirm they are
+active:
 
 ```bash
-sudo cp systemd/pg-backup-stanford-stroke.service systemd/pg-backup-stanford-stroke.timer \
-        systemd/pg-backup-orthanc.service systemd/pg-backup-orthanc.timer \
-        systemd/orthanc-storage-backup.service systemd/orthanc-storage-backup.timer \
-        systemd/pg-backup-freshness.service systemd/pg-backup-freshness.timer \
-        /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable --now \
-    pg-backup-stanford-stroke.timer pg-backup-orthanc.timer \
-    orthanc-storage-backup.timer pg-backup-freshness.timer
 systemctl list-timers 'pg-backup-*' 'orthanc-storage-backup*'
 ```
 
-Backups land in `/DATA2/pg_backups/`. Full mechanism, retention, and recovery:
+Backups land under `[backup].backup_root` from `config.toml`. Full mechanism, retention, and recovery:
 [`../operations/backup_strategy.md`](../operations/backup_strategy.md) and
 [`../operations/restore_runbook.md`](../operations/restore_runbook.md).
 
@@ -538,9 +632,44 @@ These are current implementation mismatches worth remembering during deployment:
   stop the web app systemd service
 - `scripts/admin/teardown.sh` sources `.env` from two levels above the repo root (`../../.env`),
   **not** the repo-root `.env` used by web app and helper scripts
-- `docker-compose.yml` uses an absolute `env_file` path that must be updated
-  for a fresh deployment on a different host
+- bring the stack up with `scripts/orthanc/dc.sh`, not bare `docker compose` — the
+  DICOM mount source comes from `config.toml` via the wrapper, so bare
+  `docker compose up` errors that `DICOM_MOUNT_SOURCE` is unset
 - `scripts/orthanc/check_status.sh` uses the `ssc-orthanc` container name and reads Orthanc
   credentials from repo-root `.env`
 
 Treat these as current repo caveats, not as recommended design patterns.
+
+---
+
+## 12. Migration install (porting an existing deployment)
+
+If you are **not** starting from zero but moving a live deployment to a new host,
+do **not** create empty databases and re-ingest. The canonical procedure is
+[`../operations/cluster_migration.md`](../operations/cluster_migration.md); it is
+designed so the Orthanc index, OHIF SR annotations, and the DICOM archives travel
+**without reindexing** (Orthanc only ever references the container path
+`/dicom-data`, so host-path changes are invisible to its index).
+
+How it slots into this runbook:
+
+1. **§2 host prerequisites + §3 config files** — same as a fresh install. Set
+   `config.toml` `[storage]` to the **new** host's paths; create `.env`.
+2. **Databases** — instead of §5 Step 3, follow `cluster_migration.md` §1:
+   create the empty databases (`createdb stanford-stroke`, `./init_orthanc_db.sh`)
+   then `pg_restore` **both** dumps from the source host. Restoring
+   `stanford-stroke` brings `alembic_version` along, so the web app sees the
+   schema already at head and does not re-migrate.
+3. **Orthanc index volume + archive tree** — `cluster_migration.md` §2: migrate
+   the `<project>_ssc-orthanc-storage` Docker volume (indexer state + the only
+   copy of OHIF SR annotations) and rsync `cold_archive_root`.
+4. **Host-path backfill** — `cluster_migration.md` §3: rewrite the host-path
+   columns across the schema to the new prefixes, and reset `cache_state` to cold.
+5. **Bring-up + web app + service units** — return here for §5 Steps 5–8
+   (`scripts/orthanc/dc.sh up -d`, web app deps/build, the unit installer).
+6. **Verify** — `cluster_migration.md` §4 (`reconcile_migration.py`, then
+   `reconcile.py`) instead of, or in addition to, §6 here.
+
+The service layer (Orthanc container, web app, systemd/launchd units, the
+`dc.sh` wrapper) is **identical** to a fresh install — only the database
+provisioning differs (restore vs. create-and-ingest).

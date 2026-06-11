@@ -186,7 +186,7 @@ See [`data_stores.md`](data_stores.md) for column-by-column detail.
 
 ```
 /DATA2/
-├── pacs_imaging_data/                (legacy_dicom_root — transient in
+├── pacs_imaging_data/                (dicom_data_root — transient in
 │                                      cold_path_cache mode, permanent in
 │                                      legacy mode. Bind-mounted read-only
 │                                      into the Orthanc container as
@@ -208,7 +208,7 @@ See [`data_stores.md`](data_stores.md) for column-by-column detail.
 ```
 
 The archive path deterministically mirrors the loose path — swap
-`legacy_dicom_root` for `cold_archive_root` and replace the leaf `DICOM/`
+`dicom_data_root` for `cold_archive_root` and replace the leaf `DICOM/`
 with `DICOM.tar.zst`. That makes `resolve_series_archive()` work without
 a DB lookup when `dicom_archive_path` is NULL.
 
@@ -223,8 +223,8 @@ Controlled by `config.toml` `[storage].mode`. Two values:
 
 | | `legacy` | `cold_path_cache` (production) |
 |---|---|---|
-| Canonical store | loose DICOMs in `legacy_dicom_root` | `*.tar.zst` in `cold_archive_root` |
-| Hot cache | same as canonical | `legacy_dicom_root` (transient; empty when everything is cold) |
+| Canonical store | loose DICOMs in `dicom_data_root` | `*.tar.zst` in `cold_archive_root` |
+| Hot cache | same as canonical | `dicom_data_root` (transient; empty when everything is cold) |
 | Orthanc index | populated by routine Folder Indexer scans | **permanent** — never eroded thanks to `RemoveMissingFiles: false` |
 | Warming | N/A | extract archive → `dicom_dir_path` |
 | Eviction | N/A | rmtree `dicom_dir_path`; index unchanged |
@@ -333,7 +333,7 @@ batch:
   filter existing / validate against lvo_clinical_data
         │
         ▼
-  copy DICOMs →  legacy_dicom_root/.../DICOM/
+  copy DICOMs →  dicom_data_root/.../DICOM/
         │
         ▼
   (cold_path_cache only) compress each series →

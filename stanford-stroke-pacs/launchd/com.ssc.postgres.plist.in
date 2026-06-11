@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.ssc.postgres</string>
+  <key>UserName</key><string>__DEPLOY_USER__</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key><string>__BREW_PREFIX__/opt/coreutils/libexec/gnubin:__BREW_PREFIX__/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    <key>HOME</key><string>__HOME_DIR__</string>
+    <key>LANG</key><string>en_US.UTF-8</string>
+    <key>LC_ALL</key><string>en_US.UTF-8</string>
+  </dict>
+  <key>StandardOutPath</key><string>__HOME_DIR__/Library/Logs/com.ssc.postgres.log</string>
+  <key>StandardErrorPath</key><string>__HOME_DIR__/Library/Logs/com.ssc.postgres.err</string>
+  <key>ProgramArguments</key><array><string>__BREW_PREFIX__/opt/postgresql@16/bin/postgres</string><string>-D</string><string>__BREW_PREFIX__/var/postgresql@16</string></array>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+</dict></plist>

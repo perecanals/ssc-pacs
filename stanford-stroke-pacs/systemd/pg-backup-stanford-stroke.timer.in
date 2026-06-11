@@ -1,6 +1,6 @@
 [Unit]
 Description=PACS — nightly pg_dump backup of stanford-stroke
-Documentation=file:/home/perecanals/ssc-pacs/stanford-stroke-pacs/documentation/operations/backup_strategy.md
+Documentation=file:__REPO_ROOT__/documentation/operations/backup_strategy.md
 
 [Timer]
 # Daily at 02:15 local time. Persistent=true so a missed run (host off,

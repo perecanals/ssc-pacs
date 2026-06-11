@@ -123,8 +123,8 @@ Unauthenticated liveness probe returning JSON:
   "db_stanford_stroke": "ok",
   "db_orthanc": "ok",
   "orthanc_api": "ok",
-  "disk_free_percent_legacy_dicom_root": 46.6,
-  "disk_free_bytes_legacy_dicom_root": 1833597009920
+  "disk_free_percent_dicom_data_root": 46.6,
+  "disk_free_bytes_dicom_data_root": 1833597009920
 }
 ```
 
@@ -142,7 +142,7 @@ Unauthenticated liveness probe returning JSON:
 **Non-critical but reported:**
 - `db_orthanc` — connected via `PG_ORTHANC_USER`/`PG_ORTHANC_PASSWORD`.
   Reported as `"unconfigured"` if those env vars are absent.
-- `disk_free_*_legacy_dicom_root` — observability only; a `null` here
+- `disk_free_*_dicom_data_root` — observability only; a `null` here
   does **not** degrade `/healthz`.
 
 ### Version field
@@ -181,7 +181,7 @@ Unauthenticated, same as `/healthz`.
 | `cold_storage_warm_total`                                    | counter   | `result` ∈ {`success`, `failure`, `insufficient_disk_space`} | `POST /api/studies/{uid}/warm` outcomes. |
 | `cold_storage_evict_total`                                   | counter   | `result` ∈ {`success`, `failure`}      | `POST /api/studies/{uid}/evict` outcomes. |
 | `cold_storage_warming_rows`                                  | gauge     | —                                      | `cache_state` rows currently in `status='warming'`, refreshed on scrape. |
-| `cold_storage_disk_free_bytes`                               | gauge     | —                                      | Free bytes on the filesystem holding `legacy_dicom_root`, refreshed on scrape. |
+| `cold_storage_disk_free_bytes`                               | gauge     | —                                      | Free bytes on the filesystem holding `dicom_data_root`, refreshed on scrape. |
 
 `path_template` is the matched FastAPI route template (e.g.
 `/api/studies/{studyinstanceuid}/warm`) — **never the concrete path**,

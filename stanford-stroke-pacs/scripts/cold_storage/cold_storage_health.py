@@ -2,7 +2,7 @@
 """Cold-storage health probe — surfaces the failure modes WS 05 hardens against.
 
 Prints (and optionally emits JSON for) the operational signals that
-indicate whether `cache_state` and the on-disk `legacy_dicom_root` are
+indicate whether `cache_state` and the on-disk `dicom_data_root` are
 in agreement:
 
   * Stuck-warming rows: status='warming' with `warming_started_at`
@@ -11,7 +11,7 @@ in agreement:
     been attempted since the timeout).
   * Orphaned `*.warming` directories on disk: temp dirs left by a
     crashed extraction. Should normally be zero.
-  * Free disk space on the legacy_dicom_root mount.
+  * Free disk space on the dicom_data_root mount.
   * Distribution of `last_accessed_at` across hot rows (eviction
     pressure indicator).
 
@@ -47,7 +47,7 @@ load_dotenv(REPO_ROOT / ".env")
 
 sys.path.insert(0, str(REPO_ROOT / "web-app"))
 from config import (  # noqa: E402
-    LEGACY_DICOM_ROOT,
+    DICOM_DATA_ROOT,
     STORAGE_MODE,
     WARMING_TIMEOUT_MINUTES,
 )
@@ -82,8 +82,8 @@ def _stuck_warming_rows(conn) -> list[dict[str, Any]]:
         return [dict(r) for r in cur.fetchall()]
 
 
-def _orphan_warming_dirs(legacy_root: Path) -> list[str]:
-    """Find on-disk `*.warming` siblings under legacy_root.
+def _orphan_warming_dirs(data_root: Path) -> list[str]:
+    """Find on-disk `*.warming` siblings under data_root.
 
     Walks the legacy tree and collects directories whose name ends with
     `.warming`. Returns the absolute paths so an operator can investigate
@@ -91,11 +91,11 @@ def _orphan_warming_dirs(legacy_root: Path) -> list[str]:
     so a small non-zero count immediately after a known-active warm is
     not necessarily critical — the cron timer of 15min smooths that.)
     """
-    if not legacy_root.exists():
+    if not data_root.exists():
         return []
     out: list[str] = []
     # rglob is fine here; the legacy tree is bounded and we only match dirs.
-    for p in legacy_root.rglob("*.warming"):
+    for p in data_root.rglob("*.warming"):
         try:
             if p.is_dir():
                 out.append(str(p))
@@ -105,8 +105,8 @@ def _orphan_warming_dirs(legacy_root: Path) -> list[str]:
     return out
 
 
-def _disk_free(legacy_root: Path) -> dict[str, int]:
-    p = legacy_root if legacy_root.exists() else legacy_root.parent
+def _disk_free(data_root: Path) -> dict[str, int]:
+    p = data_root if data_root.exists() else data_root.parent
     usage = shutil.disk_usage(p)
     return {"total": usage.total, "used": usage.used, "free": usage.free}
 
@@ -143,12 +143,12 @@ def _last_accessed_distribution(conn) -> dict[str, int]:
 
 
 def collect(min_free_bytes: int) -> dict[str, Any]:
-    legacy = Path(LEGACY_DICOM_ROOT)
+    dicom_data = Path(DICOM_DATA_ROOT)
     report: dict[str, Any] = {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "storage_mode": STORAGE_MODE,
         "warming_timeout_minutes": float(WARMING_TIMEOUT_MINUTES),
-        "legacy_dicom_root": str(legacy),
+        "dicom_data_root": str(dicom_data),
         "stuck_warming": [],
         "orphan_warming_dirs": [],
         "disk": {},
@@ -170,8 +170,8 @@ def collect(min_free_bytes: int) -> dict[str, Any]:
     finally:
         conn.close()
 
-    report["orphan_warming_dirs"] = _orphan_warming_dirs(legacy)
-    report["disk"] = _disk_free(legacy)
+    report["orphan_warming_dirs"] = _orphan_warming_dirs(dicom_data)
+    report["disk"] = _disk_free(dicom_data)
     report["disk"]["min_free_bytes_threshold"] = int(min_free_bytes)
 
     reasons: list[str] = []
@@ -192,7 +192,7 @@ def _human(report: dict[str, Any]) -> str:
     lines: list[str] = []
     lines.append(f"Cold-storage health report ({report['generated_at']})")
     lines.append(f"  storage_mode             : {report['storage_mode']}")
-    lines.append(f"  legacy_dicom_root        : {report['legacy_dicom_root']}")
+    lines.append(f"  dicom_data_root          : {report['dicom_data_root']}")
     lines.append(f"  warming_timeout_minutes  : {report['warming_timeout_minutes']}")
 
     disk = report["disk"]

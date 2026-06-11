@@ -101,7 +101,7 @@ The upstream base image is pinned by digest in
    cd orthanc-indexer-patched
    docker build -t ssc-orthanc:patched-indexer .
    cd ../stanford-stroke-pacs
-   docker compose down && docker compose up -d
+   scripts/orthanc/dc.sh down && scripts/orthanc/dc.sh up -d
    docker logs ssc-orthanc | grep RemoveMissingFiles
    ```
    The `RemoveMissingFiles=false` banner confirms the patch still loads.

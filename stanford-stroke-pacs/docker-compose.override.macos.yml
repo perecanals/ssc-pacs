@@ -1,0 +1,24 @@
+# docker-compose.override.macos.yml — macOS / Colima deltas over docker-compose.yml.
+#
+# Selected EXPLICITLY by scripts/orthanc/dc.sh on Darwin (`-f docker-compose.yml
+# -f docker-compose.override.macos.yml`) — NOT via compose's auto-merge. That is
+# deliberate: an auto-merged docker-compose.override.yml would also be picked up
+# on a Linux host and wrongly drop host networking. Keep all bring-up going
+# through dc.sh.
+#
+# It adapts the Linux base (which uses network_mode: host) to Colima:
+#   * drop host networking and publish ports explicitly (Colima forwards them to
+#     the Mac's localhost)
+#   * the Orthanc container reaches host Postgres via host.docker.internal
+#     (Colima NATs this to the host loopback, so the host's 127.0.0.1 trust rule
+#     accepts it — no pg_hba change)
+# The DICOM mount is inherited from the base file's ${DICOM_MOUNT_SOURCE}
+# (exported by dc.sh from config.toml) — do not re-declare it here.
+services:
+  orthanc:
+    network_mode: !reset null        # drop the base file's `network_mode: host`
+    ports:
+      - "${ORTHANC_HTTP_PORT:-8042}:${ORTHANC_HTTP_PORT:-8042}"
+      - "${ORTHANC_DICOM_PORT:-4242}:${ORTHANC_DICOM_PORT:-4242}"
+    environment:
+      ORTHANC__POSTGRESQL__HOST: "host.docker.internal"

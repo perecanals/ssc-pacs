@@ -1,19 +1,19 @@
 [Unit]
 Description=PACS — cold-storage health probe (stuck warming, orphan dirs, disk free)
-Documentation=file:/home/perecanals/ssc-pacs/stanford-stroke-pacs/documentation/cold_storage/runbook.md
+Documentation=file:__REPO_ROOT__/documentation/cold_storage/runbook.md
 Wants=network-online.target
 After=network-online.target
 
 [Service]
 Type=oneshot
-User=perecanals
-Group=perecanals
+User=__DEPLOY_USER__
+Group=__DEPLOY_GROUP__
 Nice=15
 IOSchedulingClass=best-effort
 IOSchedulingPriority=7
 # Run inside the `pacs` conda env so we get the pinned psycopg2/python-dotenv.
 # The script exits non-zero on any critical condition, which surfaces in the
 # unit's ActiveState/Result and in `systemctl list-timers --all`.
-ExecStart=/home/perecanals/miniconda3/envs/pacs/bin/python /home/perecanals/ssc-pacs/stanford-stroke-pacs/scripts/cold_storage/cold_storage_health.py --quiet
+ExecStart=__PYTHON_BIN__ __REPO_ROOT__/scripts/cold_storage/cold_storage_health.py --quiet
 StandardOutput=journal
 StandardError=journal
