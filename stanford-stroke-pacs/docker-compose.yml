@@ -22,6 +22,11 @@ services:
       ORTHANC__POSTGRESQL__USERNAME: "${PG_ORTHANC_USER}"
       ORTHANC__POSTGRESQL__PASSWORD: "${PG_ORTHANC_PASSWORD}"
       ORTHANC__POSTGRESQL__LOCK: "false"
+      # Cap the index plugin's connection pool. The plugin default opens ~50
+      # connections (half of Postgres max_connections=100) and keeps them open
+      # for the life of the container — far more than this single-instance PACS
+      # needs. 8 is ample for the indexer + UI/OHIF query load.
+      ORTHANC__POSTGRESQL__INDEX_CONNECTIONS_COUNT: "8"
       # Ports: orthanc.json carries the in-image defaults; these env overrides let
       # .env be the single place to change them (default 8042/4242 if unset).
       ORTHANC__HTTP_PORT: "${ORTHANC_HTTP_PORT:-8042}"
