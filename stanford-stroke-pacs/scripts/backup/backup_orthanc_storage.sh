@@ -37,8 +37,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SNAP_PY="$SCRIPT_DIR/orthanc_storage_snapshot.py"
 # _lib.sh defines STACK_DIR (repo-relative) and config_get (reads config.toml),
 # so paths/settings are deployable anywhere without editing this script.
-# shellcheck source=_lib.sh
-. "$SCRIPT_DIR/_lib.sh"
+# shellcheck source=../_lib.sh
+. "$SCRIPT_DIR/../_lib.sh"
 
 BACKUP_ENV_FILE="${BACKUP_ENV_FILE:-$STACK_DIR/.env}"
 BACKUP_ROOT="${BACKUP_ROOT:-$(config_get backup backup_root /DATA2/pg_backups)}"

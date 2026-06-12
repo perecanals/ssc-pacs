@@ -157,7 +157,7 @@ checkout. Settings resolve in this precedence order:
    ```
 3. **Built-in fallback** baked into each script (matches the values above).
 
-Path resolution is location-relative: `scripts/backup/_lib.sh` derives
+Path resolution is location-relative: `scripts/_lib.sh` derives
 `STACK_DIR` (the `stanford-stroke-pacs/` root) from its own path and reads
 `config.toml` via `python3` (`tomllib`). The DB credentials still come from
 `.env` (`DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`), which defaults to

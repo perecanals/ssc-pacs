@@ -2,11 +2,18 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-CONTAINER="ssc-orthanc"
-ORTHANC_URL="http://localhost:8042"
-# Read from .env (strip surrounding quotes, handle $ in passwords)
-ORTHANC_USER=$(grep '^ORTHANC_ADMIN_USER=' "$SCRIPT_DIR/.env" | cut -d '=' -f 2 | sed "s/^['\"]//;s/['\"]$//")
-ORTHANC_PASSWORD=$(grep '^ORTHANC_ADMIN_PASSWORD=' "$SCRIPT_DIR/.env" | cut -d '=' -f 2 | sed "s/^['\"]//;s/['\"]$//")
+# _lib.sh resolves STACK_DIR from its own location so the stack .env is found
+# without hardcoding an absolute path.
+# shellcheck source=../_lib.sh
+source "$SCRIPT_DIR/../_lib.sh"
+CONTAINER="ssc-orthanc"   # pinned by container_name in docker-compose.yml
+# Env override > stack .env > fallback (strip surrounding quotes, keep =/$ in passwords)
+ENV_FILE="$STACK_DIR/.env"
+env_get() { grep "^$1=" "$ENV_FILE" 2>/dev/null | head -1 | cut -d= -f2- | sed "s/^['\"]//;s/['\"]$//"; }
+ORTHANC_URL="${ORTHANC_URL:-$(env_get ORTHANC_URL)}"
+ORTHANC_URL="${ORTHANC_URL:-http://localhost:8042}"
+ORTHANC_USER="${ORTHANC_ADMIN_USER:-$(env_get ORTHANC_ADMIN_USER)}"
+ORTHANC_PASSWORD="${ORTHANC_ADMIN_PASSWORD:-$(env_get ORTHANC_ADMIN_PASSWORD)}"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -49,9 +56,9 @@ else
     fail "Container ${CONTAINER} is ${STATE}"
     ERRORS=$((ERRORS + 1))
     if [[ "$STATE" == "not_found" ]]; then
-        info "Try: cd $SCRIPT_DIR && docker compose up -d"
+        info "Try: $SCRIPT_DIR/dc.sh up -d"
     else
-        info "Try: docker compose restart"
+        info "Try: $SCRIPT_DIR/dc.sh restart"
     fi
 fi
 

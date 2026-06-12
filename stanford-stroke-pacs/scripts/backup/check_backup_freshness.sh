@@ -42,8 +42,8 @@ for arg in "$@"; do
 done
 
 # _lib.sh defines config_get (reads config.toml) so defaults stay in one place.
-# shellcheck source=_lib.sh
-. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_lib.sh"
+# shellcheck source=../_lib.sh
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../_lib.sh"
 
 BACKUP_ROOT="${BACKUP_ROOT:-$(config_get backup backup_root /DATA2/pg_backups)}"
 MAX_AGE_HOURS="${MAX_AGE_HOURS:-$(config_get backup max_age_hours 36)}"
@@ -61,7 +61,8 @@ check_path_age() {
         return
     fi
     local mtime age
-    mtime=$(stat -c %Y "$path")
+    # GNU stat (Linux) vs BSD stat (macOS)
+    mtime=$(stat -c %Y "$path" 2>/dev/null || stat -f %m "$path")
     age=$(( now_epoch - mtime ))
     if (( age > max_sec )); then
         local age_h=$(( age / 3600 ))
