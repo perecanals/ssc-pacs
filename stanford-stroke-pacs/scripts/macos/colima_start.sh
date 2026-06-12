@@ -9,10 +9,13 @@
 # Mounts (Colima only shares $HOME by default, so these are explicit):
 #   <repo>/stanford-stroke-pacs : read-only  — orthanc.json / orthanc_users.json
 #                                              bind-mounts for the container
-#   /Volumes/ThunderBay_RAID1   : read-write — cold archives + warmed imaging_data
-#                                              (the container bind is still :ro)
+#   data mount                  : read-write — common parent of config.toml's
+#                                              [storage].dicom_data_root and
+#                                              cold_archive_root (override with
+#                                              COLIMA_DATA_MOUNT); the container
+#                                              bind is still :ro
 #
-# Idempotent: exits 0 if the VM is already running. Waits for the ThunderBay RAID
+# Idempotent: exits 0 if the VM is already running. Waits for the storage roots
 # to be mounted first — the bind-mount sources must exist before `colima start`.
 #
 # Run at boot via launchd/com.ssc.colima.plist, or manually:
@@ -22,8 +25,22 @@ set -euo pipefail
 
 export PATH="/opt/homebrew/bin:$PATH"
 
-REPO_MOUNT="/opt/ssc-pacs/ssc-pacs/stanford-stroke-pacs"
-RAID_MOUNT="/Volumes/ThunderBay_RAID1"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# _lib.sh resolves STACK_DIR from its own location and provides config_get.
+# shellcheck source=../_lib.sh
+source "$SCRIPT_DIR/../_lib.sh"
+
+REPO_MOUNT="$STACK_DIR"
+# The VM must see the storage roots from config.toml. Mount their common
+# parent read-write; hard-fail if config.toml is unreadable (an empty value
+# here would otherwise become a wrong mount at boot).
+DICOM_ROOT="$(config_get storage dicom_data_root "")"
+COLD_ROOT="$(config_get storage cold_archive_root "")"
+if [[ -z "$DICOM_ROOT" || -z "$COLD_ROOT" ]]; then
+    echo "ERROR: could not read [storage] roots from $CONFIG_TOML" >&2
+    exit 1
+fi
+DATA_MOUNT="${COLIMA_DATA_MOUNT:-$(python3 -c 'import os,sys;print(os.path.commonpath(sys.argv[1:]))' "$DICOM_ROOT" "$COLD_ROOT")}"
 
 # OHIF/DICOMweb fires many parallel frame requests when a study loads, which
 # wants vCPUs, so 4 keeps the viewer responsive. vCPUs are a *cap*, not a hard
@@ -42,15 +59,15 @@ if colima status >/dev/null 2>&1; then
     exit 0
 fi
 
-# Wait for the external RAID (mount source for the cold archives / DICOM tree).
-# External volumes can mount a little after boot/login.
+# Wait for the external volume holding the storage roots (cold archives /
+# DICOM tree). External volumes can mount a little after boot/login.
 for i in $(seq 1 60); do
-    [[ -d "$RAID_MOUNT/ssc-pacs-data" ]] && break
-    echo "waiting for $RAID_MOUNT to mount ($i/60)…"
+    [[ -d "$DICOM_ROOT" && -d "$COLD_ROOT" ]] && break
+    echo "waiting for $DATA_MOUNT to mount ($i/60)…"
     sleep 5
 done
-if [[ ! -d "$RAID_MOUNT/ssc-pacs-data" ]]; then
-    echo "ERROR: $RAID_MOUNT not mounted; aborting colima start" >&2
+if [[ ! -d "$DICOM_ROOT" || ! -d "$COLD_ROOT" ]]; then
+    echo "ERROR: $DATA_MOUNT not mounted (missing $DICOM_ROOT or $COLD_ROOT); aborting colima start" >&2
     exit 1
 fi
 
@@ -59,7 +76,7 @@ colima start \
     --cpu "$CPU" --memory "$MEMORY" --disk "$DISK" \
     --mount-type virtiofs \
     --mount "${REPO_MOUNT}:r" \
-    --mount "${RAID_MOUNT}:w"
+    --mount "${DATA_MOUNT}:w"
 
 docker context use colima >/dev/null 2>&1 || true
 echo "colima up — docker socket: $HOME/.colima/default/docker.sock"

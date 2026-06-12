@@ -1,4 +1,4 @@
-# Shared helpers for the backup scripts. Source this file; do not execute it.
+# Shared helpers for the stack scripts. Source this file; do not execute it.
 #
 # Provides a single source of truth for repo-relative paths and operational
 # settings, so the scripts are deployable on any host without editing absolute
@@ -8,12 +8,15 @@
 #   config_get <section> <key> <fallback>
 #                — echo config.toml [section].key, or <fallback> if the file,
 #                  section, key, or python3 is unavailable.
+#   resolve_python
+#                — echo the project Python interpreter ($SSC_PYTHON override,
+#                  then known conda env locations, then PATH); non-zero if none.
 #
 # Resolution precedence the callers should use: explicit env override (if set)
 # > config.toml value > built-in fallback passed to config_get.
 
 _LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-STACK_DIR="$(cd "$_LIB_DIR/../.." && pwd)"
+STACK_DIR="$(cd "$_LIB_DIR/.." && pwd)"
 CONFIG_TOML="$STACK_DIR/config.toml"
 
 config_get() {
@@ -34,4 +37,25 @@ PY
 )"
     fi
     printf '%s' "${val:-$fallback}"
+}
+
+resolve_python() {
+    local candidates=(
+        "${SSC_PYTHON:-}"
+        "/opt/homebrew/Caskroom/miniconda/base/envs/ssc-pacs/bin/python"
+        "/home/perecanals/miniconda3/envs/pacs/bin/python"
+    )
+    local candidate
+    for candidate in "${candidates[@]}"; do
+        if [[ -n "$candidate" && -x "$candidate" ]]; then
+            printf '%s' "$candidate"
+            return 0
+        fi
+    done
+    candidate="$(command -v python3 || true)"
+    if [[ -n "$candidate" && -x "$candidate" ]]; then
+        printf '%s' "$candidate"
+        return 0
+    fi
+    return 1
 }

@@ -38,8 +38,11 @@ from dotenv import load_dotenv
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 load_dotenv(REPO_ROOT / ".env")
 
-DEFAULT_COLD_ROOT = Path("/DATA2/pacs_imaging_data_compressed")
-DEFAULT_LOOSE_ROOT = Path("/DATA2/pacs_imaging_data_loose_backup")
+# Paths from repo-root config.toml (see web-app/config.py)
+sys.path.insert(0, str(REPO_ROOT / "web-app"))
+from config import COLD_ARCHIVE_ROOT  # noqa: E402
+
+DEFAULT_COLD_ROOT = COLD_ARCHIVE_ROOT
 CHUNK = 1 << 20  # 1 MiB
 
 
@@ -143,7 +146,12 @@ def rebuild_archive(src_dir: Path, out_path: Path, level: int) -> None:
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--cold-root", type=Path, default=DEFAULT_COLD_ROOT)
-    ap.add_argument("--loose-root", type=Path, default=DEFAULT_LOOSE_ROOT)
+    ap.add_argument(
+        "--loose-root",
+        type=Path,
+        default=None,
+        help="Migration-era loose DICOM backup root; required for --repair.",
+    )
     ap.add_argument(
         "--patient",
         help="Limit to one patient (directory name under cold-root).",
@@ -172,8 +180,11 @@ def main() -> int:
     )
     args = ap.parse_args()
 
+    if args.repair and args.loose_root is None:
+        ap.error("--repair requires --loose-root")
+
     cold_root: Path = args.cold_root.resolve()
-    loose_root: Path = args.loose_root.resolve()
+    loose_root: Path | None = args.loose_root.resolve() if args.loose_root else None
 
     if not cold_root.is_dir():
         print(f"Cold root missing: {cold_root}", file=sys.stderr)
@@ -250,22 +261,25 @@ def main() -> int:
 
     # Plan repairs
     repair_plan: list[dict[str, Any]] = []
-    for r in bad:
-        arch = Path(r.archive)
-        ldir = loose_dir_for_archive(arch, cold_root, loose_root)
-        have_loose = ldir.is_dir() and any(ldir.iterdir())
-        repair_plan.append(
-            {
-                "archive": str(arch),
-                "loose_dir": str(ldir),
-                "loose_present": have_loose,
-                "error": r.error,
-            }
-        )
-        print(
-            f"  {'REPAIRABLE' if have_loose else 'NO LOOSE  '}  "
-            f"{arch}  <- {ldir}"
-        )
+    if loose_root is not None:
+        for r in bad:
+            arch = Path(r.archive)
+            ldir = loose_dir_for_archive(arch, cold_root, loose_root)
+            have_loose = ldir.is_dir() and any(ldir.iterdir())
+            repair_plan.append(
+                {
+                    "archive": str(arch),
+                    "loose_dir": str(ldir),
+                    "loose_present": have_loose,
+                    "error": r.error,
+                }
+            )
+            print(
+                f"  {'REPAIRABLE' if have_loose else 'NO LOOSE  '}  "
+                f"{arch}  <- {ldir}"
+            )
+    elif bad:
+        print("Pass --loose-root to plan repairs for the corrupt archives listed above.")
 
     # Execute repairs
     repair_results: list[dict[str, Any]] = []
@@ -318,7 +332,7 @@ def main() -> int:
         "host": os.uname().nodename,
         "ts": time.strftime("%Y-%m-%d %H:%M:%S %z"),
         "cold_root": str(cold_root),
-        "loose_root": str(loose_root),
+        "loose_root": str(loose_root) if loose_root else None,
         "patient_filter": args.patient,
         "archives_scanned": len(archives),
         "bytes_read": total_bytes,

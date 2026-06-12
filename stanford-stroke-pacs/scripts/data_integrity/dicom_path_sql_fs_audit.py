@@ -17,7 +17,6 @@ Example:
 from __future__ import annotations
 
 import argparse
-import os
 import random
 import sys
 from collections import Counter
@@ -30,23 +29,8 @@ REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 load_dotenv(REPO_ROOT / ".env")
 
 sys.path.insert(0, str(REPO_ROOT / "web-app"))
-from db import DB_CONFIG, get_conn  # noqa: E402
-
-
-def load_dicom_data_root() -> Path:
-    cfg = REPO_ROOT / "config.toml"
-    if cfg.is_file():
-        try:
-            import tomllib
-
-            with cfg.open("rb") as f:
-                data = tomllib.load(f)
-            s = data.get("storage", {}).get("dicom_data_root")
-            if isinstance(s, str) and s.strip():
-                return Path(s)
-        except OSError:
-            pass
-    return Path(os.getenv("DICOM_DATA_ROOT", "/DATA2/pacs_imaging_data"))
+from config import DICOM_DATA_ROOT  # noqa: E402
+from db import DB_CONFIG  # noqa: E402
 
 
 def path_parts(p: str) -> list[str]:
@@ -134,10 +118,10 @@ def relative_under_root(path_str: str, root: Path) -> str | None:
 def shallow_fs_report(root: Path, max_patients_sample: int) -> None:
     print(f"\n--- On-disk tree (--fs-root): {root} ---")
     if not root.exists():
-        print(f"  Path does not exist on this host (nothing to compare to SQL).")
+        print("  Path does not exist on this host (nothing to compare to SQL).")
         return
     if not root.is_dir():
-        print(f"  Exists but is not a directory.")
+        print("  Exists but is not a directory.")
         return
 
     try:
@@ -184,7 +168,7 @@ def main() -> int:
         "--fs-root",
         type=Path,
         default=None,
-        help=f"Filesystem root to compare against (default: config.toml dicom_data_root or env)",
+        help="Filesystem root to compare against (default: config.toml dicom_data_root or env)",
     )
     ap.add_argument(
         "--sample-rows",
@@ -207,7 +191,7 @@ def main() -> int:
     )
     args = ap.parse_args()
 
-    fs_root = (args.fs_root or load_dicom_data_root()).resolve()
+    fs_root = (args.fs_root or DICOM_DATA_ROOT).resolve()
 
     if not DB_CONFIG.get("user"):
         print("DB_USER not set in .env", file=sys.stderr)

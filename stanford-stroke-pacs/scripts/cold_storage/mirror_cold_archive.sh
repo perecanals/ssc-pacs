@@ -2,8 +2,9 @@
 # Tier 2 — cold-archive replication. DORMANT on the dev host.
 #
 # Mirrors $SOURCE_DIR (the cold archive root) to $COLD_MIRROR_DEST using
-# rsync. Both are read from environment so the dev host can ship the
-# script without a destination configured.
+# rsync. SOURCE_DIR defaults to config.toml [storage].cold_archive_root;
+# COLD_MIRROR_DEST is env-only so the dev host can ship the script without
+# a destination configured.
 #
 # Usage:
 #   mirror_cold_archive.sh           # real run (rsync writes)
@@ -13,8 +14,8 @@
 #   1. Provision a destination disk or remote (e.g. /DATA3/cold_mirror,
 #      or a borg/restic repo).
 #   2. Create /etc/default/pacs-cold-mirror with:
-#        SOURCE_DIR=/DATA2/pacs_imaging_data_compressed
 #        COLD_MIRROR_DEST=/path/to/mirror
+#      (SOURCE_DIR only if it must differ from [storage].cold_archive_root)
 #   3. systemctl enable --now cold-archive-mirror.timer
 #
 # If COLD_MIRROR_DEST is unset, this script exits 0 with a notice — so
@@ -22,18 +23,22 @@
 # no-op, not a failure spam.
 #
 # Env:
-#   SOURCE_DIR        (required)
+#   SOURCE_DIR        (default: config.toml [storage].cold_archive_root)
 #   COLD_MIRROR_DEST  (required to actually run; absent => no-op)
 #   RSYNC_EXTRA_ARGS  (optional, e.g. "--bwlimit=50000")
 
 set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=../_lib.sh
+source "$SCRIPT_DIR/../_lib.sh"
 
 DRY_RUN=0
 for arg in "$@"; do
     case "$arg" in
         --dry-run|-n) DRY_RUN=1 ;;
         -h|--help)
-            sed -n '2,28p' "$0"
+            sed -n '2,29p' "$0"
             exit 0
             ;;
         *)
@@ -48,7 +53,8 @@ if [[ -z "${COLD_MIRROR_DEST:-}" ]]; then
     exit 0
 fi
 
-: "${SOURCE_DIR:?SOURCE_DIR not set}"
+SOURCE_DIR="${SOURCE_DIR:-$(config_get storage cold_archive_root "")}"
+: "${SOURCE_DIR:?SOURCE_DIR not set and [storage].cold_archive_root unreadable}"
 
 if [[ ! -d "$SOURCE_DIR" ]]; then
     echo "[mirror_cold_archive] SOURCE_DIR does not exist: $SOURCE_DIR" >&2

@@ -20,8 +20,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # _lib.sh resolves STACK_DIR / CONFIG_TOML from its own location and provides
 # config_get <section> <key> <fallback>; reuse it so paths stay portable.
-# shellcheck source=../backup/_lib.sh
-source "$SCRIPT_DIR/../backup/_lib.sh"
+# shellcheck source=../_lib.sh
+source "$SCRIPT_DIR/../_lib.sh"
 
 mode="$(config_get storage mode legacy)"
 case "$mode" in

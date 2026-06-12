@@ -7,11 +7,9 @@ if [ $# -lt 1 ]; then
 fi
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-PYTHON="/home/perecanals/miniconda3/envs/pacs/bin/python"
+# shellcheck source=../_lib.sh
+source "$SCRIPT_DIR/../_lib.sh"
 
-if [ ! -x "$PYTHON" ]; then
-    echo "Error: Python not found at $PYTHON" >&2
-    exit 1
-fi
+PYTHON="$(resolve_python)" || { echo "Error: no usable Python found (set SSC_PYTHON to override)" >&2; exit 1; }
 
 exec "$PYTHON" "$SCRIPT_DIR/remove_label.py" "$@"
