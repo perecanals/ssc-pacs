@@ -7,10 +7,10 @@ import json
 import psycopg2
 import psycopg2.extras
 import psycopg2.sql as psql
-from fastapi import APIRouter, Cookie, HTTPException, Query
+from fastapi import APIRouter, Cookie, Depends, HTTPException, Query
 from pydantic import BaseModel
 
-from auth import get_current_user
+from auth import get_current_user, get_dataset_scope
 from common import LABEL_NAME_RE, PATIENT_ID_COL, VALID_LEVELS
 from db import get_conn
 from labelled_table_sync import (
@@ -28,7 +28,10 @@ router = APIRouter()
 
 
 @router.get("/api/labels")
-def list_labels(level: str | None = Query(None)):
+def list_labels(
+    level: str | None = Query(None),
+    user: str = Depends(get_current_user),
+):
     conn = get_conn()
     try:
         with conn.cursor() as cur:
@@ -52,7 +55,13 @@ _SUMMARY_COUNT_COL = {
 
 
 @router.get("/api/labels/summary")
-def labels_summary(level: str | None = Query(None)):
+def labels_summary(
+    level: str | None = Query(None),
+    user: str = Depends(get_current_user),
+):
+    # Note: summary counts are global (not narrowed to the caller's dataset
+    # scope) — label names and aggregate counts only, no patient identifiers
+    # or values. Documented limitation; see documentation/reference/web_app.md.
     conn = get_conn()
     try:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
@@ -89,16 +98,37 @@ def labels_summary(level: str | None = Query(None)):
 
 
 @router.get("/api/labels/{label_name}/values")
-def get_label_values(label_name: str):
-    """Return the distinct annotation values already used for a label."""
+def get_label_values(
+    label_name: str,
+    scope: list[str] | None = Depends(get_dataset_scope),
+):
+    """Return the distinct annotation values already used for a label.
+
+    Values can be free text, so for non-admins they are narrowed to
+    annotations on entities within the caller's dataset scope.
+    """
     conn = get_conn()
     try:
         with conn.cursor() as cur:
+            scope_cond = ""
+            params: list = [label_name]
+            if scope is not None:
+                scope_cond = (
+                    "AND EXISTS (SELECT 1 FROM patient dsp "
+                    "WHERE dsp.dataset && %s::text[] AND dsp.patient_id = COALESCE("
+                    "  a.patient_id, "
+                    "  (SELECT s.patient_id FROM image_series s "
+                    "   WHERE s.seriesinstanceuid = a.seriesinstanceuid LIMIT 1), "
+                    "  (SELECT st.patient_id FROM image_study st "
+                    "   WHERE st.studyinstanceuid = a.studyinstanceuid LIMIT 1))) "
+                )
+                params.append(scope)
             cur.execute(
-                "SELECT DISTINCT value FROM annotations "
+                "SELECT DISTINCT value FROM annotations a "
                 "WHERE label = %s AND value IS NOT NULL AND value != '' "
+                f"{scope_cond}"
                 "ORDER BY value",
-                (label_name,),
+                params,
             )
             return [r[0] for r in cur.fetchall()]
     finally:
@@ -146,7 +176,10 @@ class LabelDefinitionUpdate(BaseModel):
 
 
 @router.get("/api/label-definitions")
-def list_label_definitions(level: str | None = Query(None)):
+def list_label_definitions(
+    level: str | None = Query(None),
+    user: str = Depends(get_current_user),
+):
     conn = get_conn()
     try:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
@@ -265,7 +298,7 @@ def update_label_definition(
 
 
 @router.get("/api/instruments")
-def list_instruments():
+def list_instruments(user: str = Depends(get_current_user)):
     """Distinct non-null instrument values from label_definitions with counts."""
     conn = get_conn()
     try:

@@ -129,6 +129,19 @@ def test_db():
 TEST_USER = "testuser"
 TEST_PASSWORD = "testpass123"
 
+# Non-admin users with dataset scopes (deny-by-default access control).
+# Seeded patients: P-0001 in {lvo, crisp2}, P-0002 in {lvo} — so:
+#   USER_LVO sees both patients, USER_CRISP sees only P-0001,
+#   USER_NONE (no grants) sees nothing.
+USER_LVO = "user_lvo"
+USER_CRISP = "user_crisp"
+USER_NONE = "user_none"
+SCOPED_USERS = {
+    USER_LVO: ["lvo"],
+    USER_CRISP: ["crisp2"],
+    USER_NONE: [],
+}
+
 
 @pytest.fixture(scope="session")
 def seeded_db(test_db):
@@ -142,6 +155,13 @@ def seeded_db(test_db):
                 "VALUES (%s, %s, true) ON CONFLICT DO NOTHING",
                 (TEST_USER, pw_hash),
             )
+            for username, datasets in SCOPED_USERS.items():
+                cur.execute(
+                    "INSERT INTO users "
+                    "(username, password_hash, is_admin, allowed_datasets) "
+                    "VALUES (%s, %s, false, %s::text[]) ON CONFLICT DO NOTHING",
+                    (username, pw_hash, datasets),
+                )
             # Minimal reference rows so browsing endpoints don't 500 on empty tables.
             # P-0001: clinically matched. Its clinical stroke_date (2025-01-01)
             # differs from its imaging date (2025-02-02) so we can assert the tab
@@ -258,4 +278,14 @@ def logged_in_client(client):
         json={"username": TEST_USER, "password": TEST_PASSWORD},
     )
     assert resp.status_code == 200, f"Login failed: {resp.text}"
+    return client
+
+
+def login_as(client, username: str):
+    """Log the TestClient in as one of the seeded users (shared password)."""
+    resp = client.post(
+        "/api/login",
+        json={"username": username, "password": TEST_PASSWORD},
+    )
+    assert resp.status_code == 200, f"Login as {username} failed: {resp.text}"
     return client

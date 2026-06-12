@@ -258,8 +258,42 @@ The file is owned by `scripts/admin/manage_users.py`; do not edit by hand.
 
 - `add` / `passwd` / `remove` always touch the `users` table; they also update
   `orthanc_users.json` when `is_admin=True`
+- `add --datasets <csv>` / `set-datasets` manage per-user dataset grants
+  (see 5.4)
 - `rotate-service-account` rewrites `ORTHANC_ADMIN_PASSWORD` in `.env` and the
   matching entry in `orthanc_users.json` atomically. It does not touch the DB.
+
+### 5.4 Dataset-level authorization (per-user cohort access)
+
+Beyond authentication, every non-admin user carries a **dataset scope**:
+`users.allowed_datasets text[]`, a subset of the cohort tags found in
+`patient.dataset` (e.g. `lvo`, `precise`).
+
+- **Deny by default** — an empty grant set (the default for new users) means
+  the user sees *no* patient data until an admin grants datasets.
+- **Admins bypass** — `is_admin = TRUE` ignores the scope entirely.
+- **Enforced server-side on every endpoint** that returns or mutates
+  patient-derived data:
+  - the list endpoints (`/api/patients`, `/api/studies`, `/api/series`, plus
+    sidebar option endpoints) filter rows to patients whose `dataset`
+    overlaps the scope (`dataset && allowed`);
+  - detail endpoints keyed by a patient/study/series id (sub-row listings,
+    `/api/ohif-link`, warm/evict/cache-status, annotation reads/writes)
+    return **404** for out-of-scope ids, so they are indistinguishable from
+    nonexistent ones;
+  - the DICOMweb reverse proxy extracts the StudyInstanceUID from each
+    `/dicom-web/*` request (path or QIDO query param) and rejects
+    out-of-scope studies with 403. Lookups are served from in-process TTL
+    caches (`web-app/dataset_access.py`: user scope 30 s, study→datasets
+    5 min), so per-frame WADO requests cost no DB round-trips. Unscoped QIDO
+    searches are denied for non-admins.
+- **Managed by**: the `/admin` page (admin-only, users × dataset checkboxes,
+  `GET /api/admin/users` + `PUT /api/admin/users/{username}/datasets`) or
+  `scripts/admin/manage_users.py set-datasets`.
+
+Known limitation: `/api/labels` and `/api/labels/summary` expose label names
+and aggregate counts across all data (no identifiers or values);
+`/api/labels/{name}/values` *is* scope-filtered because values are free text.
 
 ---
 

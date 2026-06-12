@@ -162,6 +162,7 @@ is_admin             BOOLEAN NOT NULL DEFAULT FALSE
 created_at           TIMESTAMPTZ DEFAULT now()
 must_change_password BOOLEAN NOT NULL DEFAULT FALSE
 password_changed_at  TIMESTAMPTZ
+allowed_datasets     TEXT[] NOT NULL DEFAULT '{}'
 ```
 
 `must_change_password` is set TRUE when an admin creates the user (or runs
@@ -170,6 +171,12 @@ password_changed_at  TIMESTAMPTZ
 While the flag is TRUE the API rejects every non-auth endpoint with
 `403 password_change_required`. `password_changed_at` is stamped when the user
 last self-set their password (NULL means never self-chosen).
+
+`allowed_datasets` holds the user's dataset grants — the `patient.dataset`
+cohort tags they may see (deny-by-default: empty = no patient data; admins
+bypass). Managed via the `/admin` page or `manage_users.py set-datasets`;
+enforced by every patient-data endpoint and the DICOMweb proxy (see
+[`architecture.md`](architecture.md) §5.4).
 
 ### `user_preferences`
 

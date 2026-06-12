@@ -14,7 +14,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from zipstream import ZipStream
 
-from auth import require_admin
+from auth import get_dataset_scope, require_admin
 from cache_manager import (
     get_cache_status,
     resolve_series_archive,
@@ -29,6 +29,9 @@ from common import (
     attach_annotations,
     attach_inherited_annotations,
     build_label_filter_sql,
+    dataset_filter_sql,
+    ensure_patient_access,
+    ensure_study_access,
     parse_label_filters,
 )
 from config import STORAGE_MODE
@@ -68,12 +71,17 @@ def list_patients(
     sort_dir: str = Query("asc"),
     page: int = Query(1, ge=1),
     per_page: int = Query(50, ge=1, le=500),
+    scope: list[str] | None = Depends(get_dataset_scope),
 ):
     conn = get_conn()
     try:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             conditions = []
             params: list = []
+
+            if scope is not None:
+                conditions.append("p.dataset && %s::text[]")
+                params.append(scope)
 
             # Patient level is sourced from the `patient` registry (one row per
             # patient, comprehensive). lvo_clinical_data is joined only to prefer
@@ -173,11 +181,13 @@ def patient_studies(
         None,
         description="If set, only studies connected to this import_label are returned.",
     ),
+    scope: list[str] | None = Depends(get_dataset_scope),
 ):
     """Studies for a patient (expandable sub-rows); optionally filtered by import_label."""
     conn = get_conn()
     try:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            ensure_patient_access(cur, patient_id, scope)
             sil = (study_import_label or "").strip()
             where_st = "st.patient_id = %s"
             qparams: list = [patient_id]
@@ -217,19 +227,26 @@ def patient_studies(
 
 
 @router.get("/api/study-import-labels")
-def list_study_import_labels():
+def list_study_import_labels(scope: list[str] | None = Depends(get_dataset_scope)):
     """Distinct non-empty `import_label` values (study+series) for patient-level filter UI."""
     conn = get_conn()
     try:
         with conn.cursor() as cur:
+            scope_st = scope_s = ""
+            params: list = []
+            if scope is not None:
+                scope_st = " AND " + dataset_filter_sql("image_study.patient_id")
+                scope_s = " AND " + dataset_filter_sql("image_series.patient_id")
+                params = [scope, scope]
             cur.execute(
                 "SELECT import_label FROM ("
                 "  SELECT DISTINCT TRIM(import_label) AS import_label FROM image_study "
-                "  WHERE import_label IS NOT NULL AND TRIM(import_label) <> '' "
+                f"  WHERE import_label IS NOT NULL AND TRIM(import_label) <> ''{scope_st} "
                 "  UNION "
                 "  SELECT DISTINCT TRIM(import_label) AS import_label FROM image_series "
-                "  WHERE import_label IS NOT NULL AND TRIM(import_label) <> '' "
+                f"  WHERE import_label IS NOT NULL AND TRIM(import_label) <> ''{scope_s} "
                 ") u ORDER BY import_label",
+                params,
             )
             return [r[0] for r in cur.fetchall()]
     finally:
@@ -237,8 +254,13 @@ def list_study_import_labels():
 
 
 @router.get("/api/datasets")
-def list_datasets():
-    """Distinct cohort tags in `patient.dataset` (text[]) for patient-level filter UI."""
+def list_datasets(scope: list[str] | None = Depends(get_dataset_scope)):
+    """Distinct cohort tags in `patient.dataset` (text[]).
+
+    Non-admins get only the tags they are granted (sidebar filter); admins
+    get the full list — which is also what the /admin permissions page
+    consumes as the set of grantable datasets.
+    """
     conn = get_conn()
     try:
         with conn.cursor() as cur:
@@ -246,9 +268,12 @@ def list_datasets():
                 "SELECT DISTINCT unnest(dataset) AS dataset FROM patient "
                 "WHERE dataset <> '{}' ORDER BY 1"
             )
-            return [r[0] for r in cur.fetchall()]
+            all_datasets = [r[0] for r in cur.fetchall()]
     finally:
         conn.close()
+    if scope is not None:
+        return [d for d in all_datasets if d in scope]
+    return all_datasets
 
 
 # ---------------------------------------------------------------------------
@@ -272,12 +297,17 @@ def list_studies(
     sort_dir: str = Query("asc"),
     page: int = Query(1, ge=1),
     per_page: int = Query(50, ge=1, le=500),
+    scope: list[str] | None = Depends(get_dataset_scope),
 ):
     conn = get_conn()
     try:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             conditions = []
             params: list = []
+
+            if scope is not None:
+                conditions.append(dataset_filter_sql("st.patient_id"))
+                params.append(scope)
 
             if patient_id:
                 conditions.append("st.patient_id LIKE %s")
@@ -359,11 +389,15 @@ def list_studies(
 
 
 @router.get("/api/studies/{studyinstanceuid}/series")
-def study_series(studyinstanceuid: str):
+def study_series(
+    studyinstanceuid: str,
+    scope: list[str] | None = Depends(get_dataset_scope),
+):
     """All series for a given study (for expandable sub-rows)."""
     conn = get_conn()
     try:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            ensure_study_access(cur, studyinstanceuid, scope)
             cur.execute(
                 "SELECT s.seriesinstanceuid, s.studyinstanceuid, s.patient_id, s.import_id, s.import_label, "
                 "s.modality, s.seriesdescription, s.acquisitiondatetime, s.number_of_slices "
@@ -405,6 +439,7 @@ def list_series(
     sort_dir: str = Query("asc"),
     page: int = Query(1, ge=1),
     per_page: int = Query(50, ge=1, le=500),
+    scope: list[str] | None = Depends(get_dataset_scope),
 ):
     """Paginated series list, optionally filtered."""
     conn = get_conn()
@@ -412,6 +447,10 @@ def list_series(
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             conditions = []
             params: list = []
+
+            if scope is not None:
+                conditions.append(dataset_filter_sql("s.patient_id"))
+                params.append(scope)
 
             if label:
                 conditions.append(
@@ -502,8 +541,18 @@ def list_series(
 def ohif_link(
     studyinstanceuid: str,
     seriesinstanceuid: str | None = Query(None),
+    scope: list[str] | None = Depends(get_dataset_scope),
 ):
     """Resolve a StudyInstanceUID to an OHIF viewer URL via Orthanc lookup."""
+    # Access check first — before any cache_state mutation or Orthanc lookup.
+    if scope is not None:
+        conn = get_conn()
+        try:
+            with conn.cursor() as cur:
+                ensure_study_access(cur, studyinstanceuid, scope)
+        finally:
+            conn.close()
+
     if STORAGE_MODE == "cold_path_cache":
         cs = get_cache_status(studyinstanceuid)
         st = cs.get("status") or "cold"

@@ -7,15 +7,55 @@ no longer need entries in orthanc_users.json.
 
 from __future__ import annotations
 
+import re
+
 import httpx
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from starlette.background import BackgroundTask
+from starlette.concurrency import run_in_threadpool
 from starlette.responses import StreamingResponse
 
+import dataset_access
 from auth import get_current_user
 from orthanc_client import ORTHANC_PASS, ORTHANC_URL, ORTHANC_USER
 
 router = APIRouter()
+
+# WADO-RS/QIDO-RS path form: /dicom-web/studies/{StudyInstanceUID}[/...]
+_STUDY_PATH_RE = re.compile(r"^/dicom-web/studies/([^/]+)")
+
+
+async def dicomweb_dataset_guard(
+    request: Request,
+    user: str = Depends(get_current_user),
+) -> None:
+    """Per-request dataset scoping for the DICOMweb proxy.
+
+    Extracts the StudyInstanceUID from the WADO-RS path or the QIDO-RS query
+    string and rejects studies outside the caller's dataset scope. Admins
+    bypass. Requests with no resolvable study UID (unscoped QIDO searches)
+    are denied for non-admins — OHIF is always opened with explicit
+    StudyInstanceUIDs, so the viewer never needs an unscoped search.
+
+    DB lookups are cached in-process (dataset_access TTL caches) and run in
+    the threadpool, so per-frame requests cost no DB round-trips and never
+    block the event loop.
+    """
+    scope = await run_in_threadpool(dataset_access.get_user_scope_cached, user)
+    if scope is None:
+        return
+    m = _STUDY_PATH_RE.match(request.url.path)
+    uid = m.group(1) if m else (
+        request.query_params.get("StudyInstanceUID")
+        or request.query_params.get("0020000D")
+    )
+    if not uid:
+        raise HTTPException(status_code=403, detail="Dataset access denied")
+    datasets = await run_in_threadpool(
+        dataset_access.get_study_datasets_cached, uid
+    )
+    if not dataset_access.scope_allows(scope, datasets):
+        raise HTTPException(status_code=403, detail="Dataset access denied")
 
 # Hop-by-hop headers per RFC 7230 §6.1 — must not be forwarded in either direction.
 _HOP_BY_HOP = frozenset({
@@ -133,7 +173,7 @@ async def proxy_ohif(request: Request, path: str):
 @router.api_route(
     "/dicom-web",
     methods=_PROXY_METHODS,
-    dependencies=[Depends(get_current_user)],
+    dependencies=[Depends(dicomweb_dataset_guard)],
 )
 async def proxy_dicom_web_root(request: Request):
     return await _proxy(request)
@@ -142,7 +182,7 @@ async def proxy_dicom_web_root(request: Request):
 @router.api_route(
     "/dicom-web/{path:path}",
     methods=_PROXY_METHODS,
-    dependencies=[Depends(get_current_user)],
+    dependencies=[Depends(dicomweb_dataset_guard)],
 )
 async def proxy_dicom_web(request: Request, path: str):
     return await _proxy(request)

@@ -12,6 +12,7 @@ const IDLE_CHECK_INTERVAL_MS = 20 * 1000;
 export function AuthProvider({ children }) {
   const [currentUser, setCurrentUser] = useState(null);
   const [isAdmin, setIsAdmin] = useState(false);
+  const [allowedDatasets, setAllowedDatasets] = useState([]);
   const [mustChangePassword, setMustChangePassword] = useState(false);
   const [loading, setLoading] = useState(true);
   const [sessionTimeoutMs, setSessionTimeoutMs] = useState(DEFAULT_SESSION_TIMEOUT_MS);
@@ -25,6 +26,7 @@ export function AuthProvider({ children }) {
       const data = await apiGet("/api/me");
       setCurrentUser(data.username || null);
       setIsAdmin(Boolean(data.is_admin));
+      setAllowedDatasets(Array.isArray(data.allowed_datasets) ? data.allowed_datasets : []);
       setMustChangePassword(Boolean(data.must_change_password));
       if (Number(data.session_timeout_seconds) > 0) {
         setSessionTimeoutMs(data.session_timeout_seconds * 1000);
@@ -35,6 +37,7 @@ export function AuthProvider({ children }) {
     } catch {
       setCurrentUser(null);
       setIsAdmin(false);
+      setAllowedDatasets([]);
       setMustChangePassword(false);
     } finally {
       setLoading(false);
@@ -53,6 +56,7 @@ export function AuthProvider({ children }) {
     const onExpired = () => {
       setCurrentUser(null);
       setIsAdmin(false);
+      setAllowedDatasets([]);
       setMustChangePassword(false);
     };
     window.addEventListener("auth:expired", onExpired);
@@ -117,6 +121,7 @@ export function AuthProvider({ children }) {
       wasAuthedRef.current = false;
       setCurrentUser(null);
       setIsAdmin(false);
+      setAllowedDatasets([]);
       setMustChangePassword(false);
     }
   };
@@ -126,6 +131,7 @@ export function AuthProvider({ children }) {
       value={{
         currentUser,
         isAdmin,
+        allowedDatasets,
         mustChangePassword,
         loading,
         login,

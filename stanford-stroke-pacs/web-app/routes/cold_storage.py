@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import asyncio
 
-from fastapi import APIRouter, Body, Cookie, HTTPException, Request
+from fastapi import APIRouter, Body, Depends, HTTPException, Request
 
-from auth import get_current_user
+from auth import get_current_user, get_dataset_scope
 from cache_manager import (
     estimate_warm_disk_space,
     evict_study,
@@ -18,14 +18,66 @@ from cache_manager import (
     mark_queued,
     warm_study,
 )
+from common import ensure_patient_access, ensure_study_access
 from config import STORAGE_MODE
+from db import get_conn
 from metrics import cold_storage_evict_total, cold_storage_warm_total
 
 router = APIRouter()
 
 
+def _check_study_access(studyinstanceuid: str, scope: list[str] | None) -> None:
+    """404 if the study's patient is outside the caller's dataset scope."""
+    if scope is None:
+        return
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            ensure_study_access(cur, studyinstanceuid, scope)
+    finally:
+        conn.close()
+
+
+def _check_patient_access(patient_id: str, scope: list[str] | None) -> None:
+    if scope is None:
+        return
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            ensure_patient_access(cur, patient_id, scope)
+    finally:
+        conn.close()
+
+
+def _filter_in_scope(uids: list[str], patient_ids: list[str], scope: list[str]):
+    """Narrow batch ids to those within scope (silently drops the rest)."""
+    if not uids and not patient_ids:
+        return uids, patient_ids
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            if uids:
+                cur.execute(
+                    "SELECT st.studyinstanceuid FROM image_study st "
+                    "JOIN patient p ON p.patient_id = st.patient_id "
+                    "WHERE st.studyinstanceuid = ANY(%s) AND p.dataset && %s::text[]",
+                    (uids, scope),
+                )
+                uids = [r[0] for r in cur.fetchall()]
+            if patient_ids:
+                cur.execute(
+                    "SELECT patient_id FROM patient "
+                    "WHERE patient_id = ANY(%s) AND dataset && %s::text[]",
+                    (patient_ids, scope),
+                )
+                patient_ids = [r[0] for r in cur.fetchall()]
+    finally:
+        conn.close()
+    return uids, patient_ids
+
+
 @router.get("/api/storage-mode")
-def api_storage_mode():
+def api_storage_mode(user: str = Depends(get_current_user)):
     return {"storage_mode": STORAGE_MODE}
 
 
@@ -52,7 +104,7 @@ def _run_warm_with_metrics(studyinstanceuid: str) -> None:
 async def api_warm_study(
     studyinstanceuid: str,
     request: Request,
-    auth_token: str | None = Cookie(None),
+    scope: list[str] | None = Depends(get_dataset_scope),
 ):
     """Queue a study for warming. Returns 202 immediately.
 
@@ -63,7 +115,7 @@ async def api_warm_study(
     A synchronous disk-space precheck still surfaces 507 directly so
     callers get a structured error before any background work is queued.
     """
-    get_current_user(auth_token)
+    _check_study_access(studyinstanceuid, scope)
 
     est = estimate_warm_disk_space(studyinstanceuid)
     if est and est["available_bytes"] < est["required_bytes"]:
@@ -91,8 +143,11 @@ async def api_warm_study(
 
 
 @router.post("/api/studies/{studyinstanceuid}/evict")
-def api_evict_study(studyinstanceuid: str, auth_token: str | None = Cookie(None)):
-    get_current_user(auth_token)
+def api_evict_study(
+    studyinstanceuid: str,
+    scope: list[str] | None = Depends(get_dataset_scope),
+):
+    _check_study_access(studyinstanceuid, scope)
     try:
         result = evict_study(studyinstanceuid)
     except Exception as e:
@@ -106,7 +161,11 @@ def api_evict_study(studyinstanceuid: str, auth_token: str | None = Cookie(None)
 
 
 @router.get("/api/studies/{studyinstanceuid}/cache-status")
-def api_cache_status(studyinstanceuid: str):
+def api_cache_status(
+    studyinstanceuid: str,
+    scope: list[str] | None = Depends(get_dataset_scope),
+):
+    _check_study_access(studyinstanceuid, scope)
     return get_cache_status(studyinstanceuid)
 
 
@@ -114,7 +173,7 @@ def api_cache_status(studyinstanceuid: str):
 async def api_warm_patient(
     patient_id: str,
     request: Request,
-    auth_token: str | None = Cookie(None),
+    scope: list[str] | None = Depends(get_dataset_scope),
 ):
     """Queue every study of a patient for warming. Returns 202 immediately.
 
@@ -124,7 +183,7 @@ async def api_warm_patient(
     the rest; clients observe progress via
     ``GET /api/patients/{id}/cache-status``.
     """
-    get_current_user(auth_token)
+    _check_patient_access(patient_id, scope)
 
     uids = list_patient_study_uids(patient_id)
     # Persist 'queued' markers up front so the whole patient shows Queued
@@ -141,7 +200,11 @@ async def api_warm_patient(
 
 
 @router.get("/api/patients/{patient_id}/cache-status")
-def api_patient_cache_status(patient_id: str):
+def api_patient_cache_status(
+    patient_id: str,
+    scope: list[str] | None = Depends(get_dataset_scope),
+):
+    _check_patient_access(patient_id, scope)
     return get_patient_cache_status(patient_id)
 
 
@@ -149,15 +212,21 @@ def api_patient_cache_status(patient_id: str):
 def api_batch_cache_status(
     uids: list[str] = Body(default=[]),
     patient_ids: list[str] = Body(default=[]),
+    scope: list[str] | None = Depends(get_dataset_scope),
 ):
     """Cache status for many study UIDs and/or patients in one round-trip.
 
     Lets the table poll every visible row at once instead of one request per
     row. Returns ``{"studies": {uid: status}, "patients": {id: counts}}``.
     Bounded to keep the ``ANY(%s)`` queries and response small.
+
+    Out-of-scope ids are silently dropped (not rejected): the table polls
+    whatever rows are visible, and a wholesale 404 would break the poll loop.
     """
     if len(uids) > 500 or len(patient_ids) > 500:
         raise HTTPException(status_code=413, detail="too_many_ids")
+    if scope is not None:
+        uids, patient_ids = _filter_in_scope(uids, patient_ids, scope)
     return {
         "studies": get_batch_cache_status(uids),
         "patients": get_patients_cache_status(patient_ids),

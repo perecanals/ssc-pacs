@@ -1,0 +1,77 @@
+@reference "../app.css";
+
+.admin-users {
+  @apply min-h-screen bg-bg text-text text-sm;
+}
+
+.admin-users__main {
+  @apply pt-9 px-4 pb-6 max-w-3xl mx-auto;
+}
+
+.admin-users__header {
+  @apply py-4;
+}
+
+.admin-users__title {
+  @apply text-lg font-semibold;
+}
+
+.admin-users__subtitle {
+  @apply text-xs text-text-muted mt-1;
+}
+
+.admin-users__error {
+  @apply mb-3 px-3 py-2 text-xs rounded-md border border-danger/40 bg-danger/10 text-danger;
+}
+
+.admin-users__loading {
+  @apply text-xs text-text-muted;
+}
+
+.admin-users__table-wrap {
+  @apply bg-surface border border-border rounded-md overflow-x-auto;
+}
+
+.admin-users__table {
+  @apply w-full border-collapse text-sm;
+}
+
+.admin-users__th {
+  @apply px-3 py-2 text-left text-xs font-semibold text-text-muted border-b border-border bg-table-header-bg;
+}
+
+.admin-users__th--dataset {
+  @apply text-center;
+}
+
+.admin-users__row:hover {
+  @apply bg-table-row-hover;
+}
+
+.admin-users__row--saving {
+  @apply opacity-60;
+}
+
+.admin-users__td {
+  @apply px-3 py-2 border-b border-border;
+}
+
+.admin-users__td--check {
+  @apply text-center;
+}
+
+.admin-users__td--all {
+  @apply text-xs text-text-muted text-center italic;
+}
+
+.admin-users__username {
+  @apply font-medium;
+}
+
+.admin-users__admin-pill {
+  @apply ml-2 px-1.5 py-0.5 text-[10px] rounded bg-pill-bg text-pill-text font-medium;
+}
+
+.admin-users__checkbox {
+  @apply h-4 w-4 cursor-pointer accent-primary disabled:cursor-default;
+}

@@ -43,7 +43,7 @@ describe("Landing page", () => {
     expect(screen.getByRole("button", { name: /log out/i })).toBeInTheDocument();
   });
 
-  it("renders all three navigation cards for an admin user", async () => {
+  it("renders all four navigation cards for an admin user", async () => {
     renderLanding();
     // "Navigator" is a base card rendered before auth resolves, so waiting on
     // it does not gate on the async /api/me. Wait on an admin-only card.
@@ -51,6 +51,7 @@ describe("Landing page", () => {
       expect(screen.getByText("Orthanc Explorer")).toBeInTheDocument();
     });
     expect(screen.getByText("OHIF Viewer")).toBeInTheDocument();
+    expect(screen.getByText("User Access")).toBeInTheDocument();
     expect(screen.getByText("Navigator")).toBeInTheDocument();
   });
 });

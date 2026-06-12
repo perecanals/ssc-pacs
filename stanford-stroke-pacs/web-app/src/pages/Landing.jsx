@@ -19,6 +19,15 @@ const baseCards = [
 
 const adminOnlyCards = [
   {
+    to: "/admin",
+    internal: true,
+    icon: "\u{1F465}",
+    title: "User Access",
+    description:
+      "Grant per-user access to imaging datasets. Users only see data from datasets they are granted.",
+    hint: "Manage access",
+  },
+  {
     href: () => "/ohif/",
     icon: "\u{1F5BC}",
     title: "OHIF Viewer",

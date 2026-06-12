@@ -24,6 +24,7 @@ One **Orthanc** container (`ssc-orthanc`), one **Web App** service on the host (
 | Secret rotation (JWT, Orthanc admin, DB) | [`operations/secret_rotation.md`](operations/secret_rotation.md) |
 | Observability (logs, /healthz, /metrics, Grafana) | [`operations/observability.md`](operations/observability.md) |
 | Two-DB reconciliation (image_series vs Orthanc) | [`operations/reconciliation.md`](operations/reconciliation.md) |
+| Per-user dataset access (grants, /admin page, enforcement) | [`reference/architecture.md` §5.4](reference/architecture.md) + [`operations/commands.md`](operations/commands.md) |
 | Annotation audit trail (history table, trigger, API) | [`operations/annotation_history.md`](operations/annotation_history.md) |
 | Backup strategy (Tier 1 active, Tier 2 dormant) | [`operations/backup_strategy.md`](operations/backup_strategy.md) |
 | Restore runbook (DB recovery procedure) | [`operations/restore_runbook.md`](operations/restore_runbook.md) |

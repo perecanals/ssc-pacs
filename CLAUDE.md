@@ -2,6 +2,8 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+**Never run `sudo` commands yourself** — there is no terminal to enter the password, so they always fail. Ask the user to run them (suggest the `! <command>` prefix so the output lands in the session).
+
 ## Repository layout
 
 ```
@@ -89,9 +91,12 @@ sudo systemctl restart ssc-web-app
 
 ### User management
 ```bash
-python scripts/admin/manage_users.py list
-python scripts/admin/manage_users.py add <user> [--admin]   # --admin also mirrors into orthanc_users.json
+python scripts/admin/manage_users.py list                   # includes dataset grants column
+python scripts/admin/manage_users.py add <user> [--admin] [--datasets precise,lvo]
+                                                            # --admin also mirrors into orthanc_users.json
+                                                            # no --datasets = user sees NO data (deny-by-default)
 python scripts/admin/manage_users.py passwd <user>
+python scripts/admin/manage_users.py set-datasets <user> <csv|--all|--none>  # replace dataset grants
 python scripts/admin/manage_users.py remove <user>
 python scripts/admin/manage_users.py rotate-service-account # rotates Orthanc service account (.env + orthanc_users.json)
 python scripts/admin/manage_users.py check-service-account  # verify .env and orthanc_users.json agree (exits non-zero on drift)
@@ -223,6 +228,7 @@ The stack has two services and two databases.
 
 **Auth:**
 - End users live in the PostgreSQL `users` table (bcrypt) — single source of truth. Web App login returns an HttpOnly JWT cookie.
+- **Per-user dataset access**: `users.allowed_datasets text[]` holds the `patient.dataset` cohort tags a non-admin may see (deny-by-default: empty = no data; admins bypass). Enforced on every patient-data endpoint (list filtering + 404 on out-of-scope ids) and on the DICOMweb proxy (403, cached per study — `web-app/dataset_access.py`). Managed via the admin-only `/admin` page or `manage_users.py set-datasets`. See `documentation/reference/architecture.md` §5.4.
 - Web App reverse-proxies `/ohif/*` and `/dicom-web/*` to Orthanc (`web-app/routes/proxy.py`, async `httpx`) and attaches the service-account Basic auth from `.env` on every upstream call. End users never present credentials to Orthanc.
 - `orthanc_users.json` holds only the service account + admin users (`users.is_admin=True`). Admins can reach `:8042/ui/app/` and `:8042/ohif/` directly as themselves.
 - `scripts/admin/manage_users.py` is the single provisioning tool: regular `add`/`passwd`/`remove` touch the DB (and mirror admin entries into the JSON); `rotate-service-account` rewrites `.env`'s `ORTHANC_ADMIN_PASSWORD` and the JSON service-account entry atomically.

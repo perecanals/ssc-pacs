@@ -5,11 +5,16 @@ from __future__ import annotations
 import logging
 
 import psycopg2.extras
-from fastapi import APIRouter, BackgroundTasks, Cookie, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from pydantic import BaseModel
 
-from auth import get_current_user, require_admin
-from common import VALID_LEVELS
+from auth import get_current_user, get_dataset_scope, require_admin
+from common import (
+    VALID_LEVELS,
+    ensure_patient_access,
+    ensure_series_access,
+    ensure_study_access,
+)
 from db import get_conn
 from labelled_table_sync import sync_labelled_rows
 
@@ -88,10 +93,14 @@ _UPSERT_SQL = {
 
 
 @router.get("/api/series/{seriesinstanceuid}/annotations")
-def get_annotations(seriesinstanceuid: str):
+def get_annotations(
+    seriesinstanceuid: str,
+    scope: list[str] | None = Depends(get_dataset_scope),
+):
     conn = get_conn()
     try:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            ensure_series_access(cur, seriesinstanceuid, scope)
             cur.execute(
                 "SELECT id, level, label, value, created_by, created_at, notes "
                 "FROM annotations WHERE seriesinstanceuid = %s "
@@ -107,9 +116,9 @@ def get_annotations(seriesinstanceuid: str):
 def create_annotation(
     body: AnnotationCreate,
     background_tasks: BackgroundTasks,
-    auth_token: str | None = Cookie(None),
+    username: str = Depends(get_current_user),
+    scope: list[str] | None = Depends(get_dataset_scope),
 ):
-    username = get_current_user(auth_token)
     if body.level not in VALID_LEVELS:
         raise HTTPException(status_code=400, detail="level must be patient, study, or series")
     conn = get_conn()
@@ -119,6 +128,7 @@ def create_annotation(
             if body.level == "series":
                 if not body.seriesinstanceuid:
                     raise HTTPException(status_code=400, detail="seriesinstanceuid required for series-level")
+                ensure_series_access(cur, body.seriesinstanceuid, scope)
                 params = (
                     body.seriesinstanceuid, body.studyinstanceuid, body.patient_id,
                     body.label, body.value, username, body.notes,
@@ -126,6 +136,7 @@ def create_annotation(
             elif body.level == "study":
                 if not body.studyinstanceuid:
                     raise HTTPException(status_code=400, detail="studyinstanceuid required for study-level")
+                ensure_study_access(cur, body.studyinstanceuid, scope)
                 params = (
                     body.studyinstanceuid, body.patient_id,
                     body.label, body.value, username, body.notes,
@@ -133,6 +144,7 @@ def create_annotation(
             else:
                 if not body.patient_id:
                     raise HTTPException(status_code=400, detail="patient_id required for patient-level")
+                ensure_patient_access(cur, body.patient_id, scope)
                 params = (
                     body.patient_id,
                     body.label, body.value, username, body.notes,
@@ -155,9 +167,8 @@ def create_annotation(
 def delete_annotation(
     annotation_id: int,
     background_tasks: BackgroundTasks,
-    auth_token: str | None = Cookie(None),
+    scope: list[str] | None = Depends(get_dataset_scope),
 ):
-    get_current_user(auth_token)
     conn = get_conn()
     try:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
@@ -169,6 +180,12 @@ def delete_annotation(
             row = cur.fetchone()
             if not row:
                 raise HTTPException(status_code=404, detail="Annotation not found")
+            if row["level"] == "series":
+                ensure_series_access(cur, row["seriesinstanceuid"], scope)
+            elif row["level"] == "study":
+                ensure_study_access(cur, row["studyinstanceuid"], scope)
+            else:
+                ensure_patient_access(cur, row["patient_id"], scope)
             cur.execute(
                 "DELETE FROM annotations WHERE id = %s", (annotation_id,)
             )

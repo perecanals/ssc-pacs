@@ -71,18 +71,30 @@ so they can reach Orthanc directly on `:8042` as themselves.
 # List all users
 python scripts/admin/manage_users.py list
 
-# Add a regular user (DB only) — admin types a temporary password
+# Add a regular user (DB only) — admin types a temporary password.
+# Without --datasets the user sees NO data until granted (deny-by-default).
 python scripts/admin/manage_users.py add alice
+python scripts/admin/manage_users.py add alice --datasets precise,lvo
 
-# Add an admin user (DB + orthanc_users.json)
+# Add an admin user (DB + orthanc_users.json); admins see all datasets
 python scripts/admin/manage_users.py add bob --admin
 
 # Reset a user's password (admin-driven; user is forced to change it again)
 python scripts/admin/manage_users.py passwd alice
 
+# Replace a user's dataset grants (web-app data visibility)
+python scripts/admin/manage_users.py set-datasets alice precise,lvo
+python scripts/admin/manage_users.py set-datasets alice --all   # every current dataset
+python scripts/admin/manage_users.py set-datasets alice --none  # revoke all access
+
 # Remove a user
 python scripts/admin/manage_users.py remove alice
 ```
+
+Dataset grants control which patients a non-admin user sees in the web app
+(`patient.dataset` overlap; admins bypass). They can also be edited in the
+web app's `/admin` page (admin-only). Changes take effect immediately — no
+restart needed.
 
 `add` and `passwd` both set the user's `must_change_password` flag to TRUE. On
 their next sign-in the Navigator UI redirects them to `/change-password` and
