@@ -41,6 +41,24 @@ from orthanc_client import orthanc_lookup
 router = APIRouter()
 
 
+def _dataset_display_sql(patient_id_expr: str) -> str:
+    """SELECT-list fragment: the owning patient's cohort tags, comma-joined
+    (same display format as /api/patients), aliased AS dataset."""
+    return (
+        "(SELECT array_to_string(p.dataset, ', ') FROM patient p "
+        f"WHERE p.patient_id = {patient_id_expr}) AS dataset"
+    )
+
+
+def _dataset_member_sql(patient_id_expr: str) -> str:
+    """WHERE fragment: the owning patient's dataset array contains the tag
+    bound to one %s placeholder (exact membership, like /api/patients)."""
+    return (
+        "EXISTS (SELECT 1 FROM patient p "
+        f"WHERE p.patient_id = {patient_id_expr} AND %s = ANY(p.dataset))"
+    )
+
+
 # ---------------------------------------------------------------------------
 # Patient browsing
 # ---------------------------------------------------------------------------
@@ -207,7 +225,8 @@ def patient_studies(
                 "COALESCE(("
                 "  SELECT string_agg(DISTINCT s.modality, ', ' ORDER BY s.modality) "
                 "  FROM image_series s WHERE s.studyinstanceuid = st.studyinstanceuid"
-                "), '') AS modality "
+                "), '') AS modality, "
+                f"{_dataset_display_sql('st.patient_id')} "
                 "FROM image_study st "
                 f"WHERE {where_st} "
                 "ORDER BY st.acquisitiondatetime",
@@ -286,6 +305,13 @@ def list_studies(
     patient_id: str | None = Query(None),
     import_id: str | None = Query(None),
     import_label: str | None = Query(None),
+    dataset: str | None = Query(
+        None,
+        description=(
+            "Exact match on a cohort tag in the owning patient's dataset "
+            "(text[]); study included if the tag is a member of that array."
+        ),
+    ),
     modality: str | None = Query(None),
     study_type: str | None = Query(None),
     studydescription: str | None = Query(None),
@@ -318,6 +344,10 @@ def list_studies(
             if import_label:
                 conditions.append("LOWER(COALESCE(st.import_label, '')) LIKE LOWER(%s)")
                 params.append(f"%{import_label}%")
+            ds = (dataset or "").strip()
+            if ds:
+                conditions.append(_dataset_member_sql("st.patient_id"))
+                params.append(ds)
             if study_type:
                 conditions.append("UPPER(st.study_type) = UPPER(%s)")
                 params.append(study_type)
@@ -369,7 +399,8 @@ def list_studies(
                 f"COALESCE(("
                 f"  SELECT string_agg(DISTINCT s.modality, ', ' ORDER BY s.modality) "
                 f"  FROM image_series s WHERE s.studyinstanceuid = st.studyinstanceuid"
-                f"), '') AS modality "
+                f"), '') AS modality, "
+                f"{_dataset_display_sql('st.patient_id')} "
                 f"FROM image_study st {where} "
                 f"ORDER BY st.{col} {direction} NULLS LAST, st.studyinstanceuid ASC "
                 f"LIMIT %s OFFSET %s",
@@ -400,7 +431,8 @@ def study_series(
             ensure_study_access(cur, studyinstanceuid, scope)
             cur.execute(
                 "SELECT s.seriesinstanceuid, s.studyinstanceuid, s.patient_id, s.import_id, s.import_label, "
-                "s.modality, s.seriesdescription, s.acquisitiondatetime, s.number_of_slices "
+                "s.modality, s.seriesdescription, s.acquisitiondatetime, s.number_of_slices, "
+                f"{_dataset_display_sql('s.patient_id')} "
                 "FROM image_series s WHERE s.studyinstanceuid = %s "
                 "ORDER BY s.acquisitiondatetime, s.seriesdescription",
                 (studyinstanceuid,),
@@ -431,6 +463,13 @@ def list_series(
     patient_id: str | None = Query(None),
     import_id: str | None = Query(None),
     import_label: str | None = Query(None),
+    dataset: str | None = Query(
+        None,
+        description=(
+            "Exact match on a cohort tag in the owning patient's dataset "
+            "(text[]); series included if the tag is a member of that array."
+        ),
+    ),
     modality: str | None = Query(None),
     description: str | None = Query(None),
     study_type: str | None = Query(None),
@@ -466,6 +505,10 @@ def list_series(
             if import_label:
                 conditions.append("LOWER(COALESCE(s.import_label, '')) LIKE LOWER(%s)")
                 params.append(f"%{import_label}%")
+            ds = (dataset or "").strip()
+            if ds:
+                conditions.append(_dataset_member_sql("s.patient_id"))
+                params.append(ds)
             if modality:
                 conditions.append("UPPER(s.modality) LIKE UPPER(%s)")
                 params.append(f"%{modality}%")
@@ -509,7 +552,8 @@ def list_series(
                         s.modality,
                         s.seriesdescription,
                         s.acquisitiondatetime,
-                        s.number_of_slices
+                        s.number_of_slices,
+                        {_dataset_display_sql('s.patient_id')}
                     FROM {SERIES_FROM_CLAUSE}
                     {where}
                     ORDER BY s.seriesinstanceuid
