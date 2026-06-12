@@ -8,9 +8,12 @@ import shutil
 from pathlib import Path
 
 import psycopg2
-from fastapi import APIRouter, Depends
+import psycopg2.extras
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel
 
+import dataset_access
 from auth import require_admin
 from config import DICOM_DATA_ROOT, STORAGE_MODE
 from db import DB_CONFIG, get_conn
@@ -163,3 +166,76 @@ def reconciliation_latest(user: str = Depends(require_admin)):
         )
     latest = reports[-1]
     return json.loads(latest.read_text())
+
+
+# ---------------------------------------------------------------------------
+# User dataset permissions (admin-only)
+# ---------------------------------------------------------------------------
+
+
+class DatasetGrants(BaseModel):
+    datasets: list[str]
+
+
+def _serialize_user_row(row: dict) -> dict:
+    if row.get("created_at"):
+        row["created_at"] = row["created_at"].isoformat()
+    row["allowed_datasets"] = sorted(row.get("allowed_datasets") or [])
+    return row
+
+
+@router.get("/api/admin/users")
+def list_users(user: str = Depends(require_admin)):
+    """All users with their dataset grants, for the /admin permissions page."""
+    conn = get_conn()
+    try:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute(
+                "SELECT username, is_admin, allowed_datasets, created_at "
+                "FROM users ORDER BY username"
+            )
+            return [_serialize_user_row(r) for r in cur.fetchall()]
+    finally:
+        conn.close()
+
+
+@router.put("/api/admin/users/{username}/datasets")
+def set_user_datasets(
+    username: str,
+    body: DatasetGrants,
+    admin: str = Depends(require_admin),
+):
+    """Replace a user's dataset grants.
+
+    Values must be existing `patient.dataset` tags (422 otherwise — catches
+    typos; grant-ahead-of-ingest is a script-only affordance). Invalidates
+    the proxy's cached scope so the change applies immediately.
+    """
+    datasets = sorted({d.strip() for d in body.datasets if d.strip()})
+    conn = get_conn()
+    try:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute(
+                "SELECT DISTINCT unnest(dataset) AS ds FROM patient"
+            )
+            known = {r["ds"] for r in cur.fetchall()}
+            unknown = [d for d in datasets if d not in known]
+            if unknown:
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"Unknown dataset(s): {', '.join(unknown)}",
+                )
+            cur.execute(
+                "UPDATE users SET allowed_datasets = %s::text[] "
+                "WHERE username = %s "
+                "RETURNING username, is_admin, allowed_datasets, created_at",
+                (datasets, username),
+            )
+            row = cur.fetchone()
+            if row is None:
+                raise HTTPException(status_code=404, detail="User not found")
+        conn.commit()
+    finally:
+        conn.close()
+    dataset_access.invalidate_user_scope(username)
+    return _serialize_user_row(row)

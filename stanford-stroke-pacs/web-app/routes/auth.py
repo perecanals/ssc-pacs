@@ -77,13 +77,15 @@ def me(auth_token: str | None = Cookie(None)):
             "username": None,
             "is_admin": False,
             "must_change_password": False,
+            "allowed_datasets": [],
             "session_timeout_seconds": SESSION_TIMEOUT_SECONDS,
         }
     conn = get_conn()
     try:
         with conn.cursor() as cur:
             cur.execute(
-                "SELECT is_admin, must_change_password FROM users WHERE username = %s",
+                "SELECT is_admin, must_change_password, allowed_datasets "
+                "FROM users WHERE username = %s",
                 (username,),
             )
             row = cur.fetchone()
@@ -91,10 +93,12 @@ def me(auth_token: str | None = Cookie(None)):
         conn.close()
     is_admin = bool(row and row[0])
     must_change = bool(row and row[1])
+    allowed_datasets = sorted((row and row[2]) or [])
     return {
         "username": username,
         "is_admin": is_admin,
         "must_change_password": must_change,
+        "allowed_datasets": allowed_datasets,
         "session_timeout_seconds": SESSION_TIMEOUT_SECONDS,
     }
 

@@ -13,6 +13,7 @@ from config import (
     SESSION_TIMEOUT_HOURS,
 )
 from db import _require_env, get_conn
+import dataset_access
 
 JWT_SECRET = _require_env("JWT_SECRET")
 JWT_ALGORITHM = "HS256"
@@ -81,3 +82,15 @@ def require_admin(user: str = Depends(get_current_user)) -> str:
     if not row or not row[0]:
         raise HTTPException(status_code=403, detail="Admin access required")
     return user
+
+
+def get_dataset_scope(user: str = Depends(get_current_user)) -> list[str] | None:
+    """FastAPI dependency: the caller's dataset scope (401 if not logged in).
+
+    Returns ``None`` for admins (unrestricted) or a — possibly empty —
+    sorted list of allowed dataset tags. Deny-by-default: an empty list
+    means the user sees no patient data. Uncached, like ``require_admin``
+    (one indexed PK lookup per request).
+    """
+    scope = dataset_access.fetch_user_scope(user)
+    return None if scope is None else sorted(scope)

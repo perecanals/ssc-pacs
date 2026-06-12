@@ -267,6 +267,35 @@ Authenticated users can rebuild the snapshot tables used for export/reporting.
 This gives the app an explicit "refresh derived reporting state" action without
 mixing that logic into routine browsing.
 
+### 5.7 Per-user dataset access
+
+Every non-admin user has a dataset scope (`users.allowed_datasets`, a subset
+of the `patient.dataset` cohort tags such as `lvo` / `precise`). The backend
+enforces it on every patient-data endpoint:
+
+- list endpoints return only patients (and their studies/series) whose
+  `dataset` overlaps the scope; `/api/datasets` and
+  `/api/study-import-labels` narrow their option lists the same way
+- detail endpoints keyed by an entity id return **404** for out-of-scope ids
+  (indistinguishable from nonexistent), including OHIF link resolution,
+  warm/evict/cache-status, and annotation reads/writes
+- the DICOMweb proxy rejects out-of-scope StudyInstanceUIDs with 403 (cached
+  per study, so image streaming performance is unaffected)
+- deny-by-default: a user with no grants sees an empty table; admins bypass
+
+Admins manage grants in the **`/admin` page** (a users × datasets checkbox
+grid, linked from an admin-only Landing card) backed by
+`GET /api/admin/users` and `PUT /api/admin/users/{username}/datasets`
+(validates tags against `patient.dataset`, 422 on unknown), or via
+`scripts/admin/manage_users.py set-datasets` (which additionally allows
+granting tags that don't exist yet). `/api/me` exposes `allowed_datasets`
+to the SPA.
+
+Known limitation: `/api/labels` and `/api/labels/summary` return label names
+and aggregate counts computed across **all** data (no identifiers or values
+leak; per-scope counts were judged not worth the query complexity).
+`/api/labels/{name}/values` is scope-filtered because values are free text.
+
 ---
 
 ## 6. OHIF Integration Behavior
@@ -314,8 +343,9 @@ The most important Web App files are:
 - `web-app/app.py` - FastAPI entry point (lifespan, middleware, router registration)
 - `web-app/routes/` - API route modules (auth, studies, annotations, labels, cold_storage, admin, preferences, static)
 - `web-app/db.py` - DB connection pool and `DB_CONFIG` (single source of truth)
-- `web-app/auth.py` - JWT utilities and auth dependencies
-- `web-app/common.py` - shared label-filter SQL builders and annotation helpers
+- `web-app/auth.py` - JWT utilities and auth dependencies (incl. `get_dataset_scope`)
+- `web-app/dataset_access.py` - per-user dataset scopes + TTL caches (proxy guard)
+- `web-app/common.py` - shared label-filter SQL builders, dataset-scope SQL helpers, annotation helpers
 - `web-app/orthanc_client.py` - Orthanc REST API wrappers
 - `web-app/cache_manager.py` - cold-storage warm/evict logic
 - `web-app/src/pages/Navigator.jsx` - page-level layout and preview state

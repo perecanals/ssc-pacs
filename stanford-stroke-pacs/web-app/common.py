@@ -9,6 +9,8 @@ from __future__ import annotations
 import json
 import re
 
+from fastapi import HTTPException
+
 VALID_LEVELS = ("patient", "study", "series")
 
 LABEL_NAME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_]{0,62}$")
@@ -27,6 +29,61 @@ SERIES_SORT_WHITELIST = {
     "patient_id", "import_id", "import_label", "acquisitiondatetime",
     "modality", "seriesdescription", "number_of_slices",
 }
+
+# ---------------------------------------------------------------------------
+# Dataset (cohort) scoping
+#
+# A caller's scope comes from auth.get_dataset_scope: None = admin
+# (unrestricted), list = allowed `patient.dataset` tags (deny-by-default —
+# empty list matches nothing). Always bind scope lists as %s::text[] so
+# psycopg2 adapts empty lists to a typed empty array.
+# ---------------------------------------------------------------------------
+
+
+def dataset_filter_sql(patient_id_expr: str) -> str:
+    """WHERE fragment limiting rows to patients whose dataset overlaps the
+    caller's scope. One ``%s`` placeholder: the scope list (text[])."""
+    return (
+        "EXISTS (SELECT 1 FROM patient dsp "
+        f"WHERE dsp.patient_id = {patient_id_expr} AND dsp.dataset && %s::text[])"
+    )
+
+
+def _ensure_access(cur, sql: str, entity_id: str, scope: list[str] | None, detail: str):
+    if scope is None:
+        return
+    cur.execute(sql, (entity_id, scope))
+    if cur.fetchone() is None:
+        # 404 (not 403) so out-of-scope entity ids are indistinguishable
+        # from nonexistent ones.
+        raise HTTPException(status_code=404, detail=detail)
+
+
+def ensure_patient_access(cur, patient_id: str, scope: list[str] | None) -> None:
+    _ensure_access(
+        cur,
+        "SELECT 1 FROM patient WHERE patient_id = %s AND dataset && %s::text[]",
+        patient_id, scope, "Patient not found",
+    )
+
+
+def ensure_study_access(cur, studyinstanceuid: str, scope: list[str] | None) -> None:
+    _ensure_access(
+        cur,
+        "SELECT 1 FROM image_study st JOIN patient p ON p.patient_id = st.patient_id "
+        "WHERE st.studyinstanceuid = %s AND p.dataset && %s::text[]",
+        studyinstanceuid, scope, "Study not found",
+    )
+
+
+def ensure_series_access(cur, seriesinstanceuid: str, scope: list[str] | None) -> None:
+    _ensure_access(
+        cur,
+        "SELECT 1 FROM image_series s JOIN patient p ON p.patient_id = s.patient_id "
+        "WHERE s.seriesinstanceuid = %s AND p.dataset && %s::text[]",
+        seriesinstanceuid, scope, "Series not found",
+    )
+
 
 # ---------------------------------------------------------------------------
 # Unified label-filter SQL builder  (replaces _label_filter_sql,

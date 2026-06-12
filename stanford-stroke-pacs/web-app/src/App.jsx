@@ -4,6 +4,7 @@ import Landing from "./pages/Landing";
 import Navigator from "./pages/Navigator";
 import Login from "./pages/Login";
 import ChangePassword from "./pages/ChangePassword";
+import AdminUsers from "./pages/AdminUsers";
 import ProtectedRoute from "./components/ProtectedRoute";
 
 export default function App() {
@@ -32,6 +33,14 @@ export default function App() {
           element={
             <ProtectedRoute>
               <Navigator />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/admin"
+          element={
+            <ProtectedRoute>
+              <AdminUsers />
             </ProtectedRoute>
           }
         />

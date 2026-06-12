@@ -44,21 +44,27 @@ The web app backend (`web-app/app.py` + `web-app/routes/`) is a FastAPI service 
 
 Authorization model:
 
-- read endpoints are public
-- write endpoints require a valid JWT
+- every read and write endpoint requires a valid JWT
+- non-admin users additionally carry a **dataset scope**
+  (`users.allowed_datasets`): browsing endpoints filter rows to in-scope
+  patients, entity-id endpoints 404 on out-of-scope ids, and the DICOMweb
+  proxy 403s out-of-scope studies (see `reference/architecture.md` §5.4)
 - DICOM zip download (`GET /api/series/{uid}/dicom-zip`) is **admin-only**
-  (`Depends(require_admin)`) — bulk export is a privilege, not a public
+  (`Depends(require_admin)`) — bulk export is a privilege, not a general
   read; the DataTable download button is hidden for non-admins
-- proxied OHIF/DICOMweb routes require a valid JWT (any logged-in user)
+- proxied OHIF/DICOMweb routes require a valid JWT plus dataset access to
+  the requested study
 - `created_by` is always taken from the authenticated user, never from client
   input
 
 `users.is_admin` is consulted by the `require_admin` dependency
 (`web-app/auth.py`) used by `/api/admin/*` endpoints and the DICOM zip
-download. It also gates the "Orthanc Explorer" Landing card and the
-DataTable DICOM download button on the frontend — non-admins do not see them.
-`/api/me` returns `{"username": ..., "is_admin": bool}` so the React
-`AuthContext` can apply admin-only UI affordances.
+download. It also gates the "Orthanc Explorer", "OHIF Viewer", and
+"User Access" Landing cards and the DataTable DICOM download button on the
+frontend — non-admins do not see them. `/api/me` returns
+`{"username": ..., "is_admin": bool, "allowed_datasets": [...]}` so the React
+`AuthContext` can apply admin-only UI affordances (it exposes
+`allowedDatasets` alongside `isAdmin`).
 
 ---
 
@@ -68,10 +74,15 @@ The web app frontend is a React single-page application built with Vite and
 Tailwind CSS. Source code lives in `web-app/src/`; the production build is in
 `web-app/dist/`. Component styles are in co-located `.css` files.
 
-The app has two routes:
+The app has three routes:
 
 - `/` — Landing page with card links to Web App, Orthanc Explorer 2, and OHIF
 - `/app` — Web App annotation browser
+- `/admin` — admin-only user dataset-access page (`AdminUsers.jsx`): a
+  users × datasets checkbox grid backed by `GET /api/admin/users` and
+  `PUT /api/admin/users/{username}/datasets`, with optimistic updates that
+  revert on error. Non-admins are redirected to `/` (the backend 403s the
+  API regardless). Reuses `TopBar` and the Navigator visual conventions.
 
 The Navigator page (`Navigator.jsx`) provides three hierarchical levels:
 **Patients**, **Studies**, and **Series**. The level switcher lives in the
