@@ -11,6 +11,7 @@ vi.mock("../api/client", () => ({
     if (path === "/api/label-definitions") return Promise.resolve([]);
     if (path === "/api/labels/summary") return Promise.resolve([]);
     if (path === "/api/study-import-labels") return Promise.resolve([]);
+    if (path.startsWith("/api/preferences/")) return Promise.resolve({ prefs: {} });
     // Default: paginated listing
     return Promise.resolve({ total: 0, page: 1, per_page: 50, items: [] });
   }),

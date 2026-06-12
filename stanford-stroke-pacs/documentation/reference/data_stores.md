@@ -68,7 +68,7 @@ for the workflow when adding a new revision.
 - **`users`**: the single source of truth for end-user authentication (bcrypt password hashes). The `is_admin` column gates `/api/admin/*` endpoints and the "Orthanc Explorer" Landing card; admins are also mirrored into `orthanc_users.json` by `scripts/admin/manage_users.py` so they can reach `:8042` directly.
 - **`annotations`**: multi-level (patient / study / series) annotations.
 - **`label_definitions`**: label registry (level-aware; supports bool/int/text/select).
-- **`user_preferences`**: per-user persisted table layout/state (JSONB).
+- **`user_preferences`**: per-user persisted table layout/state and Navigator session state (JSONB).
 - **`snapshot_patients` / `snapshot_studys` / `snapshot_seriess`**: refreshable export-oriented snapshot tables.
 
 Audit:
@@ -187,6 +187,12 @@ prefs      JSONB NOT NULL DEFAULT '{}'
 updated_at TIMESTAMPTZ DEFAULT now()
 PRIMARY KEY (username, level)
 ```
+
+The `patient` / `study` / `series` rows hold per-level table preferences
+(column visibility, order, sort, column filters, frozen-column state). The
+`_global` row holds the Navigator session state as
+`{"session": {"level": ..., "filters": {...}}}` — the last-used hierarchy
+level and sidebar quick filters, restored on the user's next visit.
 
 ### `annotations_history`
 

@@ -1,6 +1,7 @@
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { getStorageMode, resolveOhifViewerUrl } from "../api/warmOhif";
 import { useAuth } from "../context/AuthContext";
+import useSessionStatePersistence from "../hooks/useSessionStatePersistence";
 import TopBar from "../components/TopBar";
 import Sidebar from "../components/Sidebar";
 import DataTable from "../components/DataTable";
@@ -13,8 +14,18 @@ const LEVELS = [
   { key: "series", label: "Series" },
 ];
 
+export const DEFAULT_FILTERS = {
+  label: null,
+  labelLevel: null,
+  patientId: null,
+  modality: null,
+  description: null,
+  studyImportLabel: null,
+  dataset: null,
+};
+
 export default function Navigator() {
-  const { loading: authLoading } = useAuth();
+  const { loading: authLoading, currentUser } = useAuth();
   const [level, setLevel] = useState("patient");
   const [sidebarOpen, setSidebarOpen] = useState(
     () => window.localStorage.getItem("sidebar:open") !== "false",
@@ -26,15 +37,24 @@ export default function Navigator() {
       return next;
     });
   }, []);
-  const [filters, setFilters] = useState({
-    label: null,
-    labelLevel: null,
-    patientId: null,
-    modality: null,
-    description: null,
-    studyImportLabel: null,
-    dataset: null,
+  const [filters, setFilters] = useState(DEFAULT_FILTERS);
+
+  // Restore last session's level + sidebar filters from the `_global`
+  // preferences bucket; saves them back (debounced) whenever they change.
+  const [sessionLoaded, setSessionLoaded] = useState(false);
+  const { loaded: restoreLoaded, restoredLevel, restoredFilters } = useSessionStatePersistence({
+    ready: !authLoading,
+    currentUser,
+    level,
+    filters,
+    defaultFilters: DEFAULT_FILTERS,
   });
+  useEffect(() => {
+    if (!restoreLoaded) return;
+    setLevel(restoredLevel);
+    setFilters(restoredFilters);
+    setSessionLoaded(true);
+  }, [restoreLoaded, restoredLevel, restoredFilters]);
 
   const [previewSelection, setPreviewSelection] = useState(null);
   const [previewUrl, setPreviewUrl] = useState("");
@@ -64,28 +84,12 @@ export default function Navigator() {
   // resets the accumulated list (and scrolls to top) whenever filters
   // change, so no page bookkeeping is needed here.
   const handleResetSidebarFilters = useCallback(() => {
-    setFilters({
-      label: null,
-      labelLevel: null,
-      patientId: null,
-      modality: null,
-      description: null,
-      studyImportLabel: null,
-      dataset: null,
-    });
+    setFilters(DEFAULT_FILTERS);
   }, []);
 
   const handleLevelChange = useCallback((newLevel) => {
     setLevel(newLevel);
-    setFilters({
-      label: null,
-      labelLevel: null,
-      patientId: null,
-      modality: null,
-      description: null,
-      studyImportLabel: null,
-      dataset: null,
-    });
+    setFilters(DEFAULT_FILTERS);
     clearPreview();
   }, [clearPreview]);
 
@@ -152,7 +156,10 @@ export default function Navigator() {
     }
   }, [previewError, previewOpen, previewSelection, previewUrl]);
 
-  if (authLoading) return null;
+  // Gate rendering until the session restore resolves so the DataTable
+  // (keyed by level) mounts exactly once, at the restored level with the
+  // restored filters — no fetch-with-defaults-then-refetch.
+  if (authLoading || !sessionLoaded) return null;
 
   return (
     <div className="navigator">

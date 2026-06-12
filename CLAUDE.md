@@ -240,6 +240,8 @@ web-app/src/
   App.jsx                  React Router (/ and /app)
   api/client.js            Fetch wrapper with 401 handling
   context/                 AuthContext
+  hooks/
+    useSessionStatePersistence.js  Persist/restore Navigator level + sidebar filters (_global prefs)
   pages/                   Landing, Navigator (page-level layout + preview state), Login, ChangePassword
   utils/
     colors.js              Shared color palette (NOTION_COLORS, hashStr, valueColor)
@@ -262,7 +264,7 @@ web-app/src/
     LabelDefModal.jsx      Label definition creation UI
 ```
 
-The `DataTable` is one generic component used at all three hierarchy levels. Table preferences (column visibility, order, sort, filters, frozen column) are persisted per user and per level in `user_preferences` (server-side JSONB). All components use `prop-types` for runtime prop validation.
+The `DataTable` is one generic component used at all three hierarchy levels. Table preferences (column visibility, order, sort, filters, frozen column) are persisted per user and per level in `user_preferences` (server-side JSONB); the Navigator's last-used level and sidebar quick filters are persisted under the `_global` level (`src/hooks/useSessionStatePersistence.js`). All components use `prop-types` for runtime prop validation.
 
 ## Image integration protocol
 

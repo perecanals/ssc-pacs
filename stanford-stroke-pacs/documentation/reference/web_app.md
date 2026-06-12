@@ -157,6 +157,9 @@ Key behaviors:
 - all table preferences (column visibility, order, sort, filters, frozen
   state) are persisted per user on the server in the `user_preferences`
   table; preferences are loaded on mount and saved automatically
+- the current hierarchy level and the sidebar quick filters are also
+  persisted per user (under the `_global` preferences level) and restored
+  on the next visit, so a session resumes where it left off
 - the Actions column is hidden at the patient level (no OHIF action applies)
 
 For component-level detail (routes, `DataTable` internals, etc.), see
@@ -247,7 +250,11 @@ Users can control visible columns per level.
 These preferences are stored server-side in the `user_preferences` table
 (per user and per level), so the table layout persists across browsers,
 devices, and sessions. Preferences include column visibility, column order,
-sort column/direction, column filters, and frozen-column state.
+sort column/direction, column filters, and frozen-column state. A separate
+`_global` row stores the Navigator session state — the last-used hierarchy
+level and the sidebar quick filters — which is restored on the next login.
+Clearing filters (including via "Reset Filters") persists the cleared state
+the same way.
 
 Column display order can be changed by dragging and dropping column headers.
 A "Reset View" button in the top bar restores all table preferences to
