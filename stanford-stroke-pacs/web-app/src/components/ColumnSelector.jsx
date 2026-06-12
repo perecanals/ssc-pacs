@@ -1,6 +1,12 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import PropTypes from "prop-types";
-import { compareLabelDefsDefault, LEVEL_ORDER, LEVEL_LABELS } from "../utils/table";
+import {
+  compareLabelDefsDefault,
+  DEFAULT_VISIBLE_LABEL_NAMES,
+  LEVEL_LABELS,
+  LEVEL_ORDER,
+  LEVEL_RANK,
+} from "../utils/table";
 import "./ColumnSelector.css";
 
 const COLUMN_KEY_MIGRATIONS = {
@@ -46,6 +52,19 @@ export function useColumnPrefs(labelDefs, builtinCols, level, initialPrefs = {})
     [builtinColsFull, labelCols],
   );
 
+  // Label columns that are on by default (same level rule as builtins: a
+  // label applies at the active level or below). Label defs load async, so
+  // these are merged into the visible set when they arrive (below) rather
+  // than in the useState initializer.
+  const defaultLabelKeys = useMemo(
+    () => labelCols
+      .filter((c) =>
+        DEFAULT_VISIBLE_LABEL_NAMES.includes(c.label) &&
+        LEVEL_RANK[c.level || "series"] >= LEVEL_RANK[level])
+      .map((c) => c.key),
+    [labelCols, level],
+  );
+
   const migrateKeys = useCallback((keys) =>
     Array.from(
       new Set(
@@ -57,12 +76,26 @@ export function useColumnPrefs(labelDefs, builtinCols, level, initialPrefs = {})
       ),
     ), [builtinKeyAliases]);
 
+  const hasSavedPrefs =
+    Array.isArray(initialPrefs.visibleKeys) && initialPrefs.visibleKeys.length > 0;
+
   const [visibleKeys, setVisibleKeys] = useState(() => {
-    if (Array.isArray(initialPrefs.visibleKeys) && initialPrefs.visibleKeys.length > 0) {
+    if (hasSavedPrefs) {
       return migrateKeys(initialPrefs.visibleKeys);
     }
     return defaultBuiltinKeys;
   });
+
+  // When showing defaults (no saved prefs), add the default-on label columns
+  // once their definitions arrive from the async fetch. Applied a single
+  // time so a user hiding one of them afterwards is not overridden by a
+  // later labelDefs refetch (e.g. after creating a new label).
+  const appliedDefaultLabelsRef = useRef(hasSavedPrefs);
+  useEffect(() => {
+    if (appliedDefaultLabelsRef.current || defaultLabelKeys.length === 0) return;
+    appliedDefaultLabelsRef.current = true;
+    setVisibleKeys((prev) => Array.from(new Set([...prev, ...defaultLabelKeys])));
+  }, [defaultLabelKeys]);
 
   const unorderedVisibleCols = allCols.filter((c) => visibleKeys.includes(c.key));
 
@@ -111,9 +144,9 @@ export function useColumnPrefs(labelDefs, builtinCols, level, initialPrefs = {})
   }, [visibleCols]);
 
   const resetColumns = useCallback(() => {
-    setVisibleKeys(defaultBuiltinKeys);
+    setVisibleKeys(Array.from(new Set([...defaultBuiltinKeys, ...defaultLabelKeys])));
     setColumnOrder([]);
-  }, [defaultBuiltinKeys]);
+  }, [defaultBuiltinKeys, defaultLabelKeys]);
 
   return {
     allCols, visibleCols, visibleKeys, columnOrder,

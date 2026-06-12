@@ -11,8 +11,8 @@ const LEVEL_CONFIG = {
     builtinCols: [
       { key: "patient_id", label: "Patient ID", filterable: true },
       { key: "stroke_date", label: "Stroke Date", filterable: true },
-      { key: "study_import_labels", label: "Study import labels", filterable: true, sortable: false },
-      { key: "dataset", label: "Dataset", filterable: true, sortable: false, defaultVisible: false },
+      { key: "study_import_labels", label: "Study import labels", filterable: true, sortable: false, defaultVisible: false },
+      { key: "dataset", label: "Dataset", filterable: true, sortable: false },
     ],
     sortDefault: "patient_id",
     filterParamMap: { patient_id: "patient_id", stroke_date: "stroke_date", study_import_labels: "study_import_label", dataset: "dataset" },
@@ -27,8 +27,9 @@ const LEVEL_CONFIG = {
     entityLabel: "studies",
     builtinCols: [
       { key: "patient_id", label: "Patient ID", filterable: true },
+      { key: "dataset", label: "Dataset", filterable: true, sortable: false },
       { key: "import_id", label: "Import ID", filterable: true, defaultVisible: false },
-      { key: "import_label", label: "Import Label", filterable: true },
+      { key: "import_label", label: "Import Label", filterable: true, defaultVisible: false },
       { key: "acquisitiondatetime", label: "Acquisition Date", filterable: true },
       { key: "modality", label: "Modality", filterable: true },
       { key: "studydescription", label: "Study Description", filterable: true },
@@ -36,6 +37,7 @@ const LEVEL_CONFIG = {
     sortDefault: "patient_id",
     filterParamMap: {
       patient_id: "patient_id",
+      dataset: "dataset",
       import_id: "import_id",
       import_label: "import_label",
       acquisitiondatetime: "acquisitiondatetime",
@@ -53,8 +55,9 @@ const LEVEL_CONFIG = {
     entityLabel: "series",
     builtinCols: [
       { key: "patient_id", label: "Patient ID", filterable: true },
+      { key: "dataset", label: "Dataset", filterable: true, sortable: false },
       { key: "import_id", label: "Import ID", filterable: true, defaultVisible: false },
-      { key: "import_label", label: "Import Label", filterable: true },
+      { key: "import_label", label: "Import Label", filterable: true, defaultVisible: false },
       { key: "acquisitiondatetime", label: "Acquisition Date", filterable: true },
       { key: "modality", label: "Modality", filterable: true },
       { key: "seriesdescription", label: "Series Description", filterable: true },
@@ -63,6 +66,7 @@ const LEVEL_CONFIG = {
     sortDefault: "patient_id",
     filterParamMap: {
       patient_id: "patient_id",
+      dataset: "dataset",
       import_id: "import_id",
       import_label: "import_label",
       acquisitiondatetime: "acquisitiondatetime",
@@ -76,6 +80,12 @@ const LEVEL_CONFIG = {
 export { LEVEL_RANK, LEVEL_ORDER, LEVEL_LABELS, LEVEL_CONFIG };
 
 export const PER_PAGE = 50;
+
+// Annotation labels shown as columns by default (when the user has no saved
+// column preferences). Matched by label name; a label only defaults on at
+// table levels where it applies (its level is at or below the active level,
+// same rule as built-in child-level columns).
+export const DEFAULT_VISIBLE_LABEL_NAMES = ["timepoint", "series_type"];
 
 // Shared default ordering for annotation labels (used by both the default
 // column order in the data table and the sidebar quick-filter list, so the

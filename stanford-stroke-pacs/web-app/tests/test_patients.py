@@ -67,6 +67,35 @@ class TestPatientListing:
         assert _find(items, "P-0001") is not None
         assert _find(items, "P-0002") is not None
 
+    def test_studies_and_series_expose_dataset_column(self, logged_in_client):
+        """Study/series rows carry the owning patient's comma-joined dataset."""
+        studies = logged_in_client.get("/api/studies").json()["items"]
+        by_uid = {s["studyinstanceuid"]: s for s in studies}
+        assert by_uid["1.2.3.4.5"]["dataset"] == "lvo, crisp2"
+        assert by_uid["2.2.2.2.2"]["dataset"] == "lvo"
+
+        series = logged_in_client.get("/api/series").json()["series"]
+        assert any(s["dataset"] == "lvo, crisp2" for s in series)
+
+        sub_rows = logged_in_client.get("/api/patients/P-0001/studies").json()
+        assert sub_rows[0]["dataset"] == "lvo, crisp2"
+        grand_rows = logged_in_client.get("/api/studies/1.2.3.4.5/series").json()
+        assert grand_rows[0]["dataset"] == "lvo, crisp2"
+
+    def test_studies_and_series_dataset_filter(self, logged_in_client):
+        """dataset=crisp2 keeps P-0001's study/series and drops P-0002's."""
+        studies = logged_in_client.get(
+            "/api/studies", params={"dataset": "crisp2"}
+        ).json()["items"]
+        uids = {s["studyinstanceuid"] for s in studies}
+        assert "1.2.3.4.5" in uids
+        assert "2.2.2.2.2" not in uids
+
+        series = logged_in_client.get(
+            "/api/series", params={"dataset": "crisp2"}
+        ).json()["series"]
+        assert series and all(s["patient_id"] == "P-0001" for s in series)
+
     def test_sort_by_stroke_date(self, logged_in_client):
         """Sorting by stroke_date orders on the displayed COALESCE value."""
         resp = logged_in_client.get(
