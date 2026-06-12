@@ -267,7 +267,7 @@ The file is owned by `scripts/admin/manage_users.py`; do not edit by hand.
 
 Beyond authentication, every non-admin user carries a **dataset scope**:
 `users.allowed_datasets text[]`, a subset of the cohort tags found in
-`patient.dataset` (e.g. `lvo`, `precise`).
+`patient.dataset` (e.g. `PRECISE`, `CRISP2/LVO`).
 
 - **Deny by default** — an empty grant set (the default for new users) means
   the user sees *no* patient data until an admin grants datasets.

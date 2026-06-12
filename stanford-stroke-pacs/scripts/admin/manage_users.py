@@ -123,7 +123,7 @@ def _distinct_patient_datasets() -> list[str]:
 
 
 def _parse_datasets_csv(raw: str) -> list[str]:
-    """Parse 'precise,lvo' into a sorted, deduped list; warn on unknown tags.
+    """Parse 'PRECISE,CRISP2/LVO' into a sorted, deduped list; warn on unknown tags.
 
     Unknown tags are allowed (grants may precede ingest of a new cohort) but
     flagged so typos don't silently grant nothing.
@@ -482,7 +482,7 @@ def main() -> None:
     p_add.add_argument(
         "--datasets", metavar="CSV",
         help=(
-            "Comma-separated dataset grants (e.g. 'precise,lvo'). "
+            "Comma-separated dataset grants (e.g. 'PRECISE,CRISP2/LVO'). "
             "Omitted = no access until granted (deny-by-default)."
         ),
     )
@@ -500,7 +500,7 @@ def main() -> None:
     p_ds.add_argument("username")
     p_ds.add_argument(
         "datasets", nargs="?", metavar="CSV",
-        help="Comma-separated dataset names (e.g. 'precise,lvo')",
+        help="Comma-separated dataset names (e.g. 'PRECISE,CRISP2/LVO')",
     )
     p_ds.add_argument(
         "--all", action="store_true",

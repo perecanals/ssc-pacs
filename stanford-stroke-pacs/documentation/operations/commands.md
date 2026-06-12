@@ -74,7 +74,7 @@ python scripts/admin/manage_users.py list
 # Add a regular user (DB only) — admin types a temporary password.
 # Without --datasets the user sees NO data until granted (deny-by-default).
 python scripts/admin/manage_users.py add alice
-python scripts/admin/manage_users.py add alice --datasets precise,lvo
+python scripts/admin/manage_users.py add alice --datasets 'PRECISE,CRISP2/LVO'
 
 # Add an admin user (DB + orthanc_users.json); admins see all datasets
 python scripts/admin/manage_users.py add bob --admin
@@ -83,7 +83,7 @@ python scripts/admin/manage_users.py add bob --admin
 python scripts/admin/manage_users.py passwd alice
 
 # Replace a user's dataset grants (web-app data visibility)
-python scripts/admin/manage_users.py set-datasets alice precise,lvo
+python scripts/admin/manage_users.py set-datasets alice 'PRECISE,CRISP2/LVO'
 python scripts/admin/manage_users.py set-datasets alice --all   # every current dataset
 python scripts/admin/manage_users.py set-datasets alice --none  # revoke all access
 

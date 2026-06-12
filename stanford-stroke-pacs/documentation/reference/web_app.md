@@ -270,7 +270,7 @@ mixing that logic into routine browsing.
 ### 5.7 Per-user dataset access
 
 Every non-admin user has a dataset scope (`users.allowed_datasets`, a subset
-of the `patient.dataset` cohort tags such as `lvo` / `precise`). The backend
+of the `patient.dataset` cohort tags such as `PRECISE` / `CRISP2/LVO`). The backend
 enforces it on every patient-data endpoint:
 
 - list endpoints return only patients (and their studies/series) whose

@@ -28,7 +28,7 @@ delete_originals_after_verification: false
 # Tag all rows in this run with a label (recorded on image_study/image_series).
 import_label: my_batch_1
 
-# Dataset/cohort tag for this batch (e.g. lvo, precise). Recorded on the
+# Dataset/cohort tag for this batch (e.g. PRECISE, CRISP2/LVO). Recorded on the
 # `patient` table only (union-accumulated across batches); not stored on
 # image_study/image_series. This is also the tag that per-user dataset
 # permissions filter on (users.allowed_datasets) — patients ingested without
