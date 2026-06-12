@@ -37,8 +37,11 @@ python execute_image_integration_protocol.py [--config path/to/config.yaml]
 ```
 
 By default it reads `execute_image_integration_protocol.yaml` next to the
-script. The script walks `src_dir`, calls the `ImageIntegrationProtocol` class
-for each patient subdirectory, and aggregates labelled-table sync at the end.
+script. That file is **gitignored** (it holds site/run-specific paths) —
+create it by copying the tracked template
+`execute_image_integration_protocol.example.yaml`. The script walks
+`src_dir`, calls the `ImageIntegrationProtocol` class for each patient
+subdirectory, and aggregates labelled-table sync at the end.
 
 Logs land under `image_integration_protocols/logs/` with a timestamped name.
 Both stdout and stderr are redirected through the logger.
@@ -297,6 +300,7 @@ ls /path/to/new_cases_root/
 #   patient-0001/  patient-0002/  patient-0003/
 
 # 2. Edit execute_image_integration_protocol.yaml
+#    (first run: copy execute_image_integration_protocol.example.yaml)
 #    - src_dir: /path/to/new_cases_root
 #    - cold_archive_root: /DATA2/pacs_imaging_data_compressed   # in cold_path_cache
 #    - import_label: "2026-04-research-batch"

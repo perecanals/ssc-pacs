@@ -270,7 +270,8 @@ New imaging data is ingested via `stanford-stroke-pacs/image_integration_protoco
 
 ```bash
 cd stanford-stroke-pacs/image_integration_protocols
-# Edit execute_image_integration_protocol.yaml, then:
+# Copy execute_image_integration_protocol.example.yaml to
+# execute_image_integration_protocol.yaml (gitignored), edit it, then:
 conda activate ssc-pacs
 python execute_image_integration_protocol.py [--config path/to/config.yaml]
 ```
