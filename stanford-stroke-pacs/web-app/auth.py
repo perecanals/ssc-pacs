@@ -7,13 +7,13 @@ from datetime import UTC, datetime, timedelta
 import jwt
 from fastapi import Cookie, Depends, HTTPException
 
+import dataset_access
 from config import (
     COOKIE_SECURE,  # noqa: F401 — re-exported for runtime patching
     SESSION_ABSOLUTE_TIMEOUT_HOURS,
     SESSION_TIMEOUT_HOURS,
 )
 from db import _require_env, get_conn
-import dataset_access
 
 JWT_SECRET = _require_env("JWT_SECRET")
 JWT_ALGORITHM = "HS256"

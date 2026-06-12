@@ -9,6 +9,7 @@ Seeded fixture geometry (conftest.py):
 """
 
 import pytest
+
 from tests.conftest import USER_CRISP, USER_LVO, USER_NONE, login_as
 
 P1_STUDY = "1.2.3.4.5"
