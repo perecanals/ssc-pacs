@@ -87,7 +87,9 @@ The app has three routes:
 The Navigator page (`Navigator.jsx`) provides three hierarchical levels:
 **Patients**, **Studies**, and **Series**. The level switcher lives in the
 top bar. Switching levels resets all filters, clears the active preview
-selection, and remounts the data table via a React `key` prop.
+selection, and remounts the data table via a React `key` prop. On load, the
+Navigator restores the last session's level and sidebar filters (see
+"Server-persisted session state" below).
 
 The Navigator page is decomposed into focused React components:
 
@@ -182,6 +184,17 @@ The Navigator page is decomposed into focused React components:
     toolbar portal as "Reset View"; clearing the cross-component sidebar
     filters is delegated to `Web App` via an `onResetSidebarFilters`
     callback passed into `DataTable`.
+  - **Server-persisted session state**: The Navigator's current hierarchy
+    level and sidebar quick-filter state are persisted per user under the
+    `_global` preferences level as `{"session": {"level", "filters"}}`
+    (`src/hooks/useSessionStatePersistence.js`). The hook mirrors the table
+    prefs pattern — debounced PUT on change, keepalive flush on tab close —
+    and on mount restores (and sanitizes) the saved pair; `Navigator.jsx`
+    gates rendering until the restore resolves so the `DataTable` (keyed by
+    level) mounts exactly once at the restored level with the restored
+    filters. Stored values are validated against the known filter keys and
+    level enum; level-inapplicable filters are dropped. Stale values (e.g. a
+    deleted label) simply match nothing — "Reset Filters" recovers.
   - **Default column order**: With no saved `columnOrder` (a clean view, or
     after "Reset View"), built-in data columns come first, followed by label
     columns grouped by instrument (instruments alphabetical, unassigned last)

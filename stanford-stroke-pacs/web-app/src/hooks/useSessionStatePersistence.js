@@ -1,0 +1,111 @@
+import { useEffect, useState, useCallback, useRef } from "react";
+import { apiFetch, apiGet } from "../api/client";
+
+const VALID_LEVELS = ["patient", "study", "series"];
+
+// Validates a stored session blob against the live filter shape. Only the
+// keys present in `defaultFilters` are kept, only string values are
+// accepted, and filters that the Sidebar cannot render at the restored
+// level are dropped (an invisible filter would still constrain the table).
+function sanitizeSession(session, defaultFilters) {
+  const level = VALID_LEVELS.includes(session?.level) ? session.level : "patient";
+  const filters = { ...defaultFilters };
+  const stored = session?.filters;
+  if (stored && typeof stored === "object") {
+    for (const key of Object.keys(defaultFilters)) {
+      if (typeof stored[key] === "string") filters[key] = stored[key];
+    }
+  }
+  if (level === "patient") {
+    filters.modality = null;
+  } else {
+    filters.dataset = null;
+    filters.studyImportLabel = null;
+  }
+  return { level, filters };
+}
+
+// Persists the Navigator's session state (current hierarchy level + sidebar
+// quick filters) under the `_global` preferences level, and restores it on
+// mount. Mirrors the debounce/flush pattern of the DataTable's
+// usePreferencePersistence. The PUT owns the entire `_global` prefs row —
+// if another consumer ever stores state there, this must merge, not replace.
+export default function useSessionStatePersistence({ ready, currentUser, level, filters, defaultFilters }) {
+  const [restored, setRestored] = useState(null);
+  const latestSession = useRef(null);
+  const hydrated = useRef(false);
+  const restoredJson = useRef(null);
+  const dirty = useRef(false);
+  const saveTimer = useRef(null);
+
+  latestSession.current = { level, filters };
+
+  useEffect(() => {
+    // Wait for the auth probe to settle so the GET fires once, as the
+    // right user — not first anonymously and again after /api/me resolves.
+    if (!ready) return undefined;
+    let cancelled = false;
+    hydrated.current = false;
+    setRestored(null);
+    apiGet("/api/preferences/_global")
+      .then((data) => data.prefs?.session)
+      .catch(() => null)
+      .then((session) => {
+        if (cancelled) return;
+        const sanitized = sanitizeSession(session, defaultFilters);
+        setRestored(sanitized);
+        restoredJson.current = JSON.stringify(sanitized);
+        hydrated.current = true;
+      });
+    return () => { cancelled = true; };
+    // defaultFilters is a module-level constant in the caller.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ready, currentUser]);
+
+  const flushSave = useCallback(() => {
+    clearTimeout(saveTimer.current);
+    if (!currentUser || !dirty.current) return;
+    dirty.current = false;
+    fetch("/api/preferences/_global", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      credentials: "same-origin",
+      keepalive: true,
+      body: JSON.stringify({ prefs: { session: latestSession.current } }),
+    }).catch(() => {});
+  }, [currentUser]);
+
+  useEffect(() => {
+    // Hydration gate (not just first-render): a save fired before the GET
+    // resolves would clobber the stored state with defaults.
+    if (!hydrated.current || !currentUser) return;
+    // The caller seeding its state from the restored values re-triggers this
+    // effect once; writing the data we just read back would be a wasted PUT.
+    if (restoredJson.current !== null && JSON.stringify(latestSession.current) === restoredJson.current) {
+      restoredJson.current = null;
+      return;
+    }
+    restoredJson.current = null;
+    dirty.current = true;
+    clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(() => {
+      dirty.current = false;
+      apiFetch("/api/preferences/_global", {
+        method: "PUT",
+        body: JSON.stringify({ prefs: { session: latestSession.current } }),
+      }).catch(() => {});
+    }, 800);
+    return () => clearTimeout(saveTimer.current);
+  }, [currentUser, level, filters]);
+
+  useEffect(() => {
+    const handleUnload = () => flushSave();
+    window.addEventListener("beforeunload", handleUnload);
+    return () => {
+      window.removeEventListener("beforeunload", handleUnload);
+      flushSave();
+    };
+  }, [flushSave]);
+
+  return { loaded: restored !== null, restoredLevel: restored?.level, restoredFilters: restored?.filters };
+}
