@@ -92,7 +92,7 @@ sudo systemctl restart ssc-web-app
 ### User management
 ```bash
 python scripts/admin/manage_users.py list                   # includes dataset grants column
-python scripts/admin/manage_users.py add <user> [--admin] [--datasets precise,lvo]
+python scripts/admin/manage_users.py add <user> [--admin] [--datasets 'PRECISE,CRISP2/LVO']
                                                             # --admin also mirrors into orthanc_users.json
                                                             # no --datasets = user sees NO data (deny-by-default)
 python scripts/admin/manage_users.py passwd <user>
