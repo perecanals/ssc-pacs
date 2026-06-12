@@ -1,7 +1,8 @@
 """Unit + integration tests for dataset_access scopes and the DICOMweb guard."""
 
-import dataset_access
 import pytest
+
+import dataset_access
 from tests.conftest import TEST_USER, USER_CRISP, USER_NONE, login_as
 
 P1_STUDY = "1.2.3.4.5"
