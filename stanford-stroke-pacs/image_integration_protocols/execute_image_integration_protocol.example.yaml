@@ -1,0 +1,36 @@
+# Example config for execute_image_integration_protocol.py.
+#
+# Copy to execute_image_integration_protocol.yaml (gitignored — it holds
+# site/run-specific paths) and edit per batch:
+#
+#   cp execute_image_integration_protocol.example.yaml execute_image_integration_protocol.yaml
+#
+# Storage paths (cold_archive_root, legacy DICOM root) come from repo-root
+# config.toml automatically. Do not duplicate them here unless you intend to
+# override on a per-run basis. The script will warn if you do.
+#
+# env_path defaults to <repo>/.env. Override if you need a different file.
+
+database: stanford-stroke
+
+# Directory of patient subdirectories to ingest.
+src_dir: /path/to/source/DICOMS
+
+# Re-integrate studies already present in the DB.
+overwrite_if_exists: false
+
+# Strip patient identifiers from DICOM headers before copying.
+anonymize_files: false
+
+# Remove the source case_dir after copy verification.
+delete_originals_after_verification: false
+
+# Tag all rows in this run with a label (recorded on image_study/image_series).
+import_label: my_batch_1
+
+# Dataset/cohort tag for this batch (e.g. lvo, precise). Recorded on the
+# `patient` table only (union-accumulated across batches); not stored on
+# image_study/image_series. This is also the tag that per-user dataset
+# permissions filter on (users.allowed_datasets) — patients ingested without
+# a dataset tag are invisible to all non-admin users.
+dataset: my_cohort

@@ -64,3 +64,6 @@ docker-compose.override.yml
 # by default; see deploy.env.example).
 deploy.env
 **/deploy.env
+
+# Site/run-specific ingestion config (use the .example.yaml template)
+stanford-stroke-pacs/image_integration_protocols/execute_image_integration_protocol.yaml
