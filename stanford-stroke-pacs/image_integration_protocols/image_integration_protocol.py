@@ -161,7 +161,7 @@ class ImageIntegrationProtocol:
             print(f"Generated NIFTI files in {time.perf_counter() - step_started:.2f}s")
 
         self.case_series_verification_table = self.case_series_table[
-            ["src_dicom_dir_path", "dicom_dir_path"]
+            ["copied_pairs", "dicom_dir_path"]
         ].copy()
         self.format_column_names()
 
@@ -271,7 +271,7 @@ class ImageIntegrationProtocol:
                 "studyinstanceuid",
                 "seriesinstanceuid",
                 "number_of_slices",
-                "src_dicom_dir_path",
+                "src_file_paths",
                 "protocolname",
                 "seriesnumber",
                 "instancenumber",
@@ -387,35 +387,6 @@ class ImageIntegrationProtocol:
                     return parsed
         return pd.NaT
 
-    @staticmethod
-    def _iter_series_directories(root_dir):
-        if not os.path.isdir(root_dir):
-            return []
-
-        series_dirs = []
-        for root, _, files in os.walk(root_dir):
-            visible_files = sorted(
-                filename for filename in files if not filename.startswith(".")
-            )
-            if visible_files:
-                series_dirs.append(root)
-        return sorted(series_dirs)
-
-    @staticmethod
-    def _read_series_headers(series_dir):
-        headers = []
-        for filename in sorted(os.listdir(series_dir)):
-            if filename.startswith("."):
-                continue
-            filepath = os.path.join(series_dir, filename)
-            if not os.path.isfile(filepath):
-                continue
-            try:
-                headers.append(pydicom.dcmread(filepath, stop_before_pixels=True))
-            except Exception as exc:
-                print(f"Skipping unreadable file {filepath}: {exc}")
-        return headers
-
     @classmethod
     def _series_geometry(cls, headers):
         if not headers:
@@ -454,31 +425,108 @@ class ImageIntegrationProtocol:
         return image_shape, slice_thickness, scan_axial_coverage_mm
 
     def create_series_table(self):
+        # Group every readable file in the case by its embedded
+        # SeriesInstanceUID rather than by directory. A DICOM series is defined
+        # by its SeriesInstanceUID, not by where its files happen to live:
+        # a "mixed" folder can hold several series, and one series' files can be
+        # split across folders. Emitting one row per UID (aggregating every file
+        # that carries it) is lossless and guarantees the upsert conflict key is
+        # unique within the batch, so the multi-row ON CONFLICT cannot raise a
+        # CardinalityViolation (see _upsert_dataframe).
+        buckets = {}  # series_uid -> dict(paths, headers, study_uids, series_numbers, dirs)
+        for root, _, files in os.walk(self.case_dir):
+            for filename in sorted(files):
+                if filename.startswith("."):
+                    continue
+                filepath = os.path.join(root, filename)
+                if not os.path.isfile(filepath):
+                    continue
+                try:
+                    dcm = pydicom.dcmread(filepath, stop_before_pixels=True)
+                except Exception as exc:
+                    print(f"Skipping unreadable file {filepath}: {exc}")
+                    continue
+
+                patient_id = self._safe_text(self._dicom_value(dcm, "PatientID"))
+                study_instance_uid = self._safe_text(
+                    self._dicom_value(dcm, "StudyInstanceUID")
+                )
+                series_instance_uid = self._safe_text(
+                    self._dicom_value(dcm, "SeriesInstanceUID")
+                )
+                if patient_id is None:
+                    print(
+                        f"Skipping file without PatientID {filepath}. "
+                        "Stanford integration requires PatientID to contain study_id."
+                    )
+                    continue
+                if study_instance_uid is None or series_instance_uid is None:
+                    print(f"Skipping file without UIDs {filepath}")
+                    continue
+
+                bucket = buckets.get(series_instance_uid)
+                if bucket is None:
+                    bucket = {
+                        "paths": [],
+                        "headers": [],
+                        "study_uids": set(),
+                        "series_numbers": set(),
+                        "dirs": set(),
+                    }
+                    buckets[series_instance_uid] = bucket
+                bucket["paths"].append(filepath)
+                bucket["headers"].append(dcm)
+                bucket["study_uids"].add(study_instance_uid)
+                series_number = self._safe_int(self._dicom_value(dcm, "SeriesNumber"))
+                if series_number is not None:
+                    bucket["series_numbers"].add(series_number)
+                bucket["dirs"].add(root)
+
         data_series_list = []
-
-        for series_dir in self._iter_series_directories(self.case_dir):
-            headers = self._read_series_headers(series_dir)
-            if not headers:
-                continue
-
+        for series_instance_uid, bucket in buckets.items():
+            # Order instances deterministically (InstanceNumber, then path) so the
+            # representative header and the computed geometry are stable run-to-run.
+            order = sorted(
+                range(len(bucket["paths"])),
+                key=lambda i: (
+                    self._safe_int(
+                        self._dicom_value(bucket["headers"][i], "InstanceNumber")
+                    )
+                    or 0,
+                    bucket["paths"][i],
+                ),
+            )
+            paths = [bucket["paths"][i] for i in order]
+            headers = [bucket["headers"][i] for i in order]
             dcm = headers[0]
             patient_id = self._safe_text(self._dicom_value(dcm, "PatientID"))
-            if patient_id is None:
-                print(
-                    f"Skipping series without PatientID in {series_dir}. "
-                    "Stanford integration requires PatientID to contain study_id."
-                )
-                continue
-
             study_instance_uid = self._safe_text(
                 self._dicom_value(dcm, "StudyInstanceUID")
             )
-            series_instance_uid = self._safe_text(
-                self._dicom_value(dcm, "SeriesInstanceUID")
+
+            # A real series belongs to exactly one study and carries one
+            # SeriesNumber. Divergence means the source mis-stamped UIDs (a DICOM
+            # standard violation). Per project decision we do NOT split or re-mint
+            # UIDs — we keep the files merged as one series and warn loudly so the
+            # source can be inspected.
+            sorted_dirs = sorted(
+                os.path.relpath(d, self.case_dir) for d in bucket["dirs"]
             )
-            if study_instance_uid is None or series_instance_uid is None:
-                print(f"Skipping series without UIDs in {series_dir}")
-                continue
+            if len(bucket["study_uids"]) > 1:
+                print(
+                    f"WARNING: SeriesInstanceUID {series_instance_uid} spans "
+                    f"{len(bucket['study_uids'])} StudyInstanceUIDs "
+                    f"{sorted(bucket['study_uids'])} across folders {sorted_dirs}; "
+                    f"keeping as one series under {study_instance_uid}."
+                )
+            if len(bucket["series_numbers"]) > 1:
+                print(
+                    f"WARNING: suspected true SeriesInstanceUID collision for "
+                    f"{series_instance_uid}: {len(paths)} files carry differing "
+                    f"SeriesNumbers {sorted(bucket['series_numbers'])} across "
+                    f"folders {sorted_dirs}. Keeping them merged as one series "
+                    f"(no split, no UID re-mint); inspect the source."
+                )
 
             image_shape, slice_thickness, scan_axial_coverage_mm = self._series_geometry(
                 headers
@@ -498,8 +546,8 @@ class ImageIntegrationProtocol:
                             ),
                             "studyinstanceuid": study_instance_uid,
                             "seriesinstanceuid": series_instance_uid,
-                            "number_of_slices": len(headers),
-                            "src_dicom_dir_path": series_dir,
+                            "number_of_slices": len(paths),
+                            "src_file_paths": paths,
                             "protocolname": self._safe_text(
                                 self._dicom_value(dcm, "ProtocolName")
                             ),
@@ -1034,6 +1082,8 @@ class ImageIntegrationProtocol:
 
     def add_paths_and_copy_dicom_files(self):
         self.case_series_table["dicom_dir_path"] = ""
+        if "copied_pairs" not in self.case_series_table.columns:
+            self.case_series_table["copied_pairs"] = None
         self.case_study_table["study_path"] = ""
 
         for idx, row in self.case_series_table.iterrows():
@@ -1054,16 +1104,26 @@ class ImageIntegrationProtocol:
             )
             os.makedirs(dicom_dir_path, exist_ok=True)
 
-            src_dicom_dir_path = row["src_dicom_dir_path"]
-            for filename in self._visible_files(src_dicom_dir_path):
-                source_path = os.path.join(src_dicom_dir_path, filename)
-                self._copy_dicom_file(
-                    source_path,
-                    os.path.join(dicom_dir_path, filename),
-                    row["patient_id"],
-                )
+            copied_pairs = []
+            used_names = set()
+            for source_path in row["src_file_paths"]:
+                base_name = os.path.basename(source_path)
+                dest_name = base_name
+                # A series' files may come from several source folders; guard
+                # against basename collisions so no instance is overwritten.
+                if dest_name in used_names:
+                    stem, ext = os.path.splitext(base_name)
+                    suffix = 1
+                    while dest_name in used_names:
+                        dest_name = f"{stem}__dup{suffix}{ext}"
+                        suffix += 1
+                used_names.add(dest_name)
+                destination_path = os.path.join(dicom_dir_path, dest_name)
+                self._copy_dicom_file(source_path, destination_path, row["patient_id"])
+                copied_pairs.append((source_path, destination_path))
 
             self.case_series_table.loc[idx, "dicom_dir_path"] = dicom_dir_path
+            self.case_series_table.at[idx, "copied_pairs"] = copied_pairs
             self.case_study_table.loc[
                 self.case_study_table["studyinstanceuid"] == row["studyinstanceuid"],
                 "study_path",
@@ -1078,21 +1138,19 @@ class ImageIntegrationProtocol:
             return
 
         for _, row in verification_table.iterrows():
-            src_dicom_dir_path = row["src_dicom_dir_path"]
+            copied_pairs = row.get("copied_pairs") or []
             dicom_dir_path = row["dicom_dir_path"]
-            source_files = self._visible_files(src_dicom_dir_path)
             destination_files = self._visible_files(dicom_dir_path)
 
-            if len(source_files) != len(destination_files):
+            if len(copied_pairs) != len(destination_files):
                 raise ValueError(
-                    f"Verification failed for {dicom_dir_path}: "
-                    f"source has {len(source_files)} files, destination has {len(destination_files)}."
+                    f"Verification failed for {dicom_dir_path}: expected "
+                    f"{len(copied_pairs)} files, destination has "
+                    f"{len(destination_files)}."
                 )
 
-            for filename in source_files:
-                source_path = os.path.join(src_dicom_dir_path, filename)
-                destination_path = os.path.join(dicom_dir_path, filename)
-
+            for source_path, destination_path in copied_pairs:
+                filename = os.path.basename(destination_path)
                 if not os.path.exists(destination_path):
                     raise ValueError(
                         f"Verification failed for {dicom_dir_path}: missing file {filename}."
@@ -1216,6 +1274,21 @@ class ImageIntegrationProtocol:
     def _upsert_dataframe(self, table_name, key_column, dataframe, connection):
         if dataframe.empty:
             return
+
+        # Belt-and-suspenders: a single multi-row INSERT ... ON CONFLICT cannot
+        # touch the same conflict target twice (Postgres CardinalityViolation),
+        # which would roll back the whole case. Grouping series by UID upstream
+        # already keeps keys unique, but guard here so a stray duplicate can
+        # never again silently drop an entire case — keep the last occurrence.
+        duplicate_mask = dataframe.duplicated(subset=[key_column], keep="last")
+        if duplicate_mask.any():
+            dropped = int(duplicate_mask.sum())
+            print(
+                f"WARNING: {table_name} upsert had {dropped} row(s) with a "
+                f"duplicate {key_column}; keeping the last occurrence of each to "
+                f"avoid a CardinalityViolation. Inspect the source data."
+            )
+            dataframe = dataframe[~duplicate_mask]
 
         metadata = MetaData()
         table = Table(table_name, metadata, autoload_with=self.postgres_engine)

@@ -14,7 +14,7 @@ metadata conventions. It is not part of a standard fresh deployment.
 
 Takes a directory of per-patient source DICOMs, and for each case:
 
-1. Discovers DICOM series under the case directory
+1. Discovers series by grouping every readable file under the case by its `SeriesInstanceUID` (not by folder)
 2. Groups series into studies
 3. Validates studies against `lvo_clinical_data` (clinical DB table)
 4. Copies DICOMs to the canonical layout under `dicom_data_root`
@@ -140,22 +140,43 @@ the tar.
 
 | Step | Method | Notes |
 |------|--------|-------|
-| 1 | `create_series_table` | Recursively scans `case_dir`, reads DICOM headers, builds a pandas DataFrame of candidate series with their source paths |
+| 1 | `create_series_table` | Recursively walks `case_dir`, reads each file's DICOM header, and **buckets files by `SeriesInstanceUID`** — one DataFrame row per real series, with the aggregated list of source file paths. A series is defined by its UID, not its folder: same-UID files spread across folders are **merged** into one row; a "mixed" folder holding several UIDs is **split** into its true series; `number_of_slices` = count of files carrying that UID. Files under one UID that disagree on `SeriesNumber`/`StudyInstanceUID` (a standard violation) trigger a **loud WARNING** and are kept merged — a suspected true UID collision to inspect at source (no split, no UID re-mint). This guarantees the upsert conflict key is unique within the batch. See [How series are identified](#how-series-are-identified). |
 | 2 | `create_study_table` | Groups series by StudyInstanceUID, computes per-study metadata, predicts `study_type` from `stroke_date` |
 | 3 | `filter_existing_studies` | Decides per study/series what to do given the current DB state. Always loads both `image_study` and `image_series` for the scanned `StudyInstanceUID`s. **Append mode (`overwrite_if_exists=false`):** for studies already in DB, drops the study row from the working set so the persisted `import_id` / `import_label` / `study_path` are preserved; then per series, drops the series row if `(SeriesUID, number_of_slices)` matches DB, keeps it for re-ingest if the slice count drifted (and wipes the stale `dicom_dir_path` and `dicom_archive_path` from disk before re-copy), keeps it if the SeriesUID is new, or warns-and-skips if DB `number_of_slices` is NULL. **Overwrite mode (`overwrite_if_exists=true`):** calls `overwrite_existing_study()`, which deletes the on-disk DICOM directories, stale cold archives, and the rows in `image_study`, `image_series`, `image_study_labelled`, and `image_series_labelled` for that study, all in one transaction — orphan rows from series that no longer exist on disk cannot survive. |
 | 4 | `load_clinical_data_table` | Reads `lvo_clinical_data` |
 | 5 | `validate_studies_against_clinical_data` | Drops studies whose `patient_id` doesn't match a clinical row or whose `studydate` is outside the allowed stroke-date window |
 | 6 | `assign_import_id` / `assign_import_label` | Tags all rows with the batch import_id/label |
-| 7 | `add_paths_and_copy_dicom_files` | **Copies DICOMs** from source → `{dicom_data_root}/{patient_id}/{studyUID}/{seriesDesc}/{seriesUID}/DICOM/`. Optionally anonymizes. Sets `dicom_dir_path` on each row. |
+| 7 | `add_paths_and_copy_dicom_files` | **Copies DICOMs** from source → `{dicom_data_root}/{patient_id}/{studyUID}/{seriesDesc}/{seriesUID}/DICOM/`. Copies the series' aggregated file list (which may span several source folders); on a destination basename collision it **renames** the file (`…__dupN`) so nothing is overwritten. Optionally anonymizes. Sets `dicom_dir_path` and records the source→dest pairs for verification. |
 | 8 | `compress_cold_archives` | **Only if `cold_archive_root` is set.** For each series, creates `{cold_archive_root}/.../DICOM.tar.zst`. Sets `dicom_archive_path` on each row. **Per-series strict, batch soft**: each archive is built to a `.tmp` sibling, member-count verified, and atomically renamed — so a published archive is always valid. A failure on one series does NOT abort the case; the loop continues and failures are collected. After the loop, a WARNING is printed summarizing `N/M` failed, and a JSON report is written to `image_integration_protocols/logs/compression_failures_<timestamp>.json` (includes seriesinstanceuid, studyinstanceuid, dicom_dir_path, error). Failed rows keep `dicom_archive_path = NULL` — retriable via `scripts/cold_storage/archive_all_series.py --patient <id>`. Idempotent: existing archives are re-verified rather than rebuilt; corrupted ones are detected and rebuilt. |
 | 9 | `create_nifti_files` | In `legacy` mode: runs DICOM→NIFTI conversion for select series and writes `{seriesUID}/NIFTI/image.nii.gz`. In `cold_path_cache` mode: **skipped.** NIFTIs would accumulate orphaned once their sibling loose DICOMs are cleaned up. Generate on demand via `scripts/dicom/dicom_to_nifti.py` (see [`../recipes/dicom_processing.md`](../recipes/dicom_processing.md)). |
 | 10 | `format_column_names` | Normalizes DataFrame column names, including adding `dicom_archive_path` to the set of columns to upsert |
 | 11 | `_require_import_id_columns` / `_require_import_label_columns` / `_require_number_of_slices_column` / `_require_dicom_archive_path_column` | Auto-DDL: `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` for any columns the protocol writes that don't yet exist. Safe to run against a fresh DB. |
-| 12 | `update_postgres_tables` | Upserts `image_series`, `image_study`, then `patient` — all in one transaction. `_upsert_patient` registers one row per patient: `stroke_date = MIN(image_study.acquisitiondatetime)` (recomputed across all of the patient's studies), `import_id`/`import_label` keep the **origin** (first-seen, preserved on conflict), and `dataset` is the deduped union of the `dataset` config across batches. |
-| 13 | `verify_integrated_case` + `delete_original_case_dir` | **Only if `delete_originals_after_verification=true`.** Byte-compares each copied file against its source, then removes the source case directory. |
+| 12 | `update_postgres_tables` | Upserts `image_series`, `image_study`, then `patient` — all in one transaction. `_upsert_patient` registers one row per patient: `stroke_date = MIN(image_study.acquisitiondatetime)` (recomputed across all of the patient's studies), `import_id`/`import_label` keep the **origin** (first-seen, preserved on conflict), and `dataset` is the deduped union of the `dataset` config across batches. As a belt-and-suspenders guard, `_upsert_dataframe` drops any rows duplicated on the conflict key (keep-last, with a WARNING) before the INSERT — so a stray duplicate can never again roll back a whole case via `CardinalityViolation` (`ON CONFLICT DO UPDATE` cannot touch the same target twice). |
+| 13 | `verify_integrated_case` + `delete_original_case_dir` | **Only if `delete_originals_after_verification=true`.** Iterates the recorded source→dest pairs (so it survives the collision-rename case), byte-compares each copied file against its source, then removes the source case directory. |
 
 Return value: `{"studyinstanceuids": [...], "seriesinstanceuids": [...]}` —
 used by the driver to sync per-level labelled mirror tables after the batch.
+
+### How series are identified
+
+The protocol enforces the DICOM identity rule directly, independent of how the
+source files are laid out on disk:
+
+- **Same `SeriesInstanceUID` = same series → merge.** All files carrying a given
+  UID become one row, even if they are scattered across several source folders
+  (e.g. a stray instance mis-filed into a different folder).
+- **Different `SeriesInstanceUID` = different series → split.** A single folder
+  that contains files from several series (a "mixed" / localizer folder) is split
+  into one row per UID — nothing is dropped.
+
+This replaced an earlier one-row-per-directory scan that used the first file in
+each folder as the series. That model silently conflated mixed folders and, when
+two folders resolved to the same UID, emitted a duplicate conflict key that
+aborted the whole case with a `CardinalityViolation`. Grouping by UID is lossless
+and keeps the conflict key unique by construction.
+
+Regression coverage: `image_integration_protocols/test_image_integration_grouping.py`
+(mixed-folder split, cross-folder merge, collision warning, copy-collision rename).
 
 ---
 

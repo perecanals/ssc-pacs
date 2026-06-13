@@ -288,7 +288,7 @@ python execute_image_integration_protocol.py [--config path/to/config.yaml]
 - `cold_archive_root` — if set, compress each series DICOM dir to `*.tar.zst` at this root after copying (supports `cold_path_cache` mode). Loose files are **not deleted** — they remain for the Orthanc Folder Indexer to pick up.
 
 **Integration steps** (in order):
-1. Scan source dirs for readable DICOM series
+1. Scan source dirs, grouping files by `SeriesInstanceUID` (not by directory) — mixed folders split into their true series; a series split across folders merges into one row
 2. Group into studies, validate against `lvo_clinical_data`
 3. Copy DICOMs to `dicom_data_root/{patient_id}/{StudyUID}/{SeriesDesc}/{SeriesUID}/DICOM/`
 4. If `cold_archive_root` set: compress each series dir to `cold_archive_root/.../DICOM.tar.zst`, record path in `image_series.dicom_archive_path`
