@@ -28,6 +28,7 @@ SERIES_FROM_CLAUSE = (
 SERIES_SORT_WHITELIST = {
     "patient_id", "import_id", "import_label", "acquisitiondatetime",
     "modality", "seriesdescription", "number_of_slices",
+    "slicethickness", "scanaxialcoverage_mm",
 }
 
 # ---------------------------------------------------------------------------

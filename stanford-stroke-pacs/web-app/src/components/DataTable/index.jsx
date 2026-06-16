@@ -14,6 +14,7 @@ import {
   buildBuiltinColumnCatalog,
   buildPatientStudiesUrl,
   formatDatetime,
+  formatNumber,
   normalizeSelectFilterValues,
   hasFilterValue,
 } from "../../utils/table";
@@ -324,6 +325,8 @@ function DataTableInner({
     if (col.builtin) {
       const raw = row[col.sourceKey] ?? "";
       if (col.sourceKey === "acquisitiondatetime") return formatDatetime(raw);
+      if (col.sourceKey === "slicethickness" || col.sourceKey === "scanaxialcoverage_mm")
+        return formatNumber(raw);
       return raw;
     }
     const labelName = col.key.replace("label:", "");

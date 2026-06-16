@@ -62,6 +62,8 @@ const LEVEL_CONFIG = {
       { key: "modality", label: "Modality", filterable: true },
       { key: "seriesdescription", label: "Series Description", filterable: true },
       { key: "number_of_slices", label: "Slices", filterable: false },
+      { key: "slicethickness", label: "Slice Thickness (mm)", filterable: true },
+      { key: "scanaxialcoverage_mm", label: "Axial Coverage (mm)", filterable: true },
     ],
     sortDefault: "patient_id",
     filterParamMap: {
@@ -72,6 +74,8 @@ const LEVEL_CONFIG = {
       acquisitiondatetime: "acquisitiondatetime",
       modality: "modality",
       seriesdescription: "description",
+      slicethickness: "slicethickness",
+      scanaxialcoverage_mm: "scanaxialcoverage",
     },
     expandable: false,
   },
@@ -129,6 +133,14 @@ export function formatDatetime(iso) {
   const d = new Date(iso);
   if (isNaN(d)) return iso;
   return d.toLocaleDateString("en-CA") + " " + d.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
+}
+
+// Round a numeric value to at most 2 decimals without forcing trailing zeros
+// (1.3, not 1.30). Blank for null/empty; passes non-numeric values through.
+export function formatNumber(v) {
+  if (v === "" || v == null) return "";
+  const n = Number(v);
+  return Number.isNaN(n) ? v : Math.round(n * 100) / 100;
 }
 
 export function buildPatientStudiesUrl(row, studyImportLabel) {
