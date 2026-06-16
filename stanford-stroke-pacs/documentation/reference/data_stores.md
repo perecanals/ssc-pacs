@@ -51,7 +51,7 @@ These tables drive browsing in the Navigator UI:
   - file pointers: `dicom_dir_path`, `nifti_path`
   - optional cold storage: **`dicom_archive_path`** — path to per-series `*.tar.zst` when using `cold_path_cache` mode
   - ingestion bookkeeping: `import_id`, `import_label`
-  - geometry-derived: `imageshape`, **`number_of_slices`**
+  - geometry-derived: `imageshape`, **`number_of_slices`**, `slicethickness`, `scanaxialcoverage_mm`
 
 Notes:
 

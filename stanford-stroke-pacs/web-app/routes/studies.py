@@ -432,6 +432,7 @@ def study_series(
             cur.execute(
                 "SELECT s.seriesinstanceuid, s.studyinstanceuid, s.patient_id, s.import_id, s.import_label, "
                 "s.modality, s.seriesdescription, s.acquisitiondatetime, s.number_of_slices, "
+                "s.slicethickness, s.scanaxialcoverage_mm, "
                 f"{_dataset_display_sql('s.patient_id')} "
                 "FROM image_series s WHERE s.studyinstanceuid = %s "
                 "ORDER BY s.acquisitiondatetime, s.seriesdescription",
@@ -474,6 +475,8 @@ def list_series(
     description: str | None = Query(None),
     study_type: str | None = Query(None),
     acquisitiondatetime: str | None = Query(None),
+    slicethickness: str | None = Query(None),
+    scanaxialcoverage: str | None = Query(None),
     sort_by: str = Query("patient_id"),
     sort_dir: str = Query("asc"),
     page: int = Query(1, ge=1),
@@ -521,6 +524,12 @@ def list_series(
             if acquisitiondatetime:
                 conditions.append("s.acquisitiondatetime::text LIKE %s")
                 params.append(f"%{acquisitiondatetime}%")
+            if slicethickness:
+                conditions.append("ROUND(s.slicethickness::numeric, 2)::text LIKE %s")
+                params.append(f"%{slicethickness}%")
+            if scanaxialcoverage:
+                conditions.append("ROUND(s.scanaxialcoverage_mm::numeric, 2)::text LIKE %s")
+                params.append(f"%{scanaxialcoverage}%")
             apply_label_filters(
                 parse_label_filters(label_filters),
                 "series", "s.seriesinstanceuid", conditions, params,
@@ -553,6 +562,8 @@ def list_series(
                         s.seriesdescription,
                         s.acquisitiondatetime,
                         s.number_of_slices,
+                        s.slicethickness,
+                        s.scanaxialcoverage_mm,
                         {_dataset_display_sql('s.patient_id')}
                     FROM {SERIES_FROM_CLAUSE}
                     {where}

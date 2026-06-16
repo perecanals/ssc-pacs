@@ -250,7 +250,7 @@ The Navigator page is decomposed into focused React components:
 |---------|------------------------------------------------------|
 | Patient | Patient ID, Stroke Date                              |
 | Study   | Patient ID, Acquisition Date, Modality, Study Description |
-| Series  | Patient ID, Acquisition Date, Modality, Series Description |
+| Series  | Patient ID, Acquisition Date, Modality, Series Description, Slices, Slice Thickness (mm), Axial Coverage (mm) |
 
 Study- and series-level rows include an OHIF action button. The Actions
 column is hidden entirely at the patient level since patients have no
