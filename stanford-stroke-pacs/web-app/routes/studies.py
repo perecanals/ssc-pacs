@@ -611,8 +611,8 @@ def ohif_link(
     if STORAGE_MODE == "cold_path_cache":
         cs = get_cache_status(studyinstanceuid)
         st = cs.get("status") or "cold"
-        if st == "warming":
-            return {"status": "warming", "url": None}
+        if st in ("warming", "queued"):
+            return {"status": st, "url": None}
         if st == "cold":
             return {
                 "status": "cold",
