@@ -2,7 +2,15 @@ import { Fragment } from "react";
 import PropTypes from "prop-types";
 import InlineEdit from "../InlineEdit";
 import WarmButton from "./WarmButton";
-import { formatDatetime } from "../../utils/table";
+import { formatDatetime, formatNumber } from "../../utils/table";
+
+// Display formatting for built-in columns, shared with index.jsx's
+// renderCellValue: dates humanized, numeric series columns rounded to 2dp.
+const formatBuiltinValue = (sourceKey, raw) => {
+  if (sourceKey === "acquisitiondatetime") return formatDatetime(raw);
+  if (sourceKey === "slicethickness" || sourceKey === "scanaxialcoverage_mm") return formatNumber(raw);
+  return raw;
+};
 
 const DownloadIcon = () => (
   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
@@ -68,7 +76,7 @@ function GrandChildTable({
                     {grandChildCols.map((c) => {
                       if (c.builtin) {
                         const raw = gc[c.sourceKey] ?? "";
-                        const display = c.sourceKey === "acquisitiondatetime" ? formatDatetime(raw) : raw;
+                        const display = formatBuiltinValue(c.sourceKey, raw);
                         const isNarrow = c.sourceKey === "patient_id" || c.sourceKey === "stroke_date";
                         return <td key={c.key} className={`dt__gc-td${isNarrow ? " dt__gc-td--narrow" : ""}`}>{display}</td>;
                       }
@@ -201,7 +209,7 @@ export default function ChildRows({
                 {childCols.map((c) => {
                   if (c.builtin) {
                     const raw = child[c.sourceKey] ?? "";
-                    const display = c.sourceKey === "acquisitiondatetime" ? formatDatetime(raw) : raw;
+                    const display = formatBuiltinValue(c.sourceKey, raw);
                     const isNarrow = c.sourceKey === "patient_id" || c.sourceKey === "stroke_date";
                     return <td key={c.key} className={`dt__child-td${isNarrow ? " dt__child-td--narrow" : ""}`}>{display}</td>;
                   }
