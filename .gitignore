@@ -5,6 +5,7 @@ orthanc_users.json
 **/orthanc_users.json
 maintenance
 hidden
+benchmarks
 
 # Python
 __pycache__/
