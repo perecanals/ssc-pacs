@@ -117,11 +117,11 @@ export async function resolveOhifViewerUrl(studyinstanceuid, seriesinstanceuid =
   if (data.url) return data.url;
 
   // Study needs warming — trigger it (or join an in-progress warm) then retry.
-  if (data.status === "cold" || data.status === "warming") {
+  if (data.status === "cold" || data.status === "warming" || data.status === "queued") {
     if (data.status === "cold") {
       await warmStudy(studyinstanceuid);
     } else {
-      // Already warming — just poll until hot (retry below settles a timeout).
+      // Already queued or warming — just poll until hot (retry below settles a timeout).
       await pollCacheUntilHot(studyinstanceuid);
     }
 
