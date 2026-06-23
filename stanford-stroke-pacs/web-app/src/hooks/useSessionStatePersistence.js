@@ -3,17 +3,37 @@ import { apiFetch, apiGet } from "../api/client";
 
 const VALID_LEVELS = ["patient", "study", "series"];
 
+// Rebuild a clean { "<level>:<label>": string[] } map from stored session data,
+// dropping anything malformed. Backs the sidebar select-value quick filters.
+function sanitizeLabelValues(stored) {
+  const out = {};
+  if (!stored || typeof stored !== "object") return out;
+  for (const [key, vals] of Object.entries(stored)) {
+    if (typeof key !== "string" || !key.includes(":") || !Array.isArray(vals)) continue;
+    const clean = [
+      ...new Set(vals.filter((v) => typeof v === "string" && v.trim()).map((v) => v.trim())),
+    ];
+    if (clean.length) out[key] = clean;
+  }
+  return out;
+}
+
 // Validates a stored session blob against the live filter shape. Only the
 // keys present in `defaultFilters` are kept, only string values are
-// accepted, and filters that the Sidebar cannot render at the restored
-// level are dropped (an invisible filter would still constrain the table).
+// accepted (labelValues is the one structured exception), and filters that
+// the Sidebar cannot render at the restored level are dropped (an invisible
+// filter would still constrain the table).
 function sanitizeSession(session, defaultFilters) {
   const level = VALID_LEVELS.includes(session?.level) ? session.level : "patient";
   const filters = { ...defaultFilters };
   const stored = session?.filters;
   if (stored && typeof stored === "object") {
     for (const key of Object.keys(defaultFilters)) {
-      if (typeof stored[key] === "string") filters[key] = stored[key];
+      if (key === "labelValues") {
+        filters.labelValues = sanitizeLabelValues(stored.labelValues);
+      } else if (typeof stored[key] === "string") {
+        filters[key] = stored[key];
+      }
     }
   }
   if (level === "patient") {

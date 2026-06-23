@@ -301,7 +301,9 @@ to the SPA.
 Known limitation: `/api/labels` and `/api/labels/summary` return label names
 and aggregate counts computed across **all** data (no identifiers or values
 leak; per-scope counts were judged not worth the query complexity).
-`/api/labels/{name}/values` is scope-filtered because values are free text.
+`/api/labels/{name}/values` returns a select label's controlled vocabulary
+from `label_value_options` — a **global** value set (not scoped per dataset);
+only the value strings are shared, never patient data.
 
 ---
 

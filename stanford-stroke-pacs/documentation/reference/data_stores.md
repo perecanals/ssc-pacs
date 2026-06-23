@@ -68,6 +68,7 @@ for the workflow when adding a new revision.
 - **`users`**: the single source of truth for end-user authentication (bcrypt password hashes). The `is_admin` column gates `/api/admin/*` endpoints and the "Orthanc Explorer" Landing card; admins are also mirrored into `orthanc_users.json` by `scripts/admin/manage_users.py` so they can reach `:8042` directly.
 - **`annotations`**: multi-level (patient / study / series) annotations.
 - **`label_definitions`**: label registry (level-aware; supports bool/int/text/select).
+- **`label_value_options`**: known values (controlled vocabulary) per select-type label. Indexed `(label, value)` lookup kept in sync on annotation writes and label-definition creation; the live source feeding the inline-edit dropdown and the column filter (replaces a `SELECT DISTINCT` scan of `annotations`). Global (not dataset-scoped); values persist once created.
 - **`user_preferences`**: per-user persisted table layout/state and Navigator session state (JSONB).
 - **`snapshot_patients` / `snapshot_studys` / `snapshot_seriess`**: refreshable export-oriented snapshot tables.
 
@@ -152,6 +153,31 @@ options     TEXT
 created_by  TEXT NOT NULL
 created_at  TIMESTAMPTZ DEFAULT now()
 ```
+
+`options` holds the **curated** select values as a JSON array (set at creation;
+not editable afterward). For select labels the *effective* option list returned
+by `GET /api/label-definitions` is `options` ∪ the live values in
+`label_value_options` — so values created inline while annotating appear in both
+the inline dropdown and the column filter without editing the definition.
+
+### `label_value_options`
+
+```text
+label       TEXT NOT NULL
+value       TEXT NOT NULL
+created_by  TEXT
+created_at  TIMESTAMPTZ DEFAULT now()
+PRIMARY KEY (label, value)
+```
+
+The controlled vocabulary for select-type labels. Seeded from
+`label_definitions.options` and from values already in `annotations` (Alembic
+revision `0009_label_value_options` backfills both), then kept current by
+`POST /api/annotations` and `POST /api/label-definitions`, which upsert select
+values here in the same transaction (`record_label_value` in `common.py`).
+`GET /api/labels/{name}/values` reads it directly — a fast indexed lookup that
+replaced a `SELECT DISTINCT value FROM annotations` scan. Global vocabulary (not
+dataset-scoped); values persist once created (pruning is a manual admin action).
 
 ### `users`
 

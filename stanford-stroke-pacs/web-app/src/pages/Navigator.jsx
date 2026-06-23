@@ -22,6 +22,9 @@ export const DEFAULT_FILTERS = {
   description: null,
   studyImportLabel: null,
   dataset: null,
+  // Sidebar select-value quick filters: { "<level>:<label>": ["v1", "v2"] }.
+  // Merged into the `label_filters` request param by useTableData.
+  labelValues: {},
 };
 
 export default function Navigator() {

@@ -110,6 +110,16 @@ The Navigator page is decomposed into focused React components:
   from the column selector independently of the filter, and is not
   auto-removed when the label filter is cleared. `visibleKeys` is the single
   source of truth for column visibility (no separate forced-visible overlay).
+  **Select-type labels** are value-pickers instead of presence filters: the
+  Sidebar also fetches `/api/label-definitions` for each label's effective
+  options, and renders select labels via `Sidebar/LabelValueFilter.jsx` — hover
+  opens a value popup (click pins it), and ticking values stores them in a
+  page-level `filters.labelValues` map keyed `"<level>:<label>"`. The popup is
+  portaled to `<body>` (fixed-positioned from the row's rect) so the sidebar's
+  overflow and the table's sticky columns don't clip it. `useTableData` merges
+  `labelValues` into the same `label_filters` query param the column-header
+  select filter uses (so no backend change), and the values round-trip through
+  the `_global` session prefs (`sanitizeSession` keeps this one structured key).
 - `DataTable` (`components/DataTable/`) — generic data table supporting all three
   levels. Split into focused modules: `index.jsx` (orchestrator), `ChildRows.jsx`
   (child/grandchild rendering), `TableHeader.jsx` (column headers + filter row),
@@ -179,8 +189,8 @@ The Navigator page is decomposed into focused React components:
     close). A "Reset View" button in the top bar restores all table
     preferences to their defaults. A separate "Reset Filters" button
     clears only the active filters — the per-column table filters **and**
-    the sidebar quick filters (label, modality, study-import label) —
-    without touching column visibility/order/sort. It lives in the same
+    the sidebar quick filters (label, select-value pickers, modality,
+    study-import label) — without touching column visibility/order/sort. It lives in the same
     toolbar portal as "Reset View"; clearing the cross-component sidebar
     filters is delegated to `Web App` via an `onResetSidebarFilters`
     callback passed into `DataTable`.
@@ -225,7 +235,11 @@ The Navigator page is decomposed into focused React components:
   `ann` prop once it catches up (a `useEffect` clears the override only when the
   prop matches, avoiding a flicker); `ValueEdit` already renders from local
   input state. On a non-`ok` POST/DELETE the cell rolls back and an `alert`
-  fires, and `onMutated` is skipped (nothing new to refresh).
+  fires, and `onMutated` is skipped (nothing new to refresh). `SelectEdit`'s
+  option list is the curated definition options ∪ `/api/labels/{name}/values`
+  (the live `label_value_options` vocabulary); saving a brand-new value upserts
+  it there server-side, so it appears for later rows and in the column/sidebar
+  filters without re-defining the label.
 - `ColumnSelector` — dropdown for toggling columns. Labels are grouped by
   their level with headings (Patient labels, Study labels, Series labels).
   Column visibility and order are persisted server-side in

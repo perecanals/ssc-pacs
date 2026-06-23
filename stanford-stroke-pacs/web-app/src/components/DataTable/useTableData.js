@@ -78,6 +78,27 @@ export default function useTableData({ level, config, filters, sortBy, sortDir, 
         if (param && typeof val === "string") params.set(param, val);
       }
     }
+    // Sidebar select-value quick filters live in filters.labelValues, keyed by
+    // "<level>:<label>". Merge them into the same label_filters channel; union
+    // with any column-header filter already set for the same label+level.
+    if (filters.labelValues && typeof filters.labelValues === "object") {
+      for (const [key, raw] of Object.entries(filters.labelValues)) {
+        const values = normalizeSelectFilterValues(raw);
+        if (values.length === 0) continue;
+        const sep = key.indexOf(":");
+        if (sep < 1) continue;
+        const lvl = key.slice(0, sep);
+        const label = key.slice(sep + 1);
+        const existing = labelFilters.find(
+          (f) => f.datatype === "select" && f.label === label && f.level === lvl,
+        );
+        if (existing) {
+          existing.values = [...new Set([...existing.values, ...values])];
+        } else {
+          labelFilters.push({ label, level: lvl, values, datatype: "select" });
+        }
+      }
+    }
     if (labelFilters.length > 0) {
       params.set("label_filters", JSON.stringify(labelFilters));
     }

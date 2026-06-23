@@ -77,6 +77,43 @@ describe("useTableData (infinite scroll)", () => {
     expect(result.current.resetNonce).toBeGreaterThan(nonceBefore);
   });
 
+  it("merges filters.labelValues into the label_filters param (union with column filter)", async () => {
+    const allCols = [{ key: "label:timepoint", level: "series", datatype: "select" }];
+    const args = {
+      ...baseArgs,
+      level: "patient",
+      allCols,
+      columnFilters: { "label:timepoint": ["baseline"] },
+      filters: {
+        labelValues: {
+          "series:timepoint": ["followup"],
+          "patient:outcome": ["good", "bad"],
+        },
+      },
+    };
+    renderHook(() => useTableData(args));
+    await waitFor(() => expect(apiGet).toHaveBeenCalled());
+
+    const url = new URL(apiGet.mock.calls[0][0], "http://x");
+    const labelFilters = JSON.parse(url.searchParams.get("label_filters"));
+
+    const timepoint = labelFilters.find((f) => f.label === "timepoint");
+    expect(timepoint).toMatchObject({ level: "series", datatype: "select" });
+    expect([...timepoint.values].sort()).toEqual(["baseline", "followup"]);
+
+    const outcome = labelFilters.find((f) => f.label === "outcome");
+    expect(outcome).toMatchObject({ level: "patient", datatype: "select" });
+    expect([...outcome.values].sort()).toEqual(["bad", "good"]);
+  });
+
+  it("omits label_filters when labelValues is empty", async () => {
+    const args = { ...baseArgs, filters: { labelValues: {} } };
+    renderHook(() => useTableData(args));
+    await waitFor(() => expect(apiGet).toHaveBeenCalled());
+    const url = new URL(apiGet.mock.calls[0][0], "http://x");
+    expect(url.searchParams.get("label_filters")).toBeNull();
+  });
+
   it("reload re-fetches pages 1..N and replaces", async () => {
     const { result } = renderHook(() => useTableData(baseArgs));
     await waitFor(() => expect(result.current.items).toHaveLength(2));

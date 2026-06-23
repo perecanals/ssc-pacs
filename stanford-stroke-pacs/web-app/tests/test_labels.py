@@ -5,9 +5,14 @@ import pytest
 
 @pytest.fixture()
 def _cleanup_labels(db_conn):
-    """Remove label definitions created during the test."""
+    """Remove label definitions (and their vocabulary) created during the test."""
     yield
     with db_conn.cursor() as cur:
+        cur.execute(
+            "DELETE FROM label_value_options WHERE label IN "
+            "(SELECT name FROM label_definitions WHERE created_by = 'testuser')"
+        )
+        cur.execute("DELETE FROM annotations WHERE created_by = 'testuser'")
         cur.execute("DELETE FROM label_definitions WHERE created_by = 'testuser'")
     db_conn.commit()
 
@@ -177,6 +182,70 @@ class TestLabelDefinitions:
             json={"instrument": "x"},
         )
         assert resp.status_code == 404
+
+    def test_create_select_label_seeds_value_options(self, logged_in_client):
+        """Curated options are seeded into the vocabulary and served via /values."""
+        logged_in_client.post(
+            "/api/label-definitions",
+            json={
+                "name": "seed_vocab",
+                "level": "patient",
+                "datatype": "select",
+                "options": ["beta", "alpha"],
+            },
+        )
+        resp = logged_in_client.get("/api/labels/seed_vocab/values")
+        assert resp.status_code == 200
+        assert resp.json() == ["alpha", "beta"]
+
+    def test_inline_value_reaches_values_and_definitions(self, logged_in_client):
+        """A new value typed inline shows up in /values and the effective options."""
+        logged_in_client.post(
+            "/api/label-definitions",
+            json={
+                "name": "inline_vocab",
+                "level": "patient",
+                "datatype": "select",
+                "options": ["preset"],
+            },
+        )
+        # Annotate a patient with a brand-new value.
+        resp = logged_in_client.post(
+            "/api/annotations",
+            json={
+                "level": "patient",
+                "patient_id": "P-0001",
+                "label": "inline_vocab",
+                "value": "freshly_created",
+            },
+        )
+        assert resp.status_code == 201
+
+        # Inline dropdown source.
+        values = logged_in_client.get("/api/labels/inline_vocab/values").json()
+        assert values == ["freshly_created", "preset"]
+
+        # Column-filter source (effective options on the label definition).
+        defs = logged_in_client.get("/api/label-definitions").json()
+        match = next(d for d in defs if d["name"] == "inline_vocab")
+        assert match["options"] == ["freshly_created", "preset"]
+
+    def test_non_select_value_not_recorded(self, logged_in_client):
+        """Text-label values are not added to the select vocabulary."""
+        logged_in_client.post(
+            "/api/label-definitions",
+            json={"name": "free_text", "level": "patient", "datatype": "text"},
+        )
+        logged_in_client.post(
+            "/api/annotations",
+            json={
+                "level": "patient",
+                "patient_id": "P-0001",
+                "label": "free_text",
+                "value": "some prose",
+            },
+        )
+        assert logged_in_client.get("/api/labels/free_text/values").json() == []
 
     def test_instruments_endpoint_returns_distinct_with_counts(self, logged_in_client):
         for name, instr in [

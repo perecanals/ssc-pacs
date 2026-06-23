@@ -131,6 +131,9 @@ It contains:
     tracks who last edited)
   - `label_definitions` — level-aware label registry supporting bool, int,
     text, and select datatypes
+  - `label_value_options` — known values (controlled vocabulary) per
+    select-type label; fast indexed lookup kept in sync on annotation writes
+    (replaces a `SELECT DISTINCT` scan of `annotations`)
   - `users`
   - `user_preferences` — per-user JSONB table display preferences (column
     visibility, order, sort, filters, frozen state) keyed by username and
@@ -292,8 +295,10 @@ Beyond authentication, every non-admin user carries a **dataset scope**:
   `scripts/admin/manage_users.py set-datasets`.
 
 Known limitation: `/api/labels` and `/api/labels/summary` expose label names
-and aggregate counts across all data (no identifiers or values);
-`/api/labels/{name}/values` *is* scope-filtered because values are free text.
+and aggregate counts across all data (no identifiers or values).
+`/api/labels/{name}/values` returns a select label's controlled vocabulary
+from the `label_value_options` table — a **global** value set, not scoped per
+dataset (only the value strings are shared, never patient data).
 
 ---
 
