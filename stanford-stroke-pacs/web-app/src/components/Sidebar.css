@@ -135,6 +135,58 @@
   @apply shrink-0 text-xs text-text-muted;
 }
 
+/* Select-label value picker (LabelValueFilter) */
+.sidebar__lvf {
+  @apply select-none;
+}
+
+.sidebar__lvf-popup {
+  position: fixed;
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border-radius: 0.375rem;
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+  color: var(--color-text);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+}
+
+.sidebar__lvf-popup-head {
+  @apply flex items-center justify-between gap-2 px-2 py-1;
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-surface);
+}
+
+.sidebar__lvf-popup-title {
+  @apply min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-[11px] font-semibold text-text-muted uppercase tracking-wide;
+}
+
+.sidebar__lvf-clear {
+  @apply shrink-0 text-xs text-primary bg-transparent border-none cursor-pointer p-0 disabled:opacity-40 disabled:cursor-default;
+}
+
+.sidebar__lvf-options {
+  @apply flex flex-col overflow-y-auto py-1;
+}
+
+.sidebar__lvf-option {
+  @apply flex items-center gap-2 px-2 py-1 cursor-pointer text-xs hover:bg-pill-bg;
+}
+
+.sidebar__lvf-checkbox {
+  @apply shrink-0 cursor-pointer accent-primary;
+}
+
+.sidebar__lvf-option-label {
+  @apply min-w-0 overflow-hidden text-ellipsis whitespace-nowrap;
+}
+
+.sidebar__lvf-empty {
+  @apply px-2 py-1 text-xs text-text-muted;
+}
+
 .sidebar__filter-group {
   @apply flex flex-col gap-1 mt-1;
 }

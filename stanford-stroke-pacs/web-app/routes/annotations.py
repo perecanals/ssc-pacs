@@ -14,6 +14,7 @@ from common import (
     ensure_patient_access,
     ensure_series_access,
     ensure_study_access,
+    record_label_value,
 )
 from db import get_conn
 from labelled_table_sync import sync_labelled_rows
@@ -151,6 +152,18 @@ def create_annotation(
                 )
             cur.execute(sql, params)
             row = cur.fetchone()
+            # Record the value in the select-label vocabulary so it shows up
+            # immediately in the inline dropdown and the column filter. Same
+            # transaction as the annotation, so a rolled-back write leaves no
+            # orphan vocabulary row. Only for select-type labels.
+            if body.value and body.value.strip():
+                cur.execute(
+                    "SELECT 1 FROM label_definitions "
+                    "WHERE name = %s AND datatype = 'select'",
+                    (body.label,),
+                )
+                if cur.fetchone():
+                    record_label_value(cur, body.label, body.value, username)
         # Commit the annotation write independently; refresh the labelled mirror
         # table off the request path so it never blocks (or rolls back) the save.
         conn.commit()

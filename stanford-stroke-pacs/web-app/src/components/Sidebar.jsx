@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import PropTypes from "prop-types";
 import { apiGet } from "../api/client";
 import { compareLabelDefsDefault, LEVEL_ORDER, LEVEL_LABELS } from "../utils/table";
+import LabelValueFilter from "./Sidebar/LabelValueFilter";
 import "./Sidebar.css";
 
 const MODALITIES = ["CT", "MR", "CR", "US", "DX", "PT", "NM", "XA", "MG", "RF"];
@@ -32,21 +33,87 @@ function groupLabelsByInstrument(labels) {
 
 export default function Sidebar({ level, filters, onFilterChange, open, onToggle }) {
   const [labelSummary, setLabelSummary] = useState([]);
+  const [labelDefs, setLabelDefs] = useState([]);
   const [studyImportLabels, setStudyImportLabels] = useState([]);
   const [datasets, setDatasets] = useState([]);
+  // Which select-label popup is pinned open (one at a time). Keyed "<level>:<label>".
+  const [pinnedKey, setPinnedKey] = useState(null);
 
-  const fetchLabels = async () => {
+  const fetchLabels = useCallback(async () => {
+    // Summary feeds the label list + counts; definitions feed each select
+    // label's value options (effective: curated ∪ live values). Refreshed
+    // together so values created inline appear in the picker without a reload.
     try {
-      const data = await apiGet("/api/labels/summary");
-      setLabelSummary(data);
+      setLabelSummary(await apiGet("/api/labels/summary"));
     } catch {
       setLabelSummary([]);
     }
-  };
+    try {
+      setLabelDefs(await apiGet("/api/label-definitions"));
+    } catch {
+      setLabelDefs([]);
+    }
+  }, []);
 
   useEffect(() => {
     fetchLabels();
-  }, []);
+  }, [fetchLabels]);
+
+  // "<level>:<name>" -> { datatype, options } for select-aware rendering.
+  const defByKey = useMemo(() => {
+    const out = {};
+    for (const d of labelDefs) {
+      out[`${d.level}:${d.name}`] = {
+        datatype: d.datatype,
+        options: Array.isArray(d.options) ? d.options : [],
+      };
+    }
+    return out;
+  }, [labelDefs]);
+
+  const labelValues = filters.labelValues || {};
+
+  const toggleLabelValue = useCallback(
+    (key, value) => {
+      const cur = filters.labelValues?.[key] || [];
+      const next = cur.includes(value)
+        ? cur.filter((v) => v !== value)
+        : [...cur, value];
+      const map = { ...(filters.labelValues || {}) };
+      if (next.length) map[key] = next;
+      else delete map[key];
+      onFilterChange({ labelValues: map });
+    },
+    [filters.labelValues, onFilterChange],
+  );
+
+  const clearLabelValue = useCallback(
+    (key) => {
+      const map = { ...(filters.labelValues || {}) };
+      delete map[key];
+      onFilterChange({ labelValues: map });
+    },
+    [filters.labelValues, onFilterChange],
+  );
+
+  // A single document-level dismissal for whichever popup is pinned.
+  useEffect(() => {
+    if (!pinnedKey) return undefined;
+    const onDown = (e) => {
+      // The popup is portaled to <body>, so it is outside .sidebar__lvf — match
+      // it explicitly so clicking inside a pinned popup doesn't dismiss it.
+      if (!e.target.closest?.(".sidebar__lvf, .sidebar__lvf-popup")) setPinnedKey(null);
+    };
+    const onKey = (e) => {
+      if (e.key === "Escape") setPinnedKey(null);
+    };
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [pinnedKey]);
 
   useEffect(() => {
     if (level !== "patient") {
@@ -75,7 +142,7 @@ export default function Sidebar({ level, filters, onFilterChange, open, onToggle
   useEffect(() => {
     window.__refreshLabelSidebar = fetchLabels;
     return () => { delete window.__refreshLabelSidebar; };
-  }, []);
+  }, [fetchLabels]);
 
   const handleLabelClick = (label, labelLevel) => {
     if (filters.label === label && filters.labelLevel === labelLevel) {
@@ -198,9 +265,11 @@ export default function Sidebar({ level, filters, onFilterChange, open, onToggle
           {/* Annotation Labels */}
           <div className="sidebar__section">
             <h2 className="sidebar__section-title">Annotation Labels</h2>
-            {filters.label && (
+            {(filters.label || Object.keys(labelValues).length > 0) && (
               <button
-                onClick={() => onFilterChange({ label: null, labelLevel: null })}
+                onClick={() =>
+                  onFilterChange({ label: null, labelLevel: null, labelValues: {} })
+                }
                 className="sidebar__clear-filter"
               >
                 Clear filter
@@ -239,10 +308,30 @@ export default function Sidebar({ level, filters, onFilterChange, open, onToggle
                           {!isInstrumentCollapsed && (
                             <ul className="sidebar__label-list">
                               {labels.map((l) => {
+                                const labelKey = `${lvl}:${l.label}`;
+                                const def = defByKey[labelKey];
+                                if (def?.datatype === "select") {
+                                  const selected = labelValues[labelKey] || [];
+                                  return (
+                                    <LabelValueFilter
+                                      key={labelKey}
+                                      label={l.label}
+                                      caseCount={l.count}
+                                      options={def.options}
+                                      selected={selected}
+                                      pinned={pinnedKey === labelKey}
+                                      onToggleValue={(v) => toggleLabelValue(labelKey, v)}
+                                      onClear={() => clearLabelValue(labelKey)}
+                                      onTogglePin={() =>
+                                        setPinnedKey((cur) => (cur === labelKey ? null : labelKey))
+                                      }
+                                    />
+                                  );
+                                }
                                 const isActive = filters.label === l.label && filters.labelLevel === lvl;
                                 return (
                                   <li
-                                    key={`${lvl}:${l.label}`}
+                                    key={labelKey}
                                     onClick={() => handleLabelClick(l.label, lvl)}
                                     data-full-label={l.label}
                                     aria-label={l.label}

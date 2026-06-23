@@ -10,8 +10,8 @@ import psycopg2.sql as psql
 from fastapi import APIRouter, Cookie, Depends, HTTPException, Query
 from pydantic import BaseModel
 
-from auth import get_current_user, get_dataset_scope
-from common import LABEL_NAME_RE, PATIENT_ID_COL, VALID_LEVELS
+from auth import get_current_user
+from common import LABEL_NAME_RE, PATIENT_ID_COL, VALID_LEVELS, record_label_value
 from db import get_conn
 from labelled_table_sync import (
     find_label_column_conflict,
@@ -100,35 +100,22 @@ def labels_summary(
 @router.get("/api/labels/{label_name}/values")
 def get_label_values(
     label_name: str,
-    scope: list[str] | None = Depends(get_dataset_scope),
+    user: str = Depends(get_current_user),
 ):
-    """Return the distinct annotation values already used for a label.
+    """Return the known values (controlled vocabulary) for a select-type label.
 
-    Values can be free text, so for non-admins they are narrowed to
-    annotations on entities within the caller's dataset scope.
+    Reads the indexed ``label_value_options`` table — a fast lookup kept in sync
+    on annotation writes — instead of scanning the annotations table. The
+    vocabulary is global: every value is visible to anyone who can see the
+    column (only value strings are shared, never patient data).
     """
     conn = get_conn()
     try:
         with conn.cursor() as cur:
-            scope_cond = ""
-            params: list = [label_name]
-            if scope is not None:
-                scope_cond = (
-                    "AND EXISTS (SELECT 1 FROM patient dsp "
-                    "WHERE dsp.dataset && %s::text[] AND dsp.patient_id = COALESCE("
-                    "  a.patient_id, "
-                    "  (SELECT s.patient_id FROM image_series s "
-                    "   WHERE s.seriesinstanceuid = a.seriesinstanceuid LIMIT 1), "
-                    "  (SELECT st.patient_id FROM image_study st "
-                    "   WHERE st.studyinstanceuid = a.studyinstanceuid LIMIT 1))) "
-                )
-                params.append(scope)
             cur.execute(
-                "SELECT DISTINCT value FROM annotations a "
-                "WHERE label = %s AND value IS NOT NULL AND value != '' "
-                f"{scope_cond}"
-                "ORDER BY value",
-                params,
+                "SELECT value FROM label_value_options "
+                "WHERE label = %s ORDER BY value",
+                (label_name,),
             )
             return [r[0] for r in cur.fetchall()]
     finally:
@@ -159,6 +146,31 @@ def _serialize_label_def_row(row: dict) -> dict:
         row["created_at"] = row["created_at"].isoformat()
     row["options"] = json.loads(row["options"]) if row.get("options") else []
     return row
+
+
+def _merge_select_value_options(cur, rows: list[dict]) -> None:
+    """Replace each select-type def's ``options`` with the effective vocabulary.
+
+    The effective set = curated ``label_definitions.options`` ∪ the live values in
+    ``label_value_options``. This is what the column filter consumes, so values
+    created inline reach the filter. Mutates ``rows`` in place; one batched query.
+    """
+    select_names = [r["name"] for r in rows if r.get("datatype") == "select"]
+    if not select_names:
+        return
+    cur.execute(
+        "SELECT label, value FROM label_value_options "
+        "WHERE label = ANY(%s) ORDER BY value",
+        (select_names,),
+    )
+    observed: dict[str, list[str]] = {}
+    for r in cur.fetchall():
+        observed.setdefault(r["label"], []).append(r["value"])
+    for row in rows:
+        if row.get("datatype") != "select":
+            continue
+        merged = dict.fromkeys([*row.get("options", []), *observed.get(row["name"], [])])
+        row["options"] = sorted(merged)
 
 
 class LabelDefinitionCreate(BaseModel):
@@ -194,7 +206,9 @@ def list_label_definitions(
                     f"SELECT {_LABEL_DEF_COLUMNS} "
                     "FROM label_definitions ORDER BY name"
                 )
-            return [_serialize_label_def_row(r) for r in cur.fetchall()]
+            rows = [_serialize_label_def_row(r) for r in cur.fetchall()]
+            _merge_select_value_options(cur, rows)
+            return rows
     finally:
         conn.close()
 
@@ -238,6 +252,11 @@ def create_label_definition(body: LabelDefinitionCreate, auth_token: str | None 
                 ),
             )
             row = _serialize_label_def_row(cur.fetchone())
+            # Seed the vocabulary table with the curated options so they are
+            # available to the inline dropdown and column filter from the start.
+            if body.datatype == "select" and body.options:
+                for opt in body.options:
+                    record_label_value(cur, body.name.strip(), opt, username)
         sync_labelled_schema(conn, body.level)
         conn.commit()
         return row

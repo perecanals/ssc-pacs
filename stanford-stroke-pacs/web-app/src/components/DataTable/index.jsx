@@ -188,6 +188,10 @@ function DataTableInner({
 
   const handleMutated = () => {
     reload();
+    // A mutation may have introduced a new select value; refresh label defs so
+    // the column filter's option list (sourced from label-definitions) picks it
+    // up without a full page reload.
+    fetchLabelDefs();
     for (const [rowId, isExp] of Object.entries(expanded)) {
       if (!isExp) continue;
       const row = items.find((r) => r[config.idCol] === rowId);

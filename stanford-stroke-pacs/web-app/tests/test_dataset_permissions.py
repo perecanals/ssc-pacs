@@ -151,9 +151,9 @@ class TestDetailAccess:
 def _cleanup_annotations(db_conn):
     yield
     with db_conn.cursor() as cur:
-        cur.execute(
-            "DELETE FROM annotations WHERE label LIKE 'dsperm_%'"
-        )
+        cur.execute("DELETE FROM annotations WHERE label LIKE 'dsperm_%'")
+        cur.execute("DELETE FROM label_value_options WHERE label LIKE 'dsperm_%'")
+        cur.execute("DELETE FROM label_definitions WHERE name LIKE 'dsperm_%'")
     db_conn.commit()
 
 
@@ -193,18 +193,24 @@ class TestAnnotationScoping:
         resp = client.get(f"/api/series/{P1_SERIES}/annotations")
         assert resp.status_code == 404
 
-    def test_label_values_scoped(self, logged_in_client, client):
-        # Annotation on P-0002 (lvo-only): its value must be invisible to
-        # the crisp2-scoped user but visible to the lvo-scoped user.
+    def test_label_values_are_global_vocabulary(self, logged_in_client, client):
+        # Select-label values form a shared controlled vocabulary: a value used
+        # only on P-0002 (lvo-only) is still visible to a crisp2-scoped user.
+        # Only the value string is shared — the underlying P-0002 row stays hidden
+        # (enforced by the patient/study/series endpoints, not this list).
+        logged_in_client.post(
+            "/api/label-definitions",
+            json={"name": "dsperm_sel", "level": "patient", "datatype": "select"},
+        )
         logged_in_client.post(
             "/api/annotations",
             json={"level": "patient", "patient_id": "P-0002",
-                  "label": "dsperm_val", "value": "secret-p2"},
+                  "label": "dsperm_sel", "value": "shared-val"},
         )
         login_as(client, USER_CRISP)
-        assert "secret-p2" not in client.get("/api/labels/dsperm_val/values").json()
+        assert "shared-val" in client.get("/api/labels/dsperm_sel/values").json()
         login_as(client, USER_LVO)
-        assert "secret-p2" in client.get("/api/labels/dsperm_val/values").json()
+        assert "shared-val" in client.get("/api/labels/dsperm_sel/values").json()
 
 
 # ---------------------------------------------------------------------------

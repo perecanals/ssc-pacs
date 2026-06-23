@@ -87,6 +87,31 @@ def ensure_series_access(cur, seriesinstanceuid: str, scope: list[str] | None) -
 
 
 # ---------------------------------------------------------------------------
+# Select-label value vocabulary (label_value_options)
+# ---------------------------------------------------------------------------
+
+
+def record_label_value(cur, label: str, value: str | None, created_by: str | None) -> None:
+    """Upsert one value into the select-label vocabulary (label_value_options).
+
+    Used on annotation writes and label-definition seeding so the inline-edit
+    dropdown and the column filter share one fast, indexed source of truth.
+    No-ops for empty values. Runs on the caller's cursor so it commits atomically
+    with the surrounding write. Idempotent via ON CONFLICT.
+    """
+    if value is None:
+        return
+    trimmed = value.strip()
+    if not trimmed:
+        return
+    cur.execute(
+        "INSERT INTO label_value_options (label, value, created_by) "
+        "VALUES (%s, %s, %s) ON CONFLICT (label, value) DO NOTHING",
+        (label, trimmed, created_by),
+    )
+
+
+# ---------------------------------------------------------------------------
 # Unified label-filter SQL builder  (replaces _label_filter_sql,
 # _label_value_filter_sql, _label_select_values_filter_sql,
 # _label_bool_filter_sql)
