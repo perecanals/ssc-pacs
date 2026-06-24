@@ -115,16 +115,16 @@ The `dicom_dir_path` column points to a directory that does not exist on disk.
 
 **Common causes:**
 - In `cold_path_cache` mode this is **expected** for cold (evicted) series.
-  Cross-reference `cache_state` — if the row is `cold`, this is normal.
+  Cross-reference `series_cache_state` — if the row is `cold`, this is normal.
 - Loose DICOMs were moved or deleted outside the application.
 
 **Investigation:**
 ```bash
-# Check cache_state
+# Check series_cache_state
 psql -d stanford-stroke -c \
   "SELECT cs.status, cs.last_accessed_at
    FROM image_series s
-   LEFT JOIN cache_state cs ON cs.studyinstanceuid = s.studyinstanceuid
+   LEFT JOIN series_cache_state cs ON cs.seriesinstanceuid = s.seriesinstanceuid
    WHERE s.seriesinstanceuid = '<uid>';"
 ```
 

@@ -227,7 +227,7 @@ def check_paths(r: Reporter, limit: int) -> None:
     extra_cols = [
         ("image_study", "study_path"),
         ("image_series", "nifti_path"),
-        ("cache_state", "cache_path"),
+        ("series_cache_state", "cache_path"),
         ("image_series_labelled", "dicom_dir_path"),
         ("image_series_labelled", "nifti_path"),
         ("image_series_labelled", "dicom_archive_path"),

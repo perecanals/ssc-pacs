@@ -174,9 +174,8 @@ One PostgreSQL server hosts both. Connection params and credentials are in
 │  └── snapshot_patients / _studies / _seriess     │
 │                                                  │
 │  Cold storage bookkeeping:                       │
-│  ├── cache_state        (per-study hot/cold)     │
-│  └── orthanc_resource_map  (legacy; unused in    │
-│                             cold_path_cache)     │
+│  └── series_cache_state (per-series hot/cold;    │
+│                          study/patient derived)  │
 └──────────────────────────────────────────────────┘
 ```
 
@@ -248,7 +247,8 @@ See [`../cold_storage/design.md`](../cold_storage/design.md) for why
   Navigator.jsx → resolveOhifViewerUrl(studyUID)
       │
       ├── GET /api/ohif-link/{studyUID}           → backend
-      │     ├── read cache_state.status           (cold_path_cache mode)
+      │     ├── read study status = aggregate over its series_cache_state
+      │     │   rows (hot only when ALL series hot)   (cold_path_cache mode)
       │     ├── if 'cold'  → {status:'cold'}
       │     ├── if 'warming' → {status:'warming'}
       │     ├── if 'hot' → defensive FS probe:
@@ -257,8 +257,8 @@ See [`../cold_storage/design.md`](../cold_storage/design.md) for why
       │     │                    → build /ohif/viewer?... URL
       │     │                    → {status:'ready', url}
       │     │                 else:
-      │     │                    clear stale cache_state, treat as cold
-      │     └── legacy mode: skip cache_state, just lookup + build URL
+      │     │                    clear stale series_cache_state rows, treat as cold
+      │     └── legacy mode: skip cache state, just lookup + build URL
       │
       ├── (if cold) POST /api/studies/{studyUID}/warm
       │     ├── route handler (async, ~ms):
@@ -268,11 +268,14 @@ See [`../cold_storage/design.md`](../cold_storage/design.md) for why
       │     │     │                         _run_warm_with_metrics, uid)
       │     │     └── return 202 {ok, queued, studyinstanceuid}
       │     └── worker thread (bounded pool, `warm_workers` from config):
-      │           → cache_manager.warm_study()
-      │               ├── pg advisory lock on studyUID
-      │               ├── mark cache_state.status='warming'
-      │               ├── for each series: untar_zst(archive, dicom_dir_path)
-      │               └── mark cache_state.status='hot'
+      │           → cache_manager.warm_study()  (wrapper → warm_series over
+      │             the study's series; study-open warms the whole study)
+      │               └── for each series, sequentially:
+      │                   ├── pg advisory lock on that seriesUID
+      │                   ├── mark its series_cache_state.status='warming'
+      │                   ├── untar_zst(archive, dicom_dir_path)
+      │                   └── mark its series_cache_state.status='hot'
+      │             (study status is the aggregate — hot once all series hot)
       │
       ├── poll /api/studies/{studyUID}/cache-status until 'hot'
       │

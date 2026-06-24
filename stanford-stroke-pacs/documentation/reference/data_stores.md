@@ -78,38 +78,30 @@ Audit:
 
 Cold storage / hot cache (when enabled):
 
-- **`cache_state`**: per-study warm status and paths for the hot cache.
-- **`orthanc_resource_map`**: Orthanc resource IDs linked to warmed studies (supports eviction).
+- **`series_cache_state`**: per-series warm status and paths for the hot cache. The series is the single source of truth; study/patient warm status is a derived aggregate. Series listings can `LEFT JOIN series_cache_state` to surface warm status. (The former per-study `cache_state` and the dead `orthanc_resource_map` tables were removed by Alembic `0010_series_cache_state`.)
 
 ### `image_series.dicom_archive_path`
 
 Nullable `TEXT`. Populated by the offline archiver (`scripts/cold_storage/archive_all_series.py`) when series are packed to `*.tar.zst`. Used when `[storage].mode = "cold_path_cache"` in `config.toml`.
 
-### `cache_state`
+### `series_cache_state`
 
 ```text
-studyinstanceuid   TEXT PRIMARY KEY
+seriesinstanceuid  TEXT PRIMARY KEY
 status             TEXT NOT NULL DEFAULT 'cold'
-                   CHECK (status IN ('cold', 'warming', 'hot', 'error'))
-cache_path         TEXT
+                   CHECK (status IN ('cold', 'warming', 'hot', 'error', 'queued'))
+cache_path         TEXT            -- the series' dicom_dir_path when warm
 warmed_at          TIMESTAMPTZ
 last_accessed_at   TIMESTAMPTZ
+warming_started_at TIMESTAMPTZ
 error_message      TEXT
 ```
 
-Indexes: `idx_cache_state_status`, `idx_cache_state_last_accessed`.
-
-### `orthanc_resource_map`
-
-```text
-orthanc_id         TEXT PRIMARY KEY
-resource_type      TEXT NOT NULL CHECK (resource_type IN ('study', 'series', 'instance'))
-studyinstanceuid   TEXT NOT NULL REFERENCES cache_state(studyinstanceuid) ON DELETE CASCADE
-seriesinstanceuid  TEXT
-created_at         TIMESTAMPTZ DEFAULT now()
-```
-
-Index: `idx_orm_study` on `studyinstanceuid`.
+The series is the cache-state unit; study/patient status is derived by
+aggregating these rows (a study is `hot` only when all its series are `hot`).
+Replaced the former per-study `cache_state` table (Alembic
+`0010_series_cache_state`), which also dropped the dead `orthanc_resource_map`
+table.
 
 ---
 

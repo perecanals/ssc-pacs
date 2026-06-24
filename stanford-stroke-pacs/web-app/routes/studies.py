@@ -17,8 +17,10 @@ from zipstream import ZipStream
 from auth import get_dataset_scope, require_admin
 from cache_manager import (
     get_cache_status,
+    get_series_cache_status,
     resolve_series_archive,
     touch_access,
+    touch_access_series,
     untar_zst,
 )
 from common import (
@@ -599,7 +601,7 @@ def ohif_link(
     scope: list[str] | None = Depends(get_dataset_scope),
 ):
     """Resolve a StudyInstanceUID to an OHIF viewer URL via Orthanc lookup."""
-    # Access check first — before any cache_state mutation or Orthanc lookup.
+    # Access check first — before any series_cache_state mutation or Orthanc lookup.
     if scope is not None:
         conn = get_conn()
         try:
@@ -609,16 +611,24 @@ def ohif_link(
             conn.close()
 
     if STORAGE_MODE == "cold_path_cache":
-        cs = get_cache_status(studyinstanceuid)
+        # Per-series preview keys off the series' own warm state (so sifting
+        # through independent series is fast); a study open (no series UID) keeps
+        # the whole-study aggregate behaviour.
+        cs = (
+            get_series_cache_status(seriesinstanceuid)
+            if seriesinstanceuid
+            else get_cache_status(studyinstanceuid)
+        )
         st = cs.get("status") or "cold"
         if st in ("warming", "queued"):
             return {"status": st, "url": None}
         if st == "cold":
-            return {
-                "status": "cold",
-                "url": None,
-                "detail": "Study not warmed yet; POST /api/studies/{uid}/warm first",
-            }
+            detail = (
+                "Series not warmed yet; POST /api/series/{uid}/warm first"
+                if seriesinstanceuid
+                else "Study not warmed yet; POST /api/studies/{uid}/warm first"
+            )
+            return {"status": "cold", "url": None, "detail": detail}
         if st == "error":
             raise HTTPException(
                 status_code=503,
@@ -628,12 +638,20 @@ def ohif_link(
             conn = get_conn()
             try:
                 with conn.cursor() as cur:
-                    cur.execute(
-                        "SELECT dicom_dir_path FROM image_series "
-                        "WHERE studyinstanceuid = %s AND dicom_dir_path IS NOT NULL "
-                        "LIMIT 1",
-                        (studyinstanceuid,),
-                    )
+                    if seriesinstanceuid:
+                        cur.execute(
+                            "SELECT dicom_dir_path FROM image_series "
+                            "WHERE seriesinstanceuid = %s AND dicom_dir_path IS NOT NULL "
+                            "LIMIT 1",
+                            (seriesinstanceuid,),
+                        )
+                    else:
+                        cur.execute(
+                            "SELECT dicom_dir_path FROM image_series "
+                            "WHERE studyinstanceuid = %s AND dicom_dir_path IS NOT NULL "
+                            "LIMIT 1",
+                            (studyinstanceuid,),
+                        )
                     row = cur.fetchone()
                 files_present = False
                 if row and row[0]:
@@ -643,10 +661,18 @@ def ohif_link(
                         files_present = False
                 if not files_present:
                     with conn.cursor() as cur:
-                        cur.execute(
-                            "DELETE FROM cache_state WHERE studyinstanceuid = %s",
-                            (studyinstanceuid,),
-                        )
+                        if seriesinstanceuid:
+                            cur.execute(
+                                "DELETE FROM series_cache_state WHERE seriesinstanceuid = %s",
+                                (seriesinstanceuid,),
+                            )
+                        else:
+                            cur.execute(
+                                "DELETE FROM series_cache_state WHERE seriesinstanceuid IN "
+                                "(SELECT seriesinstanceuid FROM image_series "
+                                " WHERE studyinstanceuid = %s)",
+                                (studyinstanceuid,),
+                            )
                     conn.commit()
                     return {
                         "status": "cold",
@@ -655,7 +681,10 @@ def ohif_link(
                     }
             finally:
                 conn.close()
-            touch_access(studyinstanceuid)
+            if seriesinstanceuid:
+                touch_access_series(seriesinstanceuid)
+            else:
+                touch_access(studyinstanceuid)
 
     entries = orthanc_lookup(studyinstanceuid)
     if not entries:

@@ -1,9 +1,11 @@
 import PropTypes from "prop-types";
 
-// Decompress / readiness control shown on patient and study rows in
+// Decompress / readiness control shown on patient, study, and series rows in
 // cold_path_cache mode. Doubles as both the trigger and the persistent
-// readiness badge: a single `status` (study) or `summary` (patient aggregate)
-// drives label, color, and whether a click queues a warm.
+// readiness badge: a single `status` (study or series) or `summary` (patient
+// aggregate) drives label, color, and whether a click queues a warm. Series
+// rows are series-backed — they pass their own series `status` and warm just
+// that series; study/patient warms are unchanged.
 
 // Collapse either a single study status or a patient aggregate into one
 // display state. An un-polled patient (summary undefined) reads as cold so the

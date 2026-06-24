@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
-"""Rebuild cache_state from disk: mark studies hot/cold based on whether
-their series DICOM directories actually exist and have files on disk.
+"""Rebuild series_cache_state from disk: mark each series hot/cold based on
+whether its DICOM directory actually exists and has files on disk.
+
+Cold storage is keyed by the series (one ``series_cache_state`` row per series);
+study/patient status is derived by aggregating these rows. This script is the
+natural reconcile — disk presence is ground truth.
 
 Run with:
     conda activate ssc-pacs
@@ -42,49 +46,45 @@ def main():
     conn = get_conn()
     cur = conn.cursor()
 
-    print(f"[{ts()}] querying studies...")
+    print(f"[{ts()}] querying series...")
     cur.execute("""
-        SELECT i.studyinstanceuid,
-               array_agg(i.dicom_dir_path ORDER BY i.seriesinstanceuid) AS series_paths,
-               st.study_path
-        FROM   image_series  i
-        JOIN   image_study   st USING (studyinstanceuid)
-        WHERE  i.dicom_dir_path IS NOT NULL
-        GROUP  BY i.studyinstanceuid, st.study_path
+        SELECT seriesinstanceuid, dicom_dir_path
+        FROM   image_series
+        WHERE  dicom_dir_path IS NOT NULL
     """)
     rows = cur.fetchall()
-    print(f"[{ts()}] {len(rows)} studies to check  ({time.monotonic()-t_start:.1f}s)")
+    print(f"[{ts()}] {len(rows)} series to check  ({time.monotonic()-t_start:.1f}s)")
 
-    print(f"[{ts()}] loading current cache_state...")
-    cur.execute("SELECT studyinstanceuid, status FROM cache_state")
+    print(f"[{ts()}] loading current series_cache_state...")
+    cur.execute("SELECT seriesinstanceuid, status FROM series_cache_state")
     current = {r[0]: r[1] for r in cur.fetchall()}
-    print(f"[{ts()}] {len(current)} cache_state rows loaded  ({time.monotonic()-t_start:.1f}s)")
+    print(f"[{ts()}] {len(current)} series_cache_state rows loaded  ({time.monotonic()-t_start:.1f}s)")
 
     now = datetime.now(timezone.utc)
     to_hot = []
     to_cold = []
 
-    print(f"[{ts()}] checking disk state (one dot = 50 studies)...")
+    print(f"[{ts()}] checking disk state (one dot = 500 series)...")
     t_disk = time.monotonic()
-    for i, (uid, paths, study_path) in enumerate(rows, 1):
-        all_warm = paths and all(is_warm(p) for p in paths)
-        was = current.get(uid, "missing")
-        if all_warm and was != "hot":
-            to_hot.append((uid, study_path))
-        elif not all_warm and was == "hot":
-            to_cold.append(uid)
+    for i, (suid, path) in enumerate(rows, 1):
+        warm = is_warm(path)
+        was = current.get(suid, "missing")
+        if warm and was != "hot":
+            to_hot.append((suid, path))
+        elif not warm and was == "hot":
+            to_cold.append(suid)
 
-        if i % 50 == 0:
+        if i % 500 == 0:
             elapsed = time.monotonic() - t_disk
             rate = i / elapsed
             eta = (len(rows) - i) / rate if rate > 0 else 0
             print(f"  [{ts()}] {i}/{len(rows)}  hot={len(to_hot)}  cold={len(to_cold)}"
-                  f"  {rate:.0f} studies/s  ETA {eta:.0f}s", flush=True)
+                  f"  {rate:.0f} series/s  ETA {eta:.0f}s", flush=True)
 
     t_disk_done = time.monotonic()
     print(f"[{ts()}] disk check done in {t_disk_done - t_disk:.1f}s")
     print()
-    print(f"  Studies checked:     {len(rows)}")
+    print(f"  Series checked:      {len(rows)}")
     print(f"  → would mark hot:    {len(to_hot)}")
     print(f"  → would mark cold:   {len(to_cold)}")
     print(f"  → already correct:   {len(rows) - len(to_hot) - len(to_cold)}")
@@ -96,21 +96,21 @@ def main():
     if to_hot:
         print(f"\n[{ts()}] writing {len(to_hot)} hot rows...")
         cur.executemany("""
-            INSERT INTO cache_state (studyinstanceuid, status, warmed_at, cache_path)
+            INSERT INTO series_cache_state (seriesinstanceuid, status, warmed_at, cache_path)
             VALUES (%s, 'hot', %s, %s)
-            ON CONFLICT (studyinstanceuid) DO UPDATE
+            ON CONFLICT (seriesinstanceuid) DO UPDATE
                 SET status     = 'hot',
                     warmed_at  = EXCLUDED.warmed_at,
                     cache_path = EXCLUDED.cache_path
-        """, [(uid, now, path) for uid, path in to_hot])
+        """, [(suid, now, path) for suid, path in to_hot])
         print(f"[{ts()}] hot rows written  ({time.monotonic()-t_start:.1f}s)")
 
     if to_cold:
         print(f"[{ts()}] writing {len(to_cold)} cold rows...")
         cur.execute("""
-            UPDATE cache_state
+            UPDATE series_cache_state
             SET    status = 'cold', warmed_at = NULL, cache_path = NULL
-            WHERE  studyinstanceuid = ANY(%s)
+            WHERE  seriesinstanceuid = ANY(%s)
         """, (to_cold,))
         print(f"[{ts()}] cold rows written  ({time.monotonic()-t_start:.1f}s)")
 

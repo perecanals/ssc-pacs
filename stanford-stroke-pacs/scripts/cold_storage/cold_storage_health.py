@@ -2,7 +2,7 @@
 """Cold-storage health probe — surfaces the failure modes WS 05 hardens against.
 
 Prints (and optionally emits JSON for) the operational signals that
-indicate whether `cache_state` and the on-disk `dicom_data_root` are
+indicate whether `series_cache_state` and the on-disk `dicom_data_root` are
 in agreement:
 
   * Stuck-warming rows: status='warming' with `warming_started_at`
@@ -68,10 +68,10 @@ def _stuck_warming_rows(conn) -> list[dict[str, Any]]:
     with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
         cur.execute(
             """
-            SELECT studyinstanceuid, warming_started_at,
+            SELECT seriesinstanceuid, warming_started_at,
                    EXTRACT(EPOCH FROM (now() - warming_started_at))::bigint AS age_seconds,
                    error_message
-            FROM cache_state
+            FROM series_cache_state
             WHERE status = 'warming'
               AND (warming_started_at IS NULL
                    OR warming_started_at < (now() - (%s * interval '1 minute')))
@@ -127,7 +127,7 @@ def _last_accessed_distribution(conn) -> dict[str, int]:
               COUNT(*) FILTER (WHERE status = 'cold')                                                    AS cold,
               COUNT(*) FILTER (WHERE status = 'error')                                                   AS error,
               COUNT(*)                                                                                   AS total
-            FROM cache_state
+            FROM series_cache_state
             """
         )
         row = cur.fetchone()
@@ -206,7 +206,7 @@ def _human(report: dict[str, Any]) -> str:
 
     dist = report["cache_state_distribution"]
     lines.append(
-        "  cache_state              : total={total} hot_1h={hot_last_1h} "
+        "  series_cache_state       : total={total} hot_1h={hot_last_1h} "
         "hot_24h={hot_last_24h} hot_7d={hot_last_7d} hot_older={hot_older_or_null} "
         "cold={cold} error={error}".format(**dist)
     )
@@ -215,7 +215,7 @@ def _human(report: dict[str, Any]) -> str:
     lines.append(f"  stuck_warming_rows       : {len(stuck)}")
     for r in stuck[:10]:
         lines.append(
-            f"      - {r['studyinstanceuid']}  age={r['age_seconds']}s  err={r.get('error_message')}"
+            f"      - {r['seriesinstanceuid']}  age={r['age_seconds']}s  err={r.get('error_message')}"
         )
     if len(stuck) > 10:
         lines.append(f"      … {len(stuck) - 10} more")

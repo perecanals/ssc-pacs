@@ -42,6 +42,7 @@ class TestUnauthenticated:
         "/api/instruments",
         "/api/storage-mode",
         f"/api/studies/{P1_STUDY}/cache-status",
+        f"/api/series/{P1_SERIES}/cache-status",
         "/api/patients/P-0001/cache-status",
     ])
     def test_get_requires_login(self, client, path):
@@ -129,6 +130,29 @@ class TestDetailAccess:
         assert client.post(f"/api/studies/{P2_STUDY}/warm").status_code == 404
         assert client.post(f"/api/studies/{P2_STUDY}/evict").status_code == 404
         assert client.post("/api/patients/P-0002/warm").status_code == 404
+
+    def test_series_endpoints_out_of_scope_404(self, client, db_conn):
+        """A P-0002 (lvo-only) series is invisible to a crisp2-scoped user."""
+        p2_series = "2.2.2.2.2.9"
+        with db_conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO image_series "
+                "(patient_id, studyinstanceuid, seriesinstanceuid, modality) "
+                "VALUES ('P-0002', %s, %s, 'CT') ON CONFLICT DO NOTHING",
+                (P2_STUDY, p2_series),
+            )
+        db_conn.commit()
+        try:
+            login_as(client, USER_CRISP)
+            assert client.get(f"/api/series/{p2_series}/cache-status").status_code == 404
+            assert client.post(f"/api/series/{p2_series}/warm").status_code == 404
+            assert client.post(f"/api/series/{p2_series}/evict").status_code == 404
+        finally:
+            with db_conn.cursor() as cur:
+                cur.execute(
+                    "DELETE FROM image_series WHERE seriesinstanceuid = %s", (p2_series,)
+                )
+            db_conn.commit()
 
     def test_batch_cache_status_drops_out_of_scope(self, client):
         login_as(client, USER_CRISP)

@@ -29,6 +29,9 @@ function GrandChildTable({
   activeRowKey,
   isAdmin,
   downloadingSeries,
+  canWarm,
+  seriesStatus,
+  onWarmSeries,
   onGrandChildRowClick,
   onResolveOhifLink,
   onDicomDownload,
@@ -104,6 +107,13 @@ function GrandChildTable({
                           OHIF
                         </button>
                       )}
+                      {gc.seriesinstanceuid && canWarm && (
+                        <WarmButton
+                          status={seriesStatus[gc.seriesinstanceuid]}
+                          onWarm={() => onWarmSeries(gc.seriesinstanceuid)}
+                          baseClass="dt__gc-link-btn"
+                        />
+                      )}
                       {gc.seriesinstanceuid && isAdmin && (
                         <button
                           onClick={() => onDicomDownload(gc.seriesinstanceuid)}
@@ -144,7 +154,9 @@ export default function ChildRows({
   downloadingSeries,
   canWarm,
   studyStatus,
+  seriesStatus,
   onWarmStudy,
+  onWarmSeries,
   onChildRowClick,
   onGrandChildRowClick,
   onResolveOhifLink,
@@ -246,6 +258,12 @@ export default function ChildRows({
                       onWarm={() => onWarmStudy(child.studyinstanceuid)}
                     />
                   )}
+                  {childConfig.idCol === "seriesinstanceuid" && child.seriesinstanceuid && canWarm && (
+                    <WarmButton
+                      status={seriesStatus[child.seriesinstanceuid]}
+                      onWarm={() => onWarmSeries(child.seriesinstanceuid)}
+                    />
+                  )}
                   {childConfig.idCol === "seriesinstanceuid" && child.seriesinstanceuid && isAdmin && (
                     <button
                       onClick={() => onDicomDownload(child.seriesinstanceuid)}
@@ -268,6 +286,9 @@ export default function ChildRows({
                   activeRowKey={activeRowKey}
                   isAdmin={isAdmin}
                   downloadingSeries={downloadingSeries}
+                  canWarm={canWarm}
+                  seriesStatus={seriesStatus}
+                  onWarmSeries={onWarmSeries}
                   onGrandChildRowClick={onGrandChildRowClick}
                   onResolveOhifLink={onResolveOhifLink}
                   onDicomDownload={onDicomDownload}
@@ -309,7 +330,9 @@ ChildRows.propTypes = {
   downloadingSeries: PropTypes.string,
   canWarm: PropTypes.bool,
   studyStatus: PropTypes.object,
+  seriesStatus: PropTypes.object,
   onWarmStudy: PropTypes.func,
+  onWarmSeries: PropTypes.func,
   onChildRowClick: PropTypes.func.isRequired,
   onGrandChildRowClick: PropTypes.func.isRequired,
   onResolveOhifLink: PropTypes.func.isRequired,
