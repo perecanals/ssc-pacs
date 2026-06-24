@@ -139,37 +139,44 @@ User clicks a row in the web app DataTable
   → Navigator.jsx handlePreviewSelect
   → warmOhif.resolveOhifViewerUrl(studyinstanceuid)
       1. GET /api/ohif-link/{uid}
-         Backend checks cache_state:
+         Backend checks the study's aggregate state over its
+         series_cache_state rows (study is 'hot' only when ALL its
+         series are hot — binary readiness):
            - 'cold'    → returns {status: 'cold', url: null, ...}
            - 'warming' → returns {status: 'warming', url: null}
            - 'error'   → HTTP 503
            - 'hot'     → defensive FS probe. If files actually present:
                            touch_access, POST Orthanc /tools/lookup,
                            return {status: 'ready', url: <OHIF URL>}.
-                         If probe shows files missing (stale cache_state):
-                           delete cache_state row, return as if 'cold'
+                         If probe shows files missing (stale state):
+                           delete the study's series_cache_state rows,
+                           return as if 'cold'
       2. If url returned → frontend opens OHIF iframe, done.
       3. If status == 'cold' → POST /api/studies/{uid}/warm
                                  (route: routes/cold_storage.api_warm_study)
          If status == 'warming' → poll cache-status
       4. Route handler runs synchronously, in milliseconds:
-         a. Disk-space precheck (cache_manager.estimate_warm_disk_space).
-            If required > available → 507 with structured detail; STOP.
+         a. Disk-space precheck (cache_manager.estimate_warm_disk_space,
+            summed over the study's series). If required > available
+            → 507 with structured detail; STOP.
          b. Submit cache_manager.warm_study to app.state.warm_executor
             (bounded ThreadPoolExecutor; max_workers from
             [storage].warm_workers, default 2).
          c. Return 202 with {ok: true, queued: true, studyinstanceuid}.
-      5. Background worker thread runs warm_study:
-         a. Advisory pg lock on studyinstanceuid
-         b. Mark cache_state status = 'warming'
-         c. Query image_series for all series in this study
-         d. For each series:
+      5. Background worker thread runs warm_study (a thin wrapper that
+         resolves the study's series and delegates to warm_series):
+         a. Query image_series for all series in this study
+         b. For each series, sequentially (never nested):
+            - Acquire the series' OWN advisory pg lock
+            - Mark its series_cache_state status = 'warming'
             - Compute archive path from dicom_archive_path / dicom_dir_path
             - Extract tar.zst → <dicom_dir_path>.warming (temp sibling)
             - Atomic rename → dicom_dir_path
-         e. Query image_study for study_path (stored as cache_path)
-         f. Mark cache_state status = 'hot', warmed_at = now()
-         g. Release lock
+            - Mark its series_cache_state status = 'hot', warmed_at = now()
+              (cache_path = the series' dicom_dir_path)
+            - Release the series' lock
+         The study's status is a DERIVED AGGREGATE over these series rows
+         — it becomes 'hot' only once every series is hot.
       6. Frontend polls cache-status until 'hot'
       7. Retry GET /api/ohif-link/{uid} — now returns ready URL
       8. OHIF loads via DICOMweb; Orthanc reads files from the restored paths
@@ -182,12 +189,15 @@ background scan will also notice the new files but that's incidental.
 
 ```
 TTL expires (eviction loop every 15 min) OR user calls POST /api/studies/{uid}/evict
-  → cache_manager.evict_study(uid)
+  → cache_manager.evict_study(uid)  (thin wrapper → evict_series over the study's series)
       1. Query image_series for all dicom_dir_path values
-      2. shutil.rmtree each dicom_dir_path
-      3. DELETE cache_state row
+      2. For each series: shutil.rmtree its dicom_dir_path
+      3. DELETE that series' series_cache_state row
          (Orthanc index untouched; patched indexer keeps the entries.)
 ```
+
+`touch_access(study)` touches all of a study's series_cache_state rows, so
+a whole-study warm ages together for eviction parity.
 
 ---
 
@@ -196,11 +206,14 @@ TTL expires (eviction loop every 15 min) OR user calls POST /api/studies/{uid}/e
 - **`image_series.dicom_archive_path`** (TEXT, nullable) — absolute path to
   the `*.tar.zst` archive for this series. Populated by
   `scripts/cold_storage/archive_all_series.py` and by the image integration protocol.
-- **`cache_state`** table — per-study status (`cold` / `warming` / `hot` /
-  `error`), `warmed_at`, `last_accessed_at`, `cache_path`, `error_message`.
-  Used by `warm_study`, `evict_study`, and `ohif_link`.
-- **`orthanc_resource_map`** table — present in schema but unused. Was used
-  by the old `cold_cache` mode which is removed.
+- **`series_cache_state`** table (PK `seriesinstanceuid`) — per-series status
+  (`cold` / `warming` / `hot` / `error` / `queued`), `warmed_at`,
+  `last_accessed_at`, `cache_path` (the series' `dicom_dir_path`),
+  `warming_started_at`, `error_message`. The series is the single source of
+  truth; study/patient warm status is a derived aggregate. Used by
+  `warm_series`/`evict_series` (and the `warm_study`/`evict_study` wrappers)
+  and `ohif_link`. Replaced the former per-study `cache_state` table
+  (Alembic `0010_series_cache_state`).
 
 See [`../reference/data_stores.md`](../reference/data_stores.md) for column details.
 
@@ -217,7 +230,16 @@ See [`../reference/data_stores.md`](../reference/data_stores.md) for column deta
   The extraction runs in `app.state.warm_executor`; clients observe
   completion via `cache-status` polling.
 - `POST /api/studies/{uid}/evict` (authenticated) — manual eviction
-- `GET  /api/studies/{uid}/cache-status` — current cache_state row
+- `GET  /api/studies/{uid}/cache-status` — aggregate study status over its
+  series_cache_state rows
+- `POST /api/series/{seriesinstanceuid}/warm` (authenticated) — warm a single
+  series (its own series_cache_state row)
+- `POST /api/series/{seriesinstanceuid}/evict` (authenticated) — evict a single
+  series
+- `GET  /api/series/{seriesinstanceuid}/cache-status` — that series'
+  series_cache_state row
+- `POST /api/cache-status/batch` — accepts `study_uids`, `patient_uids`, and
+  `series_uids`; returns `studies`, `patients`, and `series` `{uid: status}` maps
 - `GET  /api/storage-mode` — current storage mode
 - `GET  /api/ohif-link/{uid}` — returns `{status, url}` with cold/warming/ready
 
@@ -230,13 +252,26 @@ treats any 2xx (including 202) as "warming started" and then polls
 `/cache-status` until `hot`. Mode-agnostic — no dependency on
 `getStorageMode()` for the warm path.
 
-### Defensive cache_state probe
+The DataTable also surfaces a per-row **Decompress / readiness badge**
+(`components/DataTable/WarmButton.jsx`, driven by `useWarmStatus`'s batched
+`cache-status` poll) on patient, study, and series rows in `cold_path_cache`
+mode for authenticated users. Patient rows aggregate their studies; study rows
+aggregate their series. **Series rows now have their OWN state** —
+each series row reflects and triggers *that series'* `series_cache_state`,
+and clicking it warms only that series (not its siblings).
 
-The `ohif_link` endpoint, before trusting a `status='hot'` row, runs a quick
+A study *open* (no `seriesinstanceuid`) warms the whole study, as before. A
+series *preview* (the `seriesinstanceuid` is supplied) keys off that series'
+own state and warms just that series — a deliberate improvement so sifting
+through individual series is fast.
+
+### Defensive series_cache_state probe
+
+The `ohif_link` endpoint, before trusting a `status='hot'` study, runs a quick
 filesystem probe on one series' `dicom_dir_path`. If the files are missing,
-it clears the stale `cache_state` row and reports `cold` to the frontend, so
-the warm flow re-triggers automatically. This protects against drift when
-files are moved/deleted out-of-band.
+it clears the study's stale `series_cache_state` rows and reports `cold` to the
+frontend, so the warm flow re-triggers automatically. This protects against
+drift when files are moved/deleted out-of-band.
 
 ### Eviction loop
 
@@ -263,10 +298,11 @@ we see in the PACS. See `benchmarks/dicom_archive_benchmark*.py`.
 
 ### Concurrency
 
-Warming is serialized per-study via PostgreSQL advisory locks keyed on
-`abs(hashtext(studyinstanceuid))`. Multiple concurrent clicks on the same
-study result in one warm + everyone else seeing `already_hot` once files
-are in place.
+Warming is serialized **per-series** via PostgreSQL advisory locks keyed on
+`abs(hashtext(seriesinstanceuid))`. A whole-study warm acquires and releases
+each series' lock sequentially (never nested). Multiple concurrent clicks on
+the same series result in one warm + everyone else seeing `already_hot` once
+files are in place.
 
 ### Atomic extraction
 

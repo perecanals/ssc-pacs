@@ -162,9 +162,11 @@ function DataTableInner({
   const childConfig = config.expandable ? LEVEL_CONFIG[config.childLevel] : null;
   const grandChildConfig = childConfig?.expandable ? LEVEL_CONFIG[childConfig.childLevel] : null;
 
-  // Rows currently on screen that carry a decompress control: patient main
-  // rows (aggregate) and study rows (main rows at study level, or expanded
-  // study children at patient level). Series rows are intentionally excluded.
+  // Rows currently on screen that carry a decompress control. Each level/UID is
+  // warmed at its own granularity: patient main rows (aggregate over studies),
+  // study rows (study main rows + expanded study children at patient level), and
+  // series rows (series main rows + expanded series children/grandchildren) —
+  // series rows are series-backed: they show and trigger their *own* warm state.
   const visiblePatientIds = useMemo(
     () => (level === "patient" ? items.map((r) => r.patient_id).filter(Boolean) : []),
     [level, items],
@@ -179,11 +181,32 @@ function DataTableInner({
     }
     return [];
   }, [level, items, childRowsData, expanded]);
+  const visibleSeriesUids = useMemo(() => {
+    if (level === "series") return items.map((r) => r.seriesinstanceuid).filter(Boolean);
+    // Study level: expanded study rows reveal their series children.
+    if (level === "study") {
+      return Object.entries(childRowsData)
+        .filter(([sid]) => expanded[sid])
+        .flatMap(([, series]) => (series || []).map((s) => s.seriesinstanceuid))
+        .filter(Boolean);
+    }
+    // Patient level: expanded study children reveal series grandchildren.
+    if (level === "patient") {
+      return Object.entries(grandChildRows)
+        .filter(([gcKey]) => grandExpanded[gcKey])
+        .flatMap(([, series]) => (series || []).map((s) => s.seriesinstanceuid))
+        .filter(Boolean);
+    }
+    return [];
+  }, [level, items, childRowsData, expanded, grandChildRows, grandExpanded]);
 
-  const { studyStatus, patientStatus, warmStudy, warmPatient } = useWarmStatus({
+  const {
+    studyStatus, patientStatus, seriesStatus, warmStudy, warmPatient, warmSeries,
+  } = useWarmStatus({
     enabled: canWarm,
     studyUids: visibleStudyUids,
     patientIds: visiblePatientIds,
+    seriesUids: visibleSeriesUids,
   });
 
   const handleMutated = () => {
@@ -356,11 +379,19 @@ function DataTableInner({
     }
     const uid = row.studyinstanceuid;
     if (uid && (rowLevel === "study" || rowLevel === "series")) {
+      const isSeries = rowLevel === "series";
       return (
         <>
-          <button onClick={() => handleOhifLink(uid, rowLevel === "series" ? row.seriesinstanceuid : null)} className="link-btn">OHIF</button>
-          {rowLevel === "study" && canWarm && (
-            <WarmButton status={studyStatus[uid]} onWarm={() => warmStudy(uid)} />
+          <button onClick={() => handleOhifLink(uid, isSeries ? row.seriesinstanceuid : null)} className="link-btn">OHIF</button>
+          {canWarm && (
+            isSeries
+              ? row.seriesinstanceuid && (
+                  <WarmButton
+                    status={seriesStatus[row.seriesinstanceuid]}
+                    onWarm={() => warmSeries(row.seriesinstanceuid)}
+                  />
+                )
+              : <WarmButton status={studyStatus[uid]} onWarm={() => warmStudy(uid)} />
           )}
           {rowLevel === "series" && row.seriesinstanceuid && isAdmin && (
             <button onClick={() => handleDicomDownload(row.seriesinstanceuid)} className="link-btn"
@@ -561,7 +592,9 @@ function DataTableInner({
                         downloadingSeries={downloadingSeries}
                         canWarm={canWarm}
                         studyStatus={studyStatus}
+                        seriesStatus={seriesStatus}
                         onWarmStudy={warmStudy}
+                        onWarmSeries={warmSeries}
                         onChildRowClick={handleChildRowClick}
                         onGrandChildRowClick={handleGrandChildRowClick}
                         onResolveOhifLink={handleOhifLink}

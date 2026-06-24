@@ -3,6 +3,7 @@ import {
   getBatchCacheStatus,
   queueWarmStudy,
   queueWarmPatient,
+  queueWarmSeries,
 } from "../../api/warmOhif";
 
 const POLL_MS = 4000;
@@ -17,23 +18,25 @@ const POLL_MS = 4000;
 // that gap the server still reports 'cold'. We hold a local "requested" set so
 // such rows render "Queued…" instead of snapping back to "Decompress" — the
 // guard is dropped once the server confirms warming/hot/error.
-export default function useWarmStatus({ enabled, studyUids, patientIds }) {
+export default function useWarmStatus({ enabled, studyUids, patientIds, seriesUids = [] }) {
   const [studyStatus, setStudyStatus] = useState({});
   const [patientStatus, setPatientStatus] = useState({});
+  const [seriesStatus, setSeriesStatus] = useState({});
 
   // Latest visible ids, read by the loop without restarting the interval.
-  const idsRef = useRef({ studyUids: [], patientIds: [] });
-  idsRef.current = { studyUids, patientIds };
+  const idsRef = useRef({ studyUids: [], patientIds: [], seriesUids: [] });
+  idsRef.current = { studyUids, patientIds, seriesUids };
 
-  // Studies/patients the user just asked to warm, still awaiting a worker.
+  // Studies/patients/series the user just asked to warm, still awaiting a worker.
   const requestedStudies = useRef(new Set());
   const requestedPatients = useRef(new Set());
+  const requestedSeries = useRef(new Set());
 
   const poll = useCallback(async () => {
-    const { studyUids: su, patientIds: pi } = idsRef.current;
-    if (su.length === 0 && pi.length === 0) return;
+    const { studyUids: su, patientIds: pi, seriesUids: se } = idsRef.current;
+    if (su.length === 0 && pi.length === 0 && se.length === 0) return;
     try {
-      const data = await getBatchCacheStatus(su, pi);
+      const data = await getBatchCacheStatus(su, pi, se);
       if (data.studies) {
         setStudyStatus((prev) => {
           const next = { ...prev };
@@ -42,6 +45,22 @@ export default function useWarmStatus({ enabled, studyUids, patientIds }) {
               requestedStudies.current.delete(uid);
               next[uid] = st;
             } else if (requestedStudies.current.has(uid)) {
+              next[uid] = "queued"; // requested but no worker yet
+            } else {
+              next[uid] = st;
+            }
+          }
+          return next;
+        });
+      }
+      if (data.series) {
+        setSeriesStatus((prev) => {
+          const next = { ...prev };
+          for (const [uid, st] of Object.entries(data.series)) {
+            if (st === "warming" || st === "hot" || st === "error") {
+              requestedSeries.current.delete(uid);
+              next[uid] = st;
+            } else if (requestedSeries.current.has(uid)) {
               next[uid] = "queued"; // requested but no worker yet
             } else {
               next[uid] = st;
@@ -84,7 +103,7 @@ export default function useWarmStatus({ enabled, studyUids, patientIds }) {
 
   // Refetch promptly when the visible id set changes (scroll/expand) so newly
   // shown rows resolve their badge without waiting a full interval.
-  const sig = `${studyUids.join(",")}|${patientIds.join(",")}`;
+  const sig = `${studyUids.join(",")}|${patientIds.join(",")}|${seriesUids.join(",")}`;
   useEffect(() => {
     if (enabled) poll();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -99,6 +118,18 @@ export default function useWarmStatus({ enabled, studyUids, patientIds }) {
       requestedStudies.current.delete(uid);
       setStudyStatus((prev) => ({ ...prev, [uid]: "error" }));
       alert(e?.message || "Could not decompress study");
+    }
+  }, []);
+
+  const warmSeries = useCallback(async (uid) => {
+    requestedSeries.current.add(uid);
+    setSeriesStatus((prev) => ({ ...prev, [uid]: "queued" }));
+    try {
+      await queueWarmSeries(uid);
+    } catch (e) {
+      requestedSeries.current.delete(uid);
+      setSeriesStatus((prev) => ({ ...prev, [uid]: "error" }));
+      alert(e?.message || "Could not decompress series");
     }
   }, []);
 
@@ -125,5 +156,5 @@ export default function useWarmStatus({ enabled, studyUids, patientIds }) {
     }
   }, [poll]);
 
-  return { studyStatus, patientStatus, warmStudy, warmPatient };
+  return { studyStatus, patientStatus, seriesStatus, warmStudy, warmPatient, warmSeries };
 }

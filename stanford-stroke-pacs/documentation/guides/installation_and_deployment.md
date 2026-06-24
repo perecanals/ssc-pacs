@@ -664,7 +664,7 @@ How it slots into this runbook:
    the `<project>_ssc-orthanc-storage` Docker volume (indexer state + the only
    copy of OHIF SR annotations) and rsync `cold_archive_root`.
 4. **Host-path backfill** — `cluster_migration.md` §3: rewrite the host-path
-   columns across the schema to the new prefixes, and reset `cache_state` to cold.
+   columns across the schema to the new prefixes, and reset `series_cache_state` to cold.
 5. **Bring-up + web app + service units** — return here for §5 Steps 5–8
    (`scripts/orthanc/dc.sh up -d`, web app deps/build, the unit installer).
 6. **Verify** — `cluster_migration.md` §4 (`reconcile_migration.py`, then

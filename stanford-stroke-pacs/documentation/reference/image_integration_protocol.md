@@ -353,8 +353,8 @@ curl -s -u "${ORTHANC_ADMIN_USER}:${ORTHANC_ADMIN_PASSWORD}" http://localhost:80
 
 - It does **not** talk to Orthanc directly. Indexing is delegated entirely
   to the Folder Indexer plugin.
-- It does **not** populate `cache_state`. New series start implicitly cold
-  if their files are ever removed; the warm flow creates the row on first
+- It does **not** populate `series_cache_state`. New series start implicitly
+  cold if their files are ever removed; the warm flow creates the row on first
   click.
 - It does **not** clean up loose DICOMs after compression. That's a separate
   step via `scripts/cold_storage/cleanup_loose_dicoms.py` (runnable manually or via cron).

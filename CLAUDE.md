@@ -157,6 +157,12 @@ curl -X POST -b cookies.txt http://localhost:8043/api/studies/<uid>/warm
 python3 -c "from cache_manager import evict_study; print(evict_study('<uid>'))"
 curl -X POST -b cookies.txt http://localhost:8043/api/studies/<uid>/evict
 
+# Per-series warm/evict/cache-status (the cache-state unit is the SERIES;
+# study/patient status is derived. series_cache_state is the cache-state table.)
+curl      -b cookies.txt http://localhost:8043/api/series/<series-uid>/cache-status
+curl -X POST -b cookies.txt http://localhost:8043/api/series/<series-uid>/warm
+curl -X POST -b cookies.txt http://localhost:8043/api/series/<series-uid>/evict
+
 # Clean up loose DICOMs that are safe to remove (archive exists + Orthanc has indexed)
 python scripts/cold_storage/cleanup_loose_dicoms.py                  # dry-run
 python scripts/cold_storage/cleanup_loose_dicoms.py --execute        # apply
@@ -308,6 +314,7 @@ Migration from `legacy` to `cold_path_cache` is **complete and validated end-to-
 - Loose DICOMs moved to `/DATA2/pacs_imaging_data_loose_backup` (not yet deleted — kept as safety net)
 - `/DATA2/pacs_imaging_data/` is empty; warm extracts archives back on demand
 - Warm/evict/re-warm cycle works transparently in the UI (click a row → "Warming imaging cache…" spinner → OHIF loads)
+- Cache state is keyed **per series** in `series_cache_state` (PK `seriesinstanceuid`); study/patient warm status is a derived aggregate (study `hot` iff all its series are hot). Warm/evict primitives are `warm_series`/`evict_series`; `warm_study`/`warm_patient`/`evict_study` are thin wrappers over them.
 
 **Why a custom Orthanc image was required:** the upstream Folder Indexer removes
 missing files from Orthanc's index on every scan — incompatible with a cold

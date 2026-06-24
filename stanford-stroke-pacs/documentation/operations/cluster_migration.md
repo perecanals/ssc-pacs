@@ -149,14 +149,14 @@ Host paths are read by **Web App natively on the host** (warm/evict, NIfTI gen,
 labelled exports) — they must be rewritten, because Web App does not go through
 the container. **It is not just `image_series`** — every host-path column across
 the schema must be backfilled, or the leftovers stay silently broken until
-something reads them (e.g. `warm_study` records `cache_path` from
-`image_study.study_path`). The full set (verify with the all-columns scan below):
+something reads them (e.g. warming records each series' `cache_path` from its
+`dicom_dir_path`). The full set (verify with the all-columns scan below):
 
 | Table | Columns (loose tree → `imaging_data`) | Columns (archive → `compressed`) |
 |---|---|---|
 | `image_series` | `dicom_dir_path`, `nifti_path` | `dicom_archive_path` |
 | `image_study` | `study_path` | — |
-| `cache_state` | `cache_path` | — |
+| `series_cache_state` | `cache_path` (holds the series' `dicom_dir_path`) | — |
 | `image_series_labelled` (snapshot) | `dicom_dir_path`, `nifti_path` | `dicom_archive_path` |
 | `image_study_labelled` (snapshot) | `study_path` | — |
 
@@ -166,7 +166,7 @@ something reads them (e.g. `warm_study` records `cache_path` from
 UPDATE image_series          SET dicom_dir_path = replace(dicom_dir_path,'/DATA2/pacs_imaging_data','/Users/you/pacs/imaging_data') WHERE dicom_dir_path LIKE '/DATA2/pacs_imaging_data/%';
 UPDATE image_series          SET nifti_path     = replace(nifti_path,    '/DATA2/pacs_imaging_data','/Users/you/pacs/imaging_data') WHERE nifti_path     LIKE '/DATA2/pacs_imaging_data/%';
 UPDATE image_study           SET study_path     = replace(study_path,    '/DATA2/pacs_imaging_data','/Users/you/pacs/imaging_data') WHERE study_path     LIKE '/DATA2/pacs_imaging_data/%';
-UPDATE cache_state           SET cache_path     = replace(cache_path,    '/DATA2/pacs_imaging_data','/Users/you/pacs/imaging_data') WHERE cache_path     LIKE '/DATA2/pacs_imaging_data/%';
+UPDATE series_cache_state    SET cache_path     = replace(cache_path,    '/DATA2/pacs_imaging_data','/Users/you/pacs/imaging_data') WHERE cache_path     LIKE '/DATA2/pacs_imaging_data/%';
 UPDATE image_series_labelled SET dicom_dir_path = replace(dicom_dir_path,'/DATA2/pacs_imaging_data','/Users/you/pacs/imaging_data') WHERE dicom_dir_path LIKE '/DATA2/pacs_imaging_data/%';
 UPDATE image_series_labelled SET nifti_path     = replace(nifti_path,    '/DATA2/pacs_imaging_data','/Users/you/pacs/imaging_data') WHERE nifti_path     LIKE '/DATA2/pacs_imaging_data/%';
 UPDATE image_study_labelled  SET study_path     = replace(study_path,    '/DATA2/pacs_imaging_data','/Users/you/pacs/imaging_data') WHERE study_path     LIKE '/DATA2/pacs_imaging_data/%';
@@ -190,13 +190,13 @@ DO $$ DECLARE r record; n bigint; BEGIN
 configured root — empty strings, e.g. `nifti_path` for series with no NIfTI, count
 as "no path", not as un-migrated.)
 
-**Reset `cache_state`.** It is **host-specific runtime state** carried in the dump:
-rows marked `status='hot'` describe files warm on the *old* host, absent here, so
-the UI would skip warming and fail to render. Reset to cold (self-heals — a
-genuinely-warm study re-detects its files on next access):
+**Reset `series_cache_state`.** It is **host-specific runtime state** carried in
+the dump: rows marked `status='hot'` describe files warm on the *old* host, absent
+here, so the UI would skip warming and fail to render. Reset to cold (self-heals —
+a genuinely-warm series re-detects its files on next access):
 
 ```sql
-UPDATE cache_state SET status='cold', warming_started_at=NULL, error_message=NULL WHERE status<>'cold';
+UPDATE series_cache_state SET status='cold', warming_started_at=NULL, error_message=NULL WHERE status<>'cold';
 ```
 
 **Constraint that ties this to §2:** swap only the *prefix*; keep the path
@@ -230,8 +230,8 @@ the four things that a port can get wrong:
    that is easy to forget). Skipped with `--skip-volume` if Docker is unavailable.
 4. **Host paths re-pointed** — no row in any host-path column carries an
    un-migrated prefix (`image_series` `dicom_dir_path`/`nifti_path`,
-   `image_study.study_path`, `cache_state.cache_path`, and the `*_labelled`
-   snapshots), and every recorded `dicom_archive_path` exists on disk.
+   `image_study.study_path`, `series_cache_state.cache_path`, and the
+   `*_labelled` snapshots), and every recorded `dicom_archive_path` exists on disk.
 
 ```bash
 python scripts/migration/reconcile_migration.py            # full check

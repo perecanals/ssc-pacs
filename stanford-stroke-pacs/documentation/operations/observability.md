@@ -30,6 +30,7 @@ common ones:
 | Field         | Where                               |
 |---------------|-------------------------------------|
 | `study_uid`   | `cache_manager.warm_study` / `evict_study`, `eviction_loop` |
+| `series_uid`  | `cache_manager.warm_series` / `evict_series` (warm/evict are per-series) |
 | `http_method`, `http_path`, `http_path_template`, `http_status`, `duration_seconds` | Per-request log line from the middleware |
 
 `warm_study` runs in `app.state.warm_executor` (a bounded
@@ -180,7 +181,7 @@ Unauthenticated, same as `/healthz`.
 | `http_request_duration_seconds`                              | histogram | `method`, `path_template`              | Request latency. Buckets tuned for fast JSON + long warm/evict. |
 | `cold_storage_warm_total`                                    | counter   | `result` ∈ {`success`, `failure`, `insufficient_disk_space`} | `POST /api/studies/{uid}/warm` outcomes. |
 | `cold_storage_evict_total`                                   | counter   | `result` ∈ {`success`, `failure`}      | `POST /api/studies/{uid}/evict` outcomes. |
-| `cold_storage_warming_rows`                                  | gauge     | —                                      | `cache_state` rows currently in `status='warming'`, refreshed on scrape. |
+| `cold_storage_warming_rows`                                  | gauge     | —                                      | `series_cache_state` rows currently in `status='warming'`, refreshed on scrape (no new label). |
 | `cold_storage_disk_free_bytes`                               | gauge     | —                                      | Free bytes on the filesystem holding `dicom_data_root`, refreshed on scrape. |
 
 `path_template` is the matched FastAPI route template (e.g.

@@ -1,21 +1,28 @@
-"""Cold storage: warm study into original dicom paths, eviction.
+"""Cold storage: warm/evict series into their original dicom paths.
 
-Robustness invariants (see maintenance/workstreams/05-cold-storage-robustness.md):
+The **series is the single source of truth**. ``series_cache_state`` is keyed by
+``seriesinstanceuid``; ``warm_series([uid, ...])`` is the one warm primitive.
+Study- and patient-level operations are thin, behaviour-preserving wrappers:
+``warm_study`` warms every series of a study (in one call → one executor task),
+``warm_patient`` warms every series under a patient, and study/patient *status*
+is a derived aggregate over the relevant series rows (binary readiness: a study
+is ``hot`` only when all its series are hot — exactly as before).
 
-* Every `cache_state` row that holds `status='warming'` also has
-  `warming_started_at = now()`. The watchdog in `warm_study()` treats
-  rows older than `WARMING_TIMEOUT_MINUTES` as recoverable and proceeds
-  to re-warm them.
-* `warm_study()` refuses to extract if the target filesystem cannot
-  fit `WARMING_DISK_SAFETY_FACTOR * compressed` bytes plus
-  `WARMING_DISK_MIN_FREE_BYTES` of headroom. On insufficient space the
-  row is reset to `status='cold'` and an `InsufficientDiskSpaceError`
-  is raised.
-* `evict_study()` only deletes the `cache_state` row after `rmtree`
-  succeeds. A failed eviction leaves the row intact so the operator
-  can retry.
-* Every warm/evict log line carries the study UID via
-  `extra={'study_uid': uid}`.
+Robustness invariants (unchanged in spirit, now per series):
+
+* Every ``series_cache_state`` row holding ``status='warming'`` also has
+  ``warming_started_at = now()``. The watchdog in :func:`warm_series` treats rows
+  older than ``WARMING_TIMEOUT_MINUTES`` as recoverable and re-warms them.
+* :func:`warm_series` refuses to extract a series if its target filesystem cannot
+  fit ``WARMING_DISK_SAFETY_FACTOR * compressed`` bytes plus
+  ``WARMING_DISK_MIN_FREE_BYTES`` of headroom. On insufficient space that series'
+  row is reset to ``status='cold'`` and an :class:`InsufficientDiskSpaceError`
+  is recorded (the route's synchronous precheck surfaces 507 first).
+* :func:`evict_series` only deletes a ``series_cache_state`` row after its
+  ``rmtree`` succeeds. A failed eviction leaves the row intact for retry.
+* Each series is warmed under its own advisory lock, acquired and released
+  sequentially — **at most one series lock is ever held at a time**, so warming a
+  whole study cannot deadlock against a concurrent warm.
 """
 
 from __future__ import annotations
@@ -48,11 +55,11 @@ _conn = get_conn  # Backward-compat alias used throughout this module.
 
 ADV_LOCK_KEY = 8741002
 
-# Reusable SQL fragment: an entity's *effective* cache status, where a
+# Reusable SQL fragment: a series' *effective* cache status, where a
 # 'warming'/'queued' row stuck past the warming timeout is reported as 'cold'
 # (abandoned warm — worker died, or a queue dropped on app restart). Assumes the
-# cache_state row is aliased `cs` (LEFT JOIN-friendly: a missing row also reads
-# 'cold'). Takes one %s param: the timeout in minutes.
+# series_cache_state row is aliased `cs` (LEFT JOIN-friendly: a missing row also
+# reads 'cold'). Takes one %s param: the timeout in minutes.
 _EFFECTIVE_STATUS_SQL = (
     "CASE WHEN cs.status IN ('warming', 'queued') "
     "AND cs.warming_started_at < now() - (%s * interval '1 minute') "
@@ -78,6 +85,15 @@ class InsufficientDiskSpaceError(RuntimeError):
 
 def _log_extra(studyinstanceuid: str) -> dict[str, str]:
     return {"study_uid": studyinstanceuid}
+
+
+def _log_extra_series(seriesinstanceuid: str) -> dict[str, str]:
+    return {"series_uid": seriesinstanceuid}
+
+
+# ---------------------------------------------------------------------------
+# Archive resolution / extraction primitives
+# ---------------------------------------------------------------------------
 
 
 def archive_path_for_series_dir(dicom_dir: Path, data_root: Path, cold_root: Path) -> Path:
@@ -122,10 +138,53 @@ def _is_series_dir_warm(dicom_dir_path: str) -> bool:
         return False
 
 
-def _advisory_unlock(cur, studyinstanceuid: str) -> None:
+def _extract_one_series(dicom_dir_path: str, arch_path: Path, touched_tmp_dirs: list[Path]) -> float:
+    """Extract one series archive to its original dicom_dir_path. Returns extract seconds.
+
+    Extracts into a sibling ``*.warming`` temp dir, then atomically renames it
+    over the destination. ``touched_tmp_dirs`` accumulates the temp paths so the
+    caller can clean them up on failure. Raises on extraction error (the caller
+    marks the series ``error``). A no-op (returns 0.0) if the dir is already warm.
+    """
+    dicom_dir = Path(dicom_dir_path)
+    # .warming sibling lives at the same level: .../SeriesUID/DICOM.warming
+    tmp_container = dicom_dir.with_name(dicom_dir.name + ".warming")
+    touched_tmp_dirs.append(tmp_container)
+
+    # Remove stale .warming dir from a prior crash.
+    if tmp_container.exists():
+        shutil.rmtree(tmp_container)
+
+    # Skip if already extracted (partial warm from a previous run).
+    if _is_series_dir_warm(dicom_dir_path):
+        return 0.0
+
+    t0 = time.perf_counter()
+    # Archives use flat structure (files directly at archive root, matching
+    # archive_all_series.py). Extract into tmp_container, then atomic rename
+    # tmp_container → dicom_dir.
+    untar_zst(arch_path, tmp_container)
+    elapsed = time.perf_counter() - t0
+
+    # Remove empty dicom_dir if it exists (rename requires destination absent or
+    # empty on Linux).
+    if dicom_dir.is_dir():
+        shutil.rmtree(dicom_dir)
+    tmp_container.replace(dicom_dir)
+    return elapsed
+
+
+def _advisory_lock(cur, key_text: str) -> None:
+    cur.execute(
+        "SELECT pg_advisory_lock(%s, (abs(hashtext(%s::text)))::integer)",
+        (ADV_LOCK_KEY, key_text),
+    )
+
+
+def _advisory_unlock(cur, key_text: str) -> None:
     cur.execute(
         "SELECT pg_advisory_unlock(%s, (abs(hashtext(%s::text)))::integer)",
-        (ADV_LOCK_KEY, studyinstanceuid),
+        (ADV_LOCK_KEY, key_text),
     )
 
 
@@ -158,27 +217,123 @@ def _estimate_required_bytes(archives: list[tuple[str, Path]]) -> int:
     return int(compressed_total * WARMING_DISK_SAFETY_FACTOR) + int(WARMING_DISK_MIN_FREE_BYTES)
 
 
+# ---------------------------------------------------------------------------
+# Small DB helpers (series ↔ study mapping)
+# ---------------------------------------------------------------------------
+
+
+def _series_for_studies(study_uids: list[str]) -> list[str]:
+    """Return every seriesinstanceuid belonging to the given studies."""
+    if not study_uids:
+        return []
+    conn = _conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT seriesinstanceuid FROM image_series WHERE studyinstanceuid = ANY(%s)",
+                (list(study_uids),),
+            )
+            return [r[0] for r in cur.fetchall()]
+    finally:
+        conn.close()
+
+
+def _series_for_patient(patient_id: str) -> list[str]:
+    conn = _conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT s.seriesinstanceuid FROM image_series s "
+                "JOIN image_study st ON st.studyinstanceuid = s.studyinstanceuid "
+                "WHERE st.patient_id = %s",
+                (patient_id,),
+            )
+            return [r[0] for r in cur.fetchall()]
+    finally:
+        conn.close()
+
+
+def list_patient_study_uids(patient_id: str) -> list[str]:
+    """Return every studyinstanceuid belonging to a patient (warm-all fan-out)."""
+    conn = _conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT studyinstanceuid FROM image_study WHERE patient_id = %s",
+                (patient_id,),
+            )
+            return [r[0] for r in cur.fetchall()]
+    finally:
+        conn.close()
+
+
+def _study_path(study_uid: str) -> str | None:
+    conn = _conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT study_path FROM image_study WHERE studyinstanceuid = %s",
+                (study_uid,),
+            )
+            row = cur.fetchone()
+            return row[0] if row and row[0] else None
+    finally:
+        conn.close()
+
+
+def _collapse_status(effs: list[str]) -> str:
+    """Collapse a study's per-series effective statuses to one binary-readiness status.
+
+    A study is ``hot`` only when *all* its series are hot (matches the previous
+    study-level semantics). Otherwise: any warming → warming; else any queued →
+    queued; else any error → error; else cold.
+    """
+    if not effs:
+        return "cold"
+    if all(e == "hot" for e in effs):
+        return "hot"
+    if "warming" in effs:
+        return "warming"
+    if "queued" in effs:
+        return "queued"
+    if "error" in effs:
+        return "error"
+    return "cold"
+
+
+# ---------------------------------------------------------------------------
+# Disk-space prechecks (route-level, synchronous)
+# ---------------------------------------------------------------------------
+
+
+def _estimate_for_series_rows(series_rows: list[dict[str, Any]]) -> dict[str, Any] | None:
+    archives: list[tuple[str, Path]] = []
+    for r in series_rows:
+        arch = resolve_series_archive(r.get("dicom_archive_path"), r.get("dicom_dir_path"))
+        if arch and arch.is_file():
+            archives.append((r["dicom_dir_path"], arch))
+
+    archives_to_extract = [(dp, ap) for dp, ap in archives if not _is_series_dir_warm(dp)]
+    if not archives_to_extract:
+        return None
+
+    required = _estimate_required_bytes(archives_to_extract)
+    target = Path(archives_to_extract[0][0]).parent
+    available = _disk_free_bytes(target)
+    return {"required_bytes": required, "available_bytes": available, "target": target}
+
+
 def estimate_warm_disk_space(studyinstanceuid: str) -> dict[str, Any] | None:
-    """Synchronous precheck for the warm route handler.
+    """Synchronous disk precheck for the study warm route handler.
 
-    Resolves the study's archives, filters out series that are already
-    warm on disk, and compares estimated required bytes against the
-    free space at the extraction target. Does **not** write to
-    ``cache_state`` — the caller decides whether to surface 507 or
-    proceed.
-
-    Returns ``None`` if no extraction would be performed (no archives
-    found, or every series is already warm). Otherwise a dict with
-    ``required_bytes``, ``available_bytes``, and ``target`` (Path).
-
-    The defensive disk-space check inside :func:`warm_study` runs again
-    inside the worker — this precheck is the first-line guard so the
-    route can return 507 synchronously instead of letting the worker
-    discover the problem after a thread submission.
+    Resolves the study's archives, filters out series already warm on disk, and
+    compares estimated required bytes against the free space at the extraction
+    target. Does **not** write to ``series_cache_state``. Returns ``None`` if no
+    extraction would be performed; otherwise a dict with ``required_bytes``,
+    ``available_bytes``, and ``target`` (Path).
     """
     if STORAGE_MODE != "cold_path_cache":
         return None
-
     conn = _conn()
     try:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
@@ -190,38 +345,42 @@ def estimate_warm_disk_space(studyinstanceuid: str) -> dict[str, Any] | None:
             series_rows = cur.fetchall()
     finally:
         conn.close()
+    return _estimate_for_series_rows([dict(r) for r in series_rows])
 
-    archives: list[tuple[str, Path]] = []
-    for r in series_rows:
-        arch = resolve_series_archive(r.get("dicom_archive_path"), r.get("dicom_dir_path"))
-        if arch and arch.is_file():
-            archives.append((r["dicom_dir_path"], arch))
 
-    archives_to_extract = [
-        (dp, ap) for dp, ap in archives if not _is_series_dir_warm(dp)
-    ]
-    if not archives_to_extract:
+def estimate_warm_series_disk_space(series_uids: list[str]) -> dict[str, Any] | None:
+    """Synchronous disk precheck for the series warm route handler (see above)."""
+    if STORAGE_MODE != "cold_path_cache" or not series_uids:
         return None
+    conn = _conn()
+    try:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute(
+                "SELECT dicom_dir_path, dicom_archive_path "
+                "FROM image_series WHERE seriesinstanceuid = ANY(%s)",
+                (list(series_uids),),
+            )
+            series_rows = cur.fetchall()
+    finally:
+        conn.close()
+    return _estimate_for_series_rows([dict(r) for r in series_rows])
 
-    required = _estimate_required_bytes(archives_to_extract)
-    target = Path(archives_to_extract[0][0]).parent
-    available = _disk_free_bytes(target)
-    return {
-        "required_bytes": required,
-        "available_bytes": available,
-        "target": target,
-    }
+
+# ---------------------------------------------------------------------------
+# Status reads (series source of truth; study/patient as aggregates)
+# ---------------------------------------------------------------------------
 
 
-def get_cache_status(studyinstanceuid: str) -> dict[str, Any]:
+def get_series_cache_status(seriesinstanceuid: str) -> dict[str, Any]:
+    """Per-series cache status row (the same dict shape the study endpoint returns)."""
     conn = _conn()
     try:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             cur.execute(
                 "SELECT status, error_message, warmed_at, last_accessed_at, "
                 "       warming_started_at, cache_path "
-                "FROM cache_state WHERE studyinstanceuid = %s",
-                (studyinstanceuid,),
+                "FROM series_cache_state WHERE seriesinstanceuid = %s",
+                (seriesinstanceuid,),
             )
             row = cur.fetchone()
         if not row:
@@ -242,44 +401,21 @@ def get_cache_status(studyinstanceuid: str) -> dict[str, Any]:
         conn.close()
 
 
-def list_patient_study_uids(patient_id: str) -> list[str]:
-    """Return every studyinstanceuid belonging to a patient (warm-all fan-out)."""
-    conn = _conn()
-    try:
-        with conn.cursor() as cur:
-            cur.execute(
-                "SELECT studyinstanceuid FROM image_study WHERE patient_id = %s",
-                (patient_id,),
-            )
-            return [r[0] for r in cur.fetchall()]
-    finally:
-        conn.close()
-
-
-def get_batch_cache_status(uids: list[str]) -> dict[str, str]:
-    """Map each requested study UID to its cache status (default 'cold').
-
-    A single round-trip for the table's visible rows, so the frontend polls
-    once per tick instead of once per row. Studies with no ``cache_state``
-    row are reported ``cold``.
-    """
-    out = {uid: "cold" for uid in uids}
-    if not uids:
+def get_batch_series_status(series_uids: list[str]) -> dict[str, str]:
+    """Map each requested series UID to its effective cache status (default 'cold')."""
+    out = {uid: "cold" for uid in series_uids}
+    if not series_uids:
         return out
     conn = _conn()
     try:
         with conn.cursor() as cur:
-            # A 'warming'/'queued' row past the timeout is an abandoned warm
-            # (worker died, or a queue dropped on app restart); report it 'cold'
-            # so the UI offers a clickable "Decompress" again rather than a stuck,
-            # disabled badge. reap_stale_warming() cleans the row in the background.
             cur.execute(
-                "SELECT studyinstanceuid, "
+                "SELECT seriesinstanceuid, "
                 "CASE WHEN status IN ('warming', 'queued') "
                 "AND warming_started_at < now() - (%s * interval '1 minute') "
                 "THEN 'cold' ELSE status END "
-                "FROM cache_state WHERE studyinstanceuid = ANY(%s)",
-                (WARMING_TIMEOUT_MINUTES, uids),
+                "FROM series_cache_state WHERE seriesinstanceuid = ANY(%s)",
+                (WARMING_TIMEOUT_MINUTES, list(series_uids)),
             )
             for uid, status in cur.fetchall():
                 out[uid] = status
@@ -288,114 +424,199 @@ def get_batch_cache_status(uids: list[str]) -> dict[str, str]:
         conn.close()
 
 
-def get_patient_cache_status(patient_id: str) -> dict[str, Any]:
-    """Aggregate cache status across all of a patient's studies.
+def get_cache_status(studyinstanceuid: str) -> dict[str, Any]:
+    """Study cache status, derived by aggregating the study's series rows.
 
-    Returns per-status counts plus ``total`` so the patient row can render a
-    single readiness summary (e.g. ``Ready 4/4``). A study with no
-    ``cache_state`` row counts as ``cold``.
+    Returns the same dict shape as the old per-study read (``status``,
+    ``error_message``, ``warmed_at``, ``last_accessed_at``, ``warming_started_at``,
+    ``cache_path``) so the ohif-link probe and the cache-status endpoint are
+    unchanged. Binary readiness: ``hot`` only when every series is hot.
     """
-    counts = {"cold": 0, "queued": 0, "warming": 0, "hot": 0, "error": 0}
+    conn = _conn()
+    try:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute(
+                f"SELECT {_EFFECTIVE_STATUS_SQL} AS eff, "
+                "       cs.warmed_at, cs.last_accessed_at, cs.warming_started_at, cs.error_message "
+                "FROM image_series s "
+                "LEFT JOIN series_cache_state cs ON cs.seriesinstanceuid = s.seriesinstanceuid "
+                "WHERE s.studyinstanceuid = %s",
+                (WARMING_TIMEOUT_MINUTES, studyinstanceuid),
+            )
+            rows = [dict(r) for r in cur.fetchall()]
+    finally:
+        conn.close()
+
+    if not rows:
+        return {
+            "status": "cold",
+            "error_message": None,
+            "warmed_at": None,
+            "last_accessed_at": None,
+            "warming_started_at": None,
+            "cache_path": None,
+        }
+
+    effs = [r["eff"] for r in rows]
+    status = _collapse_status(effs)
+
+    warmed_at = max((r["warmed_at"] for r in rows if r["warmed_at"]), default=None)
+    last_accessed_at = max((r["last_accessed_at"] for r in rows if r["last_accessed_at"]), default=None)
+    warming_started_at = min(
+        (r["warming_started_at"] for r in rows
+         if r["eff"] in ("warming", "queued") and r["warming_started_at"]),
+        default=None,
+    )
+    error_message = next(
+        (r["error_message"] for r in rows if r["eff"] == "error" and r["error_message"]),
+        None,
+    )
+
+    return {
+        "status": status,
+        "error_message": error_message if status == "error" else None,
+        "warmed_at": warmed_at.isoformat() if warmed_at else None,
+        "last_accessed_at": last_accessed_at.isoformat() if last_accessed_at else None,
+        "warming_started_at": warming_started_at.isoformat() if warming_started_at else None,
+        "cache_path": _study_path(studyinstanceuid) if status == "hot" else None,
+    }
+
+
+def get_batch_cache_status(uids: list[str]) -> dict[str, str]:
+    """Map each requested study UID to its aggregated cache status (default 'cold').
+
+    A single round-trip for the table's visible rows. Studies with no warm series
+    are reported ``cold``; a study is ``hot`` only when all its series are hot.
+    """
+    out = {uid: "cold" for uid in uids}
+    if not uids:
+        return out
     conn = _conn()
     try:
         with conn.cursor() as cur:
             cur.execute(
-                f"SELECT {_EFFECTIVE_STATUS_SQL} AS status "
-                "FROM image_study st "
-                "LEFT JOIN cache_state cs ON cs.studyinstanceuid = st.studyinstanceuid "
-                "WHERE st.patient_id = %s",
-                (WARMING_TIMEOUT_MINUTES, patient_id),
+                f"SELECT s.studyinstanceuid, {_EFFECTIVE_STATUS_SQL} AS eff "
+                "FROM image_series s "
+                "LEFT JOIN series_cache_state cs ON cs.seriesinstanceuid = s.seriesinstanceuid "
+                "WHERE s.studyinstanceuid = ANY(%s)",
+                (WARMING_TIMEOUT_MINUTES, list(uids)),
             )
-            for (status,) in cur.fetchall():
-                counts[status] = counts.get(status, 0) + 1
+            by_study: dict[str, list[str]] = {}
+            for study_uid, eff in cur.fetchall():
+                by_study.setdefault(study_uid, []).append(eff)
+        for study_uid, effs in by_study.items():
+            out[study_uid] = _collapse_status(effs)
+        return out
     finally:
         conn.close()
+
+
+def _patient_status_counts(patient_ids: list[str]) -> dict[str, dict[str, int]]:
+    """Per-patient {status: study_count} aggregated over each study's series.
+
+    Two-level aggregation done in Python for clarity: collapse each study's series
+    to a binary study status, then count studies by status per patient. A study
+    with no series counts as one ``cold`` study (LEFT JOIN keeps it present).
+    """
+    counts = {
+        pid: {"cold": 0, "queued": 0, "warming": 0, "hot": 0, "error": 0}
+        for pid in patient_ids
+    }
+    if not patient_ids:
+        return counts
+    conn = _conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"SELECT st.patient_id, st.studyinstanceuid, {_EFFECTIVE_STATUS_SQL} AS eff "
+                "FROM image_study st "
+                "LEFT JOIN image_series s ON s.studyinstanceuid = st.studyinstanceuid "
+                "LEFT JOIN series_cache_state cs ON cs.seriesinstanceuid = s.seriesinstanceuid "
+                "WHERE st.patient_id = ANY(%s)",
+                (WARMING_TIMEOUT_MINUTES, list(patient_ids)),
+            )
+            # patient_id -> study_uid -> [eff, ...]
+            per_study: dict[str, dict[str, list[str]]] = {}
+            for pid, study_uid, eff in cur.fetchall():
+                per_study.setdefault(pid, {}).setdefault(study_uid, []).append(eff)
+    finally:
+        conn.close()
+
+    for pid, studies in per_study.items():
+        entry = counts.setdefault(pid, {"cold": 0, "queued": 0, "warming": 0, "hot": 0, "error": 0})
+        for effs in studies.values():
+            entry[_collapse_status(effs)] += 1
+    return counts
+
+
+def get_patient_cache_status(patient_id: str) -> dict[str, Any]:
+    """Aggregate cache status across all of a patient's studies (counts studies)."""
+    counts = _patient_status_counts([patient_id])[patient_id]
     total = sum(counts.values())
     return {"patient_id": patient_id, "total": total, **counts}
 
 
 def get_patients_cache_status(patient_ids: list[str]) -> dict[str, dict[str, Any]]:
-    """Aggregate cache status for many patients in one grouped query.
+    """Aggregate cache status for many patients (one query, study-counted summaries)."""
+    counts = _patient_status_counts(patient_ids)
+    out: dict[str, dict[str, Any]] = {}
+    for pid, c in counts.items():
+        out[pid] = {"patient_id": pid, "total": sum(c.values()), **c}
+    return out
 
-    Backs the batch endpoint so a page of patient rows polls without N+1.
+
+# ---------------------------------------------------------------------------
+# Queue / reap / touch (series-keyed)
+# ---------------------------------------------------------------------------
+
+
+def mark_queued_series(series_uids: list[str]) -> None:
+    """Persist a 'queued' marker for series submitted to the warm executor.
+
+    Makes the Queued state durable across reloads and visible to other users.
+    Only promotes rows that are currently cold/error/absent; never downgrades a
+    'hot' or in-progress 'warming' row.
     """
-    out = {
-        pid: {"patient_id": pid, "total": 0, "cold": 0, "queued": 0, "warming": 0, "hot": 0, "error": 0}
-        for pid in patient_ids
-    }
-    if not patient_ids:
-        return out
-    conn = _conn()
-    try:
-        with conn.cursor() as cur:
-            cur.execute(
-                f"SELECT st.patient_id, {_EFFECTIVE_STATUS_SQL} AS status, COUNT(*) "
-                "FROM image_study st "
-                "LEFT JOIN cache_state cs ON cs.studyinstanceuid = st.studyinstanceuid "
-                f"WHERE st.patient_id = ANY(%s) GROUP BY st.patient_id, {_EFFECTIVE_STATUS_SQL}",
-                (WARMING_TIMEOUT_MINUTES, patient_ids, WARMING_TIMEOUT_MINUTES),
-            )
-            for pid, status, count in cur.fetchall():
-                entry = out.setdefault(
-                    pid,
-                    {"patient_id": pid, "total": 0, "cold": 0, "queued": 0, "warming": 0, "hot": 0, "error": 0},
-                )
-                entry[status] = entry.get(status, 0) + count
-                entry["total"] += count
-        return out
-    finally:
-        conn.close()
-
-
-def mark_queued(studyinstanceuids: list[str]) -> None:
-    """Persist a 'queued' marker for studies submitted to the warm executor.
-
-    Makes the Queued state durable across page reloads and visible to other
-    users — the in-process executor queue itself is not observable. Only
-    promotes rows that are currently cold/error/absent; never downgrades a
-    'hot' or an in-progress 'warming' row. ``warm_study()`` flips
-    'queued'->'warming' when a worker actually starts (re-stamping
-    ``warming_started_at``), and :func:`reap_stale_warming` ages out orphaned
-    'queued' rows if the app restarts and drops its in-memory queue.
-    """
-    if STORAGE_MODE != "cold_path_cache" or not studyinstanceuids:
+    if STORAGE_MODE != "cold_path_cache" or not series_uids:
         return
     conn = _conn()
     try:
         with conn.cursor() as cur:
             cur.executemany(
                 """
-                INSERT INTO cache_state (studyinstanceuid, status, warming_started_at)
+                INSERT INTO series_cache_state (seriesinstanceuid, status, warming_started_at)
                 VALUES (%s, 'queued', now())
-                ON CONFLICT (studyinstanceuid) DO UPDATE
+                ON CONFLICT (seriesinstanceuid) DO UPDATE
                 SET status = 'queued', warming_started_at = now(), error_message = NULL
-                WHERE cache_state.status IN ('cold', 'error')
+                WHERE series_cache_state.status IN ('cold', 'error')
                 """,
-                [(u,) for u in studyinstanceuids],
+                [(u,) for u in series_uids],
             )
         conn.commit()
     finally:
         conn.close()
 
 
+def mark_queued(studyinstanceuids: list[str]) -> None:
+    """Queue every series of the given studies (study/patient warm entry point)."""
+    if STORAGE_MODE != "cold_path_cache" or not studyinstanceuids:
+        return
+    mark_queued_series(_series_for_studies(studyinstanceuids))
+
+
 def reap_stale_warming(min_age_minutes: float | None = None) -> list[str]:
-    """Reset abandoned 'warming'/'queued' rows back to 'cold'.
+    """Reset abandoned 'warming'/'queued' series rows back to 'cold'.
 
-    A warm whose worker died mid-extraction (e.g. the app was restarted) leaves
-    its row stuck in 'warming' forever; likewise a 'queued' row whose enqueue
-    never ran (the in-memory executor queue is dropped on restart). The UI would
-    render either as a permanently disabled badge — a dead end for the rater.
-    This sweep returns such studies to 'cold' so they can be decompressed again.
+    A warm whose worker died mid-extraction leaves its row stuck in 'warming'
+    forever; likewise a 'queued' row whose enqueue never ran (the in-memory
+    executor queue is dropped on restart). This sweep returns such series to
+    'cold' so they can be decompressed again.
 
-    ``min_age_minutes`` defaults to ``WARMING_TIMEOUT_MINUTES`` for the periodic
-    eviction-loop sweep. Pass ``0`` at app startup: a freshly started process has
-    an empty executor and holds no warm locks, so *every* warming/queued row is
-    orphaned and should be reset immediately rather than waiting out the timeout.
-
-    Each candidate is only reset if ``pg_try_advisory_lock`` succeeds. A warm
-    that is genuinely still running (in this or another live process) holds that
-    lock for the whole extraction, so it is never clobbered — only truly
-    abandoned rows reaped.
+    ``min_age_minutes`` defaults to ``WARMING_TIMEOUT_MINUTES``. Pass ``0`` at app
+    startup: a freshly started process holds no warm locks, so every warming/queued
+    row is orphaned. Each candidate is only reset if ``pg_try_advisory_lock``
+    succeeds, so a genuinely-running warm (which holds that series lock) is never
+    clobbered.
     """
     if STORAGE_MODE != "cold_path_cache":
         return []
@@ -405,7 +626,7 @@ def reap_stale_warming(min_age_minutes: float | None = None) -> list[str]:
     try:
         with conn.cursor() as cur:
             cur.execute(
-                "SELECT studyinstanceuid FROM cache_state "
+                "SELECT seriesinstanceuid FROM series_cache_state "
                 "WHERE status IN ('warming', 'queued') "
                 "AND warming_started_at < now() - (%s * interval '1 minute')",
                 (age,),
@@ -420,31 +641,49 @@ def reap_stale_warming(min_age_minutes: float | None = None) -> list[str]:
                     continue  # a warm is genuinely still in progress — leave it
                 try:
                     cur.execute(
-                        "UPDATE cache_state SET status = 'cold', "
+                        "UPDATE series_cache_state SET status = 'cold', "
                         "warming_started_at = NULL, error_message = NULL "
-                        "WHERE studyinstanceuid = %s AND status IN ('warming', 'queued')",
+                        "WHERE seriesinstanceuid = %s AND status IN ('warming', 'queued')",
                         (uid,),
                     )
                     if cur.rowcount:
                         reaped.append(uid)
                     conn.commit()
                 finally:
-                    cur.execute(
-                        "SELECT pg_advisory_unlock(%s, (abs(hashtext(%s::text)))::integer)",
-                        (ADV_LOCK_KEY, uid),
-                    )
+                    _advisory_unlock(cur, uid)
                     conn.commit()
     finally:
         conn.close()
     return reaped
 
 
-def touch_access(studyinstanceuid: str) -> None:
+def touch_access_series(seriesinstanceuid: str) -> None:
     conn = _conn()
     try:
         with conn.cursor() as cur:
             cur.execute(
-                "UPDATE cache_state SET last_accessed_at = now() WHERE studyinstanceuid = %s",
+                "UPDATE series_cache_state SET last_accessed_at = now() "
+                "WHERE seriesinstanceuid = %s",
+                (seriesinstanceuid,),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def touch_access(studyinstanceuid: str) -> None:
+    """Touch every series of a study, so whole-study warmth ages together.
+
+    Keeps per-series eviction TTL equivalent to the old per-study TTL for
+    whole-study access patterns (a study open touches all its series at once).
+    """
+    conn = _conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE series_cache_state SET last_accessed_at = now() "
+                "WHERE seriesinstanceuid IN "
+                "(SELECT seriesinstanceuid FROM image_series WHERE studyinstanceuid = %s)",
                 (studyinstanceuid,),
             )
         conn.commit()
@@ -452,321 +691,292 @@ def touch_access(studyinstanceuid: str) -> None:
         conn.close()
 
 
-def warm_study(studyinstanceuid: str) -> dict[str, Any]:
-    """Extract all series archives for a study to their original dicom_dir_path locations.
+# ---------------------------------------------------------------------------
+# Warm primitive (series source of truth)
+# ---------------------------------------------------------------------------
 
-    Orthanc's Folder Indexer has already recorded these paths in its index.
-    Restoring files to the same paths makes OHIF work immediately — no re-ingestion needed.
+
+def _upsert_series_status(
+    cur, seriesinstanceuid: str, status: str, *,
+    error_message: str | None = None, stamp_warming: bool = False,
+) -> None:
+    """INSERT/UPDATE a series_cache_state row to `status` (warming_started_at handling inline)."""
+    warming_started = "now()" if stamp_warming else "NULL"
+    cur.execute(
+        f"""
+        INSERT INTO series_cache_state (seriesinstanceuid, status, error_message, warming_started_at)
+        VALUES (%s, %s, %s, {warming_started})
+        ON CONFLICT (seriesinstanceuid) DO UPDATE
+        SET status = EXCLUDED.status, error_message = EXCLUDED.error_message,
+            warming_started_at = {warming_started}
+        """,
+        (seriesinstanceuid, status, error_message),
+    )
+
+
+def _warm_one_series(cur, conn, seriesinstanceuid: str, row: dict[str, Any] | None,
+                     log_extra: dict[str, str]) -> dict[str, Any]:
+    """Warm a single series. The caller must already hold this series' advisory lock.
+
+    Manages its own commits. Returns a result dict; raises
+    :class:`InsufficientDiskSpaceError` (after marking the series 'cold') so the
+    caller can record/surface it.
+    """
+    touched_tmp_dirs: list[Path] = []
+    dir_path = row.get("dicom_dir_path") if row else None
+    archive = resolve_series_archive(row.get("dicom_archive_path"), dir_path) if row else None
+
+    cur.execute(
+        "SELECT status, warming_started_at FROM series_cache_state WHERE seriesinstanceuid = %s",
+        (seriesinstanceuid,),
+    )
+    cs_row = cur.fetchone()
+
+    # Watchdog: a row stuck in 'warming' past the timeout is recoverable. The
+    # advisory lock means no other process is currently warming this series, so
+    # the previous warmer must have crashed — fall through to re-warm.
+    if cs_row and cs_row["status"] == "warming":
+        started = cs_row.get("warming_started_at")
+        timeout_sec = WARMING_TIMEOUT_MINUTES * 60.0
+        if started is None:
+            logger.warning(
+                "warm_series: stale warming row with no warming_started_at — re-warming",
+                extra=log_extra,
+            )
+        else:
+            cur.execute("SELECT now()")
+            now_ts = cur.fetchone()["now"]
+            age = (now_ts - started).total_seconds()
+            if age > timeout_sec:
+                logger.warning(
+                    "warm_series: warming watchdog fired (age=%.0fs > timeout=%.0fs) — re-warming",
+                    age, timeout_sec, extra=log_extra,
+                )
+            else:
+                conn.commit()
+                return {"ok": False, "error": "warm_in_progress", "warming_age_seconds": age}
+
+    # Hot-check short-circuit: already warm and files present.
+    if cs_row and cs_row["status"] == "hot" and dir_path and _is_series_dir_warm(dir_path):
+        cur.execute(
+            "UPDATE series_cache_state SET last_accessed_at = now() WHERE seriesinstanceuid = %s",
+            (seriesinstanceuid,),
+        )
+        conn.commit()
+        return {"ok": True, "already_hot": True, "extract_seconds": 0.0}
+
+    if not archive or not archive.is_file():
+        _upsert_series_status(cur, seriesinstanceuid, "error", error_message="no_archive_for_series")
+        conn.commit()
+        logger.warning("warm_series: no archive for series", extra=log_extra)
+        return {"ok": False, "error": "no_archive_for_series"}
+
+    # Pre-extraction disk-space check (skip if already warm — it won't extract).
+    if not _is_series_dir_warm(dir_path):
+        required = _estimate_required_bytes([(dir_path, archive)])
+        target = Path(dir_path).parent
+        available = _disk_free_bytes(target)
+        if available < required:
+            _upsert_series_status(
+                cur, seriesinstanceuid, "cold",
+                error_message=f"insufficient_disk_space:required={required},available={available}",
+            )
+            conn.commit()
+            logger.error(
+                "warm_series: insufficient disk space (required=%d, available=%d, target=%s)",
+                required, available, target, extra=log_extra,
+            )
+            raise InsufficientDiskSpaceError(required, available, target)
+
+    # Mark warming (and stamp warming_started_at for the watchdog).
+    _upsert_series_status(cur, seriesinstanceuid, "warming", stamp_warming=True)
+    conn.commit()
+
+    try:
+        secs = _extract_one_series(dir_path, archive, touched_tmp_dirs)
+    except Exception as e:
+        for tmp in touched_tmp_dirs:
+            try:
+                if tmp.exists():
+                    shutil.rmtree(tmp)
+            except Exception as cleanup_err:
+                logger.warning(
+                    "warm_series: tmp-dir cleanup failed for %s: %s",
+                    tmp, cleanup_err, extra=log_extra,
+                )
+        conn.rollback()
+        _upsert_series_status(cur, seriesinstanceuid, "error", error_message=str(e)[:2000])
+        conn.commit()
+        logger.exception("warm_series: extraction failed", extra=log_extra)
+        return {"ok": False, "error": str(e)}
+
+    if not _is_series_dir_warm(dir_path):
+        _upsert_series_status(
+            cur, seriesinstanceuid, "error", error_message="extraction_produced_no_warm_series"
+        )
+        conn.commit()
+        logger.error("warm_series: extraction produced no warm series", extra=log_extra)
+        return {"ok": False, "error": "extraction_produced_no_warm_series"}
+
+    cur.execute(
+        """
+        UPDATE series_cache_state
+        SET status = 'hot', warmed_at = now(), last_accessed_at = now(),
+            cache_path = %s, error_message = NULL, warming_started_at = NULL
+        WHERE seriesinstanceuid = %s
+        """,
+        (dir_path, seriesinstanceuid),
+    )
+    conn.commit()
+    logger.info("warm_series: hot (extract_seconds=%.2f)", secs, extra=log_extra)
+    return {"ok": True, "extract_seconds": secs}
+
+
+def warm_series(series_uids: list[str]) -> dict[str, Any]:
+    """Extract one or more series archives to their original dicom_dir_path locations.
+
+    The single warm primitive. Each series is warmed under its own advisory lock,
+    acquired and released sequentially (never nested), so warming a whole study
+    (the :func:`warm_study` wrapper) cannot deadlock against a concurrent warm.
+    Returns an aggregate result: ``ok`` is True if at least one series ended hot.
     """
     if STORAGE_MODE != "cold_path_cache":
         return {"ok": True, "skipped": True, "reason": "not_cold_path_cache_mode"}
+    if not series_uids:
+        return {"ok": True, "series_count": 0, "extract_seconds": 0.0, "errors": []}
 
     conn = _conn()
     cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-    touched_tmp_dirs: list[Path] = []
-    log_extra = _log_extra(studyinstanceuid)
-
-    def finish() -> None:
-        conn.commit()
-        _advisory_unlock(cur, studyinstanceuid)
-        conn.commit()
-
     try:
         cur.execute(
-            "SELECT pg_advisory_lock(%s, (abs(hashtext(%s::text)))::integer)",
-            (ADV_LOCK_KEY, studyinstanceuid),
-        )
-
-        cur.execute(
-            "SELECT status, warming_started_at FROM cache_state WHERE studyinstanceuid = %s",
-            (studyinstanceuid,),
-        )
-        cs_row = cur.fetchone()
-
-        cur.execute(
             "SELECT seriesinstanceuid, dicom_dir_path, dicom_archive_path "
-            "FROM image_series WHERE studyinstanceuid = %s",
-            (studyinstanceuid,),
+            "FROM image_series WHERE seriesinstanceuid = ANY(%s)",
+            (list(series_uids),),
         )
-        series_rows = cur.fetchall()
+        meta = {r["seriesinstanceuid"]: dict(r) for r in cur.fetchall()}
 
-        # Watchdog: a row stuck in 'warming' past the timeout is treated as
-        # recoverable. The advisory lock above means no other process is
-        # currently warming this study, so the previous warmer must have
-        # crashed. Log a warning and fall through to re-warm.
-        if cs_row and cs_row["status"] == "warming":
-            started = cs_row.get("warming_started_at")
-            timeout_sec = WARMING_TIMEOUT_MINUTES * 60.0
-            if started is None:
-                logger.warning(
-                    "warm_study: stale warming row with no warming_started_at — re-warming",
-                    extra=log_extra,
-                )
+        total_extract = 0.0
+        warm_count = 0
+        already_hot_count = 0
+        errors: list[dict[str, str]] = []
+
+        for suid in series_uids:
+            row = meta.get(suid)
+            log_extra = _log_extra_series(suid)
+            _advisory_lock(cur, suid)
+            try:
+                res = _warm_one_series(cur, conn, suid, row, log_extra)
+            except InsufficientDiskSpaceError:
+                # Already marked 'cold' + logged inside. Record and continue so a
+                # whole-study warm still attempts its other series.
+                res = {"ok": False, "error": "insufficient_disk_space"}
+            except Exception as e:  # pragma: no cover - defensive
+                conn.rollback()
+                logger.exception("warm_series: unexpected error", extra=log_extra)
+                res = {"ok": False, "error": str(e)}
+            finally:
+                _advisory_unlock(cur, suid)
+                conn.commit()
+
+            if res.get("ok"):
+                warm_count += 1
+                total_extract += res.get("extract_seconds", 0.0) or 0.0
+                if res.get("already_hot"):
+                    already_hot_count += 1
             else:
-                cur.execute("SELECT now()")
-                now_ts = cur.fetchone()["now"]
-                age = (now_ts - started).total_seconds()
-                if age > timeout_sec:
-                    logger.warning(
-                        "warm_study: warming watchdog fired (age=%.0fs > timeout=%.0fs) — re-warming",
-                        age, timeout_sec, extra=log_extra,
-                    )
-                else:
-                    # Another warm is genuinely in progress (can't happen
-                    # under the advisory lock, but be defensive). Surface
-                    # an explicit error rather than racing.
-                    finish()
-                    return {
-                        "ok": False,
-                        "error": "warm_in_progress",
-                        "warming_age_seconds": age,
-                    }
+                errors.append({"series": suid, "error": res.get("error", "unknown")})
 
-        # Hot-check short-circuit: already warm and all files present.
-        if cs_row and cs_row["status"] == "hot":
-            non_null_dirs = [r["dicom_dir_path"] for r in series_rows if r.get("dicom_dir_path")]
-            if non_null_dirs and all(_is_series_dir_warm(d) for d in non_null_dirs):
-                cur.execute(
-                    "UPDATE cache_state SET last_accessed_at = now() WHERE studyinstanceuid = %s",
-                    (studyinstanceuid,),
-                )
-                conn.commit()
-                _advisory_unlock(cur, studyinstanceuid)
-                conn.commit()
-                return {"ok": True, "already_hot": True}
-
-        # Resolve archives for each series.
-        archives: list[tuple[str, Path]] = []
-        for r in series_rows:
-            arch = resolve_series_archive(r.get("dicom_archive_path"), r.get("dicom_dir_path"))
-            if arch and arch.is_file():
-                archives.append((r["dicom_dir_path"], arch))
-
-        if not archives:
-            cur.execute(
-                """
-                INSERT INTO cache_state (studyinstanceuid, status, error_message, warming_started_at)
-                VALUES (%s, 'error', %s, NULL)
-                ON CONFLICT (studyinstanceuid) DO UPDATE
-                SET status = 'error', error_message = EXCLUDED.error_message,
-                    warming_started_at = NULL
-                """,
-                (studyinstanceuid, "no_archives_for_study"),
-            )
-            finish()
-            logger.warning("warm_study: no archives for study", extra=log_extra)
-            return {"ok": False, "error": "no_archives_for_study"}
-
-        # Pre-extraction disk-space check. Estimate against the legacy root
-        # since every dicom_dir_path lives under it (warm extracts in-place).
-        # Skip archives whose dest is already warm — they won't be extracted.
-        archives_to_extract = [
-            (dp, ap) for dp, ap in archives if not _is_series_dir_warm(dp)
-        ]
-        if archives_to_extract:
-            required = _estimate_required_bytes(archives_to_extract)
-            target_for_check = Path(archives_to_extract[0][0]).parent
-            available = _disk_free_bytes(target_for_check)
-            if available < required:
-                # Mark cold (not 'warming') and surface a clear error.
-                cur.execute(
-                    """
-                    INSERT INTO cache_state (studyinstanceuid, status, error_message, warming_started_at)
-                    VALUES (%s, 'cold', %s, NULL)
-                    ON CONFLICT (studyinstanceuid) DO UPDATE
-                    SET status = 'cold', error_message = EXCLUDED.error_message,
-                        warming_started_at = NULL
-                    """,
-                    (studyinstanceuid, f"insufficient_disk_space:required={required},available={available}"),
-                )
-                finish()
-                logger.error(
-                    "warm_study: insufficient disk space (required=%d, available=%d, target=%s)",
-                    required, available, target_for_check, extra=log_extra,
-                )
-                raise InsufficientDiskSpaceError(required, available, target_for_check)
-
-        # Mark warming (and stamp warming_started_at for the watchdog).
-        cur.execute(
-            """
-            INSERT INTO cache_state (studyinstanceuid, status, error_message, warming_started_at)
-            VALUES (%s, 'warming', NULL, now())
-            ON CONFLICT (studyinstanceuid) DO UPDATE
-            SET status = 'warming', error_message = NULL, warming_started_at = now()
-            """,
-            (studyinstanceuid,),
-        )
-        conn.commit()
-        logger.info("warm_study: starting extraction (%d archives)", len(archives), extra=log_extra)
-
-        # Per-series extraction. Serial by design: warming is disk-bandwidth
-        # bound, not CPU-bound, so extracting series concurrently only divides
-        # the same throughput and adds contention (measured: no speedup, slight
-        # regression). The real lever is reducing competing disk I/O, not adding
-        # threads.
-        t_extract = 0.0
-        for dicom_dir_path, arch_path in archives:
-            dicom_dir = Path(dicom_dir_path)
-            # .warming sibling lives at the same level: .../SeriesUID/DICOM.warming
-            tmp_container = dicom_dir.with_name(dicom_dir.name + ".warming")
-            touched_tmp_dirs.append(tmp_container)
-
-            try:
-                # Remove stale .warming dir from a prior crash.
-                if tmp_container.exists():
-                    shutil.rmtree(tmp_container)
-
-                # Skip if already extracted (partial warm from a previous run).
-                if _is_series_dir_warm(dicom_dir_path):
-                    continue
-
-                t0 = time.perf_counter()
-                # Archives use flat structure (files directly at archive root,
-                # matching archive_all_series.py). Extract into tmp_container,
-                # then atomic rename tmp_container → dicom_dir.
-                untar_zst(arch_path, tmp_container)
-                t_extract += time.perf_counter() - t0
-
-                # Remove empty dicom_dir if it exists (rename requires destination absent
-                # or empty on Linux).
-                if dicom_dir.is_dir():
-                    shutil.rmtree(dicom_dir)
-                tmp_container.replace(dicom_dir)
-
-            except Exception as e:
-                logger.warning(
-                    "warm_study: extraction failed for %s: %s",
-                    dicom_dir_path, e, extra=log_extra,
-                )
-
-        # Verify at least one series warmed successfully.
-        warm_count = sum(1 for dp, _ in archives if _is_series_dir_warm(dp))
-        if warm_count == 0:
-            cur.execute(
-                "UPDATE cache_state SET status = 'error', error_message = %s, "
-                "warming_started_at = NULL "
-                "WHERE studyinstanceuid = %s",
-                ("extraction_produced_no_warm_series", studyinstanceuid),
-            )
-            finish()
-            logger.error("warm_study: extraction produced no warm series", extra=log_extra)
-            return {"ok": False, "error": "extraction_produced_no_warm_series"}
-
-        # Fetch study_path to use as cache_path record.
-        cur.execute(
-            "SELECT study_path FROM image_study WHERE studyinstanceuid = %s",
-            (studyinstanceuid,),
-        )
-        study_row = cur.fetchone()
-        cache_path = study_row["study_path"] if study_row and study_row.get("study_path") else None
-
-        cur.execute(
-            """
-            UPDATE cache_state
-            SET status = 'hot',
-                warmed_at = now(),
-                last_accessed_at = now(),
-                cache_path = %s,
-                error_message = NULL,
-                warming_started_at = NULL
-            WHERE studyinstanceuid = %s
-            """,
-            (cache_path, studyinstanceuid),
-        )
-        finish()
-        logger.info(
-            "warm_study: hot (series=%d, extract_seconds=%.2f)",
-            warm_count, t_extract, extra=log_extra,
-        )
-
-        return {
-            "ok": True,
-            "extract_seconds": t_extract,
+        out: dict[str, Any] = {
+            "ok": warm_count > 0,
             "series_count": warm_count,
-            "cache_path": cache_path,
+            "extract_seconds": total_extract,
+            "errors": errors,
         }
-
-    except InsufficientDiskSpaceError:
-        # Already logged and the row was reset to 'cold' inside the
-        # try-block. Skip the generic error handler so we don't overwrite
-        # the cold-marker with status='error'.
-        try:
-            _advisory_unlock(cur, studyinstanceuid)
-            conn.commit()
-        except Exception:
-            pass
-        # Best-effort cleanup of any tmp dirs (none should exist yet).
-        for tmp in touched_tmp_dirs:
-            try:
-                if tmp.exists():
-                    shutil.rmtree(tmp)
-            except Exception as cleanup_err:
-                logger.warning(
-                    "warm_study: tmp-dir cleanup failed for %s: %s",
-                    tmp, cleanup_err, extra=log_extra,
-                )
-        raise
-    except Exception as e:
-        conn.rollback()
-        # Clean up any .warming temp dirs created during this run; surface
-        # cleanup errors instead of swallowing them so orphaned dirs are
-        # detectable in the logs (and via cold_storage_health.py).
-        for tmp in touched_tmp_dirs:
-            try:
-                if tmp.exists():
-                    shutil.rmtree(tmp)
-            except Exception as cleanup_err:
-                logger.warning(
-                    "warm_study: tmp-dir cleanup failed for %s: %s",
-                    tmp, cleanup_err, extra=log_extra,
-                )
-        try:
-            cur.execute(
-                """
-                INSERT INTO cache_state (studyinstanceuid, status, error_message, warming_started_at)
-                VALUES (%s, 'error', %s, NULL)
-                ON CONFLICT (studyinstanceuid) DO UPDATE
-                SET status = 'error', error_message = EXCLUDED.error_message,
-                    warming_started_at = NULL
-                """,
-                (studyinstanceuid, str(e)[:2000]),
-            )
-            conn.commit()
-        except Exception:
-            conn.rollback()
-        try:
-            _advisory_unlock(cur, studyinstanceuid)
-            conn.commit()
-        except Exception:
-            pass
-        logger.exception("warm_study failed", extra=log_extra)
-        return {"ok": False, "error": str(e)}
+        if warm_count > 0 and not errors and already_hot_count == warm_count:
+            out["already_hot"] = True
+        if not out["ok"]:
+            out["error"] = errors[0]["error"] if errors else "no_series"
+        return out
     finally:
         cur.close()
         conn.close()
 
 
-def evict_study(studyinstanceuid: str) -> dict[str, Any]:
-    """Delete extracted DICOM files from each series dicom_dir_path for a study.
+# ---------------------------------------------------------------------------
+# Study / patient warm wrappers (behaviour-preserving)
+# ---------------------------------------------------------------------------
 
-    Transactional: the `cache_state` row is only deleted after every
-    `rmtree` succeeds. If any rmtree raises, the row is left intact and
-    the exception is re-raised so the operator can intervene (chmod,
-    free space, kill the holding process, etc.) and retry.
+
+def warm_study(studyinstanceuid: str) -> dict[str, Any]:
+    """Warm every series of a study (unchanged whole-study behaviour).
+
+    A thin wrapper over :func:`warm_series` — one call, so the route still submits
+    exactly one executor task per study warm. Returns a study-shaped result dict
+    compatible with the previous implementation.
     """
-    log_extra = _log_extra(studyinstanceuid)
+    if STORAGE_MODE != "cold_path_cache":
+        return {"ok": True, "skipped": True, "reason": "not_cold_path_cache_mode"}
+
+    series_uids = _study_series_uids(studyinstanceuid)
+    res = warm_series(series_uids)
+    if res.get("skipped"):
+        return res
+
+    out: dict[str, Any] = {
+        "ok": res["ok"],
+        "series_count": res.get("series_count", 0),
+        "extract_seconds": res.get("extract_seconds", 0.0),
+    }
+    if res.get("already_hot"):
+        out["already_hot"] = True
+    if res["ok"]:
+        out["cache_path"] = _study_path(studyinstanceuid)
+    else:
+        errs = res.get("errors", [])
+        if errs and all(e["error"] == "no_archive_for_series" for e in errs):
+            out["error"] = "no_archives_for_study"
+        else:
+            out["error"] = res.get("error", "warm_failed")
+    return out
+
+
+def _study_series_uids(studyinstanceuid: str) -> list[str]:
+    return _series_for_studies([studyinstanceuid])
+
+
+def warm_patient(patient_id: str) -> dict[str, Any]:
+    """Warm every series under a patient (used by the patient warm fan-out)."""
+    return warm_series(_series_for_patient(patient_id))
+
+
+# ---------------------------------------------------------------------------
+# Evict (series source of truth; study/patient wrappers)
+# ---------------------------------------------------------------------------
+
+
+def evict_series(series_uids: list[str]) -> dict[str, Any]:
+    """Delete extracted DICOM files for the given series, then their cache rows.
+
+    Two-phase and transactional, matching the previous study-level guarantee: all
+    ``rmtree`` calls run first; the ``series_cache_state`` rows are only deleted
+    after every deletion succeeds. If any ``rmtree`` raises, no rows are deleted
+    and the exception propagates so an operator can intervene and retry.
+    """
+    if not series_uids:
+        return {"ok": True, "evicted": []}
     conn = _conn()
     try:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             cur.execute(
-                "SELECT dicom_dir_path FROM image_series WHERE studyinstanceuid = %s",
-                (studyinstanceuid,),
+                "SELECT seriesinstanceuid, dicom_dir_path FROM image_series "
+                "WHERE seriesinstanceuid = ANY(%s)",
+                (list(series_uids),),
             )
             rows = cur.fetchall()
 
-        # Phase 1: filesystem deletion. Don't touch the DB until every
-        # path is gone — a partial filesystem with a deleted cache_state
-        # row is the orphan state we are trying to prevent.
+        # Phase 1: filesystem deletion. Don't touch the DB until every path is
+        # gone — a partial filesystem with deleted cache rows is the orphan state
+        # we are preventing.
         for row in rows:
             dp = row.get("dicom_dir_path")
             if not dp:
@@ -778,34 +988,45 @@ def evict_study(studyinstanceuid: str) -> dict[str, Any]:
                 shutil.rmtree(p)
             except Exception as rm_err:
                 logger.exception(
-                    "evict_study: rmtree failed for %s: %s — leaving cache_state intact",
-                    p, rm_err, extra=log_extra,
+                    "evict_series: rmtree failed for %s: %s — leaving cache rows intact",
+                    p, rm_err, extra=_log_extra_series(row["seriesinstanceuid"]),
                 )
                 raise
 
         # Phase 2: DB delete. Single transaction.
         with conn.cursor() as cur:
             cur.execute(
-                "DELETE FROM cache_state WHERE studyinstanceuid = %s",
-                (studyinstanceuid,),
+                "DELETE FROM series_cache_state WHERE seriesinstanceuid = ANY(%s)",
+                (list(series_uids),),
             )
         conn.commit()
-        logger.info("evict_study: evicted", extra=log_extra)
-        return {"ok": True, "evicted": studyinstanceuid}
+        return {"ok": True, "evicted": list(series_uids)}
     finally:
         conn.close()
 
 
+def evict_study(studyinstanceuid: str) -> dict[str, Any]:
+    """Evict every series of a study (unchanged whole-study behaviour)."""
+    evict_series(_study_series_uids(studyinstanceuid))
+    logger.info("evict_study: evicted", extra=_log_extra(studyinstanceuid))
+    return {"ok": True, "evicted": studyinstanceuid}
+
+
 def run_eviction() -> list[str]:
+    """Evict series whose hot rows have not been accessed within the TTL.
+
+    Per-series TTL: because :func:`touch_access` touches all of a study's series
+    together, an idle study's series all age out together and are evicted in the
+    same sweep — equivalent to the old whole-study eviction.
+    """
     if STORAGE_MODE != "cold_path_cache":
         return []
     conn = _conn()
-    evicted: list[str] = []
     try:
         with conn.cursor() as cur:
             cur.execute(
                 """
-                SELECT studyinstanceuid FROM cache_state
+                SELECT seriesinstanceuid FROM series_cache_state
                 WHERE status = 'hot'
                   AND last_accessed_at IS NOT NULL
                   AND last_accessed_at < (now() - (%s * interval '1 hour'))
@@ -813,15 +1034,17 @@ def run_eviction() -> list[str]:
                 (EVICTION_TTL_HOURS,),
             )
             uids = [r[0] for r in cur.fetchall()]
-        for uid in uids:
-            try:
-                evict_study(uid)
-                evicted.append(uid)
-            except Exception as e:
-                logger.warning(
-                    "run_eviction: evict_study failed: %s", e,
-                    extra=_log_extra(uid),
-                )
-        return evicted
     finally:
         conn.close()
+
+    evicted: list[str] = []
+    for uid in uids:
+        try:
+            evict_series([uid])
+            evicted.append(uid)
+        except Exception as e:
+            logger.warning(
+                "run_eviction: evict_series failed: %s", e,
+                extra=_log_extra_series(uid),
+            )
+    return evicted

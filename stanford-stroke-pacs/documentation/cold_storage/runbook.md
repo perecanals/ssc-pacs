@@ -235,16 +235,16 @@ during burst load.
 ### Stuck-warming watchdog
 
 If a process crashes between archive extraction and the final
-`status='hot'` mark, the row stays in `status='warming'`. Three layers
+`status='hot'` mark, the series' row stays in `status='warming'`. Three layers
 recover from this — no manual action is normally needed:
 
-1. **On-demand (`warm_study()`):** the next warm for that UID acquires the
-   per-study advisory lock (the dead warmer's lock was released when its
-   connection died), sees `status='warming'` with
+1. **On-demand (`warm_series()`, reached via `warm_study()`):** the next warm
+   for that series acquires the per-series advisory lock (the dead warmer's
+   lock was released when its connection died), sees `status='warming'` with
    `warming_started_at < now() - warming_timeout_minutes`, logs
-   `warm_study: warming watchdog fired …`, and re-warms.
+   `warm_series: warming watchdog fired …`, and re-warms.
 2. **Background reaper (`reap_stale_warming()`):** the eviction loop
-   (every 15 min) resets any `warming` row past `warming_timeout_minutes`
+   (every 15 min) resets any `warming` series row past `warming_timeout_minutes`
    back to `status='cold'` — but only if `pg_try_advisory_lock` succeeds,
    so a genuinely in-progress (slow) warm is never clobbered. This means a
    stuck row self-heals even if no one warms it again.
@@ -262,13 +262,13 @@ SUID="<study uid>"
 curl -X POST -b cookies.txt http://localhost:8043/api/studies/$SUID/warm
 ```
 
-To inspect the row directly:
+To inspect the rows directly (cache state is now per-series):
 
 ```bash
 psql -d stanford-stroke -c "
-  SELECT studyinstanceuid, status, warming_started_at,
+  SELECT seriesinstanceuid, status, warming_started_at,
          now() - warming_started_at AS age, error_message
-  FROM cache_state
+  FROM series_cache_state
   WHERE status = 'warming';"
 ```
 
@@ -277,9 +277,9 @@ and you cannot trigger a warm):
 
 ```bash
 psql -d stanford-stroke -c "
-  UPDATE cache_state
+  UPDATE series_cache_state
   SET status = 'cold', warming_started_at = NULL, error_message = NULL
-  WHERE studyinstanceuid = '<study uid>';"
+  WHERE seriesinstanceuid = '<series uid>';"
 ```
 
 ### Disk-space precheck
@@ -291,11 +291,12 @@ The estimate runs in two places:
    extraction to the background executor. If `required > available`, the
    route returns **507 Insufficient Storage** synchronously and no
    background work is queued. This is the path operators see in practice.
-2. **Inside `warm_study()` (worker thread)** — the same check runs again
-   as a defensive second line in case disk fills between the route
-   precheck and the worker starting. On failure the worker marks the
-   row `status='cold'` and raises `InsufficientDiskSpaceError` to its
-   own log line (no HTTP client is listening at this point).
+2. **Inside `warm_series()` (worker thread, reached via `warm_study()`)** —
+   the same check runs again per series as a defensive second line in case
+   disk fills between the route precheck and the worker starting. On failure
+   the worker marks the series' row `status='cold'` and raises
+   `InsufficientDiskSpaceError` to its own log line (no HTTP client is
+   listening at this point).
 
 Required free bytes are estimated as
 `safety_factor × Σ(compressed archive sizes) + min_free_bytes`. The 507
@@ -319,10 +320,11 @@ When you see this in the journal:
 
 ### Transactional eviction
 
-`evict_study()` deletes `cache_state` **only after** every `rmtree`
+`evict_study()` (a thin wrapper over `evict_series` for the study's series)
+deletes a series' `series_cache_state` row **only after** its `rmtree`
 succeeds. If `rmtree` fails (permissions, EBUSY, disk error), the row is
-left intact, the failure is logged with the study UID, and the API
-returns 500. The operator must clear the underlying cause and retry.
+left intact, the failure is logged, and the API returns 500. The operator
+must clear the underlying cause and retry.
 
 ### Health probe
 
@@ -330,7 +332,7 @@ returns 500. The operator must clear the underlying cause and retry.
 - count of stuck-warming rows;
 - count of orphan `*.warming` directories on disk;
 - free disk on `dicom_data_root`;
-- distribution of `cache_state` rows by `last_accessed_at` bucket.
+- distribution of `series_cache_state` rows by `last_accessed_at` bucket.
 
 ```bash
 # Human output
@@ -365,9 +367,13 @@ report can be wired into your alerting layer once WS 06 lands.
 | Endpoint | Auth | Purpose |
 |----------|------|---------|
 | `GET /api/storage-mode` | — | Returns `{"storage_mode": "cold_path_cache" \| "legacy"}` |
-| `GET /api/studies/{uid}/cache-status` | — | `cache_state` row for the study |
+| `GET /api/studies/{uid}/cache-status` | — | Aggregate study status over its `series_cache_state` rows |
 | `POST /api/studies/{uid}/warm` | yes | Queue extraction in `app.state.warm_executor`; returns **202** immediately. Returns **507** if a synchronous disk-space precheck fails. Watch `cache-status` for `hot`. |
-| `POST /api/studies/{uid}/evict` | yes | Delete extracted files, clear cache_state |
+| `POST /api/studies/{uid}/evict` | yes | Delete extracted files, clear the study's series_cache_state rows |
+| `GET /api/series/{seriesinstanceuid}/cache-status` | — | `series_cache_state` row for the series |
+| `POST /api/series/{seriesinstanceuid}/warm` | yes | Warm a single series (its own row); returns **202**. |
+| `POST /api/series/{seriesinstanceuid}/evict` | yes | Evict a single series |
+| `POST /api/cache-status/batch` | — | Accepts `study_uids`, `patient_uids`, `series_uids`; returns `studies`, `patients`, `series` `{uid: status}` maps |
 | `GET /api/ohif-link/{uid}` | — | Returns `{status: 'cold' \| 'warming' \| 'ready' \| 'error', url}`; with stale-state FS probe |
 
 The frontend's `warmOhif.resolveOhifViewerUrl()` consumes these and handles
@@ -408,8 +414,8 @@ If you need to roll back:
 
 | File | Purpose |
 |------|---------|
-| `web-app/cache_manager.py` | `warm_study`, `evict_study`, `get_cache_status`, `run_eviction`, `estimate_warm_disk_space` (route precheck) |
-| `web-app/routes/cold_storage.py` | `POST /warm` (202 + executor submit), `/evict`, `/cache-status`, `/storage-mode` |
+| `web-app/cache_manager.py` | `warm_series`/`evict_series` (per-series primitives), `warm_study`/`warm_patient`/`evict_study` (thin wrappers), `get_cache_status`, `get_series_cache_status`, `run_eviction`, `estimate_warm_disk_space` (route precheck) |
+| `web-app/routes/cold_storage.py` | study `POST /warm`/`/evict`/`/cache-status`, series `POST /series/{uid}/warm`/`/evict`/`/cache-status`, `POST /cache-status/batch`, `/storage-mode` |
 | `web-app/app.py` | Lifespan owns `app.state.warm_executor` (`ThreadPoolExecutor(max_workers=WARM_WORKERS)`); defensive ohif-link FS probe |
 | `web-app/src/api/warmOhif.js` | Frontend warm flow (mode-agnostic cold/warming handling) |
 | `scripts/cold_storage/archive_all_series.py` | Offline archiver — populates `dicom_archive_path` for the existing tree |
@@ -426,8 +432,6 @@ If you need to roll back:
 ### Database changes (auto-applied on Web App restart)
 
 - `image_series.dicom_archive_path TEXT` — populated by archiver / integration protocol
-- `cache_state` table — per-study cold/warming/hot/error status
-- `cache_state.warming_started_at TIMESTAMPTZ` — added by Alembic revision `0002_warming_started_at`; powers the stuck-warming watchdog (see above)
-- `orthanc_resource_map` table — legacy from removed `cold_cache` mode; harmless empty table
+- `series_cache_state` table (PK `seriesinstanceuid`) — per-series cold/warming/hot/error/queued status; powers warm/evict, the stuck-warming watchdog, and the derived study/patient aggregates. Created by Alembic revision `0010_series_cache_state`, which dropped the former per-study `cache_state` table (backfilling it by fanning each study row to its series) and the dead `orthanc_resource_map` table.
 
 See [`../reference/data_stores.md`](../reference/data_stores.md) for column details.

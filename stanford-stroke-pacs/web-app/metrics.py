@@ -55,7 +55,7 @@ cold_storage_evict_total = Counter(
 
 cold_storage_warming_rows = Gauge(
     "cold_storage_warming_rows",
-    "Number of cache_state rows currently in status='warming'.",
+    "Number of series_cache_state rows currently in status='warming'.",
     registry=REGISTRY,
 )
 
@@ -120,7 +120,7 @@ def refresh_cold_storage_gauges(get_conn, dicom_data_root) -> None:
         try:
             with conn.cursor() as cur:
                 cur.execute(
-                    "SELECT COUNT(*) FROM cache_state WHERE status = 'warming'"
+                    "SELECT COUNT(*) FROM series_cache_state WHERE status = 'warming'"
                 )
                 (warming,) = cur.fetchone()
                 cold_storage_warming_rows.set(int(warming or 0))
