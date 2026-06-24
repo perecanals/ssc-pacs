@@ -114,6 +114,34 @@ describe("useTableData (infinite scroll)", () => {
     expect(url.searchParams.get("label_filters")).toBeNull();
   });
 
+  it("emits dataset + study_import_label at patient level", async () => {
+    const args = {
+      ...baseArgs,
+      level: "patient",
+      filters: { dataset: "lvo", studyImportLabel: "PRECISE" },
+    };
+    renderHook(() => useTableData(args));
+    await waitFor(() => expect(apiGet).toHaveBeenCalled());
+    const url = new URL(apiGet.mock.calls[0][0], "http://x");
+    expect(url.searchParams.get("dataset")).toBe("lvo");
+    expect(url.searchParams.get("study_import_label")).toBe("PRECISE");
+    expect(url.searchParams.get("import_label")).toBeNull();
+  });
+
+  it("emits dataset + import_label (not study_import_label) at study/series level", async () => {
+    const args = {
+      ...baseArgs,
+      level: "study",
+      filters: { dataset: "lvo", studyImportLabel: "PRECISE" },
+    };
+    renderHook(() => useTableData(args));
+    await waitFor(() => expect(apiGet).toHaveBeenCalled());
+    const url = new URL(apiGet.mock.calls[0][0], "http://x");
+    expect(url.searchParams.get("dataset")).toBe("lvo");
+    expect(url.searchParams.get("import_label")).toBe("PRECISE");
+    expect(url.searchParams.get("study_import_label")).toBeNull();
+  });
+
   it("reload re-fetches pages 1..N and replaces", async () => {
     const { result } = renderHook(() => useTableData(baseArgs));
     await waitFor(() => expect(result.current.items).toHaveLength(2));

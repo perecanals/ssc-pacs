@@ -5,7 +5,6 @@ import { compareLabelDefsDefault, LEVEL_ORDER, LEVEL_LABELS } from "../utils/tab
 import LabelValueFilter from "./Sidebar/LabelValueFilter";
 import "./Sidebar.css";
 
-const MODALITIES = ["CT", "MR", "CR", "US", "DX", "PT", "NM", "XA", "MG", "RF"];
 const UNASSIGNED = "__unassigned__";
 
 // Same default ordering as the data table's columns: instrument groups
@@ -115,12 +114,9 @@ export default function Sidebar({ level, filters, onFilterChange, open, onToggle
     };
   }, [pinnedKey]);
 
+  // Dataset + import-label option lists are level-independent (and scope-filtered
+  // server-side), so fetch once. Both feed the sidebar dropdowns at every level.
   useEffect(() => {
-    if (level !== "patient") {
-      setStudyImportLabels([]);
-      setDatasets([]);
-      return;
-    }
     let cancelled = false;
     apiGet("/api/study-import-labels")
       .then((data) => {
@@ -137,7 +133,7 @@ export default function Sidebar({ level, filters, onFilterChange, open, onToggle
         if (!cancelled) setDatasets([]);
       });
     return () => { cancelled = true; };
-  }, [level]);
+  }, []);
 
   useEffect(() => {
     window.__refreshLabelSidebar = fetchLabels;
@@ -192,75 +188,51 @@ export default function Sidebar({ level, filters, onFilterChange, open, onToggle
           <h1 className="sidebar__group-title">Quick Filters</h1>
 
           {/* Dataset (patient view only) */}
-          {level === "patient" && (
-            <div className="sidebar__section">
-              <h2 className="sidebar__section-title">Dataset</h2>
-              <div className="sidebar__filter-group">
-                <select
-                  id="sidebar-dataset"
-                  value={filters.dataset || ""}
-                  onChange={(e) =>
-                    onFilterChange({ dataset: e.target.value || null })
-                  }
-                  className="sidebar__modality-select"
-                >
-                  <option value="">All datasets</option>
-                  {datasets.map((ds) => (
-                    <option key={ds} value={ds}>
-                      {ds}
-                    </option>
-                  ))}
-                </select>
-              </div>
+          {/* Dataset (all levels) */}
+          <div className="sidebar__section">
+            <h2 className="sidebar__section-title">Dataset</h2>
+            <div className="sidebar__filter-group">
+              <select
+                id="sidebar-dataset"
+                value={filters.dataset || ""}
+                onChange={(e) =>
+                  onFilterChange({ dataset: e.target.value || null })
+                }
+                className="sidebar__modality-select"
+              >
+                <option value="">All datasets</option>
+                {datasets.map((ds) => (
+                  <option key={ds} value={ds}>
+                    {ds}
+                  </option>
+                ))}
+              </select>
             </div>
-          )}
+          </div>
 
-          {/* Study Import Label (patient view only) */}
-          {level === "patient" && (
-            <div className="sidebar__section">
-              <h2 className="sidebar__section-title">Study Import Label</h2>
-              <div className="sidebar__filter-group">
-                <select
-                  id="sidebar-study-import-label"
-                  value={filters.studyImportLabel || ""}
-                  onChange={(e) =>
-                    onFilterChange({ studyImportLabel: e.target.value || null })
-                  }
-                  className="sidebar__modality-select"
-                >
-                  <option value="">All import labels</option>
-                  {studyImportLabels.map((lbl) => (
-                    <option key={lbl} value={lbl}>
-                      {lbl}
-                    </option>
-                  ))}
-                </select>
-              </div>
+          {/* Import label (all levels) */}
+          <div className="sidebar__section">
+            <h2 className="sidebar__section-title">
+              {level === "patient" ? "Study Import Label" : "Import Label"}
+            </h2>
+            <div className="sidebar__filter-group">
+              <select
+                id="sidebar-study-import-label"
+                value={filters.studyImportLabel || ""}
+                onChange={(e) =>
+                  onFilterChange({ studyImportLabel: e.target.value || null })
+                }
+                className="sidebar__modality-select"
+              >
+                <option value="">All import labels</option>
+                {studyImportLabels.map((lbl) => (
+                  <option key={lbl} value={lbl}>
+                    {lbl}
+                  </option>
+                ))}
+              </select>
             </div>
-          )}
-
-          {/* Modality (study/series view) */}
-          {(level === "study" || level === "series") && (
-            <div className="sidebar__section">
-              <h2 className="sidebar__section-title">Modality</h2>
-              <div className="sidebar__filter-group">
-                <select
-                  value={filters.modality || ""}
-                  onChange={(e) =>
-                    onFilterChange({ modality: e.target.value || null })
-                  }
-                  className="sidebar__modality-select"
-                >
-                  <option value="">All modalities</option>
-                  {MODALITIES.map((m) => (
-                    <option key={m} value={m}>
-                      {m}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            </div>
-          )}
+          </div>
 
           {/* Annotation Labels */}
           <div className="sidebar__section">

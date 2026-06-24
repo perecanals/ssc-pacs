@@ -36,11 +36,10 @@ function sanitizeSession(session, defaultFilters) {
       }
     }
   }
+  // Dataset + import-label dropdowns now render at every level; only Modality is
+  // patient-inapplicable. Keep dataset/studyImportLabel across all levels.
   if (level === "patient") {
     filters.modality = null;
-  } else {
-    filters.dataset = null;
-    filters.studyImportLabel = null;
   }
   return { level, filters };
 }
