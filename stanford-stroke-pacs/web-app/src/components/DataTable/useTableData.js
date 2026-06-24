@@ -43,11 +43,15 @@ export default function useTableData({ level, config, filters, sortBy, sortDir, 
     if (filters.patientId) params.set("patient_id", filters.patientId);
     if (filters.modality) params.set("modality", filters.modality);
     if (filters.description) params.set("description", filters.description);
-    if (level === "patient" && filters.studyImportLabel?.trim()) {
-      params.set("study_import_label", filters.studyImportLabel.trim());
-    }
-    if (level === "patient" && filters.dataset?.trim()) {
+    // Dataset + import-label sidebar quick filters apply at every level. The
+    // import-label param name differs: patients use `study_import_label`
+    // (matches across studies+series); studies/series use `import_label`.
+    if (filters.dataset?.trim()) {
       params.set("dataset", filters.dataset.trim());
+    }
+    if (filters.studyImportLabel?.trim()) {
+      const v = filters.studyImportLabel.trim();
+      params.set(level === "patient" ? "study_import_label" : "import_label", v);
     }
 
     const labelFilters = [];

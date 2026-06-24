@@ -73,3 +73,25 @@ describe("useSessionStatePersistence — labelValues restore", () => {
     expect(result.current.restoredFilters.labelValues).toEqual({});
   });
 });
+
+describe("useSessionStatePersistence — dataset/import-label restore", () => {
+  beforeEach(() => apiGet.mockReset());
+
+  it("keeps dataset + studyImportLabel at series level (no longer pruned)", async () => {
+    const result = restore({
+      level: "series",
+      filters: { dataset: "lvo", studyImportLabel: "PRECISE" },
+    });
+    await waitFor(() => expect(result.current.loaded).toBe(true));
+    expect(result.current.restoredFilters.dataset).toBe("lvo");
+    expect(result.current.restoredFilters.studyImportLabel).toBe("PRECISE");
+    // Modality stays applicable on series.
+    expect(result.current.restoredLevel).toBe("series");
+  });
+
+  it("nulls modality when restoring at patient level", async () => {
+    const result = restore({ level: "patient", filters: { modality: "CT" } });
+    await waitFor(() => expect(result.current.loaded).toBe(true));
+    expect(result.current.restoredFilters.modality).toBeNull();
+  });
+});

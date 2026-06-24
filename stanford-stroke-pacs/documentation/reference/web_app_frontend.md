@@ -97,7 +97,13 @@ The Navigator page is decomposed into focused React components:
   Reset Filters and Reset View buttons, label-definition trigger area,
   and login/logout controls
 - `Sidebar` — search box, annotation label list grouped by level with counts,
-  modality filter dropdown. Within each level the labels are grouped by
+  plus **Dataset** and **Import label** dropdown quick filters shown on **all**
+  levels (the import-label section is titled "Study Import Label" on Patient and
+  "Import Label" on Study/Series; options come from `/api/datasets` and
+  `/api/study-import-labels`, both scope-filtered). `useTableData` sends the
+  import-label value as `study_import_label` on Patient and `import_label` on
+  Study/Series. Modality is **not** a sidebar dropdown — it is filtered via its
+  table column header on Study/Series. Within each level the labels are grouped by
   instrument (instruments alphabetical, unassigned last) and ordered by label
   creation time (oldest first) within each instrument — the same
   `compareLabelDefsDefault` ordering (`utils/table.js`) used for the default
@@ -189,8 +195,8 @@ The Navigator page is decomposed into focused React components:
     close). A "Reset View" button in the top bar restores all table
     preferences to their defaults. A separate "Reset Filters" button
     clears only the active filters — the per-column table filters **and**
-    the sidebar quick filters (label, select-value pickers, modality,
-    study-import label) — without touching column visibility/order/sort. It lives in the same
+    the sidebar quick filters (label, select-value pickers, dataset,
+    import label) — without touching column visibility/order/sort. It lives in the same
     toolbar portal as "Reset View"; clearing the cross-component sidebar
     filters is delegated to `Web App` via an `onResetSidebarFilters`
     callback passed into `DataTable`.

@@ -13,8 +13,8 @@ vi.mock("../api/client", () => ({
     if (path === "/api/storage-mode") return Promise.resolve({ storage_mode: "legacy" });
     if (path === "/api/label-definitions") return Promise.resolve([]);
     if (path === "/api/labels/summary") return Promise.resolve([]);
-    if (path === "/api/study-import-labels") return Promise.resolve([]);
-    if (path === "/api/datasets") return Promise.resolve([]);
+    if (path === "/api/study-import-labels") return Promise.resolve(["PRECISE"]);
+    if (path === "/api/datasets") return Promise.resolve(["lvo", "crisp2"]);
     if (path === "/api/preferences/_global") return Promise.resolve({ prefs: globalPrefs });
     if (path.startsWith("/api/preferences/")) return Promise.resolve({ prefs: {} });
     return Promise.resolve({ total: 0, page: 1, per_page: 50, items: [] });
@@ -52,14 +52,17 @@ describe("Navigator session state persistence", () => {
   });
 
   it("restores level and sidebar filters from the _global prefs", async () => {
-    globalPrefs = { session: { level: "study", filters: { modality: "CT" } } };
+    globalPrefs = {
+      session: { level: "study", filters: { dataset: "lvo", studyImportLabel: "PRECISE" } },
+    };
     renderNavigator();
 
-    // Study level restored → the sidebar shows the modality quick filter
-    // (patient level shows Dataset instead) with the saved value.
-    const modality = await screen.findByRole("combobox");
-    expect(modality.value).toBe("CT");
-    expect(screen.queryByRole("heading", { name: "Dataset" })).not.toBeInTheDocument();
+    // Study level restored → Dataset + Import-label dropdowns render (no longer
+    // pruned at non-patient levels) with the saved values; the import-label
+    // section is titled "Import Label" (not the patient-only "Study Import Label").
+    await screen.findByRole("heading", { name: "Import Label" });
+    expect(document.getElementById("sidebar-dataset").value).toBe("lvo");
+    expect(document.getElementById("sidebar-study-import-label").value).toBe("PRECISE");
   });
 
   it("falls back to defaults when the stored session is invalid", async () => {

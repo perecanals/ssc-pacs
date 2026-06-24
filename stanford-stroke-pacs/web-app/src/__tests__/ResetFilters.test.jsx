@@ -19,7 +19,8 @@ vi.mock("../api/client", () => ({
     if (path === "/api/storage-mode") return Promise.resolve({ storage_mode: "legacy" });
     if (path === "/api/label-definitions") return Promise.resolve([]);
     if (path === "/api/labels/summary") return Promise.resolve([]);
-    if (path === "/api/study-import-labels") return Promise.resolve([]);
+    if (path === "/api/study-import-labels") return Promise.resolve(["PRECISE"]);
+    if (path === "/api/datasets") return Promise.resolve([]);
     if (path.startsWith("/api/preferences/")) return Promise.resolve({ prefs: {} });
     if (path.startsWith("/api/series")) {
       return Promise.resolve({ total: 1, page: 1, per_page: 50, series: [SERIES_ROW] });
@@ -51,17 +52,17 @@ describe("Reset Filters button", () => {
       </MemoryRouter>,
     );
 
-    // Go to the series level so the sidebar modality quick filter shows.
+    // Go to the series level so the sidebar import-label quick filter shows.
     fireEvent.click(await screen.findByRole("button", { name: /^series$/i }));
     await screen.findByText("AxialResetTest");
 
-    // Set the sidebar modality quick filter.
-    const modality = screen.getByRole("combobox");
-    fireEvent.change(modality, { target: { value: "CT" } });
-    expect(modality.value).toBe("CT");
+    // Set the sidebar import-label quick filter.
+    const importLabel = document.getElementById("sidebar-study-import-label");
+    fireEvent.change(importLabel, { target: { value: "PRECISE" } });
+    expect(importLabel.value).toBe("PRECISE");
 
     // The single "Reset Filters" toolbar button clears it.
     fireEvent.click(screen.getByRole("button", { name: /reset filters/i }));
-    await waitFor(() => expect(modality.value).toBe(""));
+    await waitFor(() => expect(importLabel.value).toBe(""));
   });
 });
