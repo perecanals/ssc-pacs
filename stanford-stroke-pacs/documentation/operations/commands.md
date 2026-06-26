@@ -359,6 +359,18 @@ curl -s -u admin:<password> http://localhost:8042/system | python3 -m json.tool
 
 See [`../cold_storage/runbook.md`](../cold_storage/runbook.md) for evaluation, archiver, and mode switching.
 
+Repair stale Orthanc index entries (duplicate-path rot that makes OHIF panes blank):
+
+```bash
+# Report only (default)
+python scripts/cold_storage/prune_stale_index_paths.py --patient 24-012
+python scripts/cold_storage/prune_stale_index_paths.py --json        # all patients
+
+# Apply (briefly stops Orthanc, backs up the index DB, restarts)
+python scripts/cold_storage/prune_stale_index_paths.py --patient 24-012 --execute --yes
+python scripts/cold_storage/prune_stale_index_paths.py --execute      # global
+```
+
 ---
 
 ## Backups

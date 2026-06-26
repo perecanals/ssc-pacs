@@ -382,6 +382,50 @@ the DataTable never see a raw cold error.
 
 ---
 
+## Repairing stale index entries (duplicate-path rot)
+
+Because the patched indexer runs with `"RemoveMissingFiles": false`, it never
+prunes `Files` rows whose underlying file disappears. That is **correct** for
+cold studies (their files legitimately come and go). But if a series' DICOMs ever
+lived under the *wrong* directory before being reorganized — e.g. an earlier
+migration/re-ingest placed files under a different study dir, which the indexer
+recorded, then the data moved to its canonical `image_series.dicom_dir_path` — an
+Orthanc instance can end up with **two `Files` rows**: one valid (correct dir) and
+one stale (wrong dir, file gone). The plugin resolves an instance with
+`SELECT path FROM Files WHERE instanceId=?` and takes the *first* row, so it
+intermittently returns the dead path → Orthanc 500 → **OHIF shows a blank pane**.
+
+`scripts/cold_storage/prune_stale_index_paths.py` detects and removes only those
+stale rows. Detection is **structural and warm-state independent**: a row is stale
+iff its directory ≠ the DB-canonical dir for the instance's *true*
+SeriesInstanceUID (instance→series from Orthanc `/tools/find`; series→dir from
+`image_series.dicom_dir_path`). It never consults the filesystem, so it also cleans
+stale rows for studies that are currently cold, while leaving their *valid*
+(currently-missing) rows intact.
+
+```bash
+conda activate ssc-pacs
+
+# Report only (default). One patient, or all.
+python scripts/cold_storage/prune_stale_index_paths.py --patient 24-012
+python scripts/cold_storage/prune_stale_index_paths.py --json   # all patients + JSON report
+
+# Apply. Briefly STOPS Orthanc, backs up the index DB, deletes stale rows, restarts.
+python scripts/cold_storage/prune_stale_index_paths.py --patient 24-012 --execute --yes
+python scripts/cold_storage/prune_stale_index_paths.py --execute            # global
+```
+
+Safety: dry-run by default; never deletes an instance's last `Files` row (the
+`Attachments` table does not cascade); pre-edit DB is backed up to
+`maintenance/index-prune-reports/backups/`; an attachment-orphan invariant is
+asserted before the edited DB is restored; idempotent (a second run finds 0).
+Instances whose *every* row is stale are reported and only removed with
+`--delete-orphans` (via Orthanc REST, which cleans both tables). The brief Orthanc
+stop is an OHIF/Explorer outage (~1–3 min); a single global `--execute` covers all
+patients in one stop/start. JSON reports land in `maintenance/index-prune-reports/`.
+
+---
+
 ## Mode comparison
 
 | | `legacy` | `cold_path_cache` |
