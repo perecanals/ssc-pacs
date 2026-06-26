@@ -173,6 +173,13 @@ python scripts/cold_storage/list_unarchived_series.py --count
 python scripts/cold_storage/list_unarchived_series.py --patient 4-0551
 python scripts/cold_storage/archive_all_series.py --patient 4-0551   # idempotent retry
 
+# Repair stale Orthanc index entries (duplicate-path rot → blank OHIF pane).
+# Detects Files rows whose dir != the DB-canonical dir for the instance's true
+# series; --execute briefly stops Orthanc, backs up the index DB, prunes, restarts.
+python scripts/cold_storage/prune_stale_index_paths.py --patient 24-012          # report
+python scripts/cold_storage/prune_stale_index_paths.py --patient 24-012 --execute --yes
+python scripts/cold_storage/prune_stale_index_paths.py --execute                 # global
+
 # On-demand DICOM → NIFTI (cold_path_cache mode skips auto-NIFTI generation)
 python scripts/dicom/dicom_to_nifti.py --dir /path/to/DICOM
 python scripts/dicom/dicom_to_nifti.py --archive /path/to/DICOM.tar.zst --out /tmp/x.nii.gz
