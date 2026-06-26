@@ -7,8 +7,8 @@ mode = "cold_path_cache"
 # Uncompressed DICOM tree Orthanc indexes. In cold_path_cache mode this doubles
 # as the warm cache: archives are extracted back here on warm (the path each
 # series records in image_series.dicom_dir_path lives under this root).
-dicom_data_root = "/Volumes/ThunderBay_RAID1/ssc-pacs-data/imaging_data"
-cold_archive_root = "/Volumes/ThunderBay_RAID1/ssc-pacs-data/compressed"
+dicom_data_root = "/Volumes/Expansion/ssc-pacs-data/imaging_data"
+cold_archive_root = "/Volumes/Expansion/ssc-pacs-data/compressed"
 eviction_ttl_hours = 336
 # Cold-storage warm watchdog: a `cache_state` row stuck in status='warming'
 # longer than this is treated as cold by the next warm attempt (recovers
