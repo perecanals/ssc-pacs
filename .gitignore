@@ -6,6 +6,7 @@ orthanc_users.json
 maintenance
 hidden
 benchmarks
+*.sql
 
 # Python
 __pycache__/
