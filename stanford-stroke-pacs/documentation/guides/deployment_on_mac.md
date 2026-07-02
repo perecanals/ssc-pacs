@@ -205,8 +205,9 @@ Two Mac-specific adaptations to the documented bootstrap:
 There is no systemd; `ssc-web-app.service` does not apply. The repo ships
 ready-made plists in [`launchd/`](../../launchd/) — `com.ssc.colima`,
 `com.ssc.postgres`, `com.ssc.webapp`, and the nightly `com.ssc.pg-backup-*`,
-`com.ssc.orthanc-storage-backup`, `com.ssc.reconciliation`,
-`com.ssc.cold-storage-health` jobs — so you don't hand-write them. The web-app plist
+`com.ssc.orthanc-storage-backup`, `com.ssc.cold-storage-health` jobs — so you
+don't hand-write them. (Reconciliation is on-demand only — no daemon; see
+[`operations/reconciliation.md`](../operations/reconciliation.md).) The web-app plist
 runs `…/envs/ssc-pacs/bin/uvicorn app:app --host 0.0.0.0 --port 8043` with
 `RunAtLoad` + `KeepAlive`.
 
@@ -218,7 +219,7 @@ instead. This repo ships daemon **templates** in [`launchd/`](../../launchd/)
 (`*.plist.in`, with `__TOKENS__` for user/home/Homebrew prefix/conda env/repo
 path) and an installer that resolves those for this host (auto-derived; override
 in `deploy.env`), renders them, and does the whole cutover — Colima, Postgres, the
-Web App, **and** the nightly backup/reconciliation/health jobs:
+Web App, **and** the nightly backup/health jobs:
 
 ```bash
 scripts/macos/install_launchd.sh --dry-run   # preview rendered plists (plutil-linted)

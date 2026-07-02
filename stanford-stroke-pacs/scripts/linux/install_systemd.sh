@@ -109,5 +109,5 @@ done
 
 echo "==> Status"
 systemctl --no-pager --plain status ssc-web-app.service | head -n 3 || true
-systemctl list-timers --all --no-pager | grep -E 'pacs|reconc|cold|backup|freshness' || true
+systemctl list-timers --all --no-pager | grep -E 'pacs|cold|backup|freshness' || true
 echo "Done."

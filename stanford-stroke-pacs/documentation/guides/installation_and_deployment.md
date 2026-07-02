@@ -339,7 +339,8 @@ cd web-app && npm ci && npm run build
 The units ship as **templates** (`systemd/*.in`) with `__TOKENS__` for the
 per-host bits. The installer resolves user/repo/python automatically (override in
 `deploy.env`), renders the templates into `/etc/systemd/system/`, and enables the
-web app plus the backup/reconciliation/health timers:
+web app plus the backup/health timers (reconciliation is on-demand only — no
+timer; see [`operations/reconciliation.md`](../operations/reconciliation.md)):
 
 ```bash
 scripts/linux/install_systemd.sh --dry-run    # preview the rendered units

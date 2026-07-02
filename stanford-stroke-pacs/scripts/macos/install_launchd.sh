@@ -78,7 +78,6 @@ DAEMONS=(
   com.ssc.pg-backup-orthanc
   com.ssc.orthanc-storage-backup
   com.ssc.pg-backup-freshness
-  com.ssc.reconciliation
   com.ssc.cold-storage-health
 )
 
