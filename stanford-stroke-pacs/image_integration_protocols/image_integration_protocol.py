@@ -19,6 +19,7 @@ from utils import (
     convert_dicom_to_nifti,
     identify_study_type,
     identify_series_type,
+    max_same_position_count,
     name_sanity_check,
     should_create_nifti,
 )
@@ -405,7 +406,16 @@ class ImageIntegrationProtocol:
         z_positions = []
         for dcm in headers:
             position = cls._dicom_value(dcm, "ImagePositionPatient")
-            if isinstance(position, (list, tuple)) and len(position) >= 3:
+            # pydicom returns ImagePositionPatient as a MultiValue, which is NOT
+            # a list/tuple — an isinstance((list, tuple)) guard silently rejects
+            # it and leaves z_positions empty. Accept any non-string sequence of
+            # length >= 3 so the true z-extent is used (not just the fallbacks).
+            if (
+                position is not None
+                and not isinstance(position, (str, bytes))
+                and hasattr(position, "__len__")
+                and len(position) >= 3
+            ):
                 z_value = cls._safe_float(position[2])
                 if z_value is not None:
                     z_positions.append(z_value)
@@ -531,6 +541,13 @@ class ImageIntegrationProtocol:
             image_shape, slice_thickness, scan_axial_coverage_mm = self._series_geometry(
                 headers
             )
+            modality = self._safe_text(self._dicom_value(dcm, "Modality"))
+            series_description = self._safe_text(
+                self._dicom_value(dcm, "SeriesDescription")
+            )
+            # Geometry-first series-type detection: how many frames share a slice
+            # location distinguishes dynamic (CTP/PWI/DWI) from static scans.
+            same_position_count = max_same_position_count(headers)
 
             data_series_list.append(
                 pd.DataFrame(
@@ -541,9 +558,7 @@ class ImageIntegrationProtocol:
                             "studydescription": self._safe_text(
                                 self._dicom_value(dcm, "StudyDescription")
                             ),
-                            "seriesdescription": self._safe_text(
-                                self._dicom_value(dcm, "SeriesDescription")
-                            ),
+                            "seriesdescription": series_description,
                             "studyinstanceuid": study_instance_uid,
                             "seriesinstanceuid": series_instance_uid,
                             "number_of_slices": len(paths),
@@ -567,15 +582,12 @@ class ImageIntegrationProtocol:
                             "imageshape": image_shape,
                             "scanaxialcoverage_mm": scan_axial_coverage_mm,
                             "seriesdescription_": name_sanity_check(
-                                self._safe_text(self._dicom_value(dcm, "SeriesDescription"))
-                                or "UNNAMED_SERIES"
+                                series_description or "UNNAMED_SERIES"
                             ),
                             "series_type": identify_series_type(
-                                self._safe_text(self._dicom_value(dcm, "SeriesDescription"))
+                                modality, same_position_count, series_description
                             ),
-                            "modality": self._safe_text(
-                                self._dicom_value(dcm, "Modality")
-                            ),
+                            "modality": modality,
                         }
                     ]
                 )

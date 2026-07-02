@@ -94,19 +94,151 @@ def is_ncct_series(seriesdescription):
     return isinstance(seriesdescription, str) and seriesdescription.startswith(tuple(ncct_prefixes))
 
 
-def is_ctp_series(seriesdescription):
-    ctp_prefixes = ["CTP", "PERF", "PERFUSION", "CT PERFUSION"]
-    return isinstance(seriesdescription, str) and seriesdescription.startswith(tuple(ctp_prefixes))
+# --- Geometric series-type detection (CTP / PWI / DWI) -----------------------
+#
+# The discriminating signal is `same_position_count`: how many frames in a
+# series share the same ImagePositionPatient. Static scans (CTA/NCCT) visit each
+# slice location once (~1); dynamic acquisitions cycle through time/b-values at
+# each location, so the count equals the number of timepoints. Combined with
+# Modality (CT->CTP, MR->PWI/DWI) and a small SeriesDescription exclusion list,
+# this cleanly separates the perfusion/diffusion families. See
+# max_same_position_count() for how the count is derived from DICOM headers.
+
+PERFUSION_MIN_FRAMES = 15            # CTP and PWI floor (frames per slice)
+DWI_FRAME_RANGE = (2, 14)           # below the perfusion floor -> no overlap
+MR_DYNAMIC_EXCLUDE = ("asl", "fmri", "qsm", "swi")
 
 
-def identify_series_type(seriesdescription):
-    if is_cta_series(seriesdescription):
-        return "CTA"
-    if is_ncct_series(seriesdescription):
-        return "NCCT"
-    if is_ctp_series(seriesdescription):
+def _position_key(position):
+    """Round an ImagePositionPatient triple to a hashable key, or None.
+
+    Accepts list/tuple and pydicom MultiValue (a non-list sequence of DSfloat).
+    """
+    if position is None or isinstance(position, (str, bytes)):
+        return None
+    try:
+        if len(position) < 3:
+            return None
+        return tuple(round(float(position[i]), 2) for i in range(3))
+    except (TypeError, ValueError):
+        return None
+
+
+def _frame_positions(dcm):
+    """Best-effort per-frame ImagePositionPatient for enhanced/multiframe DICOM.
+
+    Returns a list of position keys (one per frame), or None when the
+    PerFrameFunctionalGroupsSequence / PlanePositionSequence structure is
+    absent or unreadable — in which case the caller degrades to None rather
+    than guessing.
+    """
+    per_frame = getattr(dcm, "PerFrameFunctionalGroupsSequence", None)
+    if not per_frame:
+        return None
+    keys = []
+    for frame in per_frame:
+        plane = getattr(frame, "PlanePositionSequence", None)
+        if not plane:
+            return None
+        key = _position_key(getattr(plane[0], "ImagePositionPatient", None))
+        if key is None:
+            return None
+        keys.append(key)
+    return keys or None
+
+
+def max_same_position_count(headers):
+    """Largest number of frames sharing one ImagePositionPatient in a series.
+
+    ~1 for static scans (CTA/NCCT), ~N_timepoints for dynamic acquisitions
+    (CTP/PWI/DWI). `headers` is the list of pydicom datasets the pipeline
+    already holds for a series (read with stop_before_pixels=True).
+
+    Returns None when no positions are available, or when an enhanced-multiframe
+    series carries geometry we cannot decode — so callers degrade to an
+    undetermined series_type instead of misclassifying.
+    """
+    if not headers:
+        return None
+    counts = {}
+    seen = False
+    for dcm in headers:
+        try:
+            n_frames = int(getattr(dcm, "NumberOfFrames", 0) or 0)
+        except (TypeError, ValueError):
+            n_frames = 0
+        if n_frames > 1:
+            # Enhanced multiframe: a single file holds many frames. Per-file
+            # ImagePositionPatient under-counts, so read per-frame positions.
+            frame_keys = _frame_positions(dcm)
+            if frame_keys is None:
+                return None  # multiframe geometry we can't read -> don't guess
+            for key in frame_keys:
+                counts[key] = counts.get(key, 0) + 1
+                seen = True
+            continue
+        key = _position_key(getattr(dcm, "ImagePositionPatient", None))
+        if key is None:
+            continue
+        counts[key] = counts.get(key, 0) + 1
+        seen = True
+    if not seen:
+        return None
+    return max(counts.values())
+
+
+def _description_excluded(seriesdescription, tokens=MR_DYNAMIC_EXCLUDE):
+    """True if the description names a non-target MR series (asl/fmri/qsm/swi)."""
+    if not isinstance(seriesdescription, str):
+        return False
+    text = seriesdescription.lower()
+    return any(token in text for token in tokens)
+
+
+def is_ctp_series(modality, same_position_count, seriesdescription=None):
+    """CT perfusion: CT with many time frames per slice location."""
+    return (
+        modality == "CT"
+        and same_position_count is not None
+        and same_position_count >= PERFUSION_MIN_FRAMES
+    )
+
+
+def is_pwi_series(modality, same_position_count, seriesdescription=None):
+    """MR perfusion (DSC/DCE): MR with many time frames per slice location."""
+    return (
+        modality == "MR"
+        and same_position_count is not None
+        and same_position_count >= PERFUSION_MIN_FRAMES
+        and not _description_excluded(seriesdescription)
+    )
+
+
+def is_dwi_series(modality, same_position_count, seriesdescription=None):
+    """Diffusion: MR with a few frames (b-values/directions) per slice location."""
+    lo, hi = DWI_FRAME_RANGE
+    return (
+        modality == "MR"
+        and same_position_count is not None
+        and lo <= same_position_count <= hi
+        and not _description_excluded(seriesdescription)
+    )
+
+
+def identify_series_type(modality, same_position_count, seriesdescription=None):
+    """Geometry-first series-type detection. Returns 'CTP'/'PWI'/'DWI'/None.
+
+    CTA/NCCT keyword detection is intentionally NOT used here — those keyword
+    lists were never tuned for the current dataset. is_cta_series/is_ncct_series
+    remain available for identify_study_type's BASELINE/FOLLOW_UP classification.
+    """
+    if is_ctp_series(modality, same_position_count, seriesdescription):
         return "CTP"
-    return ""
+    if is_pwi_series(modality, same_position_count, seriesdescription):
+        return "PWI"
+    if is_dwi_series(modality, same_position_count, seriesdescription):
+        return "DWI"
+    return None
 
 
 def should_create_nifti(series_type):
