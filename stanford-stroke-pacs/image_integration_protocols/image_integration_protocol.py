@@ -88,7 +88,8 @@ class ImageIntegrationProtocol:
         )
         if self.case_series_table is None or self.case_series_table.empty:
             print(f"No readable DICOM series found under case_dir ({self.case_dir})")
-            return {"studyinstanceuids": [], "seriesinstanceuids": []}
+            return {"studyinstanceuids": [], "seriesinstanceuids": [],
+                    "skipped_existing_seriesinstanceuids": []}
 
         step_started = time.perf_counter()
         self.create_study_table()
@@ -98,7 +99,8 @@ class ImageIntegrationProtocol:
         )
         if self.case_study_table is None or self.case_study_table.empty:
             print(f"No valid studies could be created from case_dir ({self.case_dir})")
-            return {"studyinstanceuids": [], "seriesinstanceuids": []}
+            return {"studyinstanceuids": [], "seriesinstanceuids": [],
+                    "skipped_existing_seriesinstanceuids": []}
 
         initial_study_count = len(self.case_study_table)
         step_started = time.perf_counter()
@@ -114,7 +116,9 @@ class ImageIntegrationProtocol:
                 print(
                     f"All series for case_dir ({self.case_dir}) are already in the database"
                 )
-            return {"studyinstanceuids": [], "seriesinstanceuids": []}
+            return {"studyinstanceuids": [], "seriesinstanceuids": [],
+                    "skipped_existing_seriesinstanceuids":
+                        list(self.skipped_existing_series_uids)}
 
         step_started = time.perf_counter()
         self.load_clinical_data_table()
@@ -198,6 +202,8 @@ class ImageIntegrationProtocol:
             "seriesinstanceuids": sorted(
                 self.case_series_table["seriesinstanceuid"].dropna().astype(str).unique().tolist()
             ),
+            "skipped_existing_seriesinstanceuids":
+                list(getattr(self, "skipped_existing_series_uids", [])),
         }
 
     def load_image_tables(self):
@@ -667,6 +673,10 @@ class ImageIntegrationProtocol:
         return predicted_study_type
 
     def filter_existing_studies(self, overwrite_if_exists=False):
+        # Series found on disk but skipped because they are already in
+        # image_series. Exposed so the executor can re-index the resume-boundary
+        # case (ingested but possibly not indexed before an interruption).
+        self.skipped_existing_series_uids = []
         study_uids = self.case_study_table["studyinstanceuid"].dropna().astype(str).unique().tolist()
         print(
             f"Checking {len(study_uids)} study UID(s) against image_study and image_series"
@@ -770,6 +780,7 @@ class ImageIntegrationProtocol:
                     )
 
             drop_uids = drop_match_uids | drop_unverifiable_uids
+            self.skipped_existing_series_uids = sorted(drop_uids)
             if drop_uids:
                 self.case_series_table = self.case_series_table[
                     ~self.case_series_table["seriesinstanceuid"].astype(str).isin(drop_uids)

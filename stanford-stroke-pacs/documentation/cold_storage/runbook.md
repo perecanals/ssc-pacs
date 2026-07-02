@@ -466,8 +466,8 @@ If you need to roll back:
 | `scripts/cold_storage/cleanup_loose_dicoms.py` | Safely delete loose DICOMs whose archive exists and Orthanc has indexed (dry-run by default; cron-friendly) |
 | `scripts/cold_storage/list_unarchived_series.py` | List series with loose files but no archive — triage compression failures |
 | `scripts/dicom/dicom_to_nifti.py` | On-demand DICOM → NIFTI from a loose dir, a cold archive, or by series UID (optionally warming) |
-| `scripts/one_off/orthanc_path_availability_test.py` | Automated DICOMweb path-availability probe |
-| `scripts/one_off/orthanc_holdout_case.py` | Manual OHIF holdout test (hide/restore a patient) |
+| `maintenance/scripts/orthanc_path_availability_test.py` (site-local, gitignored) | Automated DICOMweb path-availability probe |
+| `maintenance/scripts/orthanc_holdout_case.py` (site-local, gitignored) | Manual OHIF holdout test (hide/restore a patient) |
 | `orthanc.json` | `Indexer.RemoveMissingFiles` must be `false` for `cold_path_cache` |
 | `docker-compose.yml` | `image: ssc-orthanc:patched-indexer` |
 | `config.toml` | `[storage].mode` and paths |

@@ -69,3 +69,5 @@ deploy.env
 
 # Site/run-specific ingestion config (use the .example.yaml template)
 stanford-stroke-pacs/image_integration_protocols/execute_image_integration_protocol.yaml
+# Per-batch configs derived from the base YAML by run_all_batches.sh
+stanford-stroke-pacs/image_integration_protocols/batch_configs/

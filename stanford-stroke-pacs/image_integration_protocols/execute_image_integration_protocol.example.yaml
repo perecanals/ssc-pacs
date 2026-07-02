@@ -34,3 +34,18 @@ import_label: my_batch_1
 # permissions filter on (users.allowed_datasets) — patients ingested without
 # a dataset tag are invisible to all non-admin users.
 dataset: my_cohort
+
+# Resume a previously interrupted run: skip cases already processed (in sorted
+# order) per the most recent prior log with a matching src_dir, re-analyzing the
+# case that was interrupted. Avoids re-scanning completed cases off slow disks.
+# Pass --no-resume on the CLI to force a full re-read regardless of this setting.
+resume: true
+
+# cold_path_cache only. After each case is indexed into Orthanc and verified,
+# delete its loose (uncompressed) DICOM dirs — the tar.zst archive is canonical
+# and the Orthanc index survives eviction, so the loose copy is redundant.
+# Same safety checks as scripts/cold_storage/cleanup_loose_dicoms.py (archive
+# present + file-count match + series verified in the index; NIFTI siblings
+# preserved). false = current behavior: loose files stay on disk ("hot", instantly
+# viewable) until a manual cleanup_loose_dicoms.py pass.
+cleanup_loose_after_indexing: false
