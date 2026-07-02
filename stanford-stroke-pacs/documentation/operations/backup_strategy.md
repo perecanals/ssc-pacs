@@ -236,10 +236,10 @@ loss is recoverable via re-ingestion.
 1. Provision a destination — local disk (`/DATA3/cold_mirror`), NFS mount,
    or a borg/restic repository on a remote host.
 2. Re-evaluate the rsync target choice if PHI is at stake. If
-   `image_integration_protocol.anonymize_files` is **off**, the archives
+   `image_ingestion_protocol.anonymize_files` is **off**, the archives
    contain identifiable data and must not leave the host without
    encryption at rest (borg/restic both support this). See
-   `documentation/reference/image_integration_protocol.md`.
+   `documentation/reference/image_ingestion_protocol.md`.
 3. Create `/etc/default/pacs-cold-mirror` (mode 0644, root-owned):
 
    ```ini

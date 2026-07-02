@@ -42,8 +42,8 @@ migration_backups/
 # Local maintenance notes (not part of shipped repo)
 maintenance/
 
-# Integration protocol logs
-stanford-stroke-pacs/image_integration_protocols/logs/
+# Ingestion protocol logs
+stanford-stroke-pacs/image_ingestion_protocols/logs/
 
 # SQL data dumps (schema only — CSV/raw data stays out)
 ssc-sql-db/tables/
@@ -68,6 +68,6 @@ deploy.env
 **/deploy.env
 
 # Site/run-specific ingestion config (use the .example.yaml template)
-stanford-stroke-pacs/image_integration_protocols/execute_image_integration_protocol.yaml
+stanford-stroke-pacs/image_ingestion_protocols/execute_image_ingestion_protocol.yaml
 # Per-batch configs derived from the base YAML by run_all_batches.sh
-stanford-stroke-pacs/image_integration_protocols/batch_configs/
+stanford-stroke-pacs/image_ingestion_protocols/batch_configs/

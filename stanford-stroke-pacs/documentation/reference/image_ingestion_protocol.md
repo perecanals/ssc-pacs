@@ -1,10 +1,10 @@
-# Image integration protocol
+# Image ingestion protocol
 
 **Purpose:** How new imaging data gets into the PACS. Explains the protocol's
 inputs, steps, outputs, and how it interacts with each storage mode. For the
 cold storage design see [`../cold_storage/design.md`](../cold_storage/design.md).
 
-Code lives under `stanford-stroke-pacs/image_integration_protocols/`. This
+Code lives under `stanford-stroke-pacs/image_ingestion_protocols/`. This
 pipeline is **site-specific** to the Stanford Stroke Center DICOM layout and
 metadata conventions. It is not part of a standard fresh deployment.
 
@@ -31,19 +31,19 @@ not stop the batch; errors are written to `logs/error_log_*.json`.
 ## Entry point
 
 ```bash
-cd /home/perecanals/ssc-pacs/stanford-stroke-pacs/image_integration_protocols
+cd /home/perecanals/ssc-pacs/stanford-stroke-pacs/image_ingestion_protocols
 conda activate pacs
-python execute_image_integration_protocol.py [--config path/to/config.yaml]
+python execute_image_ingestion_protocol.py [--config path/to/config.yaml]
 ```
 
-By default it reads `execute_image_integration_protocol.yaml` next to the
+By default it reads `execute_image_ingestion_protocol.yaml` next to the
 script. That file is **gitignored** (it holds site/run-specific paths) —
 create it by copying the tracked template
-`execute_image_integration_protocol.example.yaml`. The script walks
-`src_dir`, calls the `ImageIntegrationProtocol` class for each patient
+`execute_image_ingestion_protocol.example.yaml`. The script walks
+`src_dir`, calls the `ImageIngestionProtocol` class for each patient
 subdirectory, and aggregates labelled-table sync at the end.
 
-Logs land under `image_integration_protocols/logs/` with a timestamped name.
+Logs land under `image_ingestion_protocols/logs/` with a timestamped name.
 Both stdout and stderr are redirected through the logger.
 
 ### Resuming an interrupted run
@@ -93,17 +93,17 @@ dataset: "crisp2"                           # optional, cohort tag recorded on t
 | `import_label` | Free-text tag written to `import_label` column in both tables — useful for filtering a batch later |
 | `dataset` | Optional cohort/dataset tag. Recorded only on the `patient` table (`dataset text[]`, union-accumulated across batches); not written to `image_study`/`image_series`. |
 | `cold_archive_root` | **Optional override.** Defaults to `[storage].cold_archive_root` from `config.toml` when `mode = "cold_path_cache"`, or `null` in legacy mode. The script warns if you override and the override differs from `config.toml`. |
-| `cleanup_loose_after_indexing` | `cold_path_cache` only (ignored with a warning in legacy mode). Default `false`. When `true`, after each case's Orthanc indexing verifies, delete its series' loose `DICOM/` dirs (same safety checks as `cleanup_loose_dicoms.py`; NIFTI siblings preserved). See "Cleanup of loose DICOMs after integration". |
+| `cleanup_loose_after_indexing` | `cold_path_cache` only (ignored with a warning in legacy mode). Default `false`. When `true`, after each case's Orthanc indexing verifies, delete its series' loose `DICOM/` dirs (same safety checks as `cleanup_loose_dicoms.py`; NIFTI siblings preserved). See "Cleanup of loose DICOMs after ingestion". |
 | `resume` | Default `true`. Resume an interrupted run from the prior log's position (see "Resume"). CLI `--no-resume` overrides. |
 
-`execute_image_integration_protocol.py` picks a single monotonic `import_id`
+`execute_image_ingestion_protocol.py` picks a single monotonic `import_id`
 via `get_next_import_id()` (max existing + 1) and writes it into every row in
 the batch, so you can later find everything that came in together.
 
 ### Config sources of truth
 
 Storage paths and storage mode are read from `config.toml` by both
-`ImageIntegrationProtocol` and the `execute_image_integration_protocol.py`
+`ImageIngestionProtocol` and the `execute_image_ingestion_protocol.py`
 driver (via `web-app/config.py`). This eliminates the previous hardcoded
 `/DATA2/pacs_imaging_data` and the YAML's separate `cold_archive_root`. You
 no longer need to keep multiple files in sync; the only path you typically
@@ -158,7 +158,7 @@ the tar.
 
 ---
 
-## Protocol steps (inside `ImageIntegrationProtocol.execute_image_integration_protocol`)
+## Protocol steps (inside `ImageIngestionProtocol.execute_image_ingestion_protocol`)
 
 | Step | Method | Notes |
 |------|--------|-------|
@@ -169,12 +169,12 @@ the tar.
 | 5 | `validate_studies_against_clinical_data` | Drops studies whose `patient_id` doesn't match a clinical row or whose `studydate` is outside the allowed stroke-date window |
 | 6 | `assign_import_id` / `assign_import_label` | Tags all rows with the batch import_id/label |
 | 7 | `add_paths_and_copy_dicom_files` | **Copies DICOMs** from source → `{dicom_data_root}/{patient_id}/{studyUID}/{seriesDesc}/{seriesUID}/DICOM/`. Copies the series' aggregated file list (which may span several source folders); on a destination basename collision it **renames** the file (`…__dupN`) so nothing is overwritten. Optionally anonymizes. Sets `dicom_dir_path` and records the source→dest pairs for verification. |
-| 8 | `compress_cold_archives` | **Only if `cold_archive_root` is set.** For each series, creates `{cold_archive_root}/.../DICOM.tar.zst`. Sets `dicom_archive_path` on each row. **Per-series strict, batch soft**: each archive is built to a `.tmp` sibling, member-count verified, and atomically renamed — so a published archive is always valid. A failure on one series does NOT abort the case; the loop continues and failures are collected. After the loop, a WARNING is printed summarizing `N/M` failed, and a JSON report is written to `image_integration_protocols/logs/compression_failures_<timestamp>.json` (includes seriesinstanceuid, studyinstanceuid, dicom_dir_path, error). Failed rows keep `dicom_archive_path = NULL` — retriable via `scripts/cold_storage/archive_all_series.py --patient <id>`. Idempotent: existing archives are re-verified rather than rebuilt; corrupted ones are detected and rebuilt. |
+| 8 | `compress_cold_archives` | **Only if `cold_archive_root` is set.** For each series, creates `{cold_archive_root}/.../DICOM.tar.zst`. Sets `dicom_archive_path` on each row. **Per-series strict, batch soft**: each archive is built to a `.tmp` sibling, member-count verified, and atomically renamed — so a published archive is always valid. A failure on one series does NOT abort the case; the loop continues and failures are collected. After the loop, a WARNING is printed summarizing `N/M` failed, and a JSON report is written to `image_ingestion_protocols/logs/compression_failures_<timestamp>.json` (includes seriesinstanceuid, studyinstanceuid, dicom_dir_path, error). Failed rows keep `dicom_archive_path = NULL` — retriable via `scripts/cold_storage/archive_all_series.py --patient <id>`. Idempotent: existing archives are re-verified rather than rebuilt; corrupted ones are detected and rebuilt. |
 | 9 | `create_nifti_files` | In `legacy` mode: runs DICOM→NIFTI conversion for select series and writes `{seriesUID}/NIFTI/image.nii.gz`. In `cold_path_cache` mode: **skipped.** NIFTIs would accumulate orphaned once their sibling loose DICOMs are cleaned up. Generate on demand via `scripts/dicom/dicom_to_nifti.py` (see [`../recipes/dicom_processing.md`](../recipes/dicom_processing.md)). |
 | 10 | `format_column_names` | Normalizes DataFrame column names, including adding `dicom_archive_path` to the set of columns to upsert |
 | 11 | `_require_import_id_columns` / `_require_import_label_columns` / `_require_number_of_slices_column` / `_require_dicom_archive_path_column` | Auto-DDL: `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` for any columns the protocol writes that don't yet exist. Safe to run against a fresh DB. |
 | 12 | `update_postgres_tables` | Upserts `image_series`, `image_study`, then `patient` — all in one transaction. `_upsert_patient` registers one row per patient: `stroke_date = MIN(image_study.acquisitiondatetime)` (recomputed across all of the patient's studies), `import_id`/`import_label` keep the **origin** (first-seen, preserved on conflict), and `dataset` is the deduped union of the `dataset` config across batches. As a belt-and-suspenders guard, `_upsert_dataframe` drops any rows duplicated on the conflict key (keep-last, with a WARNING) before the INSERT — so a stray duplicate can never again roll back a whole case via `CardinalityViolation` (`ON CONFLICT DO UPDATE` cannot touch the same target twice). |
-| 13 | `verify_integrated_case` + `delete_original_case_dir` | **Only if `delete_originals_after_verification=true`.** Iterates the recorded source→dest pairs (so it survives the collision-rename case), byte-compares each copied file against its source, then removes the source case directory. |
+| 13 | `verify_ingested_case` + `delete_original_case_dir` | **Only if `delete_originals_after_verification=true`.** Iterates the recorded source→dest pairs (so it survives the collision-rename case), byte-compares each copied file against its source, then removes the source case directory. |
 
 Return value: `{"studyinstanceuids": [...], "seriesinstanceuids": [...]}` —
 used by the driver to sync per-level labelled mirror tables after the batch.
@@ -197,7 +197,7 @@ two folders resolved to the same UID, emitted a duplicate conflict key that
 aborted the whole case with a `CardinalityViolation`. Grouping by UID is lossless
 and keeps the conflict key unique by construction.
 
-Regression coverage: `image_integration_protocols/test_image_integration_grouping.py`
+Regression coverage: `image_ingestion_protocols/test_image_ingestion_grouping.py`
 (mixed-folder split, cross-folder merge, collision warning, copy-collision rename).
 
 ### How `series_type` is detected
@@ -268,7 +268,7 @@ At the end of the run, for each successfully compressed series:
 
 For any series whose compression failed, `dicom_archive_path` stays NULL.
 The case does not abort — other series complete normally. See the failure
-log at `image_integration_protocols/logs/compression_failures_*.json` and
+log at `image_ingestion_protocols/logs/compression_failures_*.json` and
 retry via `scripts/cold_storage/archive_all_series.py --patient <id>` (idempotent).
 Use `scripts/cold_storage/list_unarchived_series.py` to list NULL-archive rows.
 
@@ -308,9 +308,9 @@ clean: N/N series verified" or the list of still-missing series. Anything
 still missing after that: backfill with
 `scripts/cold_storage/reindex_missing_series.py`.
 
-### Cleanup of loose DICOMs after integration (cold_path_cache only)
+### Cleanup of loose DICOMs after ingestion (cold_path_cache only)
 
-By default the integration protocol does **not** delete loose DICOMs after
+By default the ingestion protocol does **not** delete loose DICOMs after
 compression: they stay on disk ("hot", instantly viewable) until removed. Once
 a series is compressed **and** indexed into Orthanc, the loose copy is
 redundant — the archive is canonical and the index survives eviction.
@@ -373,11 +373,11 @@ corruption that the fast path would miss.
 
 ## Configuration coupling with the rest of the stack
 
-The integration protocol reads `[storage].dicom_data_root`, `[storage].cold_archive_root`,
+The ingestion protocol reads `[storage].dicom_data_root`, `[storage].cold_archive_root`,
 and `[storage].mode` from `config.toml` via `web-app/config.py`. There are
 no hardcoded paths to keep in sync.
 
-**Checklist before running integration in `cold_path_cache` mode:**
+**Checklist before running ingestion in `cold_path_cache` mode:**
 1. `config.toml` has `mode = "cold_path_cache"` with the right
    `dicom_data_root` and `cold_archive_root`
 2. The custom `ssc-orthanc:patched-indexer` image is deployed and running
@@ -389,7 +389,7 @@ That's it — the protocol picks up the same values automatically.
 
 ## Error handling
 
-- **Per-case:** `execute_image_integration_protocol.py` wraps each patient
+- **Per-case:** `execute_image_ingestion_protocol.py` wraps each patient
   directory in a try/except. Exceptions are logged, the error is appended
   to `logs/error_log_*.json`, and the loop continues.
 - **Per-step inside a case:** individual steps (compression, NIFTI
@@ -412,19 +412,19 @@ That's it — the protocol picks up the same values automatically.
 ls /path/to/new_cases_root/
 #   patient-0001/  patient-0002/  patient-0003/
 
-# 2. Edit execute_image_integration_protocol.yaml
-#    (first run: copy execute_image_integration_protocol.example.yaml)
+# 2. Edit execute_image_ingestion_protocol.yaml
+#    (first run: copy execute_image_ingestion_protocol.example.yaml)
 #    - src_dir: /path/to/new_cases_root
 #    - cold_archive_root: /DATA2/pacs_imaging_data_compressed   # in cold_path_cache
 #    - import_label: "2026-04-research-batch"
 
 # 3. Run
-cd /home/perecanals/ssc-pacs/stanford-stroke-pacs/image_integration_protocols
+cd /home/perecanals/ssc-pacs/stanford-stroke-pacs/image_ingestion_protocols
 conda activate pacs
-python execute_image_integration_protocol.py
+python execute_image_ingestion_protocol.py
 
 # 4. Watch the log
-tail -f logs/execute_image_integration_protocol_*.log
+tail -f logs/execute_image_ingestion_protocol_*.log
 
 # 5. After completion, check the summary — it prints total/processed/skipped/failed
 
@@ -443,9 +443,9 @@ curl -s -u "${ORTHANC_ADMIN_USER}:${ORTHANC_ADMIN_PASSWORD}" http://localhost:80
 
 ## What it does NOT do
 
-- The `ImageIntegrationProtocol` class itself does **not** talk to Orthanc;
+- The `ImageIngestionProtocol` class itself does **not** talk to Orthanc;
   indexing is driven by the executor
-  (`execute_image_integration_protocol.py`), per case, via the patched
+  (`execute_image_ingestion_protocol.py`), per case, via the patched
   indexer's `POST /indexer/scan` endpoint (see "Mode behavior" above).
 - It does **not** populate `series_cache_state`. New series start implicitly
   cold if their files are ever removed; the warm flow creates the row on first
@@ -454,5 +454,5 @@ curl -s -u "${ORTHANC_ADMIN_USER}:${ORTHANC_ADMIN_PASSWORD}" http://localhost:80
   `cleanup_loose_after_indexing: true`; otherwise that's a separate step via
   `scripts/cold_storage/cleanup_loose_dicoms.py` (runnable manually or via cron).
 - It does **not** run the labelled-table sync by itself — that's done once
-  per batch in `execute_image_integration_protocol.py` after all cases are
+  per batch in `execute_image_ingestion_protocol.py` after all cases are
   processed (via `labelled_table_sync.sync_labelled_rows`).

@@ -1,4 +1,4 @@
-"""Focused tests for SeriesInstanceUID-based grouping in the integration protocol.
+"""Focused tests for SeriesInstanceUID-based grouping in the ingestion protocol.
 
 The protocol groups DICOM files by their embedded SeriesInstanceUID (not by
 directory), so that "mixed" folders are split into their true series and a
@@ -6,7 +6,7 @@ series scattered across folders is merged into one row. These tests build tiny
 synthetic DICOM trees and exercise create_series_table /
 add_paths_and_copy_dicom_files without a database.
 
-Run with: pytest image_integration_protocols/test_image_integration_grouping.py
+Run with: pytest image_ingestion_protocols/test_image_ingestion_grouping.py
 """
 
 import os
@@ -16,7 +16,7 @@ import pytest
 from pydicom.dataset import Dataset, FileMetaDataset
 from pydicom.uid import ExplicitVRLittleEndian, generate_uid
 
-from image_integration_protocol import ImageIntegrationProtocol
+from image_ingestion_protocol import ImageIngestionProtocol
 
 STUDY_UID = "1.2.3.999.1"
 
@@ -50,7 +50,7 @@ def _write_dcm(path, series_uid, series_number, instance_number,
 
 
 def _protocol(case_dir):
-    return ImageIntegrationProtocol(case_dir=str(case_dir), postgres_engine=None)
+    return ImageIngestionProtocol(case_dir=str(case_dir), postgres_engine=None)
 
 
 def test_mixed_folder_splits_and_split_series_merges(tmp_path):

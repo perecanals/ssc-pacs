@@ -9,7 +9,7 @@ they fit together. Deliberately overview-level; link out for detail.
 - Database tables and columns: [`data_stores.md`](data_stores.md)
 - Cold storage design and rationale: [`../cold_storage/design.md`](../cold_storage/design.md)
 - Cold storage operations: [`../cold_storage/runbook.md`](../cold_storage/runbook.md)
-- Ingest pipeline: [`image_integration_protocol.md`](image_integration_protocol.md)
+- Ingest pipeline: [`image_ingestion_protocol.md`](image_ingestion_protocol.md)
 
 ---
 
@@ -227,7 +227,7 @@ Controlled by `config.toml` `[storage].mode`. Two values:
 | Orthanc index | populated by routine Folder Indexer scans | **permanent** — never eroded thanks to `RemoveMissingFiles: false` |
 | Warming | N/A | extract archive → `dicom_dir_path` |
 | Eviction | N/A | rmtree `dicom_dir_path`; index unchanged |
-| NIFTI produced by integration protocol | yes (`NIFTI/image.nii.gz` sibling) | no — on-demand via `scripts/dicom/dicom_to_nifti.py` |
+| NIFTI produced by ingestion protocol | yes (`NIFTI/image.nii.gz` sibling) | no — on-demand via `scripts/dicom/dicom_to_nifti.py` |
 | Requires custom Orthanc image | no | yes (`ssc-orthanc:patched-indexer`) |
 
 See [`../cold_storage/design.md`](../cold_storage/design.md) for why
@@ -323,7 +323,7 @@ macOS Archive Utility handles the resulting zip natively.
 
 ## 7. Ingest flow (new imaging data)
 
-`image_integration_protocols/` is the SSC-specific pipeline. One run per
+`image_ingestion_protocols/` is the SSC-specific pipeline. One run per
 batch:
 
 ```
@@ -363,10 +363,10 @@ batch:
 
 Per-series compression failures are **non-fatal**: the case completes with
 its successful rows, failed rows keep `dicom_archive_path = NULL`, and a
-JSON report lands in `image_integration_protocols/logs/compression_failures_*.json`.
+JSON report lands in `image_ingestion_protocols/logs/compression_failures_*.json`.
 Retry with `scripts/cold_storage/archive_all_series.py --patient <id>`.
 
-Details: [`image_integration_protocol.md`](image_integration_protocol.md).
+Details: [`image_ingestion_protocol.md`](image_ingestion_protocol.md).
 
 ---
 
@@ -402,7 +402,7 @@ to Orthanc directly.
 | `cold_path_cache` stack (archiver, cleanup, cache_manager) | ✅ | |
 | `scripts/admin/manage_users.py`, `init_orthanc_db.sh` | ✅ | |
 | `stanford-stroke` schema (expects `patient`, `image_study`, `image_series`; `lvo_clinical_data` optional clinical side-table) | schema shape portable | column conventions SSC-ish |
-| `image_integration_protocols/` | | ❌ assumes SSC layout + metadata rules |
+| `image_ingestion_protocols/` | | ❌ assumes SSC layout + metadata rules |
 | `scripts/orthanc/enrich_orthanc.py` | | ❌ specific to an anonymised-headers deployment |
 
 For a fresh deployment with an equivalent metadata-ingest pipeline, the
@@ -422,4 +422,4 @@ Web App + Orthanc + cold storage stack drops in cleanly.
 | Run day-2 operator commands | [`../operations/commands.md`](../operations/commands.md) |
 | Warm / evict / clean up cold storage | [`../cold_storage/runbook.md`](../cold_storage/runbook.md) |
 | Convert DICOM → NIFTI or inspect a cold archive | [`../recipes/dicom_processing.md`](../recipes/dicom_processing.md) |
-| Ingest new imaging data | [`image_integration_protocol.md`](image_integration_protocol.md) |
+| Ingest new imaging data | [`image_ingestion_protocol.md`](image_ingestion_protocol.md) |

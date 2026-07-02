@@ -14,12 +14,12 @@ cd /home/perecanals/ssc-pacs/stanford-stroke-pacs
 
 The Web App does **not** generate NIFTIs automatically in
 `cold_path_cache` mode. Use `scripts/dicom/dicom_to_nifti.py` to produce them on
-demand. It wraps `image_integration_protocols/utils.convert_dicom_to_nifti`
+demand. It wraps `image_ingestion_protocols/utils.convert_dicom_to_nifti`
 (SimpleITK + GDCM) and supports three input modes.
 
 ### 1. From a loose directory
 
-If the DICOM files are sitting on disk at a path you know (e.g. a just-integrated
+If the DICOM files are sitting on disk at a path you know (e.g. a just-ingested
 series before cleanup, or a sandbox copy):
 
 ```bash
@@ -100,7 +100,7 @@ zstd -dc archive.tar.zst | tar -tf - | wc -l
 
 `scripts/cold_storage/list_unarchived_series.py` prints `image_series` rows where
 `dicom_archive_path IS NULL` but `dicom_dir_path IS NOT NULL`. That's
-the set of series whose compression failed during integration (or never
+the set of series whose compression failed during ingestion (or never
 ran).
 
 ```bash
@@ -113,7 +113,7 @@ python scripts/cold_storage/list_unarchived_series.py --count
 # Filter by patient
 python scripts/cold_storage/list_unarchived_series.py --patient 4-0551
 
-# Filter by import label (the batch tag from execute_image_integration_protocol.yaml)
+# Filter by import label (the batch tag from execute_image_ingestion_protocol.yaml)
 python scripts/cold_storage/list_unarchived_series.py --import-label "2026-04-batch"
 ```
 

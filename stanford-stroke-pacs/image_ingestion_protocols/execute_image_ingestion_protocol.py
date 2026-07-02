@@ -8,7 +8,7 @@ import traceback
 from pathlib import Path
 from datetime import datetime
 import yaml
-from image_integration_protocol import ImageIntegrationProtocol
+from image_ingestion_protocol import ImageIngestionProtocol
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
 if str(ROOT_DIR) not in sys.path:
@@ -43,7 +43,7 @@ class StreamToLogger:
 # Configure logging
 def setup_logging():
     """Set up logging configuration"""
-    log_filename = f"execute_image_integration_protocol_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
+    log_filename = f"execute_image_ingestion_protocol_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
     log_filepath = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'logs', log_filename)
     os.makedirs(os.path.dirname(log_filepath), exist_ok=True)
     logging.basicConfig(
@@ -86,9 +86,16 @@ def determine_resume_start(logs_dir, current_log_path, src_dir, nhc_list, logger
     index_by_case = {nhc: i for i, nhc in enumerate(nhc_list)}
     current = os.path.abspath(current_log_path) if current_log_path else None
 
-    pattern = os.path.join(logs_dir, "execute_image_integration_protocol_*.log")
-    # Filename timestamp sorts chronologically, so reverse() is newest-first.
-    candidates = sorted(glob.glob(pattern), reverse=True)
+    # Match logs from before the integration→ingestion rename too, so resume
+    # continuity survives it. Mixed prefixes break lexicographic ordering —
+    # sort on the fixed-width "YYYYMMDD_HHMMSS.log" suffix, newest first.
+    patterns = ("execute_image_ingestion_protocol_*.log",
+                "execute_image_integration_protocol_*.log")
+    candidates = sorted(
+        (p for pat in patterns for p in glob.glob(os.path.join(logs_dir, pat))),
+        key=lambda p: os.path.basename(p)[-19:],
+        reverse=True,
+    )
 
     for log_path in candidates:
         if current is not None and os.path.abspath(log_path) == current:
@@ -144,7 +151,7 @@ def determine_resume_start(logs_dir, current_log_path, src_dir, nhc_list, logger
     return 0
 
 
-DEFAULT_CONFIG_PATH = Path(__file__).with_name("execute_image_integration_protocol.yaml")
+DEFAULT_CONFIG_PATH = Path(__file__).with_name("execute_image_ingestion_protocol.yaml")
 
 
 def load_config(config_path):
@@ -157,7 +164,7 @@ def load_config(config_path):
     if not isinstance(config, dict):
         raise ValueError(f"Config file must contain a top-level mapping: {config_path}")
 
-    # Storage paths default from repo-root config.toml so the integration
+    # Storage paths default from repo-root config.toml so the ingestion
     # protocol can never drift from the running stack. The YAML can still
     # override on a per-run basis but a warning is emitted.
     config_toml_archive_root = (
@@ -216,7 +223,7 @@ def load_config(config_path):
     return merged_config, raw_yaml
 
 
-def execute_image_integration_protocol(
+def execute_image_ingestion_protocol(
     case_dir,
     postgres_engine,
     logger,
@@ -228,8 +235,8 @@ def execute_image_integration_protocol(
     dataset=None,
     cold_archive_root=None,
 ):
-    # Create an instance of the ImageIntegrationProtocol class
-    protocol = ImageIntegrationProtocol(
+    # Create an instance of the ImageIngestionProtocol class
+    protocol = ImageIngestionProtocol(
         case_dir,
         postgres_engine,
         anonymize_files=anonymize_files,
@@ -240,7 +247,7 @@ def execute_image_integration_protocol(
         cold_archive_root=cold_archive_root,
     )
     # Execute the protocol
-    return protocol.execute_image_integration_protocol(overwrite_if_exists=overwrite_if_exists)
+    return protocol.execute_image_ingestion_protocol(overwrite_if_exists=overwrite_if_exists)
 
 
 def sync_batch_labelled_tables(postgres_engine, logger, study_ids, series_ids):
@@ -428,7 +435,7 @@ if __name__ == "__main__":
     from sqlalchemy import create_engine
     from dotenv import load_dotenv
 
-    parser = argparse.ArgumentParser(description="Execute the Stanford image integration protocol.")
+    parser = argparse.ArgumentParser(description="Execute the Stanford image ingestion protocol.")
     parser.add_argument(
         "--config",
         default=str(DEFAULT_CONFIG_PATH),
@@ -453,7 +460,7 @@ if __name__ == "__main__":
     sys.stdout = StreamToLogger(logger, logging.INFO)
     sys.stderr = StreamToLogger(logger, logging.ERROR)
 
-    logger.info("Starting image integration protocol execution")
+    logger.info("Starting image ingestion protocol execution")
     logger.info(f"Log file: {log_filepath}")
     logger.info(f"Config file: {config['config_path']}")
     logger.info("Loaded YAML configuration:\n%s", raw_yaml.rstrip())
@@ -466,7 +473,7 @@ if __name__ == "__main__":
     postgres_engine = create_engine(
         f"postgresql://{DB_USER}:{DB_PASSWORD}@localhost:5432/{config['database']}"
     )
-    run_import_id = ImageIntegrationProtocol.get_next_import_id(postgres_engine)
+    run_import_id = ImageIngestionProtocol.get_next_import_id(postgres_engine)
 
     src_dir = config["src_dir"]
     logger.info(f"Source directory: {src_dir}")
@@ -541,7 +548,7 @@ if __name__ == "__main__":
             if len(os.listdir(case_dir)) > 0:
                 logger.info(f"Processing case {nhc}")
                 try:
-                    result = execute_image_integration_protocol(
+                    result = execute_image_ingestion_protocol(
                         case_dir,
                         postgres_engine,
                         logger,
@@ -656,7 +663,7 @@ if __name__ == "__main__":
 
     # Log final summary
     logger.info("=" * 60)
-    logger.info("IMAGE INTEGRATION PROTOCOL SUMMARY")
+    logger.info("IMAGE INGESTION PROTOCOL SUMMARY")
     logger.info(f"Total cases found: {total_cases}")
     logger.info(f"Successfully processed: {processed_cases}")
     logger.info(f"Skipped (empty directories): {skipped_cases}")
@@ -680,4 +687,4 @@ if __name__ == "__main__":
                 f"{len(synced_series_ids)} series verified"
             )
     logger.info("=" * 60)
-    logger.info("Image integration protocol execution completed")
+    logger.info("Image ingestion protocol execution completed")
