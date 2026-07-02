@@ -22,9 +22,9 @@ upsert (NOT this protocol), and only after the DRIFT rows below are understood.
 See maintenance/deleted_series_2026-06-24.md.
 
 Usage:
-  python scripts/one_off/backfill_existing_series.py                 # default patients
-  python scripts/one_off/backfill_existing_series.py --patients 2-541,2-506
-  python scripts/one_off/backfill_existing_series.py --all           # every patient with on-disk files
+  python scripts/data_integrity/disk_vs_db_series_audit.py                 # default patients
+  python scripts/data_integrity/disk_vs_db_series_audit.py --patients 2-541,2-506
+  python scripts/data_integrity/disk_vs_db_series_audit.py --all           # every patient with on-disk files
 """
 
 from __future__ import annotations
