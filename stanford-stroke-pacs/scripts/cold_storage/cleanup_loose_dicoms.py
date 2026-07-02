@@ -48,7 +48,7 @@ load_dotenv(REPO_ROOT / ".env")
 # Read paths from web-app/config.py so cleanup matches the running stack.
 sys.path.insert(0, str(REPO_ROOT / "web-app"))
 from config import DICOM_DATA_ROOT, STORAGE_MODE  # noqa: E402
-from db import DB_CONFIG, get_conn  # noqa: E402
+from db import DB_CONFIG  # noqa: E402
 
 ORTHANC_DB_CONFIG = dict(
     host=os.getenv("DB_HOST", "localhost"),
@@ -119,6 +119,67 @@ def count_archive_files(archive_path: Path) -> int:
     return n
 
 
+def clean_series_loose_dir(
+    series_uid: str,
+    dicom_dir: Path,
+    archive: Path,
+    *,
+    series_in_orthanc: bool,
+    deep_verify: bool = True,
+    execute: bool = True,
+) -> tuple[str, int, str | None]:
+    """Verify one series' loose DICOM dir is redundant and (optionally) delete it.
+
+    Safety checks (all must pass before deletion):
+      1. archive exists and is non-empty
+      2. the series is present in Orthanc's index (caller-established fact)
+      3. deep_verify: archive regular-file count == loose dir file count
+
+    The NIFTI sibling ({seriesUID}/NIFTI/) is untouched — only `dicom_dir` itself
+    (the .../DICOM dir recorded in image_series.dicom_dir_path) is removed.
+
+    Returns (status, bytes_freed, detail) with status one of:
+    'cleaned', 'already_clean', 'no_archive', 'not_in_orthanc', 'count_mismatch'.
+    Shared by the CLI below and the ingestion pipeline's
+    cleanup_loose_after_indexing knob.
+    """
+    if not dicom_dir.is_dir():
+        return "already_clean", 0, None
+    loose_count = count_loose_files(dicom_dir)
+    if loose_count == 0:
+        # Empty dir — remove the empty shell so future runs don't re-check.
+        if execute:
+            try:
+                dicom_dir.rmdir()
+            except OSError:
+                pass
+        return "already_clean", 0, None
+
+    if not archive.is_file() or archive.stat().st_size == 0:
+        return "no_archive", 0, f"{series_uid}: archive missing or empty at {archive}"
+
+    # Series must be in Orthanc's index. If it isn't, the patched indexer
+    # hasn't picked it up yet (or never will) — refusing to delete.
+    if not series_in_orthanc:
+        return "not_in_orthanc", 0, None
+
+    if deep_verify:
+        try:
+            archive_count = count_archive_files(archive)
+        except Exception as exc:
+            return "no_archive", 0, f"{series_uid}: archive verification raised {exc}"
+        if archive_count != loose_count:
+            return "count_mismatch", 0, (
+                f"{series_uid}: archive has {archive_count} files; "
+                f"loose dir has {loose_count} files at {dicom_dir}"
+            )
+
+    size = sum(p.stat().st_size for p in dicom_dir.rglob("*") if p.is_file())
+    if execute:
+        shutil.rmtree(dicom_dir, ignore_errors=False)
+    return "cleaned", size, None
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--execute", action="store_true", help="Actually delete (default: dry-run)")
@@ -171,58 +232,28 @@ def main() -> int:
         dicom_dir = Path(row["dicom_dir_path"])
         archive = Path(row["dicom_archive_path"])
 
-        # Already cleaned: dir gone or empty.
-        if not dicom_dir.is_dir():
+        status, size, detail = clean_series_loose_dir(
+            series_uid, dicom_dir, archive,
+            series_in_orthanc=series_uid in orthanc_uids,
+            deep_verify=not args.no_deep_verify,
+            execute=args.execute,
+        )
+        if detail:
+            errors.append(detail)
+        if status == "already_clean":
             skipped_already_clean += 1
-            continue
-        loose_count = count_loose_files(dicom_dir)
-        if loose_count == 0:
-            # Empty dir — remove the empty shell so future runs don't re-check.
-            if args.execute:
-                try:
-                    dicom_dir.rmdir()
-                except OSError:
-                    pass
-            skipped_already_clean += 1
-            continue
-
-        # Archive must exist and be non-empty.
-        if not archive.is_file() or archive.stat().st_size == 0:
+        elif status == "no_archive":
             skipped_no_archive += 1
-            errors.append(f"{series_uid}: archive missing or empty at {archive}")
-            continue
-
-        # Series must be in Orthanc's index. If it isn't, the patched indexer
-        # hasn't picked it up yet (or never will) — refusing to delete.
-        if series_uid not in orthanc_uids:
+        elif status == "not_in_orthanc":
             skipped_not_in_orthanc += 1
-            continue
-
-        # Deep verify: archive file count must match loose file count.
-        if not args.no_deep_verify:
-            try:
-                archive_count = count_archive_files(archive)
-            except Exception as exc:
-                errors.append(f"{series_uid}: archive verification raised {exc}")
-                skipped_no_archive += 1
-                continue
-            if archive_count != loose_count:
-                skipped_count_mismatch += 1
-                errors.append(
-                    f"{series_uid}: archive has {archive_count} files; "
-                    f"loose dir has {loose_count} files at {dicom_dir}"
-                )
-                continue
-
-        # Safe to delete.
-        size = sum(p.stat().st_size for p in dicom_dir.rglob("*") if p.is_file())
-        if not args.quiet:
-            verb = "Would delete" if not args.execute else "Deleting"
-            print(f"  {verb} ({loose_count} files, {size/1e6:.1f} MB) {dicom_dir}")
-        if args.execute:
-            shutil.rmtree(dicom_dir, ignore_errors=False)
-        cleaned += 1
-        bytes_freed += size
+        elif status == "count_mismatch":
+            skipped_count_mismatch += 1
+        elif status == "cleaned":
+            if not args.quiet:
+                verb = "Would delete" if not args.execute else "Deleting"
+                print(f"  {verb} ({size/1e6:.1f} MB) {dicom_dir}")
+            cleaned += 1
+            bytes_freed += size
 
     elapsed = time.perf_counter() - t0
     print()

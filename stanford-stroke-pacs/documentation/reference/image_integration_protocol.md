@@ -46,6 +46,26 @@ subdirectory, and aggregates labelled-table sync at the end.
 Logs land under `image_integration_protocols/logs/` with a timestamped name.
 Both stdout and stderr are redirected through the logger.
 
+### Resuming an interrupted run
+
+A large backlog runs for days and will be interrupted repeatedly. Each case is
+processed in deterministic `sorted()` order and commits atomically at the end
+(one transaction), so the driver can resume **position-based** without
+re-scanning completed cases off slow disk:
+
+- On startup it parses the most recent prior log whose `Source directory:` header
+  matches the current `src_dir` (`determine_resume_start`), finds the last case it
+  reached, and skips everything before it. The case that was **interrupted** is
+  re-analyzed (idempotent — `filter_existing_studies` skips studies already in the
+  DB); a case that **completed** is skipped too.
+- Resume is **on by default** (`resume: true` in the YAML). Pass `--no-resume` to
+  process every case from the top regardless. Switching to a new `src_dir` (new
+  batch) starts fresh automatically, since the log header won't match.
+- The run summary reports `Skipped (resume): N`. Cases that *errored* in a prior
+  run sit before the resume point and are skipped on resume — they remain recorded
+  in `logs/error_log_*.json` for manual retry (re-run that batch with
+  `--no-resume`, or re-ingest the specific case).
+
 ---
 
 ## YAML config reference
@@ -73,6 +93,8 @@ dataset: "crisp2"                           # optional, cohort tag recorded on t
 | `import_label` | Free-text tag written to `import_label` column in both tables — useful for filtering a batch later |
 | `dataset` | Optional cohort/dataset tag. Recorded only on the `patient` table (`dataset text[]`, union-accumulated across batches); not written to `image_study`/`image_series`. |
 | `cold_archive_root` | **Optional override.** Defaults to `[storage].cold_archive_root` from `config.toml` when `mode = "cold_path_cache"`, or `null` in legacy mode. The script warns if you override and the override differs from `config.toml`. |
+| `cleanup_loose_after_indexing` | `cold_path_cache` only (ignored with a warning in legacy mode). Default `false`. When `true`, after each case's Orthanc indexing verifies, delete its series' loose `DICOM/` dirs (same safety checks as `cleanup_loose_dicoms.py`; NIFTI siblings preserved). See "Cleanup of loose DICOMs after integration". |
+| `resume` | Default `true`. Resume an interrupted run from the prior log's position (see "Resume"). CLI `--no-resume` overrides. |
 
 `execute_image_integration_protocol.py` picks a single monotonic `import_id`
 via `get_next_import_id()` (max existing + 1) and writes it into every row in
@@ -178,6 +200,36 @@ and keeps the conflict key unique by construction.
 Regression coverage: `image_integration_protocols/test_image_integration_grouping.py`
 (mixed-folder split, cross-folder merge, collision warning, copy-collision rename).
 
+### How `series_type` is detected
+
+During `create_series_table`, each series is classified geometry-first into
+`CTP`, `PWI`, `DWI`, or `NULL` (`utils.identify_series_type`). The discriminating
+signal is **`same_position_count`** — the largest number of frames in the series
+that share one `ImagePositionPatient` (`utils.max_same_position_count`, computed
+from the headers already in memory). Static scans visit each slice location once
+(~1); dynamic acquisitions cycle through time/b-values at each location, so the
+count equals the number of timepoints. Combined with `Modality` and a small
+`SeriesDescription` exclusion list:
+
+| series_type | Modality | same-position count | excluded descriptions |
+|-------------|----------|---------------------|-----------------------|
+| `CTP` | CT | ≥ 15 | — |
+| `PWI` | MR | ≥ 15 | asl, fmri, qsm, swi |
+| `DWI` | MR | 2–14 | asl, fmri, qsm, swi |
+
+Anything else resolves to `NULL`. The legacy keyword `CTA`/`NCCT` detection is
+**no longer** wired into `series_type` (those lists were never tuned for this
+dataset); `is_cta_series`/`is_ncct_series` remain only for `identify_study_type`'s
+BASELINE/FOLLOW_UP study classification. Enhanced-multiframe series whose
+per-frame geometry can't be decoded degrade to `NULL` rather than misclassifying.
+
+Thresholds live as constants in `utils.py` (`PERFUSION_MIN_FRAMES`,
+`DWI_FRAME_RANGE`, `MR_DYNAMIC_EXCLUDE`). A local maintenance helper to recompute
+`series_type` for existing rows from their on-disk or archived headers lives
+under the gitignored `hidden/ingestion_dev/backfill_series_type.py` (dry-run by
+default; `--execute` to write; `--patient` / `--import-label` / `--only-missing`
+filters), alongside the local unit tests for the detectors and resume logic.
+
 ---
 
 ## Mode behavior
@@ -220,17 +272,57 @@ log at `image_integration_protocols/logs/compression_failures_*.json` and
 retry via `scripts/cold_storage/archive_all_series.py --patient <id>` (idempotent).
 Use `scripts/cold_storage/list_unarchived_series.py` to list NULL-archive rows.
 
-The **patched Folder Indexer** (`ssc-orthanc:patched-indexer`) picks up the
-loose DICOMs on its next scan and adds them to Orthanc's main DB. Because
-`RemoveMissingFiles: false`, those entries will persist even after the loose
-files are removed.
+**Orthanc indexing happens per case** (always on in `cold_path_cache`).
+Immediately after each case's DB commit, `index_case_into_orthanc` →
+`scripts/cold_storage/scoped_index.py` issues a `POST /indexer/scan` to the
+patched indexer's on-demand endpoint (see `orthanc-indexer-patched/PATCHES.md`)
+scoped to just that case's study folders — no config edits, no restarts, cost
+O(case). Registrations are verified per series via `/tools/lookup`. Because
+`RemoveMissingFiles: false`, index entries persist even after the loose files
+are evicted.
+
+This per-case ordering has three properties:
+
+- **Interruptible**: the resume marker "Successfully completed processing case
+  X" means *ingested + indexed + verified*; killing a run loses at most the
+  in-flight case. On resume, the interrupted case is re-analyzed and — if its
+  series were already committed — re-indexed (idempotent, fast over
+  already-registered files).
+- **OOM-safe**: a single huge uninterrupted scan can push Orthanc core past the
+  VM memory ceiling (the plugin's DICOM cache plateaus at ~0.35 GiB, but core's
+  working set grows with sustained registration). Case-sized scans stay near
+  baseline; an oversized case (> ~40k instances) is automatically split into
+  bounded passes with a settle between them
+  (`scoped_index.register_in_bounded_passes`, also used by
+  `scripts/cold_storage/reindex_missing_series.py`).
+- **Viewable immediately**: a case shows up in OHIF while the batch is still
+  running, instead of after an end-of-run mega-scan.
+
+An indexing failure (e.g. Orthanc down) is **non-fatal**: the case's data is
+safe on disk + in the DB, the error is recorded in the run's error log
+(`<case>#indexing`), and the run continues. At the end of the run a **sanity
+pass** verifies every series ingested this run against Orthanc's index,
+re-registers any that are missing (bounded passes, `Force=true` to clear
+orphaned rows from truncated scans), and logs a final verdict — "Orthanc index
+clean: N/N series verified" or the list of still-missing series. Anything
+still missing after that: backfill with
+`scripts/cold_storage/reindex_missing_series.py`.
 
 ### Cleanup of loose DICOMs after integration (cold_path_cache only)
 
-The integration protocol does **not** delete loose DICOMs after compression.
-This is intentional: they must stay on disk long enough for Orthanc's Folder
-Indexer to see them. Once Orthanc has indexed the new series, the loose
-files are redundant and can be removed.
+By default the integration protocol does **not** delete loose DICOMs after
+compression: they stay on disk ("hot", instantly viewable) until removed. Once
+a series is compressed **and** indexed into Orthanc, the loose copy is
+redundant — the archive is canonical and the index survives eviction.
+
+Set `cleanup_loose_after_indexing: true` in the YAML to reclaim the space
+during the run itself: after each case's indexing verifies, its series' loose
+`DICOM/` dirs are deleted with the same safety checks as
+`cleanup_loose_dicoms.py` below (archive present + file-count match + series
+verified in the index; NIFTI siblings preserved; series that fail a check are
+skipped and logged, and nothing is deleted for a case whose indexing failed).
+Freshly ingested studies then read as *cold* and warm on demand like the rest
+of the corpus.
 
 Use **`scripts/cold_storage/cleanup_loose_dicoms.py`** to do this safely. The script:
 
@@ -351,13 +443,16 @@ curl -s -u "${ORTHANC_ADMIN_USER}:${ORTHANC_ADMIN_PASSWORD}" http://localhost:80
 
 ## What it does NOT do
 
-- It does **not** talk to Orthanc directly. Indexing is delegated entirely
-  to the Folder Indexer plugin.
+- The `ImageIntegrationProtocol` class itself does **not** talk to Orthanc;
+  indexing is driven by the executor
+  (`execute_image_integration_protocol.py`), per case, via the patched
+  indexer's `POST /indexer/scan` endpoint (see "Mode behavior" above).
 - It does **not** populate `series_cache_state`. New series start implicitly
   cold if their files are ever removed; the warm flow creates the row on first
   click.
-- It does **not** clean up loose DICOMs after compression. That's a separate
-  step via `scripts/cold_storage/cleanup_loose_dicoms.py` (runnable manually or via cron).
+- It does **not** clean up loose DICOMs after compression unless
+  `cleanup_loose_after_indexing: true`; otherwise that's a separate step via
+  `scripts/cold_storage/cleanup_loose_dicoms.py` (runnable manually or via cron).
 - It does **not** run the labelled-table sync by itself — that's done once
   per batch in `execute_image_integration_protocol.py` after all cases are
   processed (via `labelled_table_sync.sync_labelled_rows`).

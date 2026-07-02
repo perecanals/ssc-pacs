@@ -318,10 +318,21 @@ When the image integration protocol runs, it:
 2. Compresses them to `cold_archive_root` (populates `dicom_archive_path`)
 3. Does **not** delete the loose files
 
-The patched Folder Indexer picks up the new files on its next scan
-(`Interval` seconds) and adds them to Orthanc's index. Because
-`RemoveMissingFiles` is `false`, future evictions will not remove them.
-No Orthanc restart is required for routine ingestion.
+The pipeline then **registers just those new subtrees** into Orthanc with a
+**scoped** indexer scan (`scripts/cold_storage/scoped_index.py`; always on in
+`cold_path_cache`): it temporarily rewrites `orthanc.json`
+`Indexer.Folders` to the new dirs, restarts Orthanc so the indexer scans only
+those (cost O(new data)), then restores the original config. Because
+`RemoveMissingFiles` is `false`, future evictions will not remove the rows.
+
+> **Why not the continuous whole-tree scan?** The Folder Indexer's background scan
+> re-walks every dir in `Indexer.Folders` each `Interval`; at millions of files
+> over the virtiofs mount a pass is glacial (O(whole tree), never scales), and if
+> it runs during ingestion it can OOM Orthanc. In `cold_path_cache` the only event
+> that ever needs indexing is ingestion (warm/evict is index-neutral), so
+> steady-state `Indexer.Folders` is `[]` (no continuous scan). Backfill any gap
+> with `scripts/cold_storage/reindex_missing_series.py`; detect drift with
+> `scripts/data_integrity/reconcile.py`.
 
 After indexing is confirmed, loose files for the newly-ingested studies can
 be moved out of `dicom_data_root` (they're already in the archive).
