@@ -49,7 +49,7 @@ load_dotenv(REPO_ROOT / ".env")
 
 sys.path.insert(0, str(REPO_ROOT / "web-app"))
 
-from common import LABEL_NAME_RE  # noqa: E402
+from common import LABEL_NAME_RE, record_label_value  # noqa: E402
 from db import DB_CONFIG  # noqa: E402
 from labelled_table_sync import (  # noqa: E402
     LEVEL_CONFIGS,
@@ -233,7 +233,9 @@ def _create_label_definition(conn, args, audit_user: str) -> None:
     sync_labelled_schema(conn, args.level)
 
 
-def _upsert_annotation(conn, level: str, entity_id: str, label: str, value: str) -> None:
+def _upsert_annotation(
+    conn, level: str, entity_id: str, label: str, value: str, datatype: str
+) -> None:
     if level == "series":
         with conn.cursor() as cur:
             cur.execute(
@@ -251,6 +253,8 @@ def _upsert_annotation(conn, level: str, entity_id: str, label: str, value: str)
                 "SET value = EXCLUDED.value, created_by = EXCLUDED.created_by, created_at = now()",
                 (entity_id, study_uid, patient_id, label, value, _audit_user()),
             )
+            if datatype == "select":
+                record_label_value(cur, label, value, _audit_user())
     elif level == "study":
         with conn.cursor() as cur:
             cur.execute(
@@ -267,6 +271,8 @@ def _upsert_annotation(conn, level: str, entity_id: str, label: str, value: str)
                 "SET value = EXCLUDED.value, created_by = EXCLUDED.created_by, created_at = now()",
                 (entity_id, patient_id, label, value, _audit_user()),
             )
+            if datatype == "select":
+                record_label_value(cur, label, value, _audit_user())
     else:  # patient
         with conn.cursor() as cur:
             cur.execute(
@@ -277,6 +283,8 @@ def _upsert_annotation(conn, level: str, entity_id: str, label: str, value: str)
                 "SET value = EXCLUDED.value, created_by = EXCLUDED.created_by, created_at = now()",
                 (entity_id, label, value, _audit_user()),
             )
+            if datatype == "select":
+                record_label_value(cur, label, value, _audit_user())
 
 
 def _existing_entity_ids(conn, level: str, candidate_ids: list[str]) -> set[str]:
@@ -392,7 +400,7 @@ def main() -> None:
                 applied += 1
                 touched_ids.append(entity_id)
                 continue
-            _upsert_annotation(conn, args.level, entity_id, args.label, value)
+            _upsert_annotation(conn, args.level, entity_id, args.label, value, datatype)
             applied += 1
             touched_ids.append(entity_id)
 
