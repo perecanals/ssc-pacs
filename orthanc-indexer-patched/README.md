@@ -1,7 +1,9 @@
 # orthanc-indexer-patched
 
 A small fork of the [Orthanc Folder Indexer plugin](https://orthanc.uclouvain.be/book/plugins/indexer.html)
-with one added config flag: **`RemoveMissingFiles`**.
+with two SSC changes: the **`RemoveMissingFiles`** flag and an **on-demand scoped scan
+endpoint** (`POST/GET /indexer/scan`). See **[PATCHES.md](PATCHES.md)** for the full,
+canonical description of both (rationale, API, config, rebuild/deploy).
 
 When set to `false`, the plugin **skips the scan-time cleanup** that removes
 DICOM instances from Orthanc's index when their backing files disappear from
