@@ -23,26 +23,29 @@ python scripts/data_integrity/reconcile.py
 # JSON report (written to maintenance/reconciliation-reports/)
 python scripts/data_integrity/reconcile.py --json
 
-# JSON, no stdout (cron/timer mode)
+# JSON, no stdout (quiet mode)
 python scripts/data_integrity/reconcile.py --json --quiet
 ```
 
 ---
 
-## Scheduled runs (systemd timer)
+## On-demand only (no scheduled job)
 
-The timer runs `scripts/data_integrity/reconcile.py --json --quiet` every 6 hours.
+Reconciliation is **not scheduled** — run it by hand with the commands above
+when you want a fresh report (typically right after an ingestion run or a
+storage migration). The fresh-deploy installers
+(`scripts/macos/install_launchd.sh`, `scripts/linux/install_systemd.sh`) do
+**not** install any reconciliation timer or LaunchDaemon, and there are no
+`systemd/reconciliation.*` / `launchd/com.ssc.reconciliation.plist.in`
+templates.
 
-```bash
-# Install (one-time)
-sudo cp systemd/reconciliation.{service,timer} /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable --now reconciliation.timer
-
-# Check
-systemctl list-timers reconciliation.timer
-journalctl -u reconciliation.service -n 50
-```
+It used to run every 6 hours, but that was removed: on the full dataset the run
+is a 30–60 min storm of `stat()` calls over every series on cold storage, and
+— unattended — it provided no value because nobody read the reports. It is also
+the kind of job you want to run deliberately, not while an ingestion is in
+flight: the read pass is now careful to release its `image_series` lock before
+the disk scan (so it can no longer block ingestion), but a concurrent run still
+competes for disk I/O.
 
 ---
 
