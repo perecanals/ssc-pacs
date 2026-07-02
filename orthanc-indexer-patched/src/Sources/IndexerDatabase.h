@@ -75,6 +75,13 @@ public:
   // Returns "true" iff. this file was the last copy of some DICOM instance
   bool RemoveFile(const std::string& path);
 
+  // SSC fork: indexed range delete of all Files rows whose path is under
+  // "prefix/". Used by the on-demand /indexer/scan Force path to drop orphaned
+  // rows (row present but the instance was never registered) so the next scan
+  // re-registers them. Files-only delete (mirrors RemoveFile); orphaned-row
+  // series have no Attachments row so none is left dangling.
+  void RemoveFilesUnderPrefix(const std::string& prefix);
+
   void AddDicomInstance(const std::string& path,
                         const std::time_t time,
                         const uintmax_t size,

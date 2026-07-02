@@ -196,6 +196,28 @@ bool IndexerDatabase::RemoveFile(const std::string& path)
 }
 
 
+// SSC fork: see header. Half-open range [prefix+"/", prefix+"0") — ASCII '/'==0x2F,
+// '0'==0x30, so every path starting with prefix+"/" is < prefix+"0". Uses the
+// primary-key index on Files.path (no full-table scan).
+void IndexerDatabase::RemoveFilesUnderPrefix(const std::string& prefix)
+{
+  boost::mutex::scoped_lock lock(mutex_);
+
+  Orthanc::SQLite::Transaction transaction(db_);
+  transaction.Begin();
+
+  {
+    Orthanc::SQLite::Statement statement(db_, SQLITE_FROM_HERE,
+                                         "DELETE FROM Files WHERE path >= ? AND path < ?");
+    statement.BindString(0, prefix + "/");
+    statement.BindString(1, prefix + "0");
+    statement.Run();
+  }
+
+  transaction.Commit();
+}
+
+
 void IndexerDatabase::AddDicomInstance(const std::string& path,
                                        const std::time_t time,
                                        const uintmax_t size,

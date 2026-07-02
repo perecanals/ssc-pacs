@@ -62,7 +62,7 @@ RUN cmake /src \
       -DALLOW_DOWNLOADS=ON \
       -DSTATIC_BUILD=OFF \
       -DUSE_SYSTEM_ORTHANC_SDK=OFF \
-      -DORTHANC_PLUGIN_VERSION=1.0.0 \
+      -DORTHANC_PLUGIN_VERSION=1.1.0 \
       -DBUILD_UNIT_TESTS=OFF \
     && make -j"$(nproc)" OrthancIndexer \
     && ls -l libOrthancIndexer.so \
