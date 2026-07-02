@@ -144,6 +144,15 @@ def diff_image_series_vs_orthanc(
     db_by_uid = {r["seriesinstanceuid"]: r for r in db_rows}
     db_uids = set(db_by_uid.keys())
 
+    # This SELECT is the only DB work in this function — the Orthanc calls below
+    # are HTTP and the classify/disk-stat loops touch no DB. End the transaction
+    # now so we do NOT keep an ACCESS SHARE lock on image_series open across the
+    # (potentially many-minute) per-row is_dir()/is_file() disk scan. Holding it
+    # would block writers: a concurrent ingestion's
+    # `ALTER TABLE image_series ADD COLUMN IF NOT EXISTS` (ACCESS EXCLUSIVE) would
+    # queue behind us for the whole scan, stalling the run by tens of minutes.
+    conn.rollback()
+
     # 2. Orthanc UIDs
     orthanc_uids = _get_orthanc_series_uids(session)
 
