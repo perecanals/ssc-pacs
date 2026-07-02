@@ -160,7 +160,7 @@ Runtime split:
 | `web-app/labelled_table_sync.py` | Helpers for maintaining per-level labelled mirror tables | Imported by `web-app/routes/labels.py` and `scripts/admin/remove_label.py` |
 | `scripts/admin/remove_label.py` | Remove a label definition + annotation rows from DB | |
 | `scripts/admin/bulk_set_label_values.py` | Bulk-set annotation values from a CSV/Excel table; creates the label on demand | Requires `openpyxl` for `.xlsx` |
-| `image_integration_protocols/` | Legacy metadata pipeline | Not part of standard fresh deploy |
+| `image_ingestion_protocols/` | Legacy metadata pipeline | Not part of standard fresh deploy |
 
 ---
 
@@ -217,7 +217,7 @@ stanford-stroke-pacs/
 ├── systemd/                      # systemd unit TEMPLATES (*.in) — rendered by scripts/linux/install_systemd.sh
 ├── launchd/                      # macOS LaunchDaemon TEMPLATES (*.plist.in) — rendered by scripts/macos/install_launchd.sh
 ├── benchmarks/                   # Cold storage benchmarks
-├── image_integration_protocols/  # Legacy metadata pipeline
+├── image_ingestion_protocols/  # Legacy metadata pipeline
 ├── documentation/
 │   ├── context.md
 │   ├── reference/

@@ -39,7 +39,7 @@ warnings.filterwarnings(
 )
 
 
-class ImageIntegrationProtocol:
+class ImageIngestionProtocol:
     def __init__(
         self,
         case_dir,
@@ -75,10 +75,10 @@ class ImageIntegrationProtocol:
         # with the running stack about where files live.
         self.base_dir = str(DICOM_DATA_ROOT)
 
-    def execute_image_integration_protocol(self, overwrite_if_exists=False):
+    def execute_image_ingestion_protocol(self, overwrite_if_exists=False):
         case_name = os.path.basename(os.path.normpath(self.case_dir))
         protocol_start = time.perf_counter()
-        print(f"Starting image integration for case {case_name}")
+        print(f"Starting image ingestion for case {case_name}")
 
         step_started = time.perf_counter()
         self.create_series_table()
@@ -181,14 +181,14 @@ class ImageIntegrationProtocol:
 
         if self.delete_originals_after_verification:
             step_started = time.perf_counter()
-            self.verify_integrated_case()
+            self.verify_ingested_case()
             self.delete_original_case_dir()
             print(
-                f"Verified integrated files and deleted originals in "
+                f"Verified ingested files and deleted originals in "
                 f"{time.perf_counter() - step_started:.2f}s"
             )
         print(
-            f"Completed image integration for case {case_name} in "
+            f"Completed image ingestion for case {case_name} in "
             f"{time.perf_counter() - protocol_start:.2f}s"
         )
         # Derive both lists from case_series_table so labelled-table re-sync
@@ -473,7 +473,7 @@ class ImageIntegrationProtocol:
                 if patient_id is None:
                     print(
                         f"Skipping file without PatientID {filepath}. "
-                        "Stanford integration requires PatientID to contain study_id."
+                        "Stanford ingestion requires PatientID to contain study_id."
                     )
                     continue
                 if study_instance_uid is None or series_instance_uid is None:
@@ -683,7 +683,7 @@ class ImageIntegrationProtocol:
         )
         # Always load image_series so append mode (overwrite_if_exists=False)
         # can filter at the series level, not just the study level — otherwise
-        # new series arriving under a previously-integrated study get dropped.
+        # new series arriving under a previously-ingested study get dropped.
         self._load_case_rows_from_db(study_uids, include_series=True)
 
         existing_study_uids = (
@@ -818,7 +818,7 @@ class ImageIntegrationProtocol:
 
             if drop_unverifiable_uids:
                 print(
-                    f"WARNING: {len(drop_unverifiable_uids)} already-integrated "
+                    f"WARNING: {len(drop_unverifiable_uids)} already-ingested "
                     f"series have NULL/non-integer number_of_slices in image_series; "
                     f"cannot verify drift. Skipping. To force re-ingest, set "
                     f"overwrite_if_exists: true for these studies."
@@ -970,7 +970,7 @@ class ImageIntegrationProtocol:
 
             print(
                 f"Warning: study_id {patient_id} is not present in lvo_clinical_data. "
-                "The study will still be integrated, but remains clinically unmatched."
+                "The study will still be ingested, but remains clinically unmatched."
             )
 
     @staticmethod
@@ -1152,7 +1152,7 @@ class ImageIntegrationProtocol:
                 "study_path",
             ] = study_path
 
-    def verify_integrated_case(self):
+    def verify_ingested_case(self):
         verification_table = self.case_series_verification_table
         if verification_table is None:
             verification_table = self.case_series_table
@@ -1202,7 +1202,7 @@ class ImageIntegrationProtocol:
             return
         if case_dir_abs == base_dir_abs or case_dir_abs.startswith(f"{base_dir_abs}{os.sep}"):
             raise ValueError(
-                f"Refusing to delete source directory inside integration base_dir: {case_dir_abs}"
+                f"Refusing to delete source directory inside ingestion base_dir: {case_dir_abs}"
             )
         print(f"Deleting original case directory after verification: {case_dir_abs}")
         shutil.rmtree(case_dir_abs)
@@ -1291,7 +1291,7 @@ class ImageIntegrationProtocol:
         if isinstance(value, float) and pd.isna(value):
             return None
         if isinstance(value, list):
-            return [ImageIntegrationProtocol._normalize_for_sql(item) for item in value]
+            return [ImageIngestionProtocol._normalize_for_sql(item) for item in value]
         return value
 
     def _upsert_dataframe(self, table_name, key_column, dataframe, connection):
@@ -1500,7 +1500,7 @@ class ImageIntegrationProtocol:
         Called after add_paths_and_copy_dicom_files() when cold_archive_root
         is set. Per-series failures are non-fatal: the loop continues, the
         failed row keeps `dicom_archive_path = None`, and a JSON failure
-        report is written to `image_integration_protocols/logs/`. Each
+        report is written to `image_ingestion_protocols/logs/`. Each
         successful archive is verified (file count match) before being
         published, courtesy of `_compress_series_dir`.
 

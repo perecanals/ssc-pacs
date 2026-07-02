@@ -74,7 +74,7 @@ A series exists in `image_series` but is not indexed by Orthanc.
 
 **Common causes:**
 - Loose DICOMs were deleted before Orthanc indexed them.
-- Ingest pipeline (`image_integration_protocols/`) completed the DB insert
+- Ingest pipeline (`image_ingestion_protocols/`) completed the DB insert
   but Orthanc's Folder Indexer hasn't scanned yet (wait for `Interval`
   seconds and re-check).
 - In `cold_path_cache` mode: series is cold (files evicted) and the patched
@@ -143,7 +143,7 @@ on disk.
 **Common causes:**
 - Archive was accidentally deleted or moved.
 - Compression failed partway during ingestion.  The ingest pipeline
-  (`image_integration_protocols/`) is the biggest source of NULL or broken
+  (`image_ingestion_protocols/`) is the biggest source of NULL or broken
   archive paths.  Retry with:
   ```bash
   python scripts/cold_storage/archive_all_series.py --patient <patient_id>

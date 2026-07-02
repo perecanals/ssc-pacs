@@ -109,8 +109,8 @@ class TestPatientListing:
         assert dates == sorted(dates)
 
 
-# The exact ON CONFLICT clause used by ImageIntegrationProtocol._upsert_patient.
-# Kept in sync with image_integration_protocol.py; psycopg2 paramstyle.
+# The exact ON CONFLICT clause used by ImageIngestionProtocol._upsert_patient.
+# Kept in sync with image_ingestion_protocol.py; psycopg2 paramstyle.
 _UPSERT_SQL = """
 INSERT INTO patient (patient_id, stroke_date, import_id, import_label, dataset,
                      created_at, updated_at)
@@ -127,7 +127,7 @@ ON CONFLICT (patient_id) DO UPDATE SET
 
 
 class TestPatientUpsertSemantics:
-    """Mirrors ImageIntegrationProtocol._upsert_patient: origin-preserving
+    """Mirrors ImageIngestionProtocol._upsert_patient: origin-preserving
     import provenance, deduped dataset array union, recomputed stroke_date."""
 
     PID = "PT-UPSERT"

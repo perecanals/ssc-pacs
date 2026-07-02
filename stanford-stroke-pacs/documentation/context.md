@@ -13,7 +13,7 @@ One **Orthanc** container (`ssc-orthanc`), one **Web App** service on the host (
 | Schema / tables / SQL behavior | [`reference/data_stores.md`](reference/data_stores.md) |
 | Web App product + UI model | [`reference/web_app.md`](reference/web_app.md) |
 | Web App React / `DataTable` detail | [`reference/web_app_frontend.md`](reference/web_app_frontend.md) |
-| Image integration protocol (ingesting new data) | [`reference/image_integration_protocol.md`](reference/image_integration_protocol.md) |
+| Image ingestion protocol (ingesting new data) | [`reference/image_ingestion_protocol.md`](reference/image_ingestion_protocol.md) |
 | Testing, linting, CI (developer setup) | [`guides/installation_and_deployment.md` §8](guides/installation_and_deployment.md) |
 | Fresh install | [`guides/installation_and_deployment.md`](guides/installation_and_deployment.md) |
 | Deploy on macOS (Linux→Mac deltas, launchd, boot) | [`guides/deployment_on_mac.md`](guides/deployment_on_mac.md) |

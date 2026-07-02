@@ -61,7 +61,7 @@ Important:
 - this repo creates the upstream **table schema** (§3, from `ssc-sql-db/`) but
   does **not** generate the upstream **data** — that comes from your source
   metadata or the ingestion pipeline
-- `image_integration_protocols/` is legacy/site-specific pipeline code, not the
+- `image_ingestion_protocols/` is legacy/site-specific pipeline code, not the
   normal bootstrap path for a fresh PACS install
 
 ---
@@ -274,7 +274,7 @@ psql -d stanford-stroke -f ../ssc-sql-db/create_image_series.sql
 **3d. Load the upstream data.** Creating the tables does **not** populate them.
 Load your real `patient` / `image_study` / `image_series` rows from your source
 (CSV import via `ssc-sql-db/import_csv_to_postgres.py`, a dump from an existing
-system, or the site-specific `image_integration_protocols/` pipeline). The web
+system, or the site-specific `image_ingestion_protocols/` pipeline). The web
 app browses these tables, so it will be empty until they are populated.
 
 ### Step 4. Create the first admin user and the Orthanc service account
@@ -616,7 +616,7 @@ them.
 - specific to deployments where Orthanc's displayed identifiers need replacing
 - directly mutates Orthanc PostgreSQL tables
 
-`image_integration_protocols/`
+`image_ingestion_protocols/`
 
 - legacy Stanford Stroke Center–specific metadata ingestion and correction
   pipeline

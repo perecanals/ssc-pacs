@@ -363,7 +363,7 @@ assumptions.
 - you want OE2 columns to show values from `image_series` and `image_study`
 - you are willing to mutate Orthanc's PostgreSQL index tables directly
 
-`image_integration_protocols/` is strongly site-specific:
+`image_ingestion_protocols/` is strongly site-specific:
 
 - it is the legacy pipeline that created and curated `image_series` and
   `image_study`
@@ -381,7 +381,7 @@ If a new server already has:
   (optionally) `lvo_clinical_data`
 
 then the PACS stack can usually be redeployed without using
-`image_integration_protocols/`. The patient tab is sourced from the `patient`
+`image_ingestion_protocols/`. The patient tab is sourced from the `patient`
 registry; `lvo_clinical_data` is an optional clinical side-table — if absent,
 the patient tab still works and shows the imaging-derived `stroke_date` instead
 of the clinical one.

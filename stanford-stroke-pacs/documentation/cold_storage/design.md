@@ -205,7 +205,7 @@ a whole-study warm ages together for eviction parity.
 
 - **`image_series.dicom_archive_path`** (TEXT, nullable) — absolute path to
   the `*.tar.zst` archive for this series. Populated by
-  `scripts/cold_storage/archive_all_series.py` and by the image integration protocol.
+  `scripts/cold_storage/archive_all_series.py` and by the image ingestion protocol.
 - **`series_cache_state`** table (PK `seriesinstanceuid`) — per-series status
   (`cold` / `warming` / `hot` / `error` / `queued`), `warmed_at`,
   `last_accessed_at`, `cache_path` (the series' `dicom_dir_path`),
@@ -312,7 +312,7 @@ rename. Partial states never leak to OHIF.
 
 ### Post-ingestion workflow
 
-When the image integration protocol runs, it:
+When the image ingestion protocol runs, it:
 
 1. Copies the new loose DICOMs to `dicom_dir_path`
 2. Compresses them to `cold_archive_root` (populates `dicom_archive_path`)

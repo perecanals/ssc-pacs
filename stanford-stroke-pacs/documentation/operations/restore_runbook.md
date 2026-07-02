@@ -242,7 +242,7 @@ for a throwaway name and skip the compose down/up.
 ## 3. Restore cold archives (DORMANT — production-only)
 
 **Not applicable on dev** (no mirror is being maintained — DICOMs are
-recoverable by re-running the image integration protocol against the
+recoverable by re-running the image ingestion protocol against the
 source data).
 
 In production, once the cold mirror is enabled (see

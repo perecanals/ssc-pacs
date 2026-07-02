@@ -182,7 +182,7 @@ def seeded_db(test_db):
                 "VALUES ('P-0001', '1.2.3.4.5', '1.2.3.4.5.6', 'CT', 'Axial') "
                 "ON CONFLICT DO NOTHING"
             )
-            # P-0002: imaging integrated but NO lvo_clinical_data row — the
+            # P-0002: imaging ingested but NO lvo_clinical_data row — the
             # regression fixture. Must still appear in /api/patients, with
             # stroke_date falling back to the earliest study date.
             cur.execute(

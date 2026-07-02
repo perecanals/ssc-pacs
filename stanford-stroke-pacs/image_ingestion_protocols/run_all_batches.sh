@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 #
 # Ingest every LVO_SIR-CRISP2 batch in sequence, driving
-# execute_image_integration_protocol.py once per batch.
+# execute_image_ingestion_protocol.py once per batch.
 #
 # For each batch it derives a per-batch config from the base YAML
-# (execute_image_integration_protocol.yaml), overriding only src_dir and
+# (execute_image_ingestion_protocol.yaml), overriding only src_dir and
 # import_label, then runs the protocol. All other settings (database, dataset,
 # anonymize, overwrite, cold_archive_root resolution, resume) come from the base
 # YAML / config.toml unchanged.
@@ -22,7 +22,7 @@ set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SRC_ROOT="/Volumes/ThunderBay_RAID1/LVO_SIR-CRISP2"
-BASE_CONFIG="$SCRIPT_DIR/execute_image_integration_protocol.yaml"
+BASE_CONFIG="$SCRIPT_DIR/execute_image_ingestion_protocol.yaml"
 CONFIG_DIR="$SCRIPT_DIR/batch_configs"
 LABEL_PREFIX="sir"
 CONDA_ENV="ssc-pacs"
@@ -83,7 +83,7 @@ for batch in "${BATCHES[@]}"; do
     echo "[$(date '+%F %T')] START $batch  (label=$label, src=$src)" | tee -a "$RUNNER_LOG"
     echo "===================================================================" | tee -a "$RUNNER_LOG"
 
-    python execute_image_integration_protocol.py --config "$cfg"
+    python execute_image_ingestion_protocol.py --config "$cfg"
     rc=$?
 
     if [ "$rc" -eq 0 ]; then
