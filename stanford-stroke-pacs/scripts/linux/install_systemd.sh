@@ -41,6 +41,9 @@ if [[ -z "${PYTHON_BIN:-}" ]]; then
     home="$(eval echo "~$DEPLOY_USER")"   # fallback (e.g. previewing on macOS)
   fi
   for cand in \
+    "$home/miniconda3/envs/ssc-pacs/bin/python" \
+    "$home/anaconda3/envs/ssc-pacs/bin/python" \
+    "$home/miniforge3/envs/ssc-pacs/bin/python" \
     "$home/miniconda3/envs/pacs/bin/python" \
     "$home/anaconda3/envs/pacs/bin/python" \
     "$home/miniforge3/envs/pacs/bin/python"; do

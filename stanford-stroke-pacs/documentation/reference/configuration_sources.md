@@ -20,7 +20,7 @@ Nothing else (compose, service units, `orthanc.json`) should need hand-editing.
 |---|---|---|---|
 | **Secrets** | `.env` | DB credentials, Orthanc service-account credential, JWT secret, optional Orthanc ports | `web-app/db.py`, docker-compose `${VAR}` interpolation, `init_orthanc_db.sh`, host-local scripts |
 | **Non-secret ops** | `config.toml` | storage mode + paths, cold-cache tuning, backup settings, session/auth tuning | `web-app/config.py`, `scripts/orthanc/dc.sh`, `scripts/backup/*` (via `config_get`) |
-| **Per-host identity** | `deploy.env` (optional; auto-derived) | OS user/group, repo path, python/uvicorn bin, Homebrew prefix, conda env, PGDATA | `scripts/linux/install_systemd.sh`, `scripts/macos/install_launchd.sh` |
+| **Per-host identity** | `deploy.env` (optional; auto-derived) | OS user/group, repo path, python/uvicorn bin, Homebrew prefix, conda env, PGDATA | `scripts/linux/install_systemd.sh`, `scripts/macos/install_launchd.sh`, `scripts/_lib.sh` (`resolve_python` reads `PYTHON_BIN`/`CONDA_ENV_BIN` at runtime) |
 
 `.env` and `deploy.env` are gitignored. `config.toml` is **version-controlled and
 required** — `web-app/config.py` fails fast if it is missing.
@@ -86,7 +86,7 @@ full ordered sequence is in
 - **Non-secret ops** → always `config.toml`. `web-app/config.py` and the shell
   scripts (`config_get`) read it; built-in defaults are last-resort only and
   trigger a WARNING when used.
-- **Per-host identity** → auto-derived by the installers; `deploy.env` overrides.
+- **Per-host identity** → auto-derived by the installers and by `scripts/_lib.sh:resolve_python`; `deploy.env` overrides (no interpreter paths are hardcoded in tracked files).
 - **Bring the stack up via `scripts/orthanc/dc.sh`**, not bare `docker compose` —
   it is what resolves the DICOM mount from `config.toml` and selects the macOS
   override. Bare `docker compose up` errors that `DICOM_MOUNT_SOURCE` is unset.
