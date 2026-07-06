@@ -13,5 +13,9 @@ CREATE TABLE IF NOT EXISTS public.image_study (
     study_path text,
     protocolname text,
     manufacturer text,
+    -- Rollups of image_series sizes (decimal MB); stamped only when every
+    -- child series has sizes (backfill_storage_sizes.py / ingestion).
+    compressed_size_mb double precision,
+    decompressed_size_mb double precision,
     CONSTRAINT image_study_pkey PRIMARY KEY (studyinstanceuid)
 );
