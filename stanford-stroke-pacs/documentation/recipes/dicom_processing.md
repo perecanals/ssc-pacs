@@ -135,7 +135,9 @@ existing archives.
 `scripts/cold_storage/cleanup_loose_dicoms.py` deletes loose `DICOM/` directories only
 when the series' archive exists on disk, the archive's file count matches
 the loose dir's file count, and the series is present in Orthanc's
-`dicomidentifiers` index. Dry-run by default.
+`dicomidentifiers` index. Dry-run by default. With `--execute` it also
+deletes the cleaned series' `series_cache_state` rows (absence reads as cold).
+`--import-label <label>` (repeatable) scopes the pass to specific ingestion runs.
 
 ```bash
 # See what would be removed (no mutation)

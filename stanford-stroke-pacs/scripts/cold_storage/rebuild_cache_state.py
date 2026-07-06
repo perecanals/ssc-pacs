@@ -48,7 +48,8 @@ def main():
 
     print(f"[{ts()}] querying series...")
     cur.execute("""
-        SELECT seriesinstanceuid, dicom_dir_path
+        SELECT seriesinstanceuid, dicom_dir_path,
+               COALESCE(dicom_archive_path, '') <> '' AS has_archive
         FROM   image_series
         WHERE  dicom_dir_path IS NOT NULL
     """)
@@ -66,11 +67,18 @@ def main():
 
     print(f"[{ts()}] checking disk state (one dot = 500 series)...")
     t_disk = time.monotonic()
-    for i, (suid, path) in enumerate(rows, 1):
+    skipped_no_archive = 0
+    for i, (suid, path, has_archive) in enumerate(rows, 1):
         warm = is_warm(path)
         was = current.get(suid, "missing")
         if warm and was != "hot":
-            to_hot.append((suid, path))
+            # Never mark an archive-less series hot: a hot row makes the
+            # loose dir TTL-evictable, and evict_series deletes it without
+            # checking the archive — that loose dir may be the only copy.
+            if has_archive:
+                to_hot.append((suid, path))
+            else:
+                skipped_no_archive += 1
         elif not warm and was == "hot":
             to_cold.append(suid)
 
@@ -87,7 +95,8 @@ def main():
     print(f"  Series checked:      {len(rows)}")
     print(f"  → would mark hot:    {len(to_hot)}")
     print(f"  → would mark cold:   {len(to_cold)}")
-    print(f"  → already correct:   {len(rows) - len(to_hot) - len(to_cold)}")
+    print(f"  → warm but archive-less (left as-is): {skipped_no_archive}")
+    print(f"  → already correct:   {len(rows) - len(to_hot) - len(to_cold) - skipped_no_archive}")
 
     if args.dry_run:
         print("\n--dry-run: no changes written.")
@@ -95,14 +104,17 @@ def main():
 
     if to_hot:
         print(f"\n[{ts()}] writing {len(to_hot)} hot rows...")
+        # last_accessed_at must be set: run_eviction's TTL sweep skips rows
+        # where it is NULL, so hot rows without it are never evicted.
         cur.executemany("""
-            INSERT INTO series_cache_state (seriesinstanceuid, status, warmed_at, cache_path)
-            VALUES (%s, 'hot', %s, %s)
+            INSERT INTO series_cache_state (seriesinstanceuid, status, warmed_at, last_accessed_at, cache_path)
+            VALUES (%s, 'hot', %s, %s, %s)
             ON CONFLICT (seriesinstanceuid) DO UPDATE
-                SET status     = 'hot',
-                    warmed_at  = EXCLUDED.warmed_at,
-                    cache_path = EXCLUDED.cache_path
-        """, [(suid, now, path) for suid, path in to_hot])
+                SET status           = 'hot',
+                    warmed_at        = EXCLUDED.warmed_at,
+                    last_accessed_at = EXCLUDED.last_accessed_at,
+                    cache_path       = EXCLUDED.cache_path
+        """, [(suid, now, now, path) for suid, path in to_hot])
         print(f"[{ts()}] hot rows written  ({time.monotonic()-t_start:.1f}s)")
 
     if to_cold:

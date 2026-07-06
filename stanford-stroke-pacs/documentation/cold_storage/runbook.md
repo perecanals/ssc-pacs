@@ -182,6 +182,9 @@ hold:
 3. The series' `SeriesInstanceUID` is present in Orthanc's `dicomidentifiers`
    table (i.e. the patched Folder Indexer has indexed it)
 
+With `--execute` it also deletes the cleaned series' `series_cache_state`
+rows (absence reads as cold), so the UI immediately reflects the removal.
+
 ```bash
 cd /home/perecanals/ssc-pacs/stanford-stroke-pacs
 conda activate pacs

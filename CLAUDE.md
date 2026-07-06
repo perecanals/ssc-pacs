@@ -139,6 +139,13 @@ psql -d stanford-stroke -c "
   SELECT COUNT(*) FILTER (WHERE dicom_archive_path IS NOT NULL) AS archived,
          COUNT(*) AS total FROM image_series;"
 
+# Backfill per-series/per-study storage sizes (decimal MB; columns
+# image_series/image_study.{compressed,decompressed}_size_mb). Resumable;
+# archives without loose files are stream-decompressed to measure (slow).
+# New ingestion runs record sizes automatically.
+python scripts/cold_storage/backfill_storage_sizes.py            # everything missing
+python scripts/cold_storage/backfill_storage_sizes.py --label my_batch --workers 4
+
 # Manually warm a study (Python — no CLI yet)
 conda activate ssc-pacs
 cd web-app
@@ -297,7 +304,10 @@ python execute_image_ingestion_protocol.py [--config path/to/config.yaml]
 - `overwrite_if_exists` — re-ingest studies already in the DB
 - `anonymize_files` — strip patient identifiers from DICOM headers before copying
 - `delete_originals_after_verification` — remove the source `case_dir` after copy verification
-- `cold_archive_root` — if set, compress each series DICOM dir to `*.tar.zst` at this root after copying (supports `cold_path_cache` mode). Loose files are **not deleted** — they remain for the Orthanc Folder Indexer to pick up.
+- `cold_archive_root` — if set, compress each series DICOM dir to `*.tar.zst` at this root after copying (supports `cold_path_cache` mode)
+- `cleanup_loose_after_indexing` — default `true`: delete each case's loose DICOMs once indexed+verified in Orthanc (archive stays canonical); `false` keeps them on disk ("hot") until a manual `cleanup_loose_dicoms.py` pass
+- `compress_workers` — concurrent per-series archive compressions per case (default 4; 1 = serial)
+- `pipeline_indexing` — default `true`: run each case's Orthanc indexing + cleanup + cache stamping on a background worker while the next case ingests (wall ≈ max(ingest, index)); auto-disabled under `overwrite_if_exists`; the per-case completion marker (resume contract) is only logged after the worker finishes, so interrupts are always safe to resume
 
 **Ingestion steps** (in order):
 1. Scan source dirs, grouping files by `SeriesInstanceUID` (not by directory) — mixed folders split into their true series; a series split across folders merges into one row
@@ -305,7 +315,7 @@ python execute_image_ingestion_protocol.py [--config path/to/config.yaml]
 3. Copy DICOMs to `dicom_data_root/{patient_id}/{StudyUID}/{SeriesDesc}/{SeriesUID}/DICOM/`
 4. If `cold_archive_root` set: compress each series dir to `cold_archive_root/.../DICOM.tar.zst`, record path in `image_series.dicom_archive_path`
 5. Convert select series to NIfTI
-6. Upsert into `image_series`, `image_study`, and `patient` (one transaction). The `patient` upsert recomputes `stroke_date = MIN(image_study.acquisitiondatetime)`, preserves origin `import_id`/`import_label`, and unions the `dataset` tag.
+6. Upsert into `image_series`, `image_study`, and `patient` (one transaction). The `patient` upsert recomputes `stroke_date = MIN(image_study.acquisitiondatetime)`, preserves origin `import_id`/`import_label`, and unions the `dataset` tag. Per-series storage sizes (`compressed_size_mb`/`decompressed_size_mb`, decimal MB) are computed before the upsert; study rollups are stamped in the same transaction (a study column stays NULL until every child series has that size).
 
 `image_ingestion_protocols/` is site-specific (SSC directory layout and metadata conventions). It is not part of a standard fresh deployment.
 
@@ -334,7 +344,7 @@ storage workflow where files legitimately come and go. The fork adds a
 
 **Archive format:** files are stored flat at the archive root (matching `scripts/cold_storage/archive_all_series.py` convention — no `DICOM/` subdirectory wrapper).
 
-**Post-ingestion workflow (per-case scoped indexing):** the ingestion executor registers each case into Orthanc **immediately after the case's DB commit**, via the patched indexer's `POST /indexer/scan` endpoint scoped to that case's study folders (`index_case_into_orthanc` → `scripts/cold_storage/scoped_index.py`; no config edits, no restarts; always on in `cold_path_cache`). Registrations are verified per series (`/tools/lookup`); at the end of the run a **sanity pass** re-verifies every series ingested in the run and re-registers any missing (bounded passes, `Force=true`), logging a final "Orthanc index clean: N/N" verdict. Indexing cost is O(new data), independent of total index size — replacing the continuous whole-tree Folder Indexer scan (which does not scale). **OOM caveat:** the plugin's DICOM cache plateaus (~0.35 GiB), but Orthanc *core*'s working set grows during sustained registration — one uninterrupted scan over hundreds of thousands of instances OOMs the Colima VM (VM-global; `docker inspect` `OOMKilled` reads false). Large registrations must go through `scoped_index.register_in_bounded_passes` (default ≤350 series / ≤40k instances per pass, 120 s settle); per-case scans are naturally bounded, and `reindex_missing_series.py` uses bounded passes automatically. Steady-state `Indexer.Folders` is `[]` (no continuous scan); nothing else ever adds index entries because warm/evict is index-neutral (`RemoveMissingFiles=false` keeps rows across eviction). If indexing fails mid-run, it's non-fatal — data is safe on disk + in the DB; the sanity pass retries, and `python scripts/cold_storage/reindex_missing_series.py` backfills. Optional `cleanup_loose_after_indexing: true` in the run YAML deletes each case's loose DICOMs once indexed+verified (archive stays canonical). Drift is detected by `scripts/data_integrity/reconcile.py`, not a tree scan.
+**Post-ingestion workflow (per-case scoped indexing):** the ingestion executor registers each case into Orthanc **immediately after the case's DB commit**, via the patched indexer's `POST /indexer/scan` endpoint scoped to that case's study folders (`index_case_into_orthanc` → `scripts/cold_storage/scoped_index.py`; no config edits, no restarts; always on in `cold_path_cache`). Registrations are verified per series (`/tools/lookup`); at the end of the run a **sanity pass** re-verifies every series ingested in the run and re-registers any missing (bounded passes, `Force=true`), logging a final "Orthanc index clean: N/N" verdict. Indexing cost is O(new data), independent of total index size — replacing the continuous whole-tree Folder Indexer scan (which does not scale). **OOM caveat:** the plugin's DICOM cache plateaus (~0.35 GiB), but Orthanc *core*'s working set grows during sustained registration — one uninterrupted scan over hundreds of thousands of instances OOMs the Colima VM (VM-global; `docker inspect` `OOMKilled` reads false). Large registrations must go through `scoped_index.register_in_bounded_passes` (default ≤350 series / ≤40k instances per pass, 120 s settle); per-case scans are naturally bounded, and `reindex_missing_series.py` uses bounded passes automatically. Pass bounds alone are not enough: registering a file transiently costs Orthanc ~2–3× its size in RAM, so a single multi-GB file (e.g. an XA angio multiframe run) OOMs the 8 GiB VM by itself — `reindex_missing_series.py` skips series containing a file >`--max-file-mb` (default 800) and lists them for separate handling (`scoped_index.dir_max_file_bytes` is the reusable check). Steady-state `Indexer.Folders` is `[]` (no continuous scan); nothing else ever adds index entries because warm/evict is index-neutral (`RemoveMissingFiles=false` keeps rows across eviction). If indexing fails mid-run, it's non-fatal — data is safe on disk + in the DB; the sanity pass retries, and `python scripts/cold_storage/reindex_missing_series.py` backfills. `cleanup_loose_after_indexing` (default `true`; set `false` in the run YAML to keep loose files) deletes each case's loose DICOMs once indexed+verified (archive stays canonical). Drift is detected by `scripts/data_integrity/reconcile.py`, not a tree scan.
 
 ## Key caveats
 
