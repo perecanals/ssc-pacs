@@ -31,6 +31,7 @@ pipeline (``index_case_into_orthanc`` / end-of-run sanity pass).
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 import time
 from dataclasses import dataclass
@@ -89,6 +90,25 @@ def minimal_folder_set(dirs: Iterable[str]) -> list[str]:
             continue
         out.append(d)
     return out
+
+
+def dir_max_file_bytes(dirpath: str) -> int:
+    """Largest single file (bytes) under `dirpath`; 0 if empty/unreadable.
+
+    Registering a DICOM file transiently costs Orthanc core ~2-3x the file
+    size in RAM (read buffer + DCMTK parse + storage copy). A single
+    multi-GB multiframe file (e.g. an XA angio run) can therefore OOM the
+    whole Colima VM on its own, no matter how small the pass — callers use
+    this to fence off such series before scanning.
+    """
+    mx = 0
+    for root, _dirs, files in os.walk(dirpath):
+        for f in files:
+            try:
+                mx = max(mx, os.path.getsize(os.path.join(root, f)))
+            except OSError:
+                pass
+    return mx
 
 
 def verify_registered(session, url, suids: Iterable[str]) -> list[str]:

@@ -82,6 +82,11 @@ def main() -> int:
                     help="Max summed instances per bounded scan pass.")
     ap.add_argument("--settle", type=int, default=si.SETTLE_S,
                     help="Seconds to wait between passes (lets Orthanc memory settle).")
+    ap.add_argument("--max-file-mb", type=int, default=800,
+                    help="Skip series containing a single file larger than this "
+                         "(registering a file costs Orthanc ~2-3x its size in RAM; "
+                         "a multi-GB multiframe file OOMs the VM regardless of "
+                         "pass size). 0 disables the guard.")
     ap.add_argument("--execute", action="store_true", help="Apply (default: report only).")
     args = ap.parse_args()
 
@@ -115,11 +120,14 @@ def main() -> int:
         print("Nothing to do.")
         return 0
 
-    loose, archive_only = [], []
+    loose, archive_only, oversized = [], [], []
     for suid, ddir, n, _lbl in missing:
         target = si.SeriesTarget(suid, ddir, int(n))
         if os.path.isdir(ddir) and any(os.scandir(ddir)):
-            loose.append(target)
+            if args.max_file_mb and si.dir_max_file_bytes(ddir) > args.max_file_mb * 1e6:
+                oversized.append(target)
+            else:
+                loose.append(target)
         else:
             archive_only.append(target)
 
@@ -127,6 +135,11 @@ def main() -> int:
     print(f"  archive-only:  {len(archive_only)}"
           + ("  (will warm first)" if args.include_archive_only
              else "  (SKIPPED — pass --include-archive-only)"))
+    if oversized:
+        print(f"  oversized:     {len(oversized)}  (SKIPPED — contain a file "
+              f">{args.max_file_mb} MB that would OOM Orthanc; handle separately):")
+        for t in oversized:
+            print(f"    {t.suid}  {t.dicom_dir_path}")
 
     targets = list(loose)
     if args.include_archive_only:
