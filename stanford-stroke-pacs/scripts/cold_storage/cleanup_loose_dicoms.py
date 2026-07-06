@@ -20,6 +20,9 @@ Usage:
   # Limit to one patient
   python scripts/cleanup_loose_dicoms.py --execute --patient 4-0551
 
+  # Limit to specific ingestion runs (image_series.import_label)
+  python scripts/cleanup_loose_dicoms.py --execute --import-label sir_batch1 --import-label sir_batch2
+
   # Skip the (slow) per-archive integrity check
   python scripts/cleanup_loose_dicoms.py --execute --no-deep-verify
 
@@ -63,7 +66,8 @@ SERIES_UID_TAG_GROUP = 32
 SERIES_UID_TAG_ELEMENT = 14
 
 
-def fetch_candidate_series(patient: str | None, study: str | None) -> list[dict]:
+def fetch_candidate_series(patient: str | None, study: str | None,
+                           import_labels: list[str] | None = None) -> list[dict]:
     """Series with both an archive path and an existing loose dir."""
     q = (
         "SELECT seriesinstanceuid, studyinstanceuid, patient_id, "
@@ -81,6 +85,9 @@ def fetch_candidate_series(patient: str | None, study: str | None) -> list[dict]
     if study:
         q += " AND studyinstanceuid = %s"
         params.append(study)
+    if import_labels:
+        q += " AND import_label = ANY(%s)"
+        params.append(import_labels)
 
     with psycopg2.connect(**DB_CONFIG) as conn:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
@@ -185,6 +192,10 @@ def main() -> int:
     ap.add_argument("--execute", action="store_true", help="Actually delete (default: dry-run)")
     ap.add_argument("--patient", help="Limit to a single patient_id")
     ap.add_argument("--study", help="Limit to a single studyinstanceuid")
+    ap.add_argument("--import-label", action="append", dest="import_labels",
+                    metavar="LABEL",
+                    help="Limit to series with this image_series.import_label "
+                         "(repeatable, e.g. --import-label sir_batch1 --import-label sir_batch2)")
     ap.add_argument("--limit", type=int, help="Stop after this many series")
     ap.add_argument("--no-deep-verify", action="store_true",
                     help="Skip per-archive file count comparison (faster)")
@@ -205,7 +216,7 @@ def main() -> int:
     print(f"DICOM data root: {DICOM_DATA_ROOT}")
 
     print("Fetching candidate series from image_series ...")
-    candidates = fetch_candidate_series(args.patient, args.study)
+    candidates = fetch_candidate_series(args.patient, args.study, args.import_labels)
     print(f"  {len(candidates)} candidate series")
 
     print("Fetching indexed SeriesInstanceUIDs from Orthanc DB ...")
@@ -222,6 +233,7 @@ def main() -> int:
 
     t0 = time.perf_counter()
     processed = 0
+    cleaned_uids: list[str] = []
 
     for row in candidates:
         if args.limit and processed >= args.limit:
@@ -254,6 +266,25 @@ def main() -> int:
                 print(f"  {verb} ({size/1e6:.1f} MB) {dicom_dir}")
             cleaned += 1
             bytes_freed += size
+            cleaned_uids.append(series_uid)
+
+    # Loose files are gone — drop the cleaned series' cache rows so the web
+    # app reads them as cold (absence = cold, matching evict_series semantics).
+    # 'warming' rows are left alone: an in-flight warm lands its own row.
+    if args.execute and cleaned_uids:
+        try:
+            with psycopg2.connect(**DB_CONFIG) as conn, conn.cursor() as cur:
+                cur.execute(
+                    "DELETE FROM series_cache_state "
+                    "WHERE seriesinstanceuid = ANY(%s) AND status <> 'warming'",
+                    (cleaned_uids,),
+                )
+                print(f"Cleared {cur.rowcount} series_cache_state row(s) "
+                      f"for {len(cleaned_uids)} cleaned series")
+        except Exception as exc:
+            print(f"WARNING: failed to clear series_cache_state rows ({exc}); "
+                  f"run scripts/cold_storage/rebuild_cache_state.py to reconcile",
+                  file=sys.stderr)
 
     elapsed = time.perf_counter() - t0
     print()

@@ -4,6 +4,7 @@ import shutil
 import sys
 import tarfile
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from pathlib import Path
 
@@ -32,7 +33,7 @@ if str(_WEB_APP_DIR) not in sys.path:
     sys.path.insert(0, str(_WEB_APP_DIR))
 from config import DICOM_DATA_ROOT, STORAGE_MODE  # noqa: E402
 
-import warnings
+import warnings  # noqa: E402
 warnings.filterwarnings(
     "ignore",
     message=r"The value length .* exceeds the maximum length of .* allowed for VR LO\.",
@@ -50,6 +51,7 @@ class ImageIngestionProtocol:
         import_label=None,
         dataset=None,
         cold_archive_root=None,
+        compress_workers=4,
     ):
         self.case_dir = case_dir
         self.postgres_engine = postgres_engine
@@ -61,6 +63,9 @@ class ImageIngestionProtocol:
         # `patient` table (union-accumulated), not on image_study/image_series.
         self.dataset = dataset
         self.cold_archive_root = cold_archive_root
+        # Series archives are compressed concurrently (zstd releases the GIL);
+        # 1 = serial. Shared-state writes stay in the calling thread.
+        self.compress_workers = max(1, int(compress_workers or 1))
 
         self.case_series_table = None
         self.case_study_table = None
@@ -152,6 +157,10 @@ class ImageIngestionProtocol:
             self.compress_cold_archives()
             print(f"Compressed cold archives in {time.perf_counter() - step_started:.2f}s")
 
+        step_started = time.perf_counter()
+        self.compute_storage_sizes()
+        print(f"Computed storage sizes in {time.perf_counter() - step_started:.2f}s")
+
         if STORAGE_MODE == "cold_path_cache":
             print(
                 "Skipping NIFTI generation in cold_path_cache mode "
@@ -176,6 +185,7 @@ class ImageIngestionProtocol:
         self._require_number_of_slices_column()
         if self.cold_archive_root:
             self._require_dicom_archive_path_column()
+        self._require_storage_size_columns()
         self.update_postgres_tables()
         print(f"Updated PostgreSQL tables in {time.perf_counter() - step_started:.2f}s")
 
@@ -1237,6 +1247,9 @@ class ImageIngestionProtocol:
 
         if "dicom_archive_path" not in self.case_series_table.columns:
             self.case_series_table["dicom_archive_path"] = None
+        for size_column in ("compressed_size_mb", "decompressed_size_mb"):
+            if size_column not in self.case_series_table.columns:
+                self.case_series_table[size_column] = None
 
         self.case_series_table = self.case_series_table[
             [
@@ -1251,6 +1264,8 @@ class ImageIngestionProtocol:
                 "number_of_slices",
                 "dicom_dir_path",
                 "dicom_archive_path",
+                "compressed_size_mb",
+                "decompressed_size_mb",
                 "nifti_path",
                 "import_id",
                 "import_label",
@@ -1392,6 +1407,7 @@ class ImageIngestionProtocol:
                 "image_study", "studyinstanceuid", self.case_study_table, connection
             )
             self._upsert_patient(connection)
+            self._rollup_study_storage_sizes(connection)
 
     def _require_dicom_archive_path_column(self):
         """Add dicom_archive_path column to image_series if it does not exist."""
@@ -1399,6 +1415,82 @@ class ImageIngestionProtocol:
             conn.execute(text(
                 "ALTER TABLE image_series ADD COLUMN IF NOT EXISTS dicom_archive_path TEXT"
             ))
+
+    def _require_storage_size_columns(self):
+        """Add per-series/per-study storage size columns (decimal MB) if absent."""
+        with self.postgres_engine.begin() as conn:
+            for table in ("image_series", "image_study"):
+                for col in ("compressed_size_mb", "decompressed_size_mb"):
+                    conn.execute(text(
+                        f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {col} DOUBLE PRECISION"
+                    ))
+
+    def compute_storage_sizes(self):
+        """Record each series' storage footprint in decimal MB (bytes / 1e6).
+
+        decompressed_size_mb = sum of DICOM file content bytes under
+        dicom_dir_path (just copied, so the walk is cheap); compressed_size_mb
+        = tar.zst size when cold archiving ran (NULL otherwise, e.g. a failed
+        compression — the archive retry tools re-stamp it). Study-level totals
+        are rolled up in SQL at upsert time (_rollup_study_storage_sizes) so
+        studies extended by later runs stay correct.
+        """
+        self.case_series_table["decompressed_size_mb"] = None
+        self.case_series_table["compressed_size_mb"] = None
+        for idx, row in self.case_series_table.iterrows():
+            dicom_dir_path = row.get("dicom_dir_path")
+            if dicom_dir_path and os.path.isdir(dicom_dir_path):
+                total = 0
+                for root, _dirs, files in os.walk(dicom_dir_path):
+                    for f in files:
+                        try:
+                            total += os.path.getsize(os.path.join(root, f))
+                        except OSError:
+                            pass
+                if total:
+                    self.case_series_table.loc[idx, "decompressed_size_mb"] = round(
+                        total / 1e6, 3
+                    )
+            archive = row.get("dicom_archive_path")
+            if archive and os.path.isfile(archive):
+                self.case_series_table.loc[idx, "compressed_size_mb"] = round(
+                    os.path.getsize(archive) / 1e6, 3
+                )
+
+    def _rollup_study_storage_sizes(self, connection):
+        """Stamp study-level size totals for this run's studies.
+
+        Each column is stamped only when EVERY child series has that size,
+        so a partial ingest or failed compression never publishes an
+        undercount (the column stays NULL until the gap is repaired, e.g.
+        by scripts/cold_storage/backfill_storage_sizes.py).
+        """
+        study_uids = sorted(
+            str(u)
+            for u in self.case_series_table["studyinstanceuid"].dropna().unique()
+        ) if "studyinstanceuid" in self.case_series_table.columns else []
+        if not study_uids:
+            return
+        connection.execute(
+            text("""
+                UPDATE image_study st
+                SET compressed_size_mb = agg.c, decompressed_size_mb = agg.d
+                FROM (
+                    SELECT studyinstanceuid,
+                           CASE WHEN COUNT(*) = COUNT(compressed_size_mb)
+                                THEN ROUND(SUM(compressed_size_mb)::numeric, 3)::double precision
+                           END AS c,
+                           CASE WHEN COUNT(*) = COUNT(decompressed_size_mb)
+                                THEN ROUND(SUM(decompressed_size_mb)::numeric, 3)::double precision
+                           END AS d
+                    FROM image_series
+                    WHERE studyinstanceuid = ANY(:uids)
+                    GROUP BY studyinstanceuid
+                ) agg
+                WHERE st.studyinstanceuid = agg.studyinstanceuid
+            """),
+            {"uids": study_uids},
+        )
 
     def _compress_series_dir(self, dicom_dir_path: str):
         """Compress a series DICOM directory to a tar.zst archive.
@@ -1518,6 +1610,12 @@ class ImageIngestionProtocol:
 
         failures = []  # list[dict]
         successes = 0
+
+        # Snapshot the work list first; all case_series_table / failures
+        # mutations happen in this (calling) thread as futures complete.
+        # _compress_series_dir itself is thread-safe: it reads only immutable
+        # self state and publishes via tmp-file + atomic os.replace.
+        tasks = []  # (idx, seriesinstanceuid, studyinstanceuid, dicom_dir_path)
         for idx, row in self.case_series_table.iterrows():
             dicom_dir_path = row.get("dicom_dir_path")
             if not dicom_dir_path:
@@ -1531,22 +1629,35 @@ class ImageIngestionProtocol:
                     }
                 )
                 continue
-            try:
-                archive = self._compress_series_dir(dicom_dir_path)
-                self.case_series_table.loc[idx, "dicom_archive_path"] = str(archive)
-                successes += 1
-                print(f"Compressed {dicom_dir_path} -> {archive}")
-            except Exception as exc:
-                failures.append(
-                    {
-                        "row_index": int(idx),
-                        "seriesinstanceuid": row.get("seriesinstanceuid"),
-                        "studyinstanceuid": row.get("studyinstanceuid"),
-                        "dicom_dir_path": dicom_dir_path,
-                        "error": f"{type(exc).__name__}: {exc}",
-                    }
-                )
-                print(f"WARNING: compression failed for {dicom_dir_path}: {exc}")
+            tasks.append((idx, row.get("seriesinstanceuid"),
+                          row.get("studyinstanceuid"), dicom_dir_path))
+
+        if tasks:
+            n_workers = min(self.compress_workers, len(tasks))
+            with ThreadPoolExecutor(max_workers=n_workers) as pool:
+                future_to_task = {
+                    pool.submit(self._compress_series_dir, dicom_dir_path):
+                        (idx, series_uid, study_uid, dicom_dir_path)
+                    for idx, series_uid, study_uid, dicom_dir_path in tasks
+                }
+                for future in as_completed(future_to_task):
+                    idx, series_uid, study_uid, dicom_dir_path = future_to_task[future]
+                    try:
+                        archive = future.result()
+                        self.case_series_table.loc[idx, "dicom_archive_path"] = str(archive)
+                        successes += 1
+                        print(f"Compressed {dicom_dir_path} -> {archive}")
+                    except Exception as exc:
+                        failures.append(
+                            {
+                                "row_index": int(idx),
+                                "seriesinstanceuid": series_uid,
+                                "studyinstanceuid": study_uid,
+                                "dicom_dir_path": dicom_dir_path,
+                                "error": f"{type(exc).__name__}: {exc}",
+                            }
+                        )
+                        print(f"WARNING: compression failed for {dicom_dir_path}: {exc}")
 
         if failures:
             log_path = self._write_compression_failure_log(failures)

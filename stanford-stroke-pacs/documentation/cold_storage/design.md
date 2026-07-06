@@ -316,13 +316,21 @@ When the image ingestion protocol runs, it:
 
 1. Copies the new loose DICOMs to `dicom_dir_path`
 2. Compresses them to `cold_archive_root` (populates `dicom_archive_path`)
-3. Does **not** delete the loose files
+3. Registers the case into Orthanc (scoped scan, below), then by default
+   deletes the loose files (`cleanup_loose_after_indexing: true`; same
+   safety checks as `cleanup_loose_dicoms.py`)
+4. Stamps `series_cache_state` to match the outcome: cleaned series get
+   their row deleted (reads cold); with cleanup disabled, archived series
+   keeping loose files are upserted `hot` with `last_accessed_at` set so
+   the TTL sweep can reclaim them later. Archive-suspect series (failed a
+   cleanup safety check) and series whose indexing failed stay row-less on
+   purpose — the sweep never touches row-less series, so loose files that
+   may be the only copy survive for the archive/reindex retry.
 
-The pipeline then **registers just those new subtrees** into Orthanc with a
-**scoped** indexer scan (`scripts/cold_storage/scoped_index.py`; always on in
-`cold_path_cache`): it temporarily rewrites `orthanc.json`
-`Indexer.Folders` to the new dirs, restarts Orthanc so the indexer scans only
-those (cost O(new data)), then restores the original config. Because
+The pipeline **registers just those new subtrees** into Orthanc with a
+**scoped** indexer scan per case (`scripts/cold_storage/scoped_index.py`,
+driving the patched indexer's `POST /indexer/scan` endpoint — no config
+edits, no restarts; always on in `cold_path_cache`; cost O(new data)). Because
 `RemoveMissingFiles` is `false`, future evictions will not remove the rows.
 
 > **Why not the continuous whole-tree scan?** The Folder Indexer's background scan
@@ -334,8 +342,9 @@ those (cost O(new data)), then restores the original config. Because
 > with `scripts/cold_storage/reindex_missing_series.py`; detect drift with
 > `scripts/data_integrity/reconcile.py`.
 
-After indexing is confirmed, loose files for the newly-ingested studies can
-be moved out of `dicom_data_root` (they're already in the archive).
+After indexing is confirmed, loose files for the newly-ingested studies are
+deleted by the run itself (default) or reclaimable later via
+`cleanup_loose_dicoms.py` / the TTL sweep (they're already in the archive).
 
 ### Disk budget
 

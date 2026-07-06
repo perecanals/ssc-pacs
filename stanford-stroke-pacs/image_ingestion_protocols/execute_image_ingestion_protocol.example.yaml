@@ -35,9 +35,10 @@ import_label: my_batch_1
 # a dataset tag are invisible to all non-admin users.
 dataset: my_cohort
 
-# Resume a previously interrupted run: skip cases already processed (in sorted
-# order) per the most recent prior log with a matching src_dir, re-analyzing the
-# case that was interrupted. Avoids re-scanning completed cases off slow disks.
+# Resume a previously interrupted run: skip cases that a prior log with a
+# matching src_dir proves were successfully completed (union across all prior
+# logs). Failed or interrupted cases are re-processed. Avoids re-scanning
+# completed cases off slow disks.
 # Pass --no-resume on the CLI to force a full re-read regardless of this setting.
 resume: true
 
@@ -46,6 +47,20 @@ resume: true
 # and the Orthanc index survives eviction, so the loose copy is redundant.
 # Same safety checks as scripts/cold_storage/cleanup_loose_dicoms.py (archive
 # present + file-count match + series verified in the index; NIFTI siblings
-# preserved). false = current behavior: loose files stay on disk ("hot", instantly
-# viewable) until a manual cleanup_loose_dicoms.py pass.
-cleanup_loose_after_indexing: false
+# preserved). Default: true. Set false to keep loose files on disk ("hot",
+# instantly viewable) until a manual cleanup_loose_dicoms.py pass.
+cleanup_loose_after_indexing: true
+
+# Concurrent per-series archive compressions per case (zstd releases the GIL,
+# so threads scale). 1 = serial (the pre-2026-07 behavior). Default: 4.
+compress_workers: 4
+
+# Run each case's Orthanc indexing (+ loose cleanup + cache stamping) on a
+# background worker while the next case is ingesting — wall time per case
+# becomes max(ingest, index) instead of their sum. Interrupt/resume-safe: the
+# per-case completion marker is only logged after indexing+cleanup finish, so
+# an interrupted case is simply re-processed on the next run. Automatically
+# disabled when overwrite_if_exists is true (overwrite deletes files a
+# background scan might still be reading). Set false for strictly serial
+# per-case behavior. Default: true.
+pipeline_indexing: true

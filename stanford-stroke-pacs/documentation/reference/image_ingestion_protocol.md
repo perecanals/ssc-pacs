@@ -50,21 +50,23 @@ Both stdout and stderr are redirected through the logger.
 
 A large backlog runs for days and will be interrupted repeatedly. Each case is
 processed in deterministic `sorted()` order and commits atomically at the end
-(one transaction), so the driver can resume **position-based** without
+(one transaction), so the driver can resume **success-based** without
 re-scanning completed cases off slow disk:
 
-- On startup it parses the most recent prior log whose `Source directory:` header
-  matches the current `src_dir` (`determine_resume_start`), finds the last case it
-  reached, and skips everything before it. The case that was **interrupted** is
-  re-analyzed (idempotent — `filter_existing_studies` skips studies already in the
-  DB); a case that **completed** is skipped too.
+- On startup it parses **every** prior log whose `Source directory:` header
+  matches the current `src_dir` (`determine_resume_skip_set`) and skips exactly
+  the cases with a `Successfully completed processing case` marker (union
+  across all matching logs). Only proven successes are skipped: cases that
+  **failed** (per-case errors don't stop a run — e.g. every case after the disk
+  fills) or were **interrupted** mid-case lack the marker and are re-processed
+  (idempotent — `filter_existing_studies` skips studies already in the DB, and
+  a case already fully committed takes the resume-boundary re-index path).
 - Resume is **on by default** (`resume: true` in the YAML). Pass `--no-resume` to
   process every case from the top regardless. Switching to a new `src_dir` (new
   batch) starts fresh automatically, since the log header won't match.
-- The run summary reports `Skipped (resume): N`. Cases that *errored* in a prior
-  run sit before the resume point and are skipped on resume — they remain recorded
-  in `logs/error_log_*.json` for manual retry (re-run that batch with
-  `--no-resume`, or re-ingest the specific case).
+- The run summary reports `Skipped (resume): N`. Failed cases remain recorded
+  in `logs/error_log_*.json` and are retried automatically on the next run of
+  the same batch (they carry no success marker).
 
 ---
 
@@ -93,8 +95,10 @@ dataset: "crisp2"                           # optional, cohort tag recorded on t
 | `import_label` | Free-text tag written to `import_label` column in both tables — useful for filtering a batch later |
 | `dataset` | Optional cohort/dataset tag. Recorded only on the `patient` table (`dataset text[]`, union-accumulated across batches); not written to `image_study`/`image_series`. |
 | `cold_archive_root` | **Optional override.** Defaults to `[storage].cold_archive_root` from `config.toml` when `mode = "cold_path_cache"`, or `null` in legacy mode. The script warns if you override and the override differs from `config.toml`. |
-| `cleanup_loose_after_indexing` | `cold_path_cache` only (ignored with a warning in legacy mode). Default `false`. When `true`, after each case's Orthanc indexing verifies, delete its series' loose `DICOM/` dirs (same safety checks as `cleanup_loose_dicoms.py`; NIFTI siblings preserved). See "Cleanup of loose DICOMs after ingestion". |
-| `resume` | Default `true`. Resume an interrupted run from the prior log's position (see "Resume"). CLI `--no-resume` overrides. |
+| `cleanup_loose_after_indexing` | `cold_path_cache` only (ignored with a warning in legacy mode). Default `true`: after each case's Orthanc indexing verifies, delete its series' loose `DICOM/` dirs (same safety checks as `cleanup_loose_dicoms.py`; NIFTI siblings preserved). Set `false` to keep loose files until a manual cleanup pass. See "Cleanup of loose DICOMs after ingestion". |
+| `resume` | Default `true`. Skip cases that prior logs for this `src_dir` prove were successfully completed; failed/interrupted cases re-run (see "Resume"). CLI `--no-resume` overrides. |
+| `compress_workers` | Concurrent per-series archive compressions within a case (thread pool; zstd releases the GIL). Default `4`; `1` = serial. |
+| `pipeline_indexing` | Default `true`: each case's Orthanc indexing + loose cleanup + cache stamping runs on a background worker while the next case ingests — per-case wall ≈ max(ingest, index) instead of their sum. The completion marker (resume contract) is logged only after the worker finishes, so interrupts remain safe. Auto-disabled (with a warning) when `overwrite_if_exists` is `true`. `false` = strictly serial per case, same code path. |
 
 `execute_image_ingestion_protocol.py` picks a single monotonic `import_id`
 via `get_next_import_id()` (max existing + 1) and writes it into every row in
@@ -281,13 +285,22 @@ O(case). Registrations are verified per series via `/tools/lookup`. Because
 `RemoveMissingFiles: false`, index entries persist even after the loose files
 are evicted.
 
+With `pipeline_indexing: true` (default) the indexing + loose cleanup + cache
+stamping of case N run on a single background worker thread while the main
+thread ingests case N+1 (bounded queue: at most ~2 cases outstanding, so
+un-cleaned loose data on disk stays capped). The patched indexer runs one scan
+at a time (a second scan request gets 409 and the client waits), so one worker
+matches the server exactly.
+
 This per-case ordering has three properties:
 
 - **Interruptible**: the resume marker "Successfully completed processing case
-  X" means *ingested + indexed + verified*; killing a run loses at most the
-  in-flight case. On resume, the interrupted case is re-analyzed and — if its
-  series were already committed — re-indexed (idempotent, fast over
-  already-registered files).
+  X" means *ingested + indexed + verified + cleaned* — it is logged by the
+  worker only after all of those finish; killing a run loses at most the
+  in-flight case(s), which carry no marker. On resume they are re-analyzed
+  and — if their series were already committed — re-indexed (idempotent, fast
+  over already-registered files; an orphaned in-flight scan is absorbed by the
+  409 busy-wait).
 - **OOM-safe**: a single huge uninterrupted scan can push Orthanc core past the
   VM memory ceiling (the plugin's DICOM cache plateaus at ~0.35 GiB, but core's
   working set grows with sustained registration). Case-sized scans stay near
@@ -310,19 +323,26 @@ still missing after that: backfill with
 
 ### Cleanup of loose DICOMs after ingestion (cold_path_cache only)
 
-By default the ingestion protocol does **not** delete loose DICOMs after
-compression: they stay on disk ("hot", instantly viewable) until removed. Once
-a series is compressed **and** indexed into Orthanc, the loose copy is
+Once a series is compressed **and** indexed into Orthanc, the loose copy is
 redundant — the archive is canonical and the index survives eviction.
 
-Set `cleanup_loose_after_indexing: true` in the YAML to reclaim the space
-during the run itself: after each case's indexing verifies, its series' loose
-`DICOM/` dirs are deleted with the same safety checks as
+By default (`cleanup_loose_after_indexing: true`) the protocol reclaims the
+space during the run itself: after each case's indexing verifies, its series'
+loose `DICOM/` dirs are deleted with the same safety checks as
 `cleanup_loose_dicoms.py` below (archive present + file-count match + series
 verified in the index; NIFTI siblings preserved; series that fail a check are
 skipped and logged, and nothing is deleted for a case whose indexing failed).
 Freshly ingested studies then read as *cold* and warm on demand like the rest
 of the corpus.
+
+Set `cleanup_loose_after_indexing: false` in the YAML to keep loose files on
+disk ("hot", instantly viewable) until a manual `cleanup_loose_dicoms.py` pass.
+
+Either way, `series_cache_state` is stamped to match the outcome: cleaned
+series get their row deleted (reads cold); with cleanup disabled, archived
+series keeping loose files are upserted `hot` (visible as hot in the UI and
+TTL-evictable). Archive-suspect series stay row-less so eviction can never
+delete their only copy. See "What it does NOT do" below.
 
 Use **`scripts/cold_storage/cleanup_loose_dicoms.py`** to do this safely. The script:
 
@@ -447,11 +467,19 @@ curl -s -u "${ORTHANC_ADMIN_USER}:${ORTHANC_ADMIN_PASSWORD}" http://localhost:80
   indexing is driven by the executor
   (`execute_image_ingestion_protocol.py`), per case, via the patched
   indexer's `POST /indexer/scan` endpoint (see "Mode behavior" above).
-- It does **not** populate `series_cache_state`. New series start implicitly
-  cold if their files are ever removed; the warm flow creates the row on first
-  click.
-- It does **not** clean up loose DICOMs after compression unless
-  `cleanup_loose_after_indexing: true`; otherwise that's a separate step via
+- The executor **does** stamp `series_cache_state` per case, after Orthanc
+  indexing verifies: series whose loose dirs were cleaned get their row
+  deleted (absence reads as cold); with cleanup disabled, archived series
+  whose loose dirs remain are upserted `hot` with `last_accessed_at` set so
+  the TTL eviction sweep can reclaim them later. Series that are
+  archive-suspect (compression failed, count mismatch) or whose indexing
+  failed are left row-less on purpose: row-less reads cold and the TTL sweep
+  never touches row-less series, so their loose files — possibly the only
+  copy — can't be evicted before the archive/reindex retry. Stamping
+  failures are non-fatal — reconcile with
+  `scripts/cold_storage/rebuild_cache_state.py`.
+- It cleans up loose DICOMs after compression by default
+  (`cleanup_loose_after_indexing: true`); with `false` that's a separate step via
   `scripts/cold_storage/cleanup_loose_dicoms.py` (runnable manually or via cron).
 - It does **not** run the labelled-table sync by itself — that's done once
   per batch in `execute_image_ingestion_protocol.py` after all cases are
