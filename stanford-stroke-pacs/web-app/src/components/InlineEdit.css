@@ -38,7 +38,7 @@
 
 /* SelectEdit */
 .select-edit {
-  @apply relative inline-block;
+  @apply inline-block;
 }
 
 .select-edit__placeholder {
@@ -51,8 +51,11 @@
   @apply text-[10px] text-text-muted ml-0.5 align-super;
 }
 
+/* Portaled to <body> with position:fixed (coordinates set inline from the
+   trigger's rect) so overflow-auto sub-table wrappers can't clip it.
+   max-h / min-w are mirrored by DROPDOWN_* constants in InlineEdit.jsx. */
 .select-edit__dropdown {
-  @apply absolute top-full left-0 mt-1 bg-surface border border-border rounded-md shadow-lg z-40 min-w-[200px] max-h-[260px] overflow-hidden flex flex-col;
+  @apply fixed bg-surface border border-border rounded-md shadow-lg z-40 min-w-[200px] max-h-[260px] overflow-hidden flex flex-col;
 }
 
 .select-edit__search-wrap {
@@ -63,8 +66,10 @@
   @apply w-full px-1.5 py-0.5 text-xs border border-border rounded outline-none focus:border-primary bg-white;
 }
 
+/* overscroll-contain: a wheel click at the list's edge must not chain into
+   the table scroller — that outside scroll would close the dropdown. */
 .select-edit__options {
-  @apply overflow-y-auto py-1;
+  @apply overflow-y-auto overscroll-contain py-1;
 }
 
 .select-edit__clear-btn {

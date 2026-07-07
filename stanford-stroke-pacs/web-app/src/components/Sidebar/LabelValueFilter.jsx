@@ -25,6 +25,7 @@ export default function LabelValueFilter({
   const [hovered, setHovered] = useState(false);
   const [pos, setPos] = useState(null);
   const triggerRef = useRef(null);
+  const popupRef = useRef(null);
   const openTimer = useRef(null);
   const closeTimer = useRef(null);
 
@@ -64,14 +65,21 @@ export default function LabelValueFilter({
   };
 
   // A fixed popup detaches from a scrolled trigger; close on scroll/resize.
+  // Scrolling the popup's own option list must NOT close it — a mouse wheel
+  // used inside the popup fires that scroll, and closing on it makes the
+  // lower options unreachable.
   useEffect(() => {
     if (!visible) return undefined;
-    const onScroll = () => setHovered(false);
+    const onScroll = (e) => {
+      if (popupRef.current?.contains(e.target)) return;
+      setHovered(false);
+    };
+    const onResize = () => setHovered(false);
     window.addEventListener("scroll", onScroll, true);
-    window.addEventListener("resize", onScroll);
+    window.addEventListener("resize", onResize);
     return () => {
       window.removeEventListener("scroll", onScroll, true);
-      window.removeEventListener("resize", onScroll);
+      window.removeEventListener("resize", onResize);
     };
   }, [visible]);
 
@@ -106,6 +114,7 @@ export default function LabelValueFilter({
         pos &&
         createPortal(
           <div
+            ref={popupRef}
             className="sidebar__lvf-popup"
             style={{ top: pos.top, left: pos.left, width: POPUP_WIDTH, maxHeight: POPUP_MAX_HEIGHT }}
             onMouseEnter={() => clearTimeout(closeTimer.current)}

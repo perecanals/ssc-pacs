@@ -12,8 +12,13 @@ install-dev:  ## Install all dev dependencies (Python + Node)
 	cd $(WEBAPP) && $(NPM) ci
 	pre-commit install
 
+# Run from inside web-app so ruff discovers pyproject.toml itself and treats
+# the app's root modules (db, auth, common, …) as first-party for import
+# sorting — matching the pre-commit hook. Invoking from the repo root with
+# --config makes the cwd the project root and misclassifies those imports,
+# flagging I001 in nearly every file.
 lint:  ## Run all linters (ruff + pre-commit hooks)
-	ruff check $(WEBAPP)/ --config $(WEBAPP)/pyproject.toml
+	cd $(WEBAPP) && ruff check .
 	cd $(WEBAPP) && $(NPM) run build --dry-run 2>/dev/null || true
 
 test: test-backend test-frontend  ## Run all tests
