@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 
 import psycopg2
 import psycopg2.extras
@@ -97,6 +98,20 @@ def labels_summary(
         conn.close()
 
 
+def _select_value_sort_key(value: str) -> tuple:
+    """Sort key for select vocabularies: non-numeric strings first (naive
+    lexicographic order), then purely numeric strings by numeric value — so
+    score-style vocabularies (e.g. ASPECTS) read 0, 1, 2, …, 10 rather than
+    the naive 0, 1, 10, 2, … Mirrors compareSelectValues in utils/table.js."""
+    try:
+        num = float(value)
+    except (TypeError, ValueError):
+        return (0, 0.0, value)
+    if not math.isfinite(num):
+        return (0, 0.0, value)
+    return (1, num, value)
+
+
 @router.get("/api/labels/{label_name}/values")
 def get_label_values(
     label_name: str,
@@ -113,11 +128,10 @@ def get_label_values(
     try:
         with conn.cursor() as cur:
             cur.execute(
-                "SELECT value FROM label_value_options "
-                "WHERE label = %s ORDER BY value",
+                "SELECT value FROM label_value_options WHERE label = %s",
                 (label_name,),
             )
-            return [r[0] for r in cur.fetchall()]
+            return sorted((r[0] for r in cur.fetchall()), key=_select_value_sort_key)
     finally:
         conn.close()
 
@@ -170,7 +184,7 @@ def _merge_select_value_options(cur, rows: list[dict]) -> None:
         if row.get("datatype") != "select":
             continue
         merged = dict.fromkeys([*row.get("options", []), *observed.get(row["name"], [])])
-        row["options"] = sorted(merged)
+        row["options"] = sorted(merged, key=_select_value_sort_key)
 
 
 class LabelDefinitionCreate(BaseModel):

@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import PropTypes from "prop-types";
-import { normalizeSelectFilterValues } from "../../utils/table";
+import { compareSelectValues, normalizeSelectFilterValues } from "../../utils/table";
 
 export default function SelectFilterControl({ options = [], value, onToggle, onClear }) {
   const [open, setOpen] = useState(false);
@@ -15,7 +15,8 @@ export default function SelectFilterControl({ options = [], value, onToggle, onC
   }, []);
 
   const selectedValues = normalizeSelectFilterValues(value);
-  const uniqueOptions = [...new Set(options.map((option) => String(option).trim()).filter(Boolean))].sort();
+  const uniqueOptions = [...new Set(options.map((option) => String(option).trim()).filter(Boolean))]
+    .sort(compareSelectValues);
   const buttonLabel = selectedValues.length === 0
     ? "Any"
     : selectedValues.length === 1

@@ -230,6 +230,29 @@ class TestLabelDefinitions:
         match = next(d for d in defs if d["name"] == "inline_vocab")
         assert match["options"] == ["freshly_created", "preset"]
 
+    def test_numeric_values_sort_naturally(self, logged_in_client):
+        """Score-style vocabularies sort numerically (0, 1, …, 10 — not
+        0, 1, 10, 2, …), with non-numeric strings first in naive order."""
+        logged_in_client.post(
+            "/api/label-definitions",
+            json={
+                "name": "aspects_vocab",
+                "level": "study",
+                "datatype": "select",
+                "options": ["10", "2", "0", "unknown", "1"],
+            },
+        )
+        expected = ["unknown", "0", "1", "2", "10"]
+
+        # Inline dropdown source.
+        values = logged_in_client.get("/api/labels/aspects_vocab/values").json()
+        assert values == expected
+
+        # Column-filter / sidebar source (effective options on the definition).
+        defs = logged_in_client.get("/api/label-definitions").json()
+        match = next(d for d in defs if d["name"] == "aspects_vocab")
+        assert match["options"] == expected
+
     def test_non_select_value_not_recorded(self, logged_in_client):
         """Text-label values are not added to the select vocabulary."""
         logged_in_client.post(

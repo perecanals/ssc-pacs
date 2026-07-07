@@ -4,6 +4,7 @@ import PropTypes from "prop-types";
 import { useAuth } from "../context/AuthContext";
 import { apiGet, apiPost, apiDelete } from "../api/client";
 import { valueColor } from "../utils/colors";
+import { compareSelectValues } from "../utils/table";
 import "./InlineEdit.css";
 
 function SelectPill({ value, onClick, className = "" }) {
@@ -224,7 +225,7 @@ function SelectEdit({ level, entity, labelName, defOptions = [], ann, onMutated 
     }
   }, [open, labelName]);
 
-  const allOptions = [...new Set([...defOptions, ...annValues])].sort();
+  const allOptions = [...new Set([...defOptions, ...annValues])].sort(compareSelectValues);
   const filtered = allOptions.filter((v) =>
     v.toLowerCase().includes(search.toLowerCase()),
   );

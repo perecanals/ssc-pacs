@@ -162,6 +162,22 @@ export function normalizeSelectFilterValues(value) {
   return [];
 }
 
+// Sort order for select-value vocabularies: non-numeric strings first (naive
+// lexicographic order), then purely numeric strings by numeric value — so
+// score-style vocabularies (e.g. ASPECTS) read 0, 1, 2, …, 10 rather than the
+// naive 0, 1, 10, 2, … Mirrors _select_value_sort_key in routes/labels.py.
+export function compareSelectValues(a, b) {
+  const sa = String(a);
+  const sb = String(b);
+  const na = sa.trim() === "" ? NaN : Number(sa);
+  const nb = sb.trim() === "" ? NaN : Number(sb);
+  const aNum = Number.isFinite(na);
+  const bNum = Number.isFinite(nb);
+  if (aNum !== bNum) return aNum ? 1 : -1;
+  if (aNum) return na - nb || sa.localeCompare(sb);
+  return sa.localeCompare(sb);
+}
+
 export function hasFilterValue(value) {
   if (Array.isArray(value)) {
     return normalizeSelectFilterValues(value).length > 0;
