@@ -160,7 +160,7 @@ Runtime split:
 | `web-app/labelled_table_sync.py` | Helpers for maintaining per-level labelled mirror tables | Imported by `web-app/routes/labels.py` and `scripts/admin/remove_label.py` |
 | `scripts/admin/remove_label.py` | Remove a label definition + annotation rows from DB | |
 | `scripts/admin/bulk_set_label_values.py` | Bulk-set annotation values from a CSV/Excel table; creates the label on demand | Requires `openpyxl` for `.xlsx` |
-| `image_integration_protocols/` | Legacy metadata pipeline | Not part of standard fresh deploy |
+| `image_ingestion_protocols/` | Legacy metadata pipeline | Not part of standard fresh deploy |
 
 ---
 
@@ -178,8 +178,8 @@ Runtime split:
 |------|---------|
 | `scripts/cold_storage/archive_all_series.py` | Offline archiver: compress all series to `tar.zst` for cold storage |
 | `scripts/data_integrity/dicom_path_sql_fs_audit.py` | Read-only audit comparing `image_series.dicom_dir_path` to actual filesystem |
-| `scripts/one_off/orthanc_path_availability_test.py` | Verify Orthanc can serve instances when their files are present/absent on disk |
-| `scripts/one_off/orthanc_holdout_case.py` | Temporarily hide/restore cases from the DICOM tree for manual OHIF testing |
+| `maintenance/scripts/orthanc_path_availability_test.py` (site-local, gitignored) | Verify Orthanc can serve instances when their files are present/absent on disk |
+| `maintenance/scripts/orthanc_holdout_case.py` (site-local, gitignored) | Temporarily hide/restore cases from the DICOM tree for manual OHIF testing |
 
 ---
 
@@ -205,20 +205,19 @@ stanford-stroke-pacs/
 │   └── src/                      # React frontend
 ├── init_orthanc_db.sh
 ├── scripts/                      # Organized into subdirectories
-│   ├── admin/                    # manage_users, remove_label, teardown
+│   ├── admin/                    # manage_users, rename_dataset_value, backfill_annotation_history, teardown
 │   ├── backup/                   # backup_pg_db, check_backup_freshness
-│   ├── cold_storage/             # archive, cleanup, list_unarchived, health, mirror
+│   ├── cold_storage/             # archive, cleanup, scoped_index, reindex_missing_series, health, mirror
 │   ├── connectivity/             # tunnel
-│   ├── data_integrity/           # reconcile, dicom_path_sql_fs_audit
+│   ├── data_integrity/           # reconcile, dicom_path_sql_fs_audit, disk_vs_db_series_audit, detect_mixed_dirs
 │   ├── dicom/                    # dicom_to_nifti
 │   ├── linux/                    # install_systemd.sh (renders systemd/*.in)
 │   ├── macos/                    # colima_*, install_launchd.sh (renders launchd/*.plist.in)
-│   ├── one_off/                  # backfill_annotation_history, orthanc_holdout_case, etc.
 │   └── orthanc/                  # enrich_orthanc, label_studies, check_status, dc.sh
 ├── systemd/                      # systemd unit TEMPLATES (*.in) — rendered by scripts/linux/install_systemd.sh
 ├── launchd/                      # macOS LaunchDaemon TEMPLATES (*.plist.in) — rendered by scripts/macos/install_launchd.sh
 ├── benchmarks/                   # Cold storage benchmarks
-├── image_integration_protocols/  # Legacy metadata pipeline
+├── image_ingestion_protocols/  # Legacy metadata pipeline
 ├── documentation/
 │   ├── context.md
 │   ├── reference/

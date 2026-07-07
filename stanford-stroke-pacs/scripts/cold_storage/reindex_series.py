@@ -150,11 +150,20 @@ def main() -> int:
             total = len(r[0]["Instances"]) if r else 0
         healthy = served and total > 0 and readable == total
         stuck = on_disk and not healthy
-        flag = "REBUILD" if stuck else ("ok" if healthy else "skip")
+        # Explicitly-named series are FORCE-rebuilt even when they look healthy.
+        # Rationale: after a mixed-dir de-mix, the moved secondary's stale index
+        # rows live UNDER THE HOST DIR PATH (they carry the host UID, not the
+        # secondary's), so the host must be purged to clear them — yet the host
+        # reads healthy (its own files are intact) and auto-detection would skip
+        # it. A forced rebuild of an already-healthy series is idempotent: purge
+        # its Files rows, rescan, re-verify readable==total. Refuses no-files
+        # series (on_disk gate) in either mode.
+        forced = bool(args.series) and on_disk and not stuck
+        flag = "FORCE" if forced else ("REBUILD" if stuck else ("ok" if healthy else "skip"))
         if args.series or stuck:
             print(f"  {flag:8s} {suid}  on_disk={on_disk} served={served} "
                   f"readable={readable}/{total}")
-        if stuck:
+        if stuck or forced:
             targets.append((suid, ddir))
 
     if not targets:

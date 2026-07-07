@@ -41,6 +41,9 @@ if [[ -z "${PYTHON_BIN:-}" ]]; then
     home="$(eval echo "~$DEPLOY_USER")"   # fallback (e.g. previewing on macOS)
   fi
   for cand in \
+    "$home/miniconda3/envs/ssc-pacs/bin/python" \
+    "$home/anaconda3/envs/ssc-pacs/bin/python" \
+    "$home/miniforge3/envs/ssc-pacs/bin/python" \
     "$home/miniconda3/envs/pacs/bin/python" \
     "$home/anaconda3/envs/pacs/bin/python" \
     "$home/miniforge3/envs/pacs/bin/python"; do
@@ -109,5 +112,5 @@ done
 
 echo "==> Status"
 systemctl --no-pager --plain status ssc-web-app.service | head -n 3 || true
-systemctl list-timers --all --no-pager | grep -E 'pacs|reconc|cold|backup|freshness' || true
+systemctl list-timers --all --no-pager | grep -E 'pacs|cold|backup|freshness' || true
 echo "Done."

@@ -25,6 +25,10 @@ CREATE TABLE IF NOT EXISTS public.image_series (
     imageshape integer[],
     number_of_slices integer,
     scanaxialcoverage_mm double precision,
+    -- Storage footprint in decimal MB (bytes / 1e6). compressed = tar.zst
+    -- archive size; decompressed = sum of DICOM file content bytes.
+    compressed_size_mb double precision,
+    decompressed_size_mb double precision,
     CONSTRAINT image_series_pkey PRIMARY KEY (seriesinstanceuid)
 );
 

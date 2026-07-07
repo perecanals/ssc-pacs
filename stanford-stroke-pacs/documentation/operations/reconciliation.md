@@ -23,26 +23,29 @@ python scripts/data_integrity/reconcile.py
 # JSON report (written to maintenance/reconciliation-reports/)
 python scripts/data_integrity/reconcile.py --json
 
-# JSON, no stdout (cron/timer mode)
+# JSON, no stdout (quiet mode)
 python scripts/data_integrity/reconcile.py --json --quiet
 ```
 
 ---
 
-## Scheduled runs (systemd timer)
+## On-demand only (no scheduled job)
 
-The timer runs `scripts/data_integrity/reconcile.py --json --quiet` every 6 hours.
+Reconciliation is **not scheduled** — run it by hand with the commands above
+when you want a fresh report (typically right after an ingestion run or a
+storage migration). The fresh-deploy installers
+(`scripts/macos/install_launchd.sh`, `scripts/linux/install_systemd.sh`) do
+**not** install any reconciliation timer or LaunchDaemon, and there are no
+`systemd/reconciliation.*` / `launchd/com.ssc.reconciliation.plist.in`
+templates.
 
-```bash
-# Install (one-time)
-sudo cp systemd/reconciliation.{service,timer} /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable --now reconciliation.timer
-
-# Check
-systemctl list-timers reconciliation.timer
-journalctl -u reconciliation.service -n 50
-```
+It used to run every 6 hours, but that was removed: on the full dataset the run
+is a 30–60 min storm of `stat()` calls over every series on cold storage, and
+— unattended — it provided no value because nobody read the reports. It is also
+the kind of job you want to run deliberately, not while an ingestion is in
+flight: the read pass is now careful to release its `image_series` lock before
+the disk scan (so it can no longer block ingestion), but a concurrent run still
+competes for disk I/O.
 
 ---
 
@@ -71,7 +74,7 @@ A series exists in `image_series` but is not indexed by Orthanc.
 
 **Common causes:**
 - Loose DICOMs were deleted before Orthanc indexed them.
-- Ingest pipeline (`image_integration_protocols/`) completed the DB insert
+- Ingest pipeline (`image_ingestion_protocols/`) completed the DB insert
   but Orthanc's Folder Indexer hasn't scanned yet (wait for `Interval`
   seconds and re-check).
 - In `cold_path_cache` mode: series is cold (files evicted) and the patched
@@ -140,7 +143,7 @@ on disk.
 **Common causes:**
 - Archive was accidentally deleted or moved.
 - Compression failed partway during ingestion.  The ingest pipeline
-  (`image_integration_protocols/`) is the biggest source of NULL or broken
+  (`image_ingestion_protocols/`) is the biggest source of NULL or broken
   archive paths.  Retry with:
   ```bash
   python scripts/cold_storage/archive_all_series.py --patient <patient_id>

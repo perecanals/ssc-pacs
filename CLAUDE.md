@@ -11,16 +11,15 @@ ssc-pacs/
 ├── stanford-stroke-pacs/     # Main PACS stack (Orthanc + Web App)
 │   ├── web-app/            # FastAPI backend + React frontend (port 8043)
 │   ├── scripts/              # Organized utility scripts (see subdirectory layout below)
-│   │   ├── admin/            # manage_users.py, remove_label.py/.sh, teardown.sh
+│   │   ├── admin/            # manage_users.py, rename_dataset_value.py, backfill_annotation_history.py, teardown.sh
 │   │   ├── backup/           # backup_pg_db.sh, check_backup_freshness.sh
-│   │   ├── cold_storage/     # archive, cleanup, health, mirror, unarchived, verify_and_repair
+│   │   ├── cold_storage/     # archive, cleanup, health, scoped_index, reindex_missing_series, verify_and_repair
 │   │   ├── connectivity/     # tunnel.sh
-│   │   ├── data_integrity/   # reconcile.py, dicom_path_sql_fs_audit.py
+│   │   ├── data_integrity/   # reconcile.py, dicom_path_sql_fs_audit.py, disk_vs_db_series_audit.py, detect_mixed_dirs.py
 │   │   ├── dicom/            # dicom_to_nifti.py
-│   │   ├── one_off/          # backfill, holdout, path_availability_test
 │   │   └── orthanc/          # enrich_orthanc.py, label_studies.py, check_status.sh
 │   ├── documentation/        # Modular docs — start with documentation/context.md
-│   ├── image_integration_protocols/  # Legacy SSC metadata ingestion (site-specific)
+│   ├── image_ingestion_protocols/  # Legacy SSC metadata ingestion (site-specific)
 │   ├── .env                  # Secrets (DB creds, JWT, Orthanc admin password)
 │   ├── config.toml           # Non-secret config (storage mode, paths, session TTL)
 │   ├── docker-compose.yml    # Orthanc only (Web App is NOT a Compose service)
@@ -139,6 +138,13 @@ python scripts/cold_storage/archive_all_series.py --workers 4
 psql -d stanford-stroke -c "
   SELECT COUNT(*) FILTER (WHERE dicom_archive_path IS NOT NULL) AS archived,
          COUNT(*) AS total FROM image_series;"
+
+# Backfill per-series/per-study storage sizes (decimal MB; columns
+# image_series/image_study.{compressed,decompressed}_size_mb). Resumable;
+# archives without loose files are stream-decompressed to measure (slow).
+# New ingestion runs record sizes automatically.
+python scripts/cold_storage/backfill_storage_sizes.py            # everything missing
+python scripts/cold_storage/backfill_storage_sizes.py --label my_batch --workers 4
 
 # Manually warm a study (Python — no CLI yet)
 conda activate ssc-pacs
@@ -279,36 +285,39 @@ web-app/src/
 
 The `DataTable` is one generic component used at all three hierarchy levels. Table preferences (column visibility, order, sort, filters, frozen column) are persisted per user and per level in `user_preferences` (server-side JSONB); the Navigator's last-used level and sidebar quick filters are persisted under the `_global` level (`src/hooks/useSessionStatePersistence.js`). All components use `prop-types` for runtime prop validation.
 
-## Image integration protocol
+## Image ingestion protocol
 
-New imaging data is ingested via `stanford-stroke-pacs/image_integration_protocols/`:
+New imaging data is ingested via `stanford-stroke-pacs/image_ingestion_protocols/`:
 
 ```bash
-cd stanford-stroke-pacs/image_integration_protocols
-# Copy execute_image_integration_protocol.example.yaml to
-# execute_image_integration_protocol.yaml (gitignored), edit it, then:
+cd stanford-stroke-pacs/image_ingestion_protocols
+# Copy execute_image_ingestion_protocol.example.yaml to
+# execute_image_ingestion_protocol.yaml (gitignored), edit it, then:
 conda activate ssc-pacs
-python execute_image_integration_protocol.py [--config path/to/config.yaml]
+python execute_image_ingestion_protocol.py [--config path/to/config.yaml]
 ```
 
-**YAML config keys** (`execute_image_integration_protocol.yaml`):
+**YAML config keys** (`execute_image_ingestion_protocol.yaml`):
 - `src_dir` — directory of patient subdirectories to ingest
 - `import_label` — tag all rows in this run with a label
 - `dataset` — optional cohort tag recorded on the `patient` table only (`dataset text[]`, union-accumulated across batches)
-- `overwrite_if_exists` — re-integrate studies already in the DB
+- `overwrite_if_exists` — re-ingest studies already in the DB
 - `anonymize_files` — strip patient identifiers from DICOM headers before copying
 - `delete_originals_after_verification` — remove the source `case_dir` after copy verification
-- `cold_archive_root` — if set, compress each series DICOM dir to `*.tar.zst` at this root after copying (supports `cold_path_cache` mode). Loose files are **not deleted** — they remain for the Orthanc Folder Indexer to pick up.
+- `cold_archive_root` — if set, compress each series DICOM dir to `*.tar.zst` at this root after copying (supports `cold_path_cache` mode)
+- `cleanup_loose_after_indexing` — default `true`: delete each case's loose DICOMs once indexed+verified in Orthanc (archive stays canonical); `false` keeps them on disk ("hot") until a manual `cleanup_loose_dicoms.py` pass
+- `compress_workers` — concurrent per-series archive compressions per case (default 4; 1 = serial)
+- `pipeline_indexing` — default `true`: run each case's Orthanc indexing + cleanup + cache stamping on a background worker while the next case ingests (wall ≈ max(ingest, index)); auto-disabled under `overwrite_if_exists`; the per-case completion marker (resume contract) is only logged after the worker finishes, so interrupts are always safe to resume
 
-**Integration steps** (in order):
+**Ingestion steps** (in order):
 1. Scan source dirs, grouping files by `SeriesInstanceUID` (not by directory) — mixed folders split into their true series; a series split across folders merges into one row
 2. Group into studies, validate against `lvo_clinical_data`
 3. Copy DICOMs to `dicom_data_root/{patient_id}/{StudyUID}/{SeriesDesc}/{SeriesUID}/DICOM/`
 4. If `cold_archive_root` set: compress each series dir to `cold_archive_root/.../DICOM.tar.zst`, record path in `image_series.dicom_archive_path`
 5. Convert select series to NIfTI
-6. Upsert into `image_series`, `image_study`, and `patient` (one transaction). The `patient` upsert recomputes `stroke_date = MIN(image_study.acquisitiondatetime)`, preserves origin `import_id`/`import_label`, and unions the `dataset` tag.
+6. Upsert into `image_series`, `image_study`, and `patient` (one transaction). The `patient` upsert recomputes `stroke_date = MIN(image_study.acquisitiondatetime)`, preserves origin `import_id`/`import_label`, and unions the `dataset` tag. Per-series storage sizes (`compressed_size_mb`/`decompressed_size_mb`, decimal MB) are computed before the upsert; study rollups are stamped in the same transaction (a study column stays NULL until every child series has that size).
 
-`image_integration_protocols/` is site-specific (SSC directory layout and metadata conventions). It is not part of a standard fresh deployment.
+`image_ingestion_protocols/` is site-specific (SSC directory layout and metadata conventions). It is not part of a standard fresh deployment.
 
 ## Cold storage status (as of 2026-04-10)
 
@@ -335,7 +344,7 @@ storage workflow where files legitimately come and go. The fork adds a
 
 **Archive format:** files are stored flat at the archive root (matching `scripts/cold_storage/archive_all_series.py` convention — no `DICOM/` subdirectory wrapper).
 
-**Post-ingestion workflow:** after `image_integration_protocol` runs, loose DICOMs for the new studies are present at their `dicom_dir_path`. The patched Folder Indexer picks them up on its next scan (within `Interval` seconds) and keeps them in the index indefinitely even after they're moved/compressed. No Orthanc restart required for routine ingestion.
+**Post-ingestion workflow (per-case scoped indexing):** the ingestion executor registers each case into Orthanc **immediately after the case's DB commit**, via the patched indexer's `POST /indexer/scan` endpoint scoped to that case's study folders (`index_case_into_orthanc` → `scripts/cold_storage/scoped_index.py`; no config edits, no restarts; always on in `cold_path_cache`). Registrations are verified per series (`/tools/lookup`); at the end of the run a **sanity pass** re-verifies every series ingested in the run and re-registers any missing (bounded passes, `Force=true`), logging a final "Orthanc index clean: N/N" verdict. Indexing cost is O(new data), independent of total index size — replacing the continuous whole-tree Folder Indexer scan (which does not scale). **OOM caveat:** the plugin's DICOM cache plateaus (~0.35 GiB), but Orthanc *core*'s working set grows during sustained registration — one uninterrupted scan over hundreds of thousands of instances OOMs the Colima VM (VM-global; `docker inspect` `OOMKilled` reads false). Large registrations must go through `scoped_index.register_in_bounded_passes` (default ≤350 series / ≤40k instances per pass, 120 s settle); per-case scans are naturally bounded, and `reindex_missing_series.py` uses bounded passes automatically. Pass bounds alone are not enough: registering a file transiently costs Orthanc ~2–3× its size in RAM, so a single multi-GB file (e.g. an XA angio multiframe run) OOMs the 8 GiB VM by itself — `reindex_missing_series.py` skips series containing a file >`--max-file-mb` (default 800) and lists them for separate handling (`scoped_index.dir_max_file_bytes` is the reusable check). Steady-state `Indexer.Folders` is `[]` (no continuous scan); nothing else ever adds index entries because warm/evict is index-neutral (`RemoveMissingFiles=false` keeps rows across eviction). If indexing fails mid-run, it's non-fatal — data is safe on disk + in the DB; the sanity pass retries, and `python scripts/cold_storage/reindex_missing_series.py` backfills. `cleanup_loose_after_indexing` (default `true`; set `false` in the run YAML to keep loose files) deletes each case's loose DICOMs once indexed+verified (archive stays canonical). Drift is detected by `scripts/data_integrity/reconcile.py`, not a tree scan.
 
 ## Key caveats
 
@@ -343,7 +352,7 @@ storage workflow where files legitimately come and go. The fork adds a
 - The stack depends on the custom `ssc-orthanc:patched-indexer` image; it must be built on the host before `docker compose up`.
 - `scripts/admin/teardown.sh` is destructive and sources `.env` from two levels above the repo root (`../../.env`), not the repo-root `.env` — use with care.
 - `orthanc_users.json` must not be edited manually; always use `scripts/admin/manage_users.py`.
-- `image_integration_protocols/` is the legacy SSC-specific metadata ingestion pipeline; it is not part of a standard fresh deployment.
+- `image_ingestion_protocols/` is the legacy SSC-specific metadata ingestion pipeline; it is not part of a standard fresh deployment.
 
 ## Documentation index
 
@@ -355,7 +364,7 @@ All canonical docs are under `stanford-stroke-pacs/documentation/`. Start with `
 - `documentation/reference/data_stores.md` — all table schemas and query patterns
 - `documentation/reference/web_app.md` — Web App product rationale and features
 - `documentation/reference/web_app_frontend.md` — React component detail
-- `documentation/reference/image_integration_protocol.md` — ingesting new data, YAML config, per-mode behavior
+- `documentation/reference/image_ingestion_protocol.md` — ingesting new data, YAML config, per-mode behavior
 - `documentation/operations/commands.md` — day-2 operations cheat sheet
 - `documentation/operations/reconciliation.md` — two-DB reconciliation (image_series vs Orthanc), mismatch categories, admin endpoint
 - `documentation/operations/annotation_history.md` — annotation audit trail: trigger, session-variable coupling, history API, backfill, retention

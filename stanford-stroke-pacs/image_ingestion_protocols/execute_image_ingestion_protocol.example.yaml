@@ -1,0 +1,66 @@
+# Example config for execute_image_ingestion_protocol.py.
+#
+# Copy to execute_image_ingestion_protocol.yaml (gitignored — it holds
+# site/run-specific paths) and edit per batch:
+#
+#   cp execute_image_ingestion_protocol.example.yaml execute_image_ingestion_protocol.yaml
+#
+# Storage paths (cold_archive_root, legacy DICOM root) come from repo-root
+# config.toml automatically. Do not duplicate them here unless you intend to
+# override on a per-run basis. The script will warn if you do.
+#
+# env_path defaults to <repo>/.env. Override if you need a different file.
+
+database: stanford-stroke
+
+# Directory of patient subdirectories to ingest.
+src_dir: /path/to/source/DICOMS
+
+# Re-ingest studies already present in the DB.
+overwrite_if_exists: false
+
+# Strip patient identifiers from DICOM headers before copying.
+anonymize_files: false
+
+# Remove the source case_dir after copy verification.
+delete_originals_after_verification: false
+
+# Tag all rows in this run with a label (recorded on image_study/image_series).
+import_label: my_batch_1
+
+# Dataset/cohort tag for this batch (e.g. PRECISE, CRISP2/LVO). Recorded on the
+# `patient` table only (union-accumulated across batches); not stored on
+# image_study/image_series. This is also the tag that per-user dataset
+# permissions filter on (users.allowed_datasets) — patients ingested without
+# a dataset tag are invisible to all non-admin users.
+dataset: my_cohort
+
+# Resume a previously interrupted run: skip cases that a prior log with a
+# matching src_dir proves were successfully completed (union across all prior
+# logs). Failed or interrupted cases are re-processed. Avoids re-scanning
+# completed cases off slow disks.
+# Pass --no-resume on the CLI to force a full re-read regardless of this setting.
+resume: true
+
+# cold_path_cache only. After each case is indexed into Orthanc and verified,
+# delete its loose (uncompressed) DICOM dirs — the tar.zst archive is canonical
+# and the Orthanc index survives eviction, so the loose copy is redundant.
+# Same safety checks as scripts/cold_storage/cleanup_loose_dicoms.py (archive
+# present + file-count match + series verified in the index; NIFTI siblings
+# preserved). Default: true. Set false to keep loose files on disk ("hot",
+# instantly viewable) until a manual cleanup_loose_dicoms.py pass.
+cleanup_loose_after_indexing: true
+
+# Concurrent per-series archive compressions per case (zstd releases the GIL,
+# so threads scale). 1 = serial (the pre-2026-07 behavior). Default: 4.
+compress_workers: 4
+
+# Run each case's Orthanc indexing (+ loose cleanup + cache stamping) on a
+# background worker while the next case is ingesting — wall time per case
+# becomes max(ingest, index) instead of their sum. Interrupt/resume-safe: the
+# per-case completion marker is only logged after indexing+cleanup finish, so
+# an interrupted case is simply re-processed on the next run. Automatically
+# disabled when overwrite_if_exists is true (overwrite deletes files a
+# background scan might still be reading). Set false for strictly serial
+# per-case behavior. Default: true.
+pipeline_indexing: true

@@ -2,7 +2,7 @@
 
 **Purpose:** How to build, deploy, and operate the cold storage stack.
 For the design rationale see [`design.md`](design.md). For how new data is
-ingested see [`../reference/image_integration_protocol.md`](../reference/image_integration_protocol.md).
+ingested see [`../reference/image_ingestion_protocol.md`](../reference/image_ingestion_protocol.md).
 
 ---
 
@@ -11,7 +11,7 @@ ingested see [`../reference/image_integration_protocol.md`](../reference/image_i
 Controlled by `[storage].mode` in `config.toml` at the repo root:
 
 - **`legacy`** — Orthanc indexes loose DICOMs under `dicom_data_root`. No
-  cache manager, no archives involved at runtime. Integration protocol writes
+  cache manager, no archives involved at runtime. Ingestion protocol writes
   loose files only (compression step skipped).
 - **`cold_path_cache`** (current production mode) — Canonical payload is
   `*.tar.zst` under `cold_archive_root`. Warm extracts archives back to the
@@ -88,8 +88,8 @@ psql -d stanford-stroke -c "
 
 Both counts should match. Script is idempotent — rerun safely.
 
-If a previous integration run reports "N/M series failed to compress", it
-writes a JSON report to `image_integration_protocols/logs/compression_failures_*.json`
+If a previous ingestion run reports "N/M series failed to compress", it
+writes a JSON report to `image_ingestion_protocols/logs/compression_failures_*.json`
 with per-series details. Those rows have `dicom_archive_path = NULL`. To
 find and retry them:
 
@@ -102,7 +102,7 @@ python scripts/cold_storage/archive_all_series.py --patient <id>        # retry 
 `scripts/cold_storage/cleanup_loose_dicoms.py` already filters out NULL-archive rows, so
 failed series are safe from accidental cleanup.
 
-NIFTIs are **not** generated during integration in cold_path_cache mode.
+NIFTIs are **not** generated during ingestion in cold_path_cache mode.
 See [`../recipes/dicom_processing.md`](../recipes/dicom_processing.md) for
 the on-demand workflow via `scripts/dicom/dicom_to_nifti.py`.
 
@@ -182,6 +182,9 @@ hold:
 3. The series' `SeriesInstanceUID` is present in Orthanc's `dicomidentifiers`
    table (i.e. the patched Folder Indexer has indexed it)
 
+With `--execute` it also deletes the cleaned series' `series_cache_state`
+rows (absence reads as cold), so the UI immediately reflects the removal.
+
 ```bash
 cd /home/perecanals/ssc-pacs/stanford-stroke-pacs
 conda activate pacs
@@ -205,7 +208,7 @@ print(f'series={d[\"CountSeries\"]} instances={d[\"CountInstances\"]}')"
 # Test warm in the UI again — should still work end-to-end.
 ```
 
-For routine cleanup after each integration run, schedule the script via
+For routine cleanup after each ingestion run, schedule the script via
 cron with `--quiet --no-deep-verify` for fast incremental passes. Run a
 deep-verify pass weekly to catch archive corruption.
 
@@ -436,7 +439,7 @@ patients in one stop/start. JSON reports land in `maintenance/index-prune-report
 | `RemoveMissingFiles` | N/A | Must be `false` in `orthanc.json` |
 | Warm API calls | N/A | None to Orthanc; just filesystem extract |
 | Evict API calls | N/A | None to Orthanc; just filesystem delete |
-| Integration workflow | Copy loose files; Orthanc picks up | Copy loose files; compress; Orthanc picks up; optional cleanup |
+| Ingestion workflow | Copy loose files; Orthanc picks up | Copy loose files; compress; Orthanc picks up; optional cleanup |
 
 ---
 
@@ -466,8 +469,8 @@ If you need to roll back:
 | `scripts/cold_storage/cleanup_loose_dicoms.py` | Safely delete loose DICOMs whose archive exists and Orthanc has indexed (dry-run by default; cron-friendly) |
 | `scripts/cold_storage/list_unarchived_series.py` | List series with loose files but no archive — triage compression failures |
 | `scripts/dicom/dicom_to_nifti.py` | On-demand DICOM → NIFTI from a loose dir, a cold archive, or by series UID (optionally warming) |
-| `scripts/one_off/orthanc_path_availability_test.py` | Automated DICOMweb path-availability probe |
-| `scripts/one_off/orthanc_holdout_case.py` | Manual OHIF holdout test (hide/restore a patient) |
+| `maintenance/scripts/orthanc_path_availability_test.py` (site-local, gitignored) | Automated DICOMweb path-availability probe |
+| `maintenance/scripts/orthanc_holdout_case.py` (site-local, gitignored) | Manual OHIF holdout test (hide/restore a patient) |
 | `orthanc.json` | `Indexer.RemoveMissingFiles` must be `false` for `cold_path_cache` |
 | `docker-compose.yml` | `image: ssc-orthanc:patched-indexer` |
 | `config.toml` | `[storage].mode` and paths |
@@ -475,7 +478,7 @@ If you need to roll back:
 
 ### Database changes (auto-applied on Web App restart)
 
-- `image_series.dicom_archive_path TEXT` — populated by archiver / integration protocol
+- `image_series.dicom_archive_path TEXT` — populated by archiver / ingestion protocol
 - `series_cache_state` table (PK `seriesinstanceuid`) — per-series cold/warming/hot/error/queued status; powers warm/evict, the stuck-warming watchdog, and the derived study/patient aggregates. Created by Alembic revision `0010_series_cache_state`, which dropped the former per-study `cache_state` table (backfilling it by fanning each study row to its series) and the dead `orthanc_resource_map` table.
 
 See [`../reference/data_stores.md`](../reference/data_stores.md) for column details.

@@ -186,7 +186,7 @@ curl -s -u admin:<password> http://localhost:8042/statistics | python3 -m json.t
 # Two-DB reconciliation (image_series vs Orthanc index + disk checks)
 python scripts/data_integrity/reconcile.py               # human-readable summary
 python scripts/data_integrity/reconcile.py --json        # write JSON report
-python scripts/data_integrity/reconcile.py --json --quiet # cron/timer mode
+python scripts/data_integrity/reconcile.py --json --quiet # quiet mode (on-demand; not scheduled)
 
 # Enrich studies/series with patient_id, seriesdescription (re-run after new indexing)
 python scripts/orthanc/enrich_orthanc.py
@@ -369,6 +369,28 @@ python scripts/cold_storage/prune_stale_index_paths.py --json        # all patie
 # Apply (briefly stops Orthanc, backs up the index DB, restarts)
 python scripts/cold_storage/prune_stale_index_paths.py --patient 24-012 --execute --yes
 python scripts/cold_storage/prune_stale_index_paths.py --execute      # global
+```
+
+Backfill series that are in `image_series` but missing from Orthanc's index (e.g.
+after an indexing failure or a scan truncated by an Orthanc restart). Uses the
+patched indexer's `POST /indexer/scan` endpoint and registers in **bounded
+passes** (default ≤350 series / ≤40k instances per pass, 120 s settle — one huge
+uninterrupted scan can OOM Orthanc):
+
+```bash
+python scripts/cold_storage/reindex_missing_series.py                            # dry-run, everything
+python scripts/cold_storage/reindex_missing_series.py --label my_batch           # dry-run, one label
+python scripts/cold_storage/reindex_missing_series.py --label my_batch --limit 400 --execute  # pilot
+python scripts/cold_storage/reindex_missing_series.py --label my_batch --execute             # full label
+python scripts/cold_storage/reindex_missing_series.py --exclude-label huge_batch --execute   # skip a label
+python scripts/cold_storage/reindex_missing_series.py --pass-instances 20000 --execute       # gentler passes
+# verify: python scripts/data_integrity/reconcile.py   (in_db_not_in_orthanc should drop)
+```
+
+Register an explicit list of series directly (library CLI):
+
+```bash
+python scripts/cold_storage/scoped_index.py --series <suid1,suid2> [--granularity series|study]
 ```
 
 ---

@@ -8,11 +8,11 @@ Scans each patient's tree under `dicom_data_root` and, per series, compares it t
   * DRIFT   — row exists but `number_of_slices` != on-disk file count
   * ok      — row exists and counts match
 
-This is **read-only**. It does NOT import `ImageIntegrationProtocol` and does NOT
+This is **read-only**. It does NOT import `ImageIngestionProtocol` and does NOT
 write anything.
 
 WHY (incident 2026-06-24): an earlier version reused
-`ImageIntegrationProtocol.filter_existing_studies()` with `case_dir` pointed at the
+`ImageIngestionProtocol.filter_existing_studies()` with `case_dir` pointed at the
 live `dicom_data_root`. That method DELETES the canonical DICOM dir + cold archive
 on a slice-count mismatch (to force a clean re-ingest) — and it runs during the
 scan/filter phase, before any `--execute`. Pointed at the real store, it wiped 6
@@ -22,9 +22,9 @@ upsert (NOT this protocol), and only after the DRIFT rows below are understood.
 See maintenance/deleted_series_2026-06-24.md.
 
 Usage:
-  python scripts/one_off/backfill_existing_series.py                 # default patients
-  python scripts/one_off/backfill_existing_series.py --patients 2-541,2-506
-  python scripts/one_off/backfill_existing_series.py --all           # every patient with on-disk files
+  python scripts/data_integrity/disk_vs_db_series_audit.py                 # default patients
+  python scripts/data_integrity/disk_vs_db_series_audit.py --patients 2-541,2-506
+  python scripts/data_integrity/disk_vs_db_series_audit.py --all           # every patient with on-disk files
 """
 
 from __future__ import annotations

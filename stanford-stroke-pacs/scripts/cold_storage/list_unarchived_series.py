@@ -2,7 +2,7 @@
 """
 List series in `image_series` that have a `dicom_dir_path` but no
 `dicom_archive_path`. These are series whose loose DICOMs are still on disk
-but were never compressed (or compression failed during integration).
+but were never compressed (or compression failed during ingestion).
 
 Use to triage compression failures. Retry with:
     python scripts/archive_all_series.py --patient <patient_id>

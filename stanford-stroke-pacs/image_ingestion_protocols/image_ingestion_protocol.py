@@ -4,6 +4,7 @@ import shutil
 import sys
 import tarfile
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from pathlib import Path
 
@@ -19,6 +20,7 @@ from utils import (
     convert_dicom_to_nifti,
     identify_study_type,
     identify_series_type,
+    max_same_position_count,
     name_sanity_check,
     should_create_nifti,
 )
@@ -31,14 +33,14 @@ if str(_WEB_APP_DIR) not in sys.path:
     sys.path.insert(0, str(_WEB_APP_DIR))
 from config import DICOM_DATA_ROOT, STORAGE_MODE  # noqa: E402
 
-import warnings
+import warnings  # noqa: E402
 warnings.filterwarnings(
     "ignore",
     message=r"The value length .* exceeds the maximum length of .* allowed for VR LO\.",
 )
 
 
-class ImageIntegrationProtocol:
+class ImageIngestionProtocol:
     def __init__(
         self,
         case_dir,
@@ -49,6 +51,7 @@ class ImageIntegrationProtocol:
         import_label=None,
         dataset=None,
         cold_archive_root=None,
+        compress_workers=4,
     ):
         self.case_dir = case_dir
         self.postgres_engine = postgres_engine
@@ -60,6 +63,9 @@ class ImageIntegrationProtocol:
         # `patient` table (union-accumulated), not on image_study/image_series.
         self.dataset = dataset
         self.cold_archive_root = cold_archive_root
+        # Series archives are compressed concurrently (zstd releases the GIL);
+        # 1 = serial. Shared-state writes stay in the calling thread.
+        self.compress_workers = max(1, int(compress_workers or 1))
 
         self.case_series_table = None
         self.case_study_table = None
@@ -74,10 +80,10 @@ class ImageIntegrationProtocol:
         # with the running stack about where files live.
         self.base_dir = str(DICOM_DATA_ROOT)
 
-    def execute_image_integration_protocol(self, overwrite_if_exists=False):
+    def execute_image_ingestion_protocol(self, overwrite_if_exists=False):
         case_name = os.path.basename(os.path.normpath(self.case_dir))
         protocol_start = time.perf_counter()
-        print(f"Starting image integration for case {case_name}")
+        print(f"Starting image ingestion for case {case_name}")
 
         step_started = time.perf_counter()
         self.create_series_table()
@@ -87,7 +93,8 @@ class ImageIntegrationProtocol:
         )
         if self.case_series_table is None or self.case_series_table.empty:
             print(f"No readable DICOM series found under case_dir ({self.case_dir})")
-            return {"studyinstanceuids": [], "seriesinstanceuids": []}
+            return {"studyinstanceuids": [], "seriesinstanceuids": [],
+                    "skipped_existing_seriesinstanceuids": []}
 
         step_started = time.perf_counter()
         self.create_study_table()
@@ -97,7 +104,8 @@ class ImageIntegrationProtocol:
         )
         if self.case_study_table is None or self.case_study_table.empty:
             print(f"No valid studies could be created from case_dir ({self.case_dir})")
-            return {"studyinstanceuids": [], "seriesinstanceuids": []}
+            return {"studyinstanceuids": [], "seriesinstanceuids": [],
+                    "skipped_existing_seriesinstanceuids": []}
 
         initial_study_count = len(self.case_study_table)
         step_started = time.perf_counter()
@@ -113,7 +121,9 @@ class ImageIntegrationProtocol:
                 print(
                     f"All series for case_dir ({self.case_dir}) are already in the database"
                 )
-            return {"studyinstanceuids": [], "seriesinstanceuids": []}
+            return {"studyinstanceuids": [], "seriesinstanceuids": [],
+                    "skipped_existing_seriesinstanceuids":
+                        list(self.skipped_existing_series_uids)}
 
         step_started = time.perf_counter()
         self.load_clinical_data_table()
@@ -147,6 +157,10 @@ class ImageIntegrationProtocol:
             self.compress_cold_archives()
             print(f"Compressed cold archives in {time.perf_counter() - step_started:.2f}s")
 
+        step_started = time.perf_counter()
+        self.compute_storage_sizes()
+        print(f"Computed storage sizes in {time.perf_counter() - step_started:.2f}s")
+
         if STORAGE_MODE == "cold_path_cache":
             print(
                 "Skipping NIFTI generation in cold_path_cache mode "
@@ -171,19 +185,20 @@ class ImageIntegrationProtocol:
         self._require_number_of_slices_column()
         if self.cold_archive_root:
             self._require_dicom_archive_path_column()
+        self._require_storage_size_columns()
         self.update_postgres_tables()
         print(f"Updated PostgreSQL tables in {time.perf_counter() - step_started:.2f}s")
 
         if self.delete_originals_after_verification:
             step_started = time.perf_counter()
-            self.verify_integrated_case()
+            self.verify_ingested_case()
             self.delete_original_case_dir()
             print(
-                f"Verified integrated files and deleted originals in "
+                f"Verified ingested files and deleted originals in "
                 f"{time.perf_counter() - step_started:.2f}s"
             )
         print(
-            f"Completed image integration for case {case_name} in "
+            f"Completed image ingestion for case {case_name} in "
             f"{time.perf_counter() - protocol_start:.2f}s"
         )
         # Derive both lists from case_series_table so labelled-table re-sync
@@ -197,6 +212,8 @@ class ImageIntegrationProtocol:
             "seriesinstanceuids": sorted(
                 self.case_series_table["seriesinstanceuid"].dropna().astype(str).unique().tolist()
             ),
+            "skipped_existing_seriesinstanceuids":
+                list(getattr(self, "skipped_existing_series_uids", [])),
         }
 
     def load_image_tables(self):
@@ -405,7 +422,16 @@ class ImageIntegrationProtocol:
         z_positions = []
         for dcm in headers:
             position = cls._dicom_value(dcm, "ImagePositionPatient")
-            if isinstance(position, (list, tuple)) and len(position) >= 3:
+            # pydicom returns ImagePositionPatient as a MultiValue, which is NOT
+            # a list/tuple — an isinstance((list, tuple)) guard silently rejects
+            # it and leaves z_positions empty. Accept any non-string sequence of
+            # length >= 3 so the true z-extent is used (not just the fallbacks).
+            if (
+                position is not None
+                and not isinstance(position, (str, bytes))
+                and hasattr(position, "__len__")
+                and len(position) >= 3
+            ):
                 z_value = cls._safe_float(position[2])
                 if z_value is not None:
                     z_positions.append(z_value)
@@ -457,7 +483,7 @@ class ImageIntegrationProtocol:
                 if patient_id is None:
                     print(
                         f"Skipping file without PatientID {filepath}. "
-                        "Stanford integration requires PatientID to contain study_id."
+                        "Stanford ingestion requires PatientID to contain study_id."
                     )
                     continue
                 if study_instance_uid is None or series_instance_uid is None:
@@ -531,6 +557,13 @@ class ImageIntegrationProtocol:
             image_shape, slice_thickness, scan_axial_coverage_mm = self._series_geometry(
                 headers
             )
+            modality = self._safe_text(self._dicom_value(dcm, "Modality"))
+            series_description = self._safe_text(
+                self._dicom_value(dcm, "SeriesDescription")
+            )
+            # Geometry-first series-type detection: how many frames share a slice
+            # location distinguishes dynamic (CTP/PWI/DWI) from static scans.
+            same_position_count = max_same_position_count(headers)
 
             data_series_list.append(
                 pd.DataFrame(
@@ -541,9 +574,7 @@ class ImageIntegrationProtocol:
                             "studydescription": self._safe_text(
                                 self._dicom_value(dcm, "StudyDescription")
                             ),
-                            "seriesdescription": self._safe_text(
-                                self._dicom_value(dcm, "SeriesDescription")
-                            ),
+                            "seriesdescription": series_description,
                             "studyinstanceuid": study_instance_uid,
                             "seriesinstanceuid": series_instance_uid,
                             "number_of_slices": len(paths),
@@ -567,15 +598,12 @@ class ImageIntegrationProtocol:
                             "imageshape": image_shape,
                             "scanaxialcoverage_mm": scan_axial_coverage_mm,
                             "seriesdescription_": name_sanity_check(
-                                self._safe_text(self._dicom_value(dcm, "SeriesDescription"))
-                                or "UNNAMED_SERIES"
+                                series_description or "UNNAMED_SERIES"
                             ),
                             "series_type": identify_series_type(
-                                self._safe_text(self._dicom_value(dcm, "SeriesDescription"))
+                                modality, same_position_count, series_description
                             ),
-                            "modality": self._safe_text(
-                                self._dicom_value(dcm, "Modality")
-                            ),
+                            "modality": modality,
                         }
                     ]
                 )
@@ -655,13 +683,17 @@ class ImageIntegrationProtocol:
         return predicted_study_type
 
     def filter_existing_studies(self, overwrite_if_exists=False):
+        # Series found on disk but skipped because they are already in
+        # image_series. Exposed so the executor can re-index the resume-boundary
+        # case (ingested but possibly not indexed before an interruption).
+        self.skipped_existing_series_uids = []
         study_uids = self.case_study_table["studyinstanceuid"].dropna().astype(str).unique().tolist()
         print(
             f"Checking {len(study_uids)} study UID(s) against image_study and image_series"
         )
         # Always load image_series so append mode (overwrite_if_exists=False)
         # can filter at the series level, not just the study level — otherwise
-        # new series arriving under a previously-integrated study get dropped.
+        # new series arriving under a previously-ingested study get dropped.
         self._load_case_rows_from_db(study_uids, include_series=True)
 
         existing_study_uids = (
@@ -758,6 +790,7 @@ class ImageIntegrationProtocol:
                     )
 
             drop_uids = drop_match_uids | drop_unverifiable_uids
+            self.skipped_existing_series_uids = sorted(drop_uids)
             if drop_uids:
                 self.case_series_table = self.case_series_table[
                     ~self.case_series_table["seriesinstanceuid"].astype(str).isin(drop_uids)
@@ -795,7 +828,7 @@ class ImageIntegrationProtocol:
 
             if drop_unverifiable_uids:
                 print(
-                    f"WARNING: {len(drop_unverifiable_uids)} already-integrated "
+                    f"WARNING: {len(drop_unverifiable_uids)} already-ingested "
                     f"series have NULL/non-integer number_of_slices in image_series; "
                     f"cannot verify drift. Skipping. To force re-ingest, set "
                     f"overwrite_if_exists: true for these studies."
@@ -947,7 +980,7 @@ class ImageIntegrationProtocol:
 
             print(
                 f"Warning: study_id {patient_id} is not present in lvo_clinical_data. "
-                "The study will still be integrated, but remains clinically unmatched."
+                "The study will still be ingested, but remains clinically unmatched."
             )
 
     @staticmethod
@@ -1129,7 +1162,7 @@ class ImageIntegrationProtocol:
                 "study_path",
             ] = study_path
 
-    def verify_integrated_case(self):
+    def verify_ingested_case(self):
         verification_table = self.case_series_verification_table
         if verification_table is None:
             verification_table = self.case_series_table
@@ -1179,7 +1212,7 @@ class ImageIntegrationProtocol:
             return
         if case_dir_abs == base_dir_abs or case_dir_abs.startswith(f"{base_dir_abs}{os.sep}"):
             raise ValueError(
-                f"Refusing to delete source directory inside integration base_dir: {case_dir_abs}"
+                f"Refusing to delete source directory inside ingestion base_dir: {case_dir_abs}"
             )
         print(f"Deleting original case directory after verification: {case_dir_abs}")
         shutil.rmtree(case_dir_abs)
@@ -1214,6 +1247,9 @@ class ImageIntegrationProtocol:
 
         if "dicom_archive_path" not in self.case_series_table.columns:
             self.case_series_table["dicom_archive_path"] = None
+        for size_column in ("compressed_size_mb", "decompressed_size_mb"):
+            if size_column not in self.case_series_table.columns:
+                self.case_series_table[size_column] = None
 
         self.case_series_table = self.case_series_table[
             [
@@ -1228,6 +1264,8 @@ class ImageIntegrationProtocol:
                 "number_of_slices",
                 "dicom_dir_path",
                 "dicom_archive_path",
+                "compressed_size_mb",
+                "decompressed_size_mb",
                 "nifti_path",
                 "import_id",
                 "import_label",
@@ -1268,7 +1306,7 @@ class ImageIntegrationProtocol:
         if isinstance(value, float) and pd.isna(value):
             return None
         if isinstance(value, list):
-            return [ImageIntegrationProtocol._normalize_for_sql(item) for item in value]
+            return [ImageIngestionProtocol._normalize_for_sql(item) for item in value]
         return value
 
     def _upsert_dataframe(self, table_name, key_column, dataframe, connection):
@@ -1369,6 +1407,7 @@ class ImageIntegrationProtocol:
                 "image_study", "studyinstanceuid", self.case_study_table, connection
             )
             self._upsert_patient(connection)
+            self._rollup_study_storage_sizes(connection)
 
     def _require_dicom_archive_path_column(self):
         """Add dicom_archive_path column to image_series if it does not exist."""
@@ -1376,6 +1415,82 @@ class ImageIntegrationProtocol:
             conn.execute(text(
                 "ALTER TABLE image_series ADD COLUMN IF NOT EXISTS dicom_archive_path TEXT"
             ))
+
+    def _require_storage_size_columns(self):
+        """Add per-series/per-study storage size columns (decimal MB) if absent."""
+        with self.postgres_engine.begin() as conn:
+            for table in ("image_series", "image_study"):
+                for col in ("compressed_size_mb", "decompressed_size_mb"):
+                    conn.execute(text(
+                        f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {col} DOUBLE PRECISION"
+                    ))
+
+    def compute_storage_sizes(self):
+        """Record each series' storage footprint in decimal MB (bytes / 1e6).
+
+        decompressed_size_mb = sum of DICOM file content bytes under
+        dicom_dir_path (just copied, so the walk is cheap); compressed_size_mb
+        = tar.zst size when cold archiving ran (NULL otherwise, e.g. a failed
+        compression — the archive retry tools re-stamp it). Study-level totals
+        are rolled up in SQL at upsert time (_rollup_study_storage_sizes) so
+        studies extended by later runs stay correct.
+        """
+        self.case_series_table["decompressed_size_mb"] = None
+        self.case_series_table["compressed_size_mb"] = None
+        for idx, row in self.case_series_table.iterrows():
+            dicom_dir_path = row.get("dicom_dir_path")
+            if dicom_dir_path and os.path.isdir(dicom_dir_path):
+                total = 0
+                for root, _dirs, files in os.walk(dicom_dir_path):
+                    for f in files:
+                        try:
+                            total += os.path.getsize(os.path.join(root, f))
+                        except OSError:
+                            pass
+                if total:
+                    self.case_series_table.loc[idx, "decompressed_size_mb"] = round(
+                        total / 1e6, 3
+                    )
+            archive = row.get("dicom_archive_path")
+            if archive and os.path.isfile(archive):
+                self.case_series_table.loc[idx, "compressed_size_mb"] = round(
+                    os.path.getsize(archive) / 1e6, 3
+                )
+
+    def _rollup_study_storage_sizes(self, connection):
+        """Stamp study-level size totals for this run's studies.
+
+        Each column is stamped only when EVERY child series has that size,
+        so a partial ingest or failed compression never publishes an
+        undercount (the column stays NULL until the gap is repaired, e.g.
+        by scripts/cold_storage/backfill_storage_sizes.py).
+        """
+        study_uids = sorted(
+            str(u)
+            for u in self.case_series_table["studyinstanceuid"].dropna().unique()
+        ) if "studyinstanceuid" in self.case_series_table.columns else []
+        if not study_uids:
+            return
+        connection.execute(
+            text("""
+                UPDATE image_study st
+                SET compressed_size_mb = agg.c, decompressed_size_mb = agg.d
+                FROM (
+                    SELECT studyinstanceuid,
+                           CASE WHEN COUNT(*) = COUNT(compressed_size_mb)
+                                THEN ROUND(SUM(compressed_size_mb)::numeric, 3)::double precision
+                           END AS c,
+                           CASE WHEN COUNT(*) = COUNT(decompressed_size_mb)
+                                THEN ROUND(SUM(decompressed_size_mb)::numeric, 3)::double precision
+                           END AS d
+                    FROM image_series
+                    WHERE studyinstanceuid = ANY(:uids)
+                    GROUP BY studyinstanceuid
+                ) agg
+                WHERE st.studyinstanceuid = agg.studyinstanceuid
+            """),
+            {"uids": study_uids},
+        )
 
     def _compress_series_dir(self, dicom_dir_path: str):
         """Compress a series DICOM directory to a tar.zst archive.
@@ -1477,7 +1592,7 @@ class ImageIntegrationProtocol:
         Called after add_paths_and_copy_dicom_files() when cold_archive_root
         is set. Per-series failures are non-fatal: the loop continues, the
         failed row keeps `dicom_archive_path = None`, and a JSON failure
-        report is written to `image_integration_protocols/logs/`. Each
+        report is written to `image_ingestion_protocols/logs/`. Each
         successful archive is verified (file count match) before being
         published, courtesy of `_compress_series_dir`.
 
@@ -1495,6 +1610,12 @@ class ImageIntegrationProtocol:
 
         failures = []  # list[dict]
         successes = 0
+
+        # Snapshot the work list first; all case_series_table / failures
+        # mutations happen in this (calling) thread as futures complete.
+        # _compress_series_dir itself is thread-safe: it reads only immutable
+        # self state and publishes via tmp-file + atomic os.replace.
+        tasks = []  # (idx, seriesinstanceuid, studyinstanceuid, dicom_dir_path)
         for idx, row in self.case_series_table.iterrows():
             dicom_dir_path = row.get("dicom_dir_path")
             if not dicom_dir_path:
@@ -1508,22 +1629,35 @@ class ImageIntegrationProtocol:
                     }
                 )
                 continue
-            try:
-                archive = self._compress_series_dir(dicom_dir_path)
-                self.case_series_table.loc[idx, "dicom_archive_path"] = str(archive)
-                successes += 1
-                print(f"Compressed {dicom_dir_path} -> {archive}")
-            except Exception as exc:
-                failures.append(
-                    {
-                        "row_index": int(idx),
-                        "seriesinstanceuid": row.get("seriesinstanceuid"),
-                        "studyinstanceuid": row.get("studyinstanceuid"),
-                        "dicom_dir_path": dicom_dir_path,
-                        "error": f"{type(exc).__name__}: {exc}",
-                    }
-                )
-                print(f"WARNING: compression failed for {dicom_dir_path}: {exc}")
+            tasks.append((idx, row.get("seriesinstanceuid"),
+                          row.get("studyinstanceuid"), dicom_dir_path))
+
+        if tasks:
+            n_workers = min(self.compress_workers, len(tasks))
+            with ThreadPoolExecutor(max_workers=n_workers) as pool:
+                future_to_task = {
+                    pool.submit(self._compress_series_dir, dicom_dir_path):
+                        (idx, series_uid, study_uid, dicom_dir_path)
+                    for idx, series_uid, study_uid, dicom_dir_path in tasks
+                }
+                for future in as_completed(future_to_task):
+                    idx, series_uid, study_uid, dicom_dir_path = future_to_task[future]
+                    try:
+                        archive = future.result()
+                        self.case_series_table.loc[idx, "dicom_archive_path"] = str(archive)
+                        successes += 1
+                        print(f"Compressed {dicom_dir_path} -> {archive}")
+                    except Exception as exc:
+                        failures.append(
+                            {
+                                "row_index": int(idx),
+                                "seriesinstanceuid": series_uid,
+                                "studyinstanceuid": study_uid,
+                                "dicom_dir_path": dicom_dir_path,
+                                "error": f"{type(exc).__name__}: {exc}",
+                            }
+                        )
+                        print(f"WARNING: compression failed for {dicom_dir_path}: {exc}")
 
         if failures:
             log_path = self._write_compression_failure_log(failures)

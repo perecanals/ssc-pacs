@@ -55,7 +55,7 @@ These tables drive browsing in the Navigator UI:
 
 Notes:
 
-- The legacy Stanford ingestion pipeline (`image_integration_protocols/`) upserts into `image_study` and `image_series`.
+- The legacy Stanford ingestion pipeline (`image_ingestion_protocols/`) upserts into `image_study` and `image_series`.
 - `number_of_slices` is populated during ingest and can be backfilled for existing rows.
 
 ### web-app-owned tables (app-managed)

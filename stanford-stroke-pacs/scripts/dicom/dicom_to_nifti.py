@@ -17,7 +17,7 @@ Output:
                          --series-uid is used. Required for --archive.
 
 Reuses:
-  - image_integration_protocols/utils.convert_dicom_to_nifti
+  - image_ingestion_protocols/utils.convert_dicom_to_nifti
   - web-app/cache_manager.warm_study, _is_series_dir_warm, untar_zst
 """
 
@@ -30,9 +30,9 @@ import tempfile
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
-# Make web-app + integration utilities importable.
+# Make web-app + ingestion utilities importable.
 sys.path.insert(0, str(REPO_ROOT / "web-app"))
-sys.path.insert(0, str(REPO_ROOT / "image_integration_protocols"))
+sys.path.insert(0, str(REPO_ROOT / "image_ingestion_protocols"))
 
 import psycopg2
 import psycopg2.extras
