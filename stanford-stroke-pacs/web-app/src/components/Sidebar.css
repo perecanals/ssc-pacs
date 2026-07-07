@@ -167,8 +167,10 @@
   @apply shrink-0 text-xs text-primary bg-transparent border-none cursor-pointer p-0 disabled:opacity-40 disabled:cursor-default;
 }
 
+/* overscroll-contain: a wheel click at the list's edge must not chain into
+   the page scroller — that outside scroll would close the hover popup. */
 .sidebar__lvf-options {
-  @apply flex flex-col overflow-y-auto py-1;
+  @apply flex flex-col overflow-y-auto overscroll-contain py-1;
 }
 
 .sidebar__lvf-option {
