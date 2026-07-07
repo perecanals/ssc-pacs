@@ -77,6 +77,34 @@ describe("useTableData (infinite scroll)", () => {
     expect(result.current.resetNonce).toBeGreaterThan(nonceBefore);
   });
 
+  it("does not reset when inputs change identity but not content (annotation-save churn)", async () => {
+    // After an annotation save, handleMutated refetches label definitions,
+    // which rebuilds allCols/filters with identical content but fresh object
+    // identities. That must NOT reset the list (which would collapse to page 1
+    // and scroll the table to the top).
+    const makeArgs = () => ({
+      ...baseArgs,
+      filters: { labelValues: {} },
+      columnFilters: {},
+      allCols: [{ key: "label:timepoint", level: "series", datatype: "select" }],
+    });
+    const { result, rerender } = renderHook((args) => useTableData(args), {
+      initialProps: makeArgs(),
+    });
+    await waitFor(() => expect(result.current.items).toHaveLength(2));
+    act(() => result.current.loadMore());
+    await waitFor(() => expect(result.current.items).toHaveLength(4));
+    const nonceBefore = result.current.resetNonce;
+
+    apiGet.mockClear();
+    rerender(makeArgs()); // all-new identities, same content
+    await new Promise((r) => setTimeout(r, 20));
+
+    expect(result.current.resetNonce).toBe(nonceBefore);
+    expect(result.current.items).toHaveLength(4);
+    expect(apiGet).not.toHaveBeenCalled();
+  });
+
   it("merges filters.labelValues into the label_filters param (union with column filter)", async () => {
     const allCols = [{ key: "label:timepoint", level: "series", datatype: "select" }];
     const args = {

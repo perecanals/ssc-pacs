@@ -170,10 +170,16 @@ export default function useTableData({ level, config, filters, sortBy, sortDir, 
     fetchPages(1, pageRef.current, "replace");
   }, [fetchPages]);
 
-  // The only effect that auto-fires fetches. `reset` changes identity exactly
-  // when buildParams does (i.e. a reset-trigger input changed), so this runs
-  // once on mount and once per reset-input change — never for loadMore.
-  useEffect(() => { reset(); }, [reset]);
+  // The only effect that auto-fires fetches. Keyed on the serialized page-1
+  // query, NOT on callback identity: after an annotation save handleMutated
+  // refetches label definitions, which rebuilds allCols with identical content
+  // but a fresh identity. That churn must not reset the list — a reset
+  // collapses the accumulated pages to page 1 and scrolls the table to the
+  // top. Only a change in the effective query (filter/sort/level/columnFilter)
+  // resets; everything else goes through reload(), which replaces in place.
+  const querySig = `${config.endpoint}?${buildParams(1)}`;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { reset(); }, [querySig]);
 
   return {
     items,
