@@ -2,6 +2,7 @@ import { Fragment } from "react";
 import PropTypes from "prop-types";
 import InlineEdit from "../InlineEdit";
 import WarmButton from "./WarmButton";
+import CopyPathButtons from "./CopyPathButtons";
 import { formatDatetime, formatNumber } from "../../utils/table";
 
 // Display formatting for built-in columns, shared with index.jsx's
@@ -115,14 +116,17 @@ function GrandChildTable({
                         />
                       )}
                       {gc.seriesinstanceuid && isAdmin && (
-                        <button
-                          onClick={() => onDicomDownload(gc.seriesinstanceuid)}
-                          className="dt__gc-link-btn"
-                          title="Download DICOM as zip"
-                          disabled={downloadingSeries === gc.seriesinstanceuid}
-                        >
-                          {downloadingSeries === gc.seriesinstanceuid ? "\u2026" : <DownloadIcon />}
-                        </button>
+                        <>
+                          <button
+                            onClick={() => onDicomDownload(gc.seriesinstanceuid)}
+                            className="dt__gc-link-btn"
+                            title="Download DICOM as zip"
+                            disabled={downloadingSeries === gc.seriesinstanceuid}
+                          >
+                            {downloadingSeries === gc.seriesinstanceuid ? "\u2026" : <DownloadIcon />}
+                          </button>
+                          <CopyPathButtons seriesUid={gc.seriesinstanceuid} baseClass="dt__gc-link-btn" />
+                        </>
                       )}
                     </td>
                     <td className="dt__gc-td dt__gc-td--spacer" aria-hidden="true" />
@@ -265,14 +269,17 @@ export default function ChildRows({
                     />
                   )}
                   {childConfig.idCol === "seriesinstanceuid" && child.seriesinstanceuid && isAdmin && (
-                    <button
-                      onClick={() => onDicomDownload(child.seriesinstanceuid)}
-                      className="link-btn"
-                      title="Download DICOM as zip"
-                      disabled={downloadingSeries === child.seriesinstanceuid}
-                    >
-                      {downloadingSeries === child.seriesinstanceuid ? "\u2026" : <DownloadIcon />}
-                    </button>
+                    <>
+                      <button
+                        onClick={() => onDicomDownload(child.seriesinstanceuid)}
+                        className="link-btn"
+                        title="Download DICOM as zip"
+                        disabled={downloadingSeries === child.seriesinstanceuid}
+                      >
+                        {downloadingSeries === child.seriesinstanceuid ? "\u2026" : <DownloadIcon />}
+                      </button>
+                      <CopyPathButtons seriesUid={child.seriesinstanceuid} baseClass="link-btn" />
+                    </>
                   )}
                 </td>
                 <td className="dt__child-td dt__child-td--spacer" aria-hidden="true" />

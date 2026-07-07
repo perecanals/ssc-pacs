@@ -798,3 +798,38 @@ def download_dicom_zip(
             "Content-Length": str(len(zs)),
         },
     )
+
+
+# ---------------------------------------------------------------------------
+# Series filesystem paths
+# ---------------------------------------------------------------------------
+
+
+@router.get("/api/series/{seriesinstanceuid}/paths")
+def get_series_paths(
+    seriesinstanceuid: str,
+    user: str = Depends(require_admin),
+):
+    """Filesystem paths for a series: loose DICOM directory + compressed
+    archive. Admin-only like the zip download — server paths are operational
+    detail, exposed for the copy-path quick actions in the table."""
+    conn = get_conn()
+    try:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute(
+                "SELECT dicom_dir_path, dicom_archive_path "
+                "FROM image_series WHERE seriesinstanceuid = %s LIMIT 1",
+                (seriesinstanceuid,),
+            )
+            row = cur.fetchone()
+    finally:
+        conn.close()
+
+    if not row:
+        raise HTTPException(status_code=404, detail="Series not found")
+
+    # Empty string means "no path" in these columns; normalize to null.
+    return {
+        "dicom_dir_path": row.get("dicom_dir_path") or None,
+        "dicom_archive_path": row.get("dicom_archive_path") or None,
+    }
