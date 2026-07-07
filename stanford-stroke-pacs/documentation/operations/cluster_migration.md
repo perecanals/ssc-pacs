@@ -246,10 +246,9 @@ trusting the deployment.
 Once the migration check passes, run the standard two-DB reconciliation for the
 full per-series diff (and to populate the Prometheus gauges). It compares
 `SeriesInstanceUID` between `image_series` and Orthanc's index and confirms
-referenced paths exist on disk, reporting four mismatch categories: *in DB not
-in Orthanc*, *in Orthanc not in DB*, *dicom_dir_path missing*, and
-*dicom_archive_path missing*. Full detail in
-[`reconciliation.md`](reconciliation.md).
+archive paths exist on disk, reporting three mismatch categories: *in DB not
+in Orthanc*, *in Orthanc not in DB*, and *dicom_archive_path missing*. Full
+detail in [`reconciliation.md`](reconciliation.md).
 
 ```bash
 python scripts/data_integrity/reconcile.py            # human-readable summary

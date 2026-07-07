@@ -10,6 +10,12 @@ enforced referential integrity:
 The reconciliation job diffs the two sources and surfaces drift.  It is a
 **read-only observer** — it never mutates either database or the filesystem.
 
+Orthanc-side series UIDs are read directly from `orthanc_db` (one read-only
+query on `maindicomtags`, seconds on a 100k-series index) — the one sanctioned
+read of that database outside Orthanc itself.  If that connection fails, the
+job falls back to REST enumeration (`GET /series/{id}` per series), which is
+functionally identical but takes tens of minutes at scale.
+
 ---
 
 ## Running manually
@@ -39,13 +45,15 @@ storage migration). The fresh-deploy installers
 `systemd/reconciliation.*` / `launchd/com.ssc.reconciliation.plist.in`
 templates.
 
-It used to run every 6 hours, but that was removed: on the full dataset the run
-is a 30–60 min storm of `stat()` calls over every series on cold storage, and
-— unattended — it provided no value because nobody read the reports. It is also
-the kind of job you want to run deliberately, not while an ingestion is in
-flight: the read pass is now careful to release its `image_series` lock before
-the disk scan (so it can no longer block ingestion), but a concurrent run still
-competes for disk I/O.
+It used to run every 6 hours, but that was removed: unattended, it provided no
+value because nobody read the reports. It is also the kind of job you want to
+run deliberately, not while an ingestion is in flight: the read pass is careful
+to release its `image_series` lock before the disk scan (so it cannot block
+ingestion), but a concurrent run still competes for disk I/O. (The run is much
+cheaper than it used to be — series UIDs now come from one `orthanc_db` query
+instead of ~100k REST calls, and the per-series loose-file `stat()` check was
+removed — but the archive-existence pass still stats every archive on cold
+storage.)
 
 ---
 
@@ -112,28 +120,14 @@ curl -u admin http://localhost:8042/tools/lookup -d '<uid>' | jq .
 # pipeline or a manual INSERT.
 ```
 
-### `dicom_dir_missing`
+### `dicom_dir_missing` (removed)
 
-The `dicom_dir_path` column points to a directory that does not exist on disk.
-
-**Common causes:**
-- In `cold_path_cache` mode this is **expected** for cold (evicted) series.
-  Cross-reference `series_cache_state` — if the row is `cold`, this is normal.
-- Loose DICOMs were moved or deleted outside the application.
-
-**Investigation:**
-```bash
-# Check series_cache_state
-psql -d stanford-stroke -c \
-  "SELECT cs.status, cs.last_accessed_at
-   FROM image_series s
-   LEFT JOIN series_cache_state cs ON cs.seriesinstanceuid = s.seriesinstanceuid
-   WHERE s.seriesinstanceuid = '<uid>';"
-```
-
-In `cold_path_cache` mode, filter out cold series when interpreting this
-category.  The reconciliation report includes the raw count; the operator
-should subtract known-cold rows.
+Earlier versions also checked that `dicom_dir_path` exists on disk. The check
+was removed: in `cold_path_cache` mode evicted series legitimately have no
+loose files (the archive is canonical), so it flagged every cold series as a
+mismatch while costing one `stat()` per series on the data disk. To spot-check
+whether a specific series has loose files, cross-reference
+`series_cache_state` (`cold` = no loose files expected).
 
 ### `dicom_archive_missing`
 

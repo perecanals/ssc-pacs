@@ -228,7 +228,7 @@ The stack has two services and two databases.
 - `routes/` — `APIRouter` submodules: `auth`, `preferences`, `studies`, `cold_storage`, `annotations`, `labels`, `admin`, `static`, `proxy` (async OHIF / DICOMweb reverse proxy to Orthanc).
 
 **Two-database model:**
-- `orthanc_db` — Orthanc's internal index; do not query or mutate unless doing explicit Orthanc enrichment work.
+- `orthanc_db` — Orthanc's internal index; do not query or mutate unless doing explicit Orthanc enrichment work. (One sanctioned exception: reconciliation bulk-reads series UIDs from it, read-only, via `PG_ORTHANC_*` creds in `.env` — one query instead of ~100k REST calls.)
 - `stanford-stroke` — upstream read-only tables (`patient`, `image_study`, `image_series`, and the clinical side-table `lvo_clinical_data`) plus web-app-owned tables (`annotations`, `annotations_history`, `label_definitions`, `users`, `user_preferences`, snapshot tables). Connection from `.env`: `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`.
   - `patient` is the **patient-level spine** (one row per patient, comprehensive, populated by the ingest pipeline). `lvo_clinical_data` is no longer the patient roster — it's joined only to prefer its clinical `stroke_date` when a patient is matched (`COALESCE(c.stroke_date, p.stroke_date)`). Patient-level upstream DDL lives in `ssc-sql-db/create_patient.sql`; a `CREATE TABLE IF NOT EXISTS` bootstrap is also in Alembic revision `0006`.
 

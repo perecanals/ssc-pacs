@@ -97,7 +97,6 @@ def update_reconciliation_metrics(summary: dict, duration: float) -> None:
     for category in (
         "in_db_not_in_orthanc",
         "in_orthanc_not_in_db",
-        "dicom_dir_missing",
         "dicom_archive_missing",
     ):
         reconciliation_mismatches_total.labels(category=category).set(

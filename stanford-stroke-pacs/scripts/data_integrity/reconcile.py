@@ -52,7 +52,6 @@ def _print_human(report: dict) -> None:
     print("--- Mismatches ---")
     print(f"  In DB, not in Orthanc:     {s.get('in_db_not_in_orthanc', 0)}")
     print(f"  In Orthanc, not in DB:     {s.get('in_orthanc_not_in_db', 0)}")
-    print(f"  dicom_dir_path missing:    {s.get('dicom_dir_missing', 0)}")
     print(f"  dicom_archive_path missing:{s.get('dicom_archive_missing', 0)}")
     total = s.get("total_mismatches", 0)
     print(f"  Total mismatches:          {total}")
@@ -61,7 +60,6 @@ def _print_human(report: dict) -> None:
     for cat, label in [
         ("in_db_not_in_orthanc", "In DB, not in Orthanc"),
         ("in_orthanc_not_in_db", "In Orthanc, not in DB"),
-        ("dicom_dir_missing", "dicom_dir_path missing on disk"),
         ("dicom_archive_missing", "dicom_archive_path missing on disk"),
     ]:
         items = report.get("mismatches", {}).get(cat, [])
