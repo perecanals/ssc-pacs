@@ -41,15 +41,22 @@ function sanitizeSession(session, defaultFilters) {
   if (level === "patient") {
     filters.modality = null;
   }
-  return { level, filters };
+  // Preview-pane height in px; null = the CSS default. Clamped to the drag
+  // bounds' floor (the CSS max-height caps rendering per-viewport).
+  const rawHeight = Number(session?.previewHeight);
+  const previewHeight = Number.isFinite(rawHeight)
+    ? Math.min(4000, Math.max(320, Math.round(rawHeight)))
+    : null;
+  return { level, filters, previewHeight };
 }
 
 // Persists the Navigator's session state (current hierarchy level + sidebar
-// quick filters) under the `_global` preferences level, and restores it on
-// mount. Mirrors the debounce/flush pattern of the DataTable's
-// usePreferencePersistence. The PUT owns the entire `_global` prefs row —
-// if another consumer ever stores state there, this must merge, not replace.
-export default function useSessionStatePersistence({ ready, currentUser, level, filters, defaultFilters }) {
+// quick filters + preview-pane height) under the `_global` preferences level,
+// and restores it on mount. Mirrors the debounce/flush pattern of the
+// DataTable's usePreferencePersistence. The PUT owns the entire `_global`
+// prefs row — if another consumer ever stores state there, this must merge,
+// not replace.
+export default function useSessionStatePersistence({ ready, currentUser, level, filters, previewHeight, defaultFilters }) {
   const [restored, setRestored] = useState(null);
   const latestSession = useRef(null);
   const hydrated = useRef(false);
@@ -57,7 +64,7 @@ export default function useSessionStatePersistence({ ready, currentUser, level, 
   const dirty = useRef(false);
   const saveTimer = useRef(null);
 
-  latestSession.current = { level, filters };
+  latestSession.current = { level, filters, previewHeight };
 
   useEffect(() => {
     // Wait for the auth probe to settle so the GET fires once, as the
@@ -115,7 +122,7 @@ export default function useSessionStatePersistence({ ready, currentUser, level, 
       }).catch(() => {});
     }, 800);
     return () => clearTimeout(saveTimer.current);
-  }, [currentUser, level, filters]);
+  }, [currentUser, level, filters, previewHeight]);
 
   useEffect(() => {
     const handleUnload = () => flushSave();
@@ -126,5 +133,10 @@ export default function useSessionStatePersistence({ ready, currentUser, level, 
     };
   }, [flushSave]);
 
-  return { loaded: restored !== null, restoredLevel: restored?.level, restoredFilters: restored?.filters };
+  return {
+    loaded: restored !== null,
+    restoredLevel: restored?.level,
+    restoredFilters: restored?.filters,
+    restoredPreviewHeight: restored?.previewHeight ?? null,
+  };
 }

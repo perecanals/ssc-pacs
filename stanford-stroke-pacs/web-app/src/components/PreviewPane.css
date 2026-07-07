@@ -1,13 +1,33 @@
 @reference "../app.css";
 
 .preview-pane {
-  @apply bg-surface border border-border rounded-md overflow-hidden shrink-0;
+  @apply relative bg-surface border border-border rounded-md overflow-hidden shrink-0;
 }
 
 /* Square the top corners while open so the footer-docked pane tabs
-   (.dt__pane-tab) sit flush against the pane's edge. */
+   (.dt__pane-tab) sit flush against the pane's edge. The h-[52vh] is the
+   default height, overridden by an inline style once the user drag-resizes;
+   min/max keep both sources clamped to a usable table + pane split. */
 .preview-pane--open {
-  @apply h-[52vh] min-h-80 rounded-t-none;
+  @apply h-[52vh] min-h-80 max-h-[calc(100vh-16rem)] rounded-t-none;
+}
+
+/* Invisible drag strip along the pane's top edge; shows a primary-colored
+   line on hover/drag. Double-click resets to the default height. */
+.preview-pane__resize-handle {
+  @apply absolute top-0 inset-x-0 h-2 z-10 cursor-row-resize select-none;
+  touch-action: none;
+}
+
+.preview-pane__resize-handle:hover::after,
+.preview-pane--resizing .preview-pane__resize-handle::after {
+  content: "";
+  @apply absolute top-0 inset-x-0 h-0.5 bg-primary;
+}
+
+/* The cross-origin OHIF iframe must not swallow pointer events mid-drag. */
+.preview-pane--resizing .preview-pane__frame {
+  @apply pointer-events-none;
 }
 
 .preview-pane__body {

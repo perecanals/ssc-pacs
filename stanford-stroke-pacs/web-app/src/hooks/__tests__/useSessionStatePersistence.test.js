@@ -2,9 +2,10 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { renderHook, waitFor } from "@testing-library/react";
 
 const apiGet = vi.fn();
+const apiFetch = vi.fn().mockResolvedValue({ ok: true });
 vi.mock("../../api/client", () => ({
   apiGet: (...a) => apiGet(...a),
-  apiFetch: vi.fn().mockResolvedValue({ ok: true }),
+  apiFetch: (...a) => apiFetch(...a),
 }));
 
 import useSessionStatePersistence from "../useSessionStatePersistence";
@@ -23,14 +24,17 @@ const DEFAULT_FILTERS = {
 function restore(session) {
   apiGet.mockReset();
   apiGet.mockResolvedValue({ prefs: { session } });
-  const { result } = renderHook(() =>
-    useSessionStatePersistence({
-      ready: true,
-      currentUser: "tester",
-      level: "patient",
-      filters: DEFAULT_FILTERS,
-      defaultFilters: DEFAULT_FILTERS,
-    }),
+  const { result } = renderHook(
+    (props) =>
+      useSessionStatePersistence({
+        ready: true,
+        currentUser: "tester",
+        level: "patient",
+        filters: DEFAULT_FILTERS,
+        previewHeight: null,
+        defaultFilters: DEFAULT_FILTERS,
+        ...props,
+      }),
   );
   return result;
 }
@@ -93,5 +97,55 @@ describe("useSessionStatePersistence — dataset/import-label restore", () => {
     const result = restore({ level: "patient", filters: { modality: "CT" } });
     await waitFor(() => expect(result.current.loaded).toBe(true));
     expect(result.current.restoredFilters.modality).toBeNull();
+  });
+});
+
+describe("useSessionStatePersistence — previewHeight", () => {
+  beforeEach(() => {
+    apiGet.mockReset();
+    apiFetch.mockClear();
+  });
+
+  it("restores a stored height, rounded and clamped to the floor", async () => {
+    const result = restore({ level: "patient", previewHeight: 480.6 });
+    await waitFor(() => expect(result.current.loaded).toBe(true));
+    expect(result.current.restoredPreviewHeight).toBe(481);
+
+    const clamped = restore({ level: "patient", previewHeight: 12 });
+    await waitFor(() => expect(clamped.current.loaded).toBe(true));
+    expect(clamped.current.restoredPreviewHeight).toBe(320);
+  });
+
+  it("restores null when the stored height is missing or not a number", async () => {
+    const absent = restore({ level: "patient" });
+    await waitFor(() => expect(absent.current.loaded).toBe(true));
+    expect(absent.current.restoredPreviewHeight).toBeNull();
+
+    const garbage = restore({ level: "patient", previewHeight: "tall" });
+    await waitFor(() => expect(garbage.current.loaded).toBe(true));
+    expect(garbage.current.restoredPreviewHeight).toBeNull();
+  });
+
+  it("includes previewHeight in the debounced save", async () => {
+    apiGet.mockReset();
+    apiGet.mockResolvedValue({ prefs: { session: null } });
+    const { result, rerender } = renderHook(
+      ({ previewHeight }) =>
+        useSessionStatePersistence({
+          ready: true,
+          currentUser: "tester",
+          level: "patient",
+          filters: DEFAULT_FILTERS,
+          previewHeight,
+          defaultFilters: DEFAULT_FILTERS,
+        }),
+      { initialProps: { previewHeight: null } },
+    );
+    await waitFor(() => expect(result.current.loaded).toBe(true));
+
+    rerender({ previewHeight: 640 });
+    await waitFor(() => expect(apiFetch).toHaveBeenCalled(), { timeout: 3000 });
+    const body = JSON.parse(apiFetch.mock.calls.at(-1)[1].body);
+    expect(body.prefs.session.previewHeight).toBe(640);
   });
 });

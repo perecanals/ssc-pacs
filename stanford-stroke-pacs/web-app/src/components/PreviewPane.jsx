@@ -1,4 +1,6 @@
+import { useRef } from "react";
 import PropTypes from "prop-types";
+import usePaneResize from "../hooks/usePaneResize";
 import "./PreviewPane.css";
 
 function previewDescription(selection) {
@@ -20,7 +22,12 @@ export default function PreviewPane({
   loadingLabel,
   error,
   isOpen,
+  height,
+  onHeightChange,
 }) {
+  const paneRef = useRef(null);
+  const { resizing, handleProps } = usePaneResize({ paneRef, onResize: onHeightChange });
+
   if (!selection) {
     return null;
   }
@@ -30,7 +37,18 @@ export default function PreviewPane({
   }
 
   return (
-    <section className="preview-pane preview-pane--open">
+    <section
+      ref={paneRef}
+      className={`preview-pane preview-pane--open${resizing ? " preview-pane--resizing" : ""}`}
+      style={height != null ? { height } : undefined}
+    >
+      <div
+        className="preview-pane__resize-handle"
+        {...handleProps}
+        role="separator"
+        aria-orientation="horizontal"
+        aria-label="Resize preview"
+      />
       <div className="preview-pane__body">
         {loading && (
           <div className="preview-pane__state">
@@ -64,4 +82,6 @@ PreviewPane.propTypes = {
   loadingLabel: PropTypes.string,
   error: PropTypes.string,
   isOpen: PropTypes.bool,
+  height: PropTypes.number,
+  onHeightChange: PropTypes.func,
 };

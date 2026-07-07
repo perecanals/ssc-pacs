@@ -41,23 +41,33 @@ export default function Navigator() {
     });
   }, []);
   const [filters, setFilters] = useState(DEFAULT_FILTERS);
+  // null = the CSS default height; a number once the user drag-resizes.
+  const [previewHeight, setPreviewHeight] = useState(null);
 
-  // Restore last session's level + sidebar filters from the `_global`
-  // preferences bucket; saves them back (debounced) whenever they change.
+  // Restore last session's level + sidebar filters + preview-pane height
+  // from the `_global` preferences bucket; saves them back (debounced)
+  // whenever they change.
   const [sessionLoaded, setSessionLoaded] = useState(false);
-  const { loaded: restoreLoaded, restoredLevel, restoredFilters } = useSessionStatePersistence({
+  const {
+    loaded: restoreLoaded,
+    restoredLevel,
+    restoredFilters,
+    restoredPreviewHeight,
+  } = useSessionStatePersistence({
     ready: !authLoading,
     currentUser,
     level,
     filters,
+    previewHeight,
     defaultFilters: DEFAULT_FILTERS,
   });
   useEffect(() => {
     if (!restoreLoaded) return;
     setLevel(restoredLevel);
     setFilters(restoredFilters);
+    setPreviewHeight(restoredPreviewHeight);
     setSessionLoaded(true);
-  }, [restoreLoaded, restoredLevel, restoredFilters]);
+  }, [restoreLoaded, restoredLevel, restoredFilters, restoredPreviewHeight]);
 
   const [previewSelection, setPreviewSelection] = useState(null);
   const [previewUrl, setPreviewUrl] = useState("");
@@ -201,6 +211,8 @@ export default function Navigator() {
               loadingLabel={previewLoadingLabel}
               error={previewError}
               isOpen={previewOpen}
+              height={previewHeight}
+              onHeightChange={setPreviewHeight}
             />
           </div>
         </main>
