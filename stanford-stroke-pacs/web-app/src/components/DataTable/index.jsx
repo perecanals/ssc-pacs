@@ -25,6 +25,7 @@ import useWarmStatus from "./useWarmStatus";
 import TableHeader from "./TableHeader";
 import ChildRows, { DownloadIcon } from "./ChildRows";
 import WarmButton from "./WarmButton";
+import CopyPathButtons from "./CopyPathButtons";
 import { getStorageMode } from "../../api/warmOhif";
 import "../DataTable.css";
 
@@ -394,10 +395,13 @@ function DataTableInner({
               : <WarmButton status={studyStatus[uid]} onWarm={() => warmStudy(uid)} />
           )}
           {rowLevel === "series" && row.seriesinstanceuid && isAdmin && (
-            <button onClick={() => handleDicomDownload(row.seriesinstanceuid)} className="link-btn"
-              title="Download DICOM as zip" disabled={downloadingSeries === row.seriesinstanceuid}>
-              {downloadingSeries === row.seriesinstanceuid ? "\u2026" : <DownloadIcon />}
-            </button>
+            <>
+              <button onClick={() => handleDicomDownload(row.seriesinstanceuid)} className="link-btn"
+                title="Download DICOM as zip" disabled={downloadingSeries === row.seriesinstanceuid}>
+                {downloadingSeries === row.seriesinstanceuid ? "\u2026" : <DownloadIcon />}
+              </button>
+              <CopyPathButtons seriesUid={row.seriesinstanceuid} />
+            </>
           )}
         </>
       );
