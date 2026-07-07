@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from "react";
+import { createPortal } from "react-dom";
 import PropTypes from "prop-types";
 import { useAuth } from "../context/AuthContext";
 import { apiGet, apiPost, apiDelete } from "../api/client";
@@ -142,8 +143,16 @@ function BoolEdit({ level, entity, labelName, ann, onMutated }) {
   );
 }
 
+// Keep in sync with .select-edit__dropdown in InlineEdit.css (max-h / min-w).
+const DROPDOWN_MAX_H = 260;
+const DROPDOWN_MIN_W = 200;
+const DROPDOWN_MARGIN = 8;
+
 function SelectEdit({ level, entity, labelName, defOptions = [], ann, onMutated }) {
   const [open, setOpen] = useState(false);
+  // Fixed-position coordinates for the portaled dropdown, computed from the
+  // trigger's rect at open time. {top} opens downward, {bottom} upward.
+  const [pos, setPos] = useState(null);
   const [annValues, setAnnValues] = useState([]);
   const [search, setSearch] = useState("");
   const [saving, setSaving] = useState(false);
@@ -151,6 +160,7 @@ function SelectEdit({ level, entity, labelName, defOptions = [], ann, onMutated 
   // string, or null when the value was cleared.
   const [pending, setPending] = useState(undefined);
   const ref = useRef(null);
+  const dropdownRef = useRef(null);
 
   const annValue = ann?.value ?? null;
 
@@ -159,13 +169,52 @@ function SelectEdit({ level, entity, labelName, defOptions = [], ann, onMutated 
     if (pending !== undefined && pending === annValue) setPending(undefined);
   }, [annValue, pending]);
 
+  // The dropdown is portaled to <body> with position:fixed so it can't be
+  // clipped by the sub-tables' overflow-auto scroll wrappers (.dt__child-scroll
+  // / .dt__gc-scroll). Anchor it to the trigger's rect, flipping upward when
+  // there isn't room below, and clamping horizontally to the viewport.
+  const openDropdown = () => {
+    const rect = ref.current.getBoundingClientRect();
+    const spaceBelow = window.innerHeight - rect.bottom;
+    const openUp = spaceBelow < DROPDOWN_MAX_H + DROPDOWN_MARGIN && rect.top > spaceBelow;
+    setPos({
+      left: Math.max(
+        DROPDOWN_MARGIN,
+        Math.min(rect.left, window.innerWidth - DROPDOWN_MIN_W - DROPDOWN_MARGIN),
+      ),
+      top: openUp ? undefined : rect.bottom + 4,
+      bottom: openUp ? window.innerHeight - rect.top + 4 : undefined,
+    });
+    setOpen(true);
+  };
+
   useEffect(() => {
     const close = (e) => {
-      if (ref.current && !ref.current.contains(e.target)) setOpen(false);
+      if (ref.current?.contains(e.target)) return;
+      if (dropdownRef.current?.contains(e.target)) return;
+      setOpen(false);
     };
     document.addEventListener("mousedown", close);
     return () => document.removeEventListener("mousedown", close);
   }, []);
+
+  // A fixed-position dropdown doesn't follow its anchor, so close it when any
+  // ancestor scrolls (capture phase catches the table's scroll containers) or
+  // the window resizes. Scrolling the option list itself stays open.
+  useEffect(() => {
+    if (!open) return undefined;
+    const onScroll = (e) => {
+      if (dropdownRef.current?.contains(e.target)) return;
+      setOpen(false);
+    };
+    const onResize = () => setOpen(false);
+    window.addEventListener("scroll", onScroll, true);
+    window.addEventListener("resize", onResize);
+    return () => {
+      window.removeEventListener("scroll", onScroll, true);
+      window.removeEventListener("resize", onResize);
+    };
+  }, [open]);
 
   useEffect(() => {
     if (open) {
@@ -206,20 +255,26 @@ function SelectEdit({ level, entity, labelName, defOptions = [], ann, onMutated 
 
   const currentValue = pending !== undefined ? pending : ann?.value;
 
+  const toggleOpen = () => (open ? setOpen(false) : openDropdown());
+
   return (
     <span className="select-edit" ref={ref} title={ann?.created_by ? `Last edited by ${ann.created_by}` : undefined}>
       {currentValue ? (
-        <SelectPill value={currentValue} onClick={() => setOpen(!open)} />
+        <SelectPill value={currentValue} onClick={toggleOpen} />
       ) : (
         <button
-          onClick={() => setOpen(!open)}
+          onClick={toggleOpen}
           className="select-edit__placeholder"
         >
           Select&hellip;
         </button>
       )}
-      {open && (
-        <div className="select-edit__dropdown">
+      {open && pos && createPortal(
+        <div
+          className="select-edit__dropdown"
+          ref={dropdownRef}
+          style={{ top: pos.top, bottom: pos.bottom, left: pos.left }}
+        >
           <div className="select-edit__search-wrap">
             <input
               type="text"
@@ -271,7 +326,8 @@ function SelectEdit({ level, entity, labelName, defOptions = [], ann, onMutated 
               </div>
             )}
           </div>
-        </div>
+        </div>,
+        document.body,
       )}
     </span>
   );
