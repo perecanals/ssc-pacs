@@ -600,115 +600,107 @@ def ohif_link(
     seriesinstanceuid: str | None = Query(None),
     scope: list[str] | None = Depends(get_dataset_scope),
 ):
-    """Resolve a StudyInstanceUID to an OHIF viewer URL via Orthanc lookup."""
-    # Access check first — before any series_cache_state mutation or Orthanc lookup.
-    if scope is not None:
-        conn = get_conn()
-        try:
-            with conn.cursor() as cur:
-                ensure_study_access(cur, studyinstanceuid, scope)
-        finally:
-            conn.close()
+    """Resolve a StudyInstanceUID to an OHIF viewer URL via Orthanc lookup.
 
-    if STORAGE_MODE == "cold_path_cache":
-        # Per-series preview keys off the series' own warm state (so sifting
-        # through independent series is fast); a study open (no series UID) keeps
-        # the whole-study aggregate behaviour.
-        cs = (
-            get_series_cache_status(seriesinstanceuid)
-            if seriesinstanceuid
-            else get_cache_status(studyinstanceuid)
-        )
-        st = cs.get("status") or "cold"
-        if st in ("warming", "queued"):
-            return {"status": st, "url": None}
-        if st == "cold":
-            detail = (
-                "Series not warmed yet; POST /api/series/{uid}/warm first"
+    Access and series-membership checks run first, on one connection — before
+    any series_cache_state mutation or the Orthanc lookup.
+    """
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            ensure_study_access(cur, studyinstanceuid, scope)
+            if seriesinstanceuid:
+                cur.execute(
+                    "SELECT 1 FROM image_series "
+                    "WHERE studyinstanceuid = %s AND seriesinstanceuid = %s "
+                    "LIMIT 1",
+                    (studyinstanceuid, seriesinstanceuid),
+                )
+                if cur.fetchone() is None:
+                    raise HTTPException(
+                        status_code=404,
+                        detail="Series not found in study",
+                    )
+
+        if STORAGE_MODE == "cold_path_cache":
+            # Per-series preview keys off the series' own warm state (so sifting
+            # through independent series is fast); a study open (no series UID)
+            # keeps the whole-study aggregate behaviour.
+            cs = (
+                get_series_cache_status(seriesinstanceuid)
                 if seriesinstanceuid
-                else "Study not warmed yet; POST /api/studies/{uid}/warm first"
+                else get_cache_status(studyinstanceuid)
             )
-            return {"status": "cold", "url": None, "detail": detail}
-        if st == "error":
-            raise HTTPException(
-                status_code=503,
-                detail=cs.get("error_message") or "Hot cache error for this study",
-            )
-        if st == "hot":
-            conn = get_conn()
-            try:
+            st = cs.get("status") or "cold"
+            if st in ("warming", "queued"):
+                return {"status": st, "url": None}
+            if st == "cold":
+                detail = (
+                    "Series not warmed yet; POST /api/series/{uid}/warm first"
+                    if seriesinstanceuid
+                    else "Study not warmed yet; POST /api/studies/{uid}/warm first"
+                )
+                return {"status": "cold", "url": None, "detail": detail}
+            if st == "error":
+                raise HTTPException(
+                    status_code=503,
+                    detail=cs.get("error_message") or "Hot cache error for this study",
+                )
+            # st == "hot": verify files really exist; repair stale rows if not.
+            with conn.cursor() as cur:
+                if seriesinstanceuid:
+                    cur.execute(
+                        "SELECT dicom_dir_path FROM image_series "
+                        "WHERE seriesinstanceuid = %s AND dicom_dir_path IS NOT NULL "
+                        "LIMIT 1",
+                        (seriesinstanceuid,),
+                    )
+                else:
+                    cur.execute(
+                        "SELECT dicom_dir_path FROM image_series "
+                        "WHERE studyinstanceuid = %s AND dicom_dir_path IS NOT NULL "
+                        "LIMIT 1",
+                        (studyinstanceuid,),
+                    )
+                row = cur.fetchone()
+            files_present = False
+            if row and row[0]:
+                try:
+                    files_present = bool(os.listdir(row[0]))
+                except OSError:
+                    files_present = False
+            if not files_present:
                 with conn.cursor() as cur:
                     if seriesinstanceuid:
                         cur.execute(
-                            "SELECT dicom_dir_path FROM image_series "
-                            "WHERE seriesinstanceuid = %s AND dicom_dir_path IS NOT NULL "
-                            "LIMIT 1",
+                            "DELETE FROM series_cache_state WHERE seriesinstanceuid = %s",
                             (seriesinstanceuid,),
                         )
                     else:
                         cur.execute(
-                            "SELECT dicom_dir_path FROM image_series "
-                            "WHERE studyinstanceuid = %s AND dicom_dir_path IS NOT NULL "
-                            "LIMIT 1",
+                            "DELETE FROM series_cache_state WHERE seriesinstanceuid IN "
+                            "(SELECT seriesinstanceuid FROM image_series "
+                            " WHERE studyinstanceuid = %s)",
                             (studyinstanceuid,),
                         )
-                    row = cur.fetchone()
-                files_present = False
-                if row and row[0]:
-                    try:
-                        files_present = bool(os.listdir(row[0]))
-                    except OSError:
-                        files_present = False
-                if not files_present:
-                    with conn.cursor() as cur:
-                        if seriesinstanceuid:
-                            cur.execute(
-                                "DELETE FROM series_cache_state WHERE seriesinstanceuid = %s",
-                                (seriesinstanceuid,),
-                            )
-                        else:
-                            cur.execute(
-                                "DELETE FROM series_cache_state WHERE seriesinstanceuid IN "
-                                "(SELECT seriesinstanceuid FROM image_series "
-                                " WHERE studyinstanceuid = %s)",
-                                (studyinstanceuid,),
-                            )
-                    conn.commit()
-                    return {
-                        "status": "cold",
-                        "url": None,
-                        "detail": "Cache state was stale; files missing on disk",
-                    }
-            finally:
-                conn.close()
+                conn.commit()
+                return {
+                    "status": "cold",
+                    "url": None,
+                    "detail": "Cache state was stale; files missing on disk",
+                }
             if seriesinstanceuid:
                 touch_access_series(seriesinstanceuid)
             else:
                 touch_access(studyinstanceuid)
+    finally:
+        conn.close()
 
     entries = orthanc_lookup(studyinstanceuid)
     if not entries:
         raise HTTPException(status_code=502, detail="Orthanc lookup failed")
     for entry in entries:
         if entry.get("Type") == "Study":
-            if seriesinstanceuid:
-                conn = get_conn()
-                try:
-                    with conn.cursor() as cur:
-                        cur.execute(
-                            "SELECT 1 FROM image_series "
-                            "WHERE studyinstanceuid = %s AND seriesinstanceuid = %s "
-                            "LIMIT 1",
-                            (studyinstanceuid, seriesinstanceuid),
-                        )
-                        if cur.fetchone() is None:
-                            raise HTTPException(
-                                status_code=404,
-                                detail="Series not found in study",
-                            )
-                finally:
-                    conn.close()
-
             query = {"StudyInstanceUIDs": studyinstanceuid}
             if seriesinstanceuid:
                 query["SeriesInstanceUIDs"] = seriesinstanceuid

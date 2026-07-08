@@ -441,3 +441,94 @@ def test_series_warm_endpoint_returns_202_and_eventually_hot(cold_env, logged_in
 
         assert status == "hot", f"final status was {status!r}"
         assert dicom_dir.is_dir() and any(dicom_dir.iterdir())
+
+
+# ---------------------------------------------------------------------------
+# ohif-link: membership 404 ordering + stale-hot repair (single-connection flow)
+# ---------------------------------------------------------------------------
+
+
+def test_ohif_link_membership_404_before_orthanc_lookup(cold_env, logged_in_client):
+    """A series not in the study 404s without ever calling Orthanc."""
+    import routes.studies as studies_mod
+
+    def _must_not_be_called(_uid):
+        raise AssertionError("orthanc_lookup must not run for a bad series")
+
+    with (
+        patch.object(studies_mod, "STORAGE_MODE", "legacy"),
+        patch.object(studies_mod, "orthanc_lookup", _must_not_be_called),
+    ):
+        resp = logged_in_client.get(
+            f"/api/ohif-link/{cold_env['study_uid']}",
+            params={"seriesinstanceuid": "9.9.9.not.in.study"},
+        )
+    assert resp.status_code == 404
+    assert resp.json()["detail"] == "Series not found in study"
+
+
+def test_ohif_link_stale_hot_row_repaired_to_cold(cold_env, logged_in_client, seeded_db):
+    """A 'hot' cache row with no files on disk is deleted and reported cold."""
+    import psycopg2
+
+    import routes.studies as studies_mod
+
+    series_uid = cold_env["series_uid"]
+    conn = psycopg2.connect(**seeded_db)
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO series_cache_state "
+                "(seriesinstanceuid, status, warmed_at, last_accessed_at, cache_path) "
+                "VALUES (%s, 'hot', now(), now(), %s)",
+                (series_uid, str(cold_env["dicom_dir"])),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+    with patch.object(studies_mod, "STORAGE_MODE", "cold_path_cache"):
+        resp = logged_in_client.get(
+            f"/api/ohif-link/{cold_env['study_uid']}",
+            params={"seriesinstanceuid": series_uid},
+        )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["status"] == "cold"
+    assert body["url"] is None
+    assert "stale" in body["detail"].lower()
+
+    conn = psycopg2.connect(**seeded_db)
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT 1 FROM series_cache_state WHERE seriesinstanceuid = %s",
+                (series_uid,),
+            )
+            assert cur.fetchone() is None, "stale hot row must be deleted"
+    finally:
+        conn.close()
+
+
+def test_ohif_link_hot_series_returns_ready_url(cold_env, logged_in_client):
+    """A genuinely hot series resolves to a ready OHIF URL."""
+    import cache_manager as cm
+    import routes.studies as studies_mod
+
+    series_uid = cold_env["series_uid"]
+    with (
+        patch.object(cm, "STORAGE_MODE", "cold_path_cache"),
+        patch.object(cm, "DICOM_DATA_ROOT", cold_env["dicom_root"]),
+        patch.object(cm, "COLD_ARCHIVE_ROOT", cold_env["cold_root"]),
+        patch.object(studies_mod, "STORAGE_MODE", "cold_path_cache"),
+        patch.object(studies_mod, "orthanc_lookup", lambda _uid: [{"Type": "Study"}]),
+    ):
+        assert cm.warm_series([series_uid])["ok"] is True
+        resp = logged_in_client.get(
+            f"/api/ohif-link/{cold_env['study_uid']}",
+            params={"seriesinstanceuid": series_uid},
+        )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["status"] == "ready"
+    assert series_uid in body["url"]
