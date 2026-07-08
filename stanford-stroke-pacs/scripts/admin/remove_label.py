@@ -19,6 +19,7 @@ load_dotenv(REPO_ROOT / ".env")
 sys.path.insert(0, str(REPO_ROOT / "web-app"))
 
 from db import DB_CONFIG  # noqa: E402
+
 from labelled_table_sync import LEVEL_CONFIGS, sanitize_label_column  # noqa: E402
 
 

@@ -27,8 +27,9 @@ REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(REPO_ROOT / "web-app"))
 
 from db import DB_CONFIG, get_conn  # noqa: E402
-from metrics import update_reconciliation_metrics  # noqa: E402
 from reconciliation import diff_image_series_vs_orthanc, snapshot_summary  # noqa: E402
+
+from metrics import update_reconciliation_metrics  # noqa: E402
 
 REPORTS_DIR = REPO_ROOT.parent / "maintenance" / "reconciliation-reports"
 MAX_REPORTS = 30  # rotate: keep only the most recent N reports

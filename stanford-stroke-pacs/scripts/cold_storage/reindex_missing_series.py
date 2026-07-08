@@ -90,9 +90,10 @@ def main() -> int:
     ap.add_argument("--execute", action="store_true", help="Apply (default: report only).")
     args = ap.parse_args()
 
-    from config import DICOM_DATA_ROOT, STORAGE_MODE  # noqa: E402
     from db import DB_CONFIG  # noqa: E402
     from orthanc_client import ORTHANC_PASS, ORTHANC_URL, ORTHANC_USER  # noqa: E402
+
+    from config import DICOM_DATA_ROOT, STORAGE_MODE  # noqa: E402
 
     if STORAGE_MODE != "cold_path_cache":
         sys.exit(f"STORAGE_MODE is {STORAGE_MODE!r}, not cold_path_cache. Aborting.")

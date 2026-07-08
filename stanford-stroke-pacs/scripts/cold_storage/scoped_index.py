@@ -27,9 +27,9 @@ import argparse
 import os
 import sys
 import time
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Iterable
 
 import requests
 
@@ -306,9 +306,10 @@ def main() -> int:
     args = ap.parse_args()
 
     import psycopg2
-    from config import DICOM_DATA_ROOT, STORAGE_MODE  # noqa: E402
     from db import DB_CONFIG  # noqa: E402
     from orthanc_client import ORTHANC_PASS, ORTHANC_URL, ORTHANC_USER  # noqa: E402
+
+    from config import DICOM_DATA_ROOT, STORAGE_MODE  # noqa: E402
 
     if STORAGE_MODE != "cold_path_cache":
         sys.exit(f"STORAGE_MODE is {STORAGE_MODE!r}, not cold_path_cache. Aborting.")

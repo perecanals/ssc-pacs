@@ -24,7 +24,6 @@ Reuses:
 from __future__ import annotations
 
 import argparse
-import os
 import sys
 import tempfile
 from pathlib import Path
@@ -40,9 +39,10 @@ from dotenv import load_dotenv
 
 load_dotenv(REPO_ROOT / ".env")
 
+from db import DB_CONFIG  # noqa: E402
 from utils import convert_dicom_to_nifti  # noqa: E402
+
 from cache_manager import _is_series_dir_warm, untar_zst, warm_study  # noqa: E402
-from db import DB_CONFIG, get_conn  # noqa: E402
 
 
 def lookup_series(series_uid: str) -> dict:

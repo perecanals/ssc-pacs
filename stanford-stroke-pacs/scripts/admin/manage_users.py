@@ -28,7 +28,6 @@ from pathlib import Path
 import bcrypt
 from dotenv import load_dotenv
 
-
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 ORTHANC_USERS_FILE = REPO_ROOT / "orthanc_users.json"
 ENV_FILE = REPO_ROOT / ".env"

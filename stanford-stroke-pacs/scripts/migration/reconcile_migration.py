@@ -44,12 +44,13 @@ import requests
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(REPO_ROOT / "web-app"))
 
+from db import DB_CONFIG, get_conn  # noqa: E402
+
 from config import (  # noqa: E402
     COLD_ARCHIVE_ROOT,
     DICOM_DATA_ROOT,
     STORAGE_MODE,
 )
-from db import DB_CONFIG, get_conn  # noqa: E402
 
 ORTHANC_URL = os.getenv("ORTHANC_URL", "http://localhost:8042")
 ORTHANC_USER = os.getenv("ORTHANC_ADMIN_USER", "")

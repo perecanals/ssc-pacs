@@ -51,6 +51,7 @@ sys.path.insert(0, str(REPO_ROOT / "web-app"))
 
 from common import LABEL_NAME_RE, record_label_value  # noqa: E402
 from db import DB_CONFIG  # noqa: E402
+
 from labelled_table_sync import (  # noqa: E402
     LEVEL_CONFIGS,
     find_label_column_conflict,

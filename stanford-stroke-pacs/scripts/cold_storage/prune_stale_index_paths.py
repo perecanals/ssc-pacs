@@ -382,9 +382,10 @@ def main() -> int:
     # missing creds). Kept out of module scope so unit tests can import the pure
     # helpers above without a configured environment.
     sys.path.insert(0, str(REPO_ROOT / "web-app"))
-    from config import DICOM_DATA_ROOT, STORAGE_MODE  # noqa: E402
     from db import DB_CONFIG  # noqa: E402
     from orthanc_client import ORTHANC_PASS, ORTHANC_URL, ORTHANC_USER  # noqa: E402
+
+    from config import DICOM_DATA_ROOT, STORAGE_MODE  # noqa: E402
 
     if STORAGE_MODE != "cold_path_cache":
         print(

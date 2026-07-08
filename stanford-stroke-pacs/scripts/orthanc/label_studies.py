@@ -24,7 +24,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 load_dotenv(REPO_ROOT / ".env")
 
 sys.path.insert(0, str(REPO_ROOT / "web-app"))
-from db import DB_CONFIG as SRC_DB, get_conn  # noqa: E402
+from db import DB_CONFIG as SRC_DB  # noqa: E402
 
 ORTHANC_URL = os.getenv("ORTHANC_URL", "http://localhost:8042")
 ORTHANC_USER = os.getenv("ORTHANC_ADMIN_USER")

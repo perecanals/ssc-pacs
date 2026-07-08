@@ -35,6 +35,7 @@ load_dotenv(REPO_ROOT / ".env")
 sys.path.insert(0, str(REPO_ROOT / "web-app"))
 
 from db import get_conn  # noqa: E402
+
 from labelled_table_sync import sync_labelled_rows  # noqa: E402
 
 # array_replace swaps the tag in place; the ARRAY(SELECT DISTINCT …) wrapper

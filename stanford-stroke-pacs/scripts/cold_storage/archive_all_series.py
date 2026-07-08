@@ -31,9 +31,10 @@ load_dotenv(REPO_ROOT / ".env")
 
 # Paths from repo-root config.toml (see web-app/config.py)
 sys.path.insert(0, str(REPO_ROOT / "web-app"))
+from db import DB_CONFIG  # noqa: E402
+
 from cache_manager import archive_path_for_series_dir  # noqa: E402
 from config import COLD_ARCHIVE_ROOT, DICOM_DATA_ROOT  # noqa: E402
-from db import DB_CONFIG  # noqa: E402
 
 DEFAULT_DICOM_ROOT = DICOM_DATA_ROOT
 DEFAULT_COLD = COLD_ARCHIVE_ROOT

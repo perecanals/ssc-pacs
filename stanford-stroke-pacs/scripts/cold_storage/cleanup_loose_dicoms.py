@@ -50,8 +50,9 @@ load_dotenv(REPO_ROOT / ".env")
 
 # Read paths from web-app/config.py so cleanup matches the running stack.
 sys.path.insert(0, str(REPO_ROOT / "web-app"))
-from config import DICOM_DATA_ROOT, STORAGE_MODE  # noqa: E402
 from db import DB_CONFIG  # noqa: E402
+
+from config import DICOM_DATA_ROOT, STORAGE_MODE  # noqa: E402
 
 ORTHANC_DB_CONFIG = dict(
     host=os.getenv("DB_HOST", "localhost"),

@@ -17,7 +17,6 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import os
 import sys
 from pathlib import Path
 from typing import Any
@@ -30,7 +29,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 load_dotenv(REPO_ROOT / ".env")
 
 sys.path.insert(0, str(REPO_ROOT / "web-app"))
-from db import DB_CONFIG, get_conn  # noqa: E402
+from db import DB_CONFIG  # noqa: E402
 
 
 def main() -> int:

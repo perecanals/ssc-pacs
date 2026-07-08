@@ -35,7 +35,7 @@ import os
 import shutil
 import sys
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -47,12 +47,13 @@ REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 load_dotenv(REPO_ROOT / ".env")
 
 sys.path.insert(0, str(REPO_ROOT / "web-app"))
+from db import DB_CONFIG  # noqa: E402
+
 from config import (  # noqa: E402
     DICOM_DATA_ROOT,
     STORAGE_MODE,
     WARMING_TIMEOUT_MINUTES,
 )
-from db import DB_CONFIG, get_conn  # noqa: E402
 
 DEFAULT_MIN_FREE_BYTES = 5 * 1024 * 1024 * 1024  # 5 GiB
 
@@ -187,7 +188,7 @@ def _last_accessed_distribution(conn) -> dict[str, int]:
 def collect(min_free_bytes: int) -> dict[str, Any]:
     dicom_data = Path(DICOM_DATA_ROOT)
     report: dict[str, Any] = {
-        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "generated_at": datetime.now(UTC).isoformat(),
         "storage_mode": STORAGE_MODE,
         "warming_timeout_minutes": float(WARMING_TIMEOUT_MINUTES),
         "dicom_data_root": str(dicom_data),

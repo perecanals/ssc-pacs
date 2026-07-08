@@ -42,8 +42,9 @@ REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 load_dotenv(REPO_ROOT / ".env")
 sys.path.insert(0, str(REPO_ROOT / "web-app"))
 
-from config import DICOM_DATA_ROOT  # noqa: E402
 from db import DB_CONFIG  # noqa: E402
+
+from config import DICOM_DATA_ROOT  # noqa: E402
 
 DEFAULT_PATIENTS = ["2-541", "2-516", "2-506", "2-502", "2-528", "2-488"]
 

@@ -18,7 +18,7 @@ import argparse
 import os
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -70,7 +70,7 @@ def main():
     current = {r[0]: r[1] for r in cur.fetchall()}
     print(f"[{ts()}] {len(current)} series_cache_state rows loaded  ({time.monotonic()-t_start:.1f}s)")
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     to_hot = []
     to_cold = []
 
