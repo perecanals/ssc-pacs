@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useMemo, useRef, Fragment } from "rea
 import { createPortal } from "react-dom";
 import PropTypes from "prop-types";
 import { apiGet } from "../../api/client";
-import { downloadDicomZip, resolveOhifLink, refreshSnapshots, refreshLabelledTables } from "./actions";
+import { downloadDicomZip, resolveOhifLink, refreshLabelledTables } from "./actions";
 import { useColumnPrefs } from "../ColumnSelector";
 import ColumnSelector from "../ColumnSelector";
 import InlineEdit from "../InlineEdit";
@@ -46,7 +46,6 @@ function DataTableInner({
 
   const [showDefModal, setShowDefModal] = useState(false);
   const [editingLabel, setEditingLabel] = useState(null);
-  const [refreshingSnapshots, setRefreshingSnapshots] = useState(false);
   const [refreshingLabelledTables, setRefreshingLabelledTables] = useState(false);
 
   const [sortBy, setSortBy] = useState(serverPrefs.sortBy || config.sortDefault);
@@ -288,15 +287,6 @@ function DataTableInner({
   const handleOhifLink = async (studyinstanceuid, seriesinstanceuid = null) => {
     try { await resolveOhifLink(studyinstanceuid, seriesinstanceuid); }
     catch (e) { alert(e?.message || "Could not resolve OHIF link"); }
-  };
-
-  const handleRefreshSnapshots = async () => {
-    setRefreshingSnapshots(true);
-    try {
-      const data = await refreshSnapshots();
-      alert(`Snapshots refreshed.\n${Object.entries(data.counts).map(([k, v]) => `${k}: ${v} rows`).join("\n")}`);
-    } catch { alert("Failed to refresh snapshots"); }
-    finally { setRefreshingSnapshots(false); }
   };
 
   const handleRefreshLabelledTables = async () => {
@@ -624,22 +614,13 @@ function DataTableInner({
       <div className="dt__footer">
         <div className="dt__footer-left">
           {currentUser && (
-            <>
-              <button
-                onClick={handleRefreshLabelledTables}
-                disabled={refreshingLabelledTables}
-                className="pill-btn"
-              >
-                {refreshingLabelledTables ? "Refreshing…" : "Refresh Labelled Tables"}
-              </button>
-              <button
-                onClick={handleRefreshSnapshots}
-                disabled={refreshingSnapshots}
-                className="pill-btn"
-              >
-                {refreshingSnapshots ? "Refreshing…" : "Refresh Snapshots"}
-              </button>
-            </>
+            <button
+              onClick={handleRefreshLabelledTables}
+              disabled={refreshingLabelledTables}
+              className="pill-btn"
+            >
+              {refreshingLabelledTables ? "Refreshing…" : "Refresh Labelled Tables"}
+            </button>
           )}
         </div>
         <div className="dt__footer-slot">

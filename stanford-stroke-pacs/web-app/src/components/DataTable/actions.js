@@ -28,12 +28,6 @@ export async function resolveOhifLink(studyinstanceuid, seriesinstanceuid = null
   if (url) window.open(url, "_blank");
 }
 
-export async function refreshSnapshots() {
-  const res = await apiFetch("/api/snapshots/refresh", { method: "POST" });
-  if (!res.ok) throw new Error("Failed to refresh snapshots");
-  return res.json();
-}
-
 export async function refreshLabelledTables() {
   const res = await apiFetch("/api/labelled-tables/refresh", { method: "POST" });
   if (!res.ok) throw new Error("Failed to refresh labelled tables");
