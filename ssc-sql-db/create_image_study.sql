@@ -19,3 +19,7 @@ CREATE TABLE IF NOT EXISTS public.image_study (
     decompressed_size_mb double precision,
     CONSTRAINT image_study_pkey PRIMARY KEY (studyinstanceuid)
 );
+
+-- Join/filter hot path (mirrors Alembic revision 0011).
+CREATE INDEX IF NOT EXISTS idx_image_study_patient_id
+    ON public.image_study USING btree (patient_id);

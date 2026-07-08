@@ -32,3 +32,9 @@ CREATE TABLE IF NOT EXISTS public.image_series (
     CONSTRAINT image_series_pkey PRIMARY KEY (seriesinstanceuid)
 );
 
+-- Join/filter hot paths (mirrors Alembic revision 0011).
+CREATE INDEX IF NOT EXISTS idx_image_series_studyinstanceuid
+    ON public.image_series USING btree (studyinstanceuid);
+CREATE INDEX IF NOT EXISTS idx_image_series_patient_id
+    ON public.image_series USING btree (patient_id);
+
