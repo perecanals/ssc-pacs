@@ -1,5 +1,6 @@
-import { useEffect, useState, useCallback, useRef } from "react";
-import { apiFetch, apiGet } from "../api/client";
+import { useEffect, useState, useRef } from "react";
+import { apiGet } from "../api/client";
+import useDebouncedServerSave from "./useDebouncedServerSave";
 
 const VALID_LEVELS = ["patient", "study", "series"];
 
@@ -52,17 +53,13 @@ function sanitizeSession(session, defaultFilters) {
 
 // Persists the Navigator's session state (current hierarchy level + sidebar
 // quick filters + preview-pane height) under the `_global` preferences level,
-// and restores it on mount. Mirrors the debounce/flush pattern of the
-// DataTable's usePreferencePersistence. The PUT owns the entire `_global`
-// prefs row — if another consumer ever stores state there, this must merge,
-// not replace.
+// and restores it on mount. The PUT owns the entire `_global` prefs row — if
+// another consumer ever stores state there, this must merge, not replace.
 export default function useSessionStatePersistence({ ready, currentUser, level, filters, previewHeight, defaultFilters }) {
   const [restored, setRestored] = useState(null);
   const latestSession = useRef(null);
   const hydrated = useRef(false);
   const restoredJson = useRef(null);
-  const dirty = useRef(false);
-  const saveTimer = useRef(null);
 
   latestSession.current = { level, filters, previewHeight };
 
@@ -88,18 +85,11 @@ export default function useSessionStatePersistence({ ready, currentUser, level, 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ready, currentUser]);
 
-  const flushSave = useCallback(() => {
-    clearTimeout(saveTimer.current);
-    if (!currentUser || !dirty.current) return;
-    dirty.current = false;
-    fetch("/api/preferences/_global", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      credentials: "same-origin",
-      keepalive: true,
-      body: JSON.stringify({ prefs: { session: latestSession.current } }),
-    }).catch(() => {});
-  }, [currentUser]);
+  const scheduleSave = useDebouncedServerSave({
+    enabled: !!currentUser,
+    path: "/api/preferences/_global",
+    getBody: () => ({ prefs: { session: latestSession.current } }),
+  });
 
   useEffect(() => {
     // Hydration gate (not just first-render): a save fired before the GET
@@ -112,26 +102,8 @@ export default function useSessionStatePersistence({ ready, currentUser, level, 
       return;
     }
     restoredJson.current = null;
-    dirty.current = true;
-    clearTimeout(saveTimer.current);
-    saveTimer.current = setTimeout(() => {
-      dirty.current = false;
-      apiFetch("/api/preferences/_global", {
-        method: "PUT",
-        body: JSON.stringify({ prefs: { session: latestSession.current } }),
-      }).catch(() => {});
-    }, 800);
-    return () => clearTimeout(saveTimer.current);
-  }, [currentUser, level, filters, previewHeight]);
-
-  useEffect(() => {
-    const handleUnload = () => flushSave();
-    window.addEventListener("beforeunload", handleUnload);
-    return () => {
-      window.removeEventListener("beforeunload", handleUnload);
-      flushSave();
-    };
-  }, [flushSave]);
+    scheduleSave();
+  }, [scheduleSave, currentUser, level, filters, previewHeight]);
 
   return {
     loaded: restored !== null,

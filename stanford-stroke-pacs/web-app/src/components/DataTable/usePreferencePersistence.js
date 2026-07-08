@@ -1,5 +1,5 @@
-import { useEffect, useCallback, useRef } from "react";
-import { apiFetch } from "../../api/client";
+import { useEffect, useRef } from "react";
+import useDebouncedServerSave from "../../hooks/useDebouncedServerSave";
 import { hasFilterValue } from "../../utils/table";
 
 export default function usePreferencePersistence({
@@ -15,8 +15,6 @@ export default function usePreferencePersistence({
   statusColVisible,
 }) {
   const latestPrefs = useRef({});
-  const dirty = useRef(false);
-  const saveTimer = useRef(null);
   const initialRender = useRef(true);
 
   latestPrefs.current = {
@@ -32,43 +30,19 @@ export default function usePreferencePersistence({
     statusColVisible,
   };
 
-  const flushSave = useCallback(() => {
-    clearTimeout(saveTimer.current);
-    if (!currentUser || !dirty.current) return;
-    dirty.current = false;
-    fetch(`/api/preferences/${level}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      credentials: "same-origin",
-      keepalive: true,
-      body: JSON.stringify({ prefs: latestPrefs.current }),
-    }).catch(() => {});
-  }, [currentUser, level]);
+  const scheduleSave = useDebouncedServerSave({
+    enabled: !!currentUser,
+    path: `/api/preferences/${level}`,
+    getBody: () => ({ prefs: latestPrefs.current }),
+  });
 
   useEffect(() => {
+    // The mount render carries the restored prefs — saving them back would
+    // be a wasted PUT.
     if (initialRender.current) {
       initialRender.current = false;
       return;
     }
-    if (!currentUser) return;
-    dirty.current = true;
-    clearTimeout(saveTimer.current);
-    saveTimer.current = setTimeout(() => {
-      dirty.current = false;
-      apiFetch(`/api/preferences/${level}`, {
-        method: "PUT",
-        body: JSON.stringify({ prefs: latestPrefs.current }),
-      }).catch(() => {});
-    }, 800);
-    return () => clearTimeout(saveTimer.current);
-  }, [currentUser, level, visibleKeys, columnOrder, sortBy, sortDir, columnFilters, frozenFirstCol, fontScale, statusColVisible]);
-
-  useEffect(() => {
-    const handleUnload = () => flushSave();
-    window.addEventListener("beforeunload", handleUnload);
-    return () => {
-      window.removeEventListener("beforeunload", handleUnload);
-      flushSave();
-    };
-  }, [flushSave]);
+    scheduleSave();
+  }, [scheduleSave, currentUser, level, visibleKeys, columnOrder, sortBy, sortDir, columnFilters, frozenFirstCol, fontScale, statusColVisible]);
 }

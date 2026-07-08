@@ -2,9 +2,7 @@ import { apiFetch } from "../../api/client";
 import { resolveOhifViewerUrl } from "../../api/warmOhif";
 
 export async function downloadDicomZip(seriesinstanceuid) {
-  const res = await fetch(`/api/series/${encodeURIComponent(seriesinstanceuid)}/dicom-zip`, {
-    credentials: "same-origin",
-  });
+  const res = await apiFetch(`/api/series/${encodeURIComponent(seriesinstanceuid)}/dicom-zip`);
   if (!res.ok) {
     const text = await res.text();
     throw new Error(text || res.statusText);
