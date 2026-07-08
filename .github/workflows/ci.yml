@@ -95,10 +95,13 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
       - name: Install dependencies
-        # Stack requirements cover the ingestion package's imports (pandas,
-        # pydicom, SQLAlchemy, …); web-app requirements-dev pins pytest.
+        # The ingestion executor imports web-app modules (config,
+        # labelled_table_sync → common → fastapi), so the web-app runtime deps
+        # are required alongside the stack deps (pandas, pydicom, …) and the
+        # dev pins (pytest).
         run: |
           pip install -r stanford-stroke-pacs/requirements.txt \
+                      -r stanford-stroke-pacs/web-app/requirements.txt \
                       -r stanford-stroke-pacs/web-app/requirements-dev.txt
       - name: Run pytest
         # DB-free: the scratch-Postgres e2e is gated on SSC_INGEST_AUDIT=1 and

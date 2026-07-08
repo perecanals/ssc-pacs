@@ -61,8 +61,13 @@ describe("Navigator session state persistence", () => {
     // pruned at non-patient levels) with the saved values; the import-label
     // section is titled "Import Label" (not the patient-only "Study Import Label").
     await screen.findByRole("heading", { name: "Import Label" });
-    expect(document.getElementById("sidebar-dataset").value).toBe("lvo");
-    expect(document.getElementById("sidebar-study-import-label").value).toBe("PRECISE");
+    // The dropdown values settle via a separate async flow (the /api/datasets
+    // + import-label fetches populating the <option>s), which can lag the
+    // heading render — poll rather than assert synchronously.
+    await waitFor(() => {
+      expect(document.getElementById("sidebar-dataset").value).toBe("lvo");
+      expect(document.getElementById("sidebar-study-import-label").value).toBe("PRECISE");
+    });
   });
 
   it("falls back to defaults when the stored session is invalid", async () => {
