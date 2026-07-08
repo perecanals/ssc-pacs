@@ -8,18 +8,45 @@ ingested see [`../reference/image_ingestion_protocol.md`](../reference/image_ing
 
 ## Storage modes
 
-Controlled by `[storage].mode` in `config.toml` at the repo root:
+Two modes, set by `[storage].mode` in the stack-root `config.toml`: `legacy`
+(Orthanc indexes loose DICOMs under `dicom_data_root`) and `cold_path_cache`
+(current production — `*.tar.zst` archives under `cold_archive_root` are
+canonical; requires the patched Orthanc image). Full comparison and the retired
+`cold_cache` history live in [`design.md`](design.md) §Storage modes and
+§Migration history.
 
-- **`legacy`** — Orthanc indexes loose DICOMs under `dicom_data_root`. No
-  cache manager, no archives involved at runtime. Ingestion protocol writes
-  loose files only (compression step skipped).
-- **`cold_path_cache`** (current production mode) — Canonical payload is
-  `*.tar.zst` under `cold_archive_root`. Warm extracts archives back to the
-  original `dicom_dir_path`; evict deletes those files. Requires the
-  **custom Orthanc image** with the patched Folder Indexer plugin.
+---
 
-The old `cold_cache` mode (extract to a separate hot-cache dir + REST
-re-ingest) has been removed. See [`design.md`](design.md) §Migration history.
+## Live status
+
+Migration from `legacy` to `cold_path_cache` is complete and validated
+end-to-end in OHIF. Steady state (as of 2026-07-08):
+
+- `config.toml` `[storage].mode = "cold_path_cache"`.
+- Depends on the `ssc-orthanc:patched-indexer` image with
+  `"Indexer": { "RemoveMissingFiles": false }` in `orthanc.json`.
+- Archive coverage and warm/index counts are **not hardcoded here** — they move
+  with every ingestion run. Read them live:
+
+```bash
+# Archive coverage (archived vs total series)
+psql -d stanford-stroke -c "
+  SELECT COUNT(*) FILTER (WHERE dicom_archive_path IS NOT NULL) AS archived,
+         COUNT(*) AS total FROM image_series;"
+
+# Currently-hot series (warm working set)
+psql -d stanford-stroke -c "
+  SELECT COUNT(*) FROM series_cache_state WHERE status = 'hot';"
+
+# Orthanc's view of the index (series / studies / instances / disk)
+source .env
+curl -s -u "${ORTHANC_ADMIN_USER}:${ORTHANC_ADMIN_PASSWORD}" \
+  http://localhost:8042/statistics | python3 -m json.tool
+```
+
+The pre-migration loose DICOM backup (a full copy of the loose tree kept on the
+old Linux host before the move) is a separate safety net; its current fate is
+not tracked here — confirm on that host before assuming it exists or is gone.
 
 ---
 
@@ -42,7 +69,7 @@ re-ingest) has been removed. See [`design.md`](design.md) §Migration history.
 ## Build the patched Orthanc image
 
 ```bash
-cd /home/perecanals/ssc-pacs/orthanc-indexer-patched
+cd orthanc-indexer-patched          # from the checkout root
 docker build -t ssc-orthanc:patched-indexer .
 ```
 
@@ -58,8 +85,9 @@ docker run --rm --entrypoint /bin/sh ssc-orthanc:patched-indexer -c \
 Should print `RemoveMissingFiles` and the startup banner strings.
 
 See [`../../../orthanc-indexer-patched/README.md`](../../../orthanc-indexer-patched/README.md)
-for the full rationale and ABI notes (the builder base must match the
-runtime `orthancteam/orthanc:latest` OS).
+for the full rationale and ABI notes (the builder base must match the runtime
+base image's OS; both are pinned in
+[`../../../orthanc-indexer-patched/Dockerfile`](../../../orthanc-indexer-patched/Dockerfile)).
 
 ---
 
@@ -71,14 +99,14 @@ Orthanc indexed.**
 ### 1. Archive everything
 
 ```bash
-cd /home/perecanals/ssc-pacs/stanford-stroke-pacs
-conda activate pacs
+# from the stack root
+conda activate ssc-pacs
 
-# Preview first
-python scripts/cold_storage/archive_all_series.py --dry-run
+# Preview first (dry-run is the default — no flag)
+python scripts/cold_storage/archive_all_series.py
 
 # Full run; workers=4 is a reasonable starting point
-python scripts/cold_storage/archive_all_series.py --workers 4
+python scripts/cold_storage/archive_all_series.py --execute --workers 4
 
 # Verify coverage
 psql -d stanford-stroke -c "
@@ -95,8 +123,8 @@ find and retry them:
 
 ```bash
 python scripts/cold_storage/list_unarchived_series.py --count
-python scripts/cold_storage/list_unarchived_series.py --patient <id>   # inspect
-python scripts/cold_storage/archive_all_series.py --patient <id>        # retry (idempotent)
+python scripts/cold_storage/list_unarchived_series.py --patient <id>          # inspect
+python scripts/cold_storage/archive_all_series.py --execute --patient <id>    # retry (idempotent)
 ```
 
 `scripts/cold_storage/cleanup_loose_dicoms.py` already filters out NULL-archive rows, so
@@ -109,8 +137,8 @@ the on-demand workflow via `scripts/dicom/dicom_to_nifti.py`.
 ### 2. Deploy the patched Orthanc image
 
 ```bash
-# Build (once)
-cd /home/perecanals/ssc-pacs/orthanc-indexer-patched
+# Build (once) — from the checkout root
+cd orthanc-indexer-patched
 docker build -t ssc-orthanc:patched-indexer .
 
 # Edit docker-compose.yml
@@ -118,8 +146,8 @@ docker build -t ssc-orthanc:patched-indexer .
 
 # Edit orthanc.json — add "RemoveMissingFiles": false to the Indexer block
 
-# Swap (use the dc.sh wrapper — it resolves the DICOM mount from config.toml)
-cd /home/perecanals/ssc-pacs/stanford-stroke-pacs
+# Swap (use the dc.sh wrapper — it resolves the DICOM mount from config.toml).
+# From the stack root:
 scripts/orthanc/dc.sh down
 scripts/orthanc/dc.sh up -d
 
@@ -135,18 +163,20 @@ Indexer plugin: RemoveMissingFiles=false — files missing from disk
 
 ### 3. Switch the web app to cold_path_cache
 
-Edit `config.toml`:
+Edit `config.toml` (use your host's real paths):
 ```toml
 [storage]
 mode = "cold_path_cache"
-dicom_data_root = "/DATA2/pacs_imaging_data"
-cold_archive_root = "/DATA2/pacs_imaging_data_compressed"
-eviction_ttl_hours = 24
+dicom_data_root = "/path/to/imaging_data"      # warm cache (archives extract here)
+cold_archive_root = "/path/to/compressed"      # canonical *.tar.zst store
+eviction_ttl_hours = 336                        # production value (deliberate — 14 days)
 ```
 
-Restart the web app:
+Restart the web app — on the macOS production host that is a launchd kickstart;
+on a Linux/systemd host use `systemctl`:
 ```bash
-sudo systemctl restart ssc-web-app
+sudo launchctl kickstart -k system/com.ssc.webapp   # macOS (production)
+# sudo systemctl restart ssc-web-app                # Linux/systemd
 ```
 
 ### 4. Validate warm/evict in the UI
@@ -186,8 +216,8 @@ With `--execute` it also deletes the cleaned series' `series_cache_state`
 rows (absence reads as cold), so the UI immediately reflects the removal.
 
 ```bash
-cd /home/perecanals/ssc-pacs/stanford-stroke-pacs
-conda activate pacs
+# from the stack root
+conda activate ssc-pacs
 
 # Dry-run by default — see exactly what would be deleted
 python scripts/cold_storage/cleanup_loose_dicoms.py
@@ -219,8 +249,8 @@ accidental deletion in legacy mode.
 
 ## Watchdog and disk-space guard
 
-The cache manager has three robustness invariants (see WS 05). All three are
-configured in `[storage]` of `config.toml`:
+The cache manager has three robustness invariants, all configured in
+`[storage]` of `config.toml`:
 
 ```toml
 warming_timeout_minutes      = 30      # stuck-warming watchdog
@@ -310,12 +340,12 @@ response body is:
   "error": "insufficient_disk_space",
   "required_bytes": 12345678,
   "available_bytes":   234567,
-  "target": "/DATA2/pacs_imaging_data/<patient>/<study>/<series>"
+  "target": "<dicom_data_root>/<patient>/<study>/<series>"
 }}
 ```
 
-When you see this in the journal:
-1. `df -h /DATA2/pacs_imaging_data` to confirm.
+When you see this in the logs:
+1. `df -h <dicom_data_root>` (the `[storage].dicom_data_root` path) to confirm.
 2. Identify what's filling the disk — usually a runaway warm fan-out
    from the UI, or a cron job dumping into the same mount.
 3. Once free space is restored, retrying the warm succeeds (idempotent;
@@ -339,7 +369,7 @@ must clear the underlying cause and retry.
 
 ```bash
 # Human output
-conda activate pacs
+conda activate ssc-pacs
 python scripts/cold_storage/cold_storage_health.py
 
 # JSON for monitoring tools
@@ -349,19 +379,29 @@ python scripts/cold_storage/cold_storage_health.py --json
 Exit code is non-zero if any critical condition holds (stuck rows,
 orphan dirs, or free disk below `--min-free-bytes`, default 5 GiB).
 
-A systemd timer runs the probe every 15 minutes:
+The scheduled probe is installed by the platform unit installer, not by hand —
+there is no `systemd/cold-storage-health.*` to `sudo cp`. The installers render
+it from templates (`systemd/*.in` for Linux, `launchd/*.plist.in` for macOS):
 
 ```bash
-sudo cp systemd/cold-storage-health.service systemd/cold-storage-health.timer /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable --now cold-storage-health.timer
+# macOS (production) — installs com.ssc.cold-storage-health (StartInterval 900s)
+sudo scripts/macos/install_launchd.sh
 
-systemctl list-timers cold-storage-health.timer
-journalctl -u cold-storage-health.service -n 50
+# Linux/systemd — installs the cold-storage-health.timer
+sudo scripts/linux/install_systemd.sh
 ```
 
-Failures appear in `journalctl` (the unit exits non-zero) and the JSON
-report can be wired into your alerting layer once WS 06 lands.
+On production (macOS) check it with:
+```bash
+sudo launchctl print system/com.ssc.cold-storage-health
+tail -f ~/Library/Logs/com.ssc.cold-storage-health.log
+```
+On Linux the equivalents are `systemctl list-timers cold-storage-health.timer`
+and `journalctl -u cold-storage-health.service -n 50`.
+
+The probe exits non-zero on any critical condition; the JSON report
+(`--json`) can be wired into an alerting layer (see
+[`../operations/observability.md`](../operations/observability.md)).
 
 ---
 
@@ -447,7 +487,7 @@ patients in one stop/start. JSON reports land in `maintenance/index-prune-report
 
 If you need to roll back:
 
-1. Restore all loose files to `/DATA2/pacs_imaging_data` (from backup or by
+1. Restore all loose files to `dicom_data_root` (from backup or by
    batch-extracting archives).
 2. Edit `config.toml` → `mode = "legacy"`
 3. Restart the web app.

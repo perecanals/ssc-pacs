@@ -1,21 +1,27 @@
 # DICOM processing recipes
 
 Copy-paste snippets for common operator tasks against the SSC PACS.
-Most of these assume the `pacs` conda environment is active:
+Most of these assume the `ssc-pacs` conda environment is active and that you are
+in the stack root (`stanford-stroke-pacs/`):
 
 ```bash
-conda activate pacs
-cd /home/perecanals/ssc-pacs/stanford-stroke-pacs
+conda activate ssc-pacs
+# cd into the stack root
 ```
+
+Paths shown as `<dicom_data_root>` / `<cold_archive_root>` are the
+`[storage]` values from `config.toml`.
 
 ---
 
 ## DICOM → NIFTI
 
-The Web App does **not** generate NIFTIs automatically in
-`cold_path_cache` mode. Use `scripts/dicom/dicom_to_nifti.py` to produce them on
-demand. It wraps `image_ingestion_protocols/utils.convert_dicom_to_nifti`
-(SimpleITK + GDCM) and supports three input modes.
+NIFTIs are **not** generated during ingestion in `cold_path_cache` mode — the
+ingestion protocol's NIfTI-conversion step is a dormant-by-design path, kept for
+future use but skipped in this mode. Use `scripts/dicom/dicom_to_nifti.py` to
+produce them on demand. It wraps
+`image_ingestion_protocols/utils.convert_dicom_to_nifti` (SimpleITK + GDCM) and
+supports three input modes.
 
 ### 1. From a loose directory
 
@@ -24,7 +30,7 @@ series before cleanup, or a sandbox copy):
 
 ```bash
 python scripts/dicom/dicom_to_nifti.py \
-    --dir /DATA2/pacs_imaging_data/4-0551/1.2.../AX_T2_FLAIR/1.2.../DICOM \
+    --dir <dicom_data_root>/4-0551/1.2.../AX_T2_FLAIR/1.2.../DICOM \
     --out /tmp/ax_t2_flair.nii.gz
 ```
 
@@ -38,7 +44,7 @@ a backup host with no PostgreSQL or Orthanc available:
 
 ```bash
 python scripts/dicom/dicom_to_nifti.py \
-    --archive /DATA2/pacs_imaging_data_compressed/4-0551/1.2.../AX_T2_FLAIR/1.2.../DICOM.tar.zst \
+    --archive <cold_archive_root>/4-0551/1.2.../AX_T2_FLAIR/1.2.../DICOM.tar.zst \
     --out /tmp/ax_t2_flair.nii.gz
 ```
 
@@ -72,13 +78,13 @@ or wait for the TTL-driven eviction loop.
 List the member files:
 
 ```bash
-zstd -dc /DATA2/pacs_imaging_data_compressed/.../DICOM.tar.zst | tar -tvf - | head
+zstd -dc <cold_archive_root>/.../DICOM.tar.zst | tar -tvf - | head
 ```
 
 Pull the DICOM metadata from the first instance without touching disk:
 
 ```bash
-ARCHIVE=/DATA2/pacs_imaging_data_compressed/.../DICOM.tar.zst
+ARCHIVE=<cold_archive_root>/.../DICOM.tar.zst
 FIRST_FILE=$(zstd -dc "$ARCHIVE" | tar -tf - | head -1)
 zstd -dc "$ARCHIVE" | tar -xOf - "$FIRST_FILE" | python3 -c "
 import sys, pydicom
@@ -117,10 +123,11 @@ python scripts/cold_storage/list_unarchived_series.py --patient 4-0551
 python scripts/cold_storage/list_unarchived_series.py --import-label "2026-04-batch"
 ```
 
-Fix: rerun the idempotent archiver against the affected patient(s):
+Fix: rerun the idempotent archiver against the affected patient(s) (dry-run is
+the default — add `--execute` to actually compress):
 
 ```bash
-python scripts/cold_storage/archive_all_series.py --patient 4-0551
+python scripts/cold_storage/archive_all_series.py --execute --patient 4-0551
 ```
 
 `scripts/cold_storage/archive_all_series.py` filters by `dicom_dir_path IS NOT NULL` (not by
@@ -153,9 +160,10 @@ python scripts/cold_storage/cleanup_loose_dicoms.py --execute --patient 4-0551
 python scripts/cold_storage/cleanup_loose_dicoms.py --execute --no-deep-verify
 ```
 
-Suitable for cron:
+Suitable for scheduling. On the macOS production host this runs as a launchd
+job (see [`../guides/deployment_on_mac.md`](../guides/deployment_on_mac.md)); the
+generic form, from the stack root, is:
 
-```cron
-*/15 * * * * cd /home/perecanals/ssc-pacs/stanford-stroke-pacs && \
-  /opt/miniconda3/envs/pacs/bin/python scripts/cold_storage/cleanup_loose_dicoms.py --execute
+```bash
+conda run -n ssc-pacs python scripts/cold_storage/cleanup_loose_dicoms.py --execute
 ```

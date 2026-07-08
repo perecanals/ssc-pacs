@@ -12,7 +12,7 @@ Reduce filesystem usage for the imaging payload by treating compressed
 actively-viewed subset back into the filesystem on demand.
 
 Target access pattern: only ~1–2% of series are opened regularly, so the
-working set is small even if the total archive is large (600 GB → ~TB scale).
+working set stays small even as the total archive grows without bound.
 
 ---
 
@@ -56,9 +56,9 @@ DICOM instances from Orthanc's main DB. Warming the files back later would
 restore them to the right path — but Orthanc's index entries would already be
 gone, so `/tools/lookup` by StudyInstanceUID returns empty.
 
-**Empirically observed:** Orthanc's series count drops continuously
-(`13,801 → 8,810 → 6,911 → ...`) on a stack running in `cold_path_cache`
-mode with most files in a cold archive.
+**Empirically observed** (early 2026, on the ~13.8k-series index of the time):
+Orthanc's series count dropped continuously (`13,801 → 8,810 → 6,911 → ...`) on
+a stack running in `cold_path_cache` mode with most files in a cold archive.
 
 ### The fix: fork and patch
 
@@ -71,8 +71,10 @@ The patch is ~15 lines and lives inside `src/Sources/Plugin.cpp`. See
 [`../../../orthanc-indexer-patched/README.md`](../../../orthanc-indexer-patched/README.md)
 for the source, build, and deploy instructions.
 
-The deployment uses a custom Docker image `ssc-orthanc:patched-indexer`
-which is `orthancteam/orthanc:latest` with the patched `.so` layered on top.
+The deployment uses a custom Docker image `ssc-orthanc:patched-indexer` built
+on a digest-pinned base with the patched `.so` layered on top (see
+[`../../../orthanc-indexer-patched/Dockerfile`](../../../orthanc-indexer-patched/Dockerfile)
+for the exact pins).
 
 ---
 
@@ -223,25 +225,13 @@ See [`../reference/data_stores.md`](../reference/data_stores.md) for column deta
 
 ### API
 
-- `POST /api/studies/{uid}/warm` (authenticated) — queue extraction.
-  Returns **202** with `{ok, queued, studyinstanceuid}` after a synchronous
-  disk-space precheck. Returns **507** if the precheck fails (with
-  `{error: 'insufficient_disk_space', required_bytes, available_bytes, target}`).
-  The extraction runs in `app.state.warm_executor`; clients observe
-  completion via `cache-status` polling.
-- `POST /api/studies/{uid}/evict` (authenticated) — manual eviction
-- `GET  /api/studies/{uid}/cache-status` — aggregate study status over its
-  series_cache_state rows
-- `POST /api/series/{seriesinstanceuid}/warm` (authenticated) — warm a single
-  series (its own series_cache_state row)
-- `POST /api/series/{seriesinstanceuid}/evict` (authenticated) — evict a single
-  series
-- `GET  /api/series/{seriesinstanceuid}/cache-status` — that series'
-  series_cache_state row
-- `POST /api/cache-status/batch` — accepts `study_uids`, `patient_uids`, and
-  `series_uids`; returns `studies`, `patients`, and `series` `{uid: status}` maps
-- `GET  /api/storage-mode` — current storage mode
-- `GET  /api/ohif-link/{uid}` — returns `{status, url}` with cold/warming/ready
+The full cold-storage endpoint table (study/series warm/evict/cache-status,
+`/cache-status/batch`, `/storage-mode`, `/ohif-link`) is documented once, in
+[`runbook.md`](runbook.md#api-reference-cold-storage). The design-relevant
+contract: `POST /warm` returns **202** with `{ok, queued, studyinstanceuid}`
+after a synchronous disk-space precheck (or **507** if it fails), and the
+extraction then runs in `app.state.warm_executor`; clients observe completion by
+polling `cache-status` until `hot`.
 
 ### Frontend
 
@@ -290,7 +280,8 @@ tree on extraction.
 
 **Why `tar.zst`:** benchmarking against ZIP showed consistently smaller
 archives, faster creation, and faster extraction for studies of the sizes
-we see in the PACS. See `benchmarks/dicom_archive_benchmark*.py`.
+we see in the PACS. See `maintenance/benchmarks/dicom_archive_benchmark*.py`
+(gitignored workspace).
 
 ---
 
@@ -328,22 +319,50 @@ When the image ingestion protocol runs, it:
    may be the only copy survive for the archive/reindex retry.
 
 The pipeline **registers just those new subtrees** into Orthanc with a
-**scoped** indexer scan per case (`scripts/cold_storage/scoped_index.py`,
-driving the patched indexer's `POST /indexer/scan` endpoint — no config
-edits, no restarts; always on in `cold_path_cache`; cost O(new data)). Because
-`RemoveMissingFiles` is `false`, future evictions will not remove the rows.
+**scoped** indexer scan per case — the executor calls `index_case_into_orthanc`
+(→ `scripts/cold_storage/scoped_index.py`) **immediately after the case's DB
+commit**, driving the patched indexer's `POST /indexer/scan` endpoint scoped to
+that case's study folders. No config edits, no restarts; always on in
+`cold_path_cache`; cost is O(new data), independent of total index size.
+Registrations are verified per series (`/tools/lookup`); at the end of the run a
+**sanity pass** re-verifies every series ingested in the run and re-registers any
+missing (bounded passes, `Force=true`), logging a final `Orthanc index clean:
+N/N` verdict. Because `RemoveMissingFiles` is `false`, future evictions will not
+remove the rows.
+
+If indexing fails mid-run it is **non-fatal** — the data is safe on disk and in
+the DB; the sanity pass retries, and
+`python scripts/cold_storage/reindex_missing_series.py` is THE backfill for any
+residual gap. Drift is detected by `scripts/data_integrity/reconcile.py`, not a
+tree scan.
 
 > **Why not the continuous whole-tree scan?** The Folder Indexer's background scan
 > re-walks every dir in `Indexer.Folders` each `Interval`; at millions of files
-> over the virtiofs mount a pass is glacial (O(whole tree), never scales), and if
-> it runs during ingestion it can OOM Orthanc. In `cold_path_cache` the only event
-> that ever needs indexing is ingestion (warm/evict is index-neutral), so
-> steady-state `Indexer.Folders` is `[]` (no continuous scan). Backfill any gap
-> with `scripts/cold_storage/reindex_missing_series.py`; detect drift with
-> `scripts/data_integrity/reconcile.py`.
+> over the virtiofs mount a pass is glacial (O(whole tree), never scales). In
+> `cold_path_cache` the only event that ever needs indexing is ingestion
+> (warm/evict is index-neutral — `RemoveMissingFiles=false` keeps rows across
+> eviction), so steady-state `Indexer.Folders` is `[]` (no continuous scan).
+
+**OOM caveat.** The plugin's own DICOM cache plateaus (~0.35 GiB), but Orthanc
+*core*'s working set grows during sustained registration, and one uninterrupted
+scan over hundreds of thousands of instances OOMs the Colima VM. The kill is
+**VM-global**, so `docker inspect`'s `OOMKilled` reads **false** — misleading.
+Two guards, both in `scoped_index.py`:
+
+- **Bounded passes.** Large registrations must go through
+  `scoped_index.register_in_bounded_passes` (default ≤350 series / ≤40k
+  instances per pass, 120 s settle between passes). Per-case scans are naturally
+  bounded; `reindex_missing_series.py` uses bounded passes automatically.
+- **Per-file whale limit.** Pass bounds alone are not enough: registering a file
+  transiently costs Orthanc ~2–3× its size in RAM, so a single multi-GB file
+  (e.g. an XA angio multiframe run) OOMs the 8 GiB VM by itself.
+  `reindex_missing_series.py` skips any series containing a file larger than
+  `--max-file-mb` (default 800) and lists them for separate handling
+  (`scoped_index.dir_max_file_bytes` is the reusable check).
 
 After indexing is confirmed, loose files for the newly-ingested studies are
-deleted by the run itself (default) or reclaimable later via
+deleted by the run itself (`cleanup_loose_after_indexing`, default `true`; set
+`false` in the run YAML to keep them) or reclaimable later via
 `cleanup_loose_dicoms.py` / the TTL sweep (they're already in the archive).
 
 ### Disk budget
@@ -355,10 +374,12 @@ warm. Plan for peak working-set size based on expected concurrent viewers.
 
 ## Docker mount
 
-The Orthanc bind mount is the legacy root, read-only:
+The Orthanc bind mount is the uncompressed DICOM root, read-only. The source is
+not hardcoded in `docker-compose.yml` — it is `${DICOM_MOUNT_SOURCE}`, which
+`scripts/orthanc/dc.sh` exports from `config.toml` `[storage].dicom_data_root`:
 
 ```yaml
-- /DATA2/pacs_imaging_data:/dicom-data:ro
+- ${DICOM_MOUNT_SOURCE}:/dicom-data:ro
 ```
 
 Orthanc never writes. The Web App (running on the host, outside the

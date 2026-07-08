@@ -49,34 +49,15 @@ If unsure, you are doing a fresh install.
 
 ---
 
-## 1. What must already exist
+## 1. Schema vs. data — what this runbook does and doesn't create
 
-For a **fresh install**, this runbook creates the databases, roles, and schema
-for you (§3) — you do **not** need a pre-existing metadata layer. What you must
-supply is the *content*: real rows in the upstream `patient` / `image_study` /
-`image_series` tables and the matching DICOM tree on disk.
-
-Minimum required inputs:
-
-- a Linux host
-- Docker Engine with `docker compose`
-- a PostgreSQL **server** reachable from the host (installed; the databases
-  themselves are created in §3)
-- a superuser or a role with `CREATEDB`/`CREATEROLE` to bootstrap the databases
-- `python3` and `pip`
-- Node.js and npm (for building the web app frontend)
-- a DICOM directory tree on disk
-- the **data** to populate `image_series` / `image_study` / `patient` (the
-  schema is created in §3; loading rows is the ingestion step, not part of the
-  service bootstrap)
-
-Important:
-
-- this repo creates the upstream **table schema** (§3, from `ssc-sql-db/`) but
-  does **not** generate the upstream **data** — that comes from your source
-  metadata or the ingestion pipeline
-- `image_ingestion_protocols/` is legacy/site-specific pipeline code, not the
-  normal bootstrap path for a fresh PACS install
+For a **fresh install**, this runbook creates the databases, roles, and **table
+schema** for you (§3, from `ssc-sql-db/`) — you do **not** need a pre-existing
+metadata layer. What you must supply is the *content*: real rows in the upstream
+`patient` / `image_study` / `image_series` tables (loaded from your source
+metadata or the ingestion pipeline — §5 Step 3d) and the matching DICOM tree on
+disk. `image_ingestion_protocols/` is legacy/site-specific pipeline code, not the
+normal bootstrap path for a fresh install.
 
 ---
 
@@ -169,17 +150,10 @@ At minimum, the current scripts rely on these columns:
 - `study_type` (used by `scripts/orthanc/label_studies.py`)
 - `studydescription` (used by `scripts/orthanc/enrich_orthanc.py`)
 
-How the repo uses these tables:
-
-- web app browsing reads from them
-- `scripts/data_integrity/reconcile.py` compares `image_series` against Orthanc's index
-- `scripts/orthanc/label_studies.py` reads `study_type` from `image_study` and `modality` from
-  `image_series`
-- `scripts/orthanc/enrich_orthanc.py` uses them for display enrichment
-
-If the new environment does not have equivalent tables yet, the PACS service
-layer can still be deployed, but the web app and metadata-driven scripts will
-not function as documented.
+Beyond the web app (which browses both tables),
+`scripts/data_integrity/reconcile.py` compares `image_series` against Orthanc's
+index. Without equivalent tables the service layer still deploys, but the web
+app and metadata-driven scripts will not function as documented.
 
 ---
 
@@ -244,8 +218,9 @@ The stack uses **two databases on one PostgreSQL server** (see
 
 - **`stanford-stroke`** — the research/app DB. Holds the upstream metadata
   (`patient`, `image_study`, `image_series`, optional `lvo_clinical_data`) **and**
-  the web-app-owned tables (`users`, `annotations`, `label_definitions`,
-  `user_preferences`, snapshots).
+  the web-app-owned tables (`users`, `annotations`, `annotations_history`,
+  `label_definitions`, `user_preferences`, `series_cache_state`, and the
+  `*_labelled` mirrors).
 - **`orthanc_db`** — Orthanc's internal index.
 
 > **Migration install:** skip the *create + schema* sub-steps below — you
@@ -322,18 +297,12 @@ python scripts/admin/manage_users.py rotate-service-account
 python scripts/admin/manage_users.py check-service-account
 ```
 
-What this step accomplishes:
-
-- ensures `users` exists in the research/app DB
-- inserts the admin user with a bcrypt password hash
-- mirrors the admin entry into `orthanc_users.json`
-- writes the service-account credential into `orthanc_users.json` and `.env`
-
-Why this matters before first start:
-
-- Orthanc auth is enabled and depends on `orthanc_users.json` existing with at
-  least the service-account entry — without it, Web App's proxy and host-local
-  scripts will get 401s from Orthanc.
+This ensures `users` exists in the research/app DB, inserts the admin (bcrypt
+hash) and mirrors it into `orthanc_users.json`, and writes the service-account
+credential into both `orthanc_users.json` and `.env`. It matters **before first
+start** because Orthanc auth depends on `orthanc_users.json` carrying at least
+the service-account entry — without it, the Web App proxy and host-local scripts
+get 401s from Orthanc.
 
 ### Step 5. Build the patched Orthanc image, then start Orthanc (Docker)
 
@@ -417,43 +386,17 @@ curl -s -u <user>:<pass> http://localhost:8042/statistics | python3 -m json.tool
 
 ### Step 10. Run post-index tasks as needed
 
-There are two optional-but-useful post-index tasks.
+Two optional-but-useful post-index tasks:
 
-#### Option A. Display enrichment in Orthanc
-
-Run:
-
-```bash
-python scripts/orthanc/enrich_orthanc.py
-```
-
-Use this when:
-
-- the DICOM headers are anonymized or not operator-friendly
-- you want OE2 to display `patient_id` (mapped to Patient ID/Name),
-  `seriesdescription` (mapped to Series Description), and `studydescription`
-  from `image_study` (mapped to Study Description) in the source metadata
-
-Skip this when:
-
-- the DICOM headers already contain acceptable values for Orthanc/OE2
-- you do not want to mutate Orthanc's PostgreSQL index tables
-- you only need indexing, OHIF, or the web app workflow
-
-#### Option B. Pre-seed Orthanc study labels
-
-Run:
-
-```bash
-python scripts/orthanc/label_studies.py
-```
-
-Use this when:
-
-- `image_study` provides `study_type` and `image_series` provides `modality`
-- you want those values available immediately as Orthanc study labels in OE2
-
-This script is idempotent and safe to re-run after new studies are indexed.
+- **Display enrichment** — `python scripts/orthanc/enrich_orthanc.py`. Run it
+  only when the DICOM headers are anonymized or not operator-friendly: it maps
+  `patient_id`, `seriesdescription`, and `studydescription` (from `image_study`)
+  into OE2's Patient/Series/Study Description fields, mutating Orthanc's
+  PostgreSQL index tables. Skip it if the headers already display acceptably or
+  you only need indexing/OHIF/the web app.
+- **Pre-seed study labels** — `python scripts/orthanc/label_studies.py`. Turns
+  `image_study.study_type` + `image_series.modality` into Orthanc study labels
+  in OE2. Idempotent and safe to re-run after new studies are indexed.
 
 ---
 
@@ -533,19 +476,10 @@ Expected outcomes:
 
 ### 6.4 Index coverage check
 
-If the source metadata table is present, run:
-
-```bash
-python scripts/data_integrity/reconcile.py
-```
-
-This compares `SeriesInstanceUID` values between:
-
-- `image_series`
-- Orthanc's indexed series reported via REST API
-
-It is the most useful repo-provided verification that indexing actually matches
-the expected metadata inventory.
+`reconcile.py` (§6.2) is the most useful coverage check: it compares
+`SeriesInstanceUID` values between `image_series` and Orthanc's indexed series
+(via REST), so it verifies that indexing actually matches the expected metadata
+inventory. Run it once the source metadata tables are populated.
 
 ---
 
@@ -700,18 +634,14 @@ them.
 
 ## 11. Known repo caveats
 
-These are current implementation mismatches worth remembering during deployment:
-
-- `scripts/admin/teardown.sh` is destructive and should not be used casually; it does not
-  stop the web app systemd service (it sources the stack-root `.env`, resolved
-  relative to its own location)
-- bring the stack up with `scripts/orthanc/dc.sh`, not bare `docker compose` — the
-  DICOM mount source comes from `config.toml` via the wrapper, so bare
-  `docker compose up` errors that `DICOM_MOUNT_SOURCE` is unset
-- `scripts/orthanc/check_status.sh` uses the `ssc-orthanc` container name and reads Orthanc
-  credentials from repo-root `.env`
-
-Treat these as current repo caveats, not as recommended design patterns.
+- `scripts/admin/teardown.sh` is destructive; it sources the stack-root `.env`
+  (resolved relative to its own location) and does **not** stop the web app
+  service — use with care.
+- Always bring the stack up with `scripts/orthanc/dc.sh`, not bare `docker
+  compose` (which errors that `DICOM_MOUNT_SOURCE` is unset — the wrapper
+  exports it from `config.toml`).
+- `scripts/orthanc/check_status.sh` validates the `ssc-orthanc` container only
+  (not the web app) and reads Orthanc credentials from `.env`.
 
 ---
 

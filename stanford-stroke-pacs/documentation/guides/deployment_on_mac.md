@@ -19,9 +19,9 @@ setup must be adapted.
 | # | Linux assumption | Why it breaks on macOS | Fix (section) |
 |---|---|---|---|
 | 1 | `network_mode: host` in `docker-compose.yml` | Docker (Colima) runs Linux in a VM; host networking does **not** publish container ports to the Mac, and the container can't reach `localhost` Postgres | §4 |
-| 2 | Image is Linux/amd64 | Apple Silicon is arm64; `orthancteam/orthanc` may be amd64-only | §3 |
+| 2 | Image is Linux/amd64 | Apple Silicon is arm64; the patched-indexer base image may be amd64-only | §3 |
 | 3 | Web App runs under **systemd** (`ssc-web-app.service`) | macOS has no systemd | §6 |
-| 4 | `/DATA2/...` paths, `sudo -u postgres` | Those paths don't exist; Homebrew Postgres has no `postgres` system user (your Mac user is the superuser) | §5 |
+| 4 | Linux-style data paths, `sudo -u postgres` | Those paths don't exist; Homebrew Postgres has no `postgres` system user (your Mac user is the superuser) | §5 |
 
 On an **Intel Mac**, difference #2 disappears.
 
@@ -80,10 +80,12 @@ inside the VM with `colima ssh -- ls /opt/ssc-pacs/ssc-pacs/stanford-stroke-pacs
 
 Cold storage requires the custom `ssc-orthanc:patched-indexer` image (see
 [`orthanc-indexer-patched/README.md`](../../../orthanc-indexer-patched/README.md)).
-First check whether the base supports your architecture:
+First check whether the runtime base image (pinned by digest in
+[`orthanc-indexer-patched/Dockerfile`](../../../orthanc-indexer-patched/Dockerfile))
+supports your architecture:
 
 ```bash
-docker manifest inspect orthancteam/orthanc | grep -E 'architecture'
+docker manifest inspect "$(grep -oE '^FROM [^ ]+' orthanc-indexer-patched/Dockerfile | tail -1 | cut -d' ' -f2)" | grep -E 'architecture'
 ```
 
 - **Intel Mac** — build normally: `docker build -t ssc-orthanc:patched-indexer .`
@@ -204,23 +206,20 @@ Two Mac-specific adaptations to the documented bootstrap:
 
 ## 6. Web App as a launchd service (start on boot)
 
-There is no systemd; `ssc-web-app.service` does not apply. The repo ships
-ready-made plists in [`launchd/`](../../launchd/) — `com.ssc.colima`,
+There is no systemd; `ssc-web-app.service` does not apply. **Headless servers
+(no console login) must use LaunchDaemons, not LaunchAgents** — a per-user
+LaunchAgent only loads inside a GUI login session, so over SSH
+`launchctl bootstrap gui/$UID …` (and `brew services`) fail with *"Domain does
+not support specified action"*. The repo ships daemon **templates** in
+[`launchd/`](../../launchd/) (`*.plist.in`, `__TOKENS__` for
+user/home/Homebrew prefix/conda env/repo path) — `com.ssc.colima`,
 `com.ssc.postgres`, `com.ssc.webapp`, and the nightly `com.ssc.pg-backup-*`,
-`com.ssc.orthanc-storage-backup`, `com.ssc.cold-storage-health` jobs — so you
-don't hand-write them. (Reconciliation is on-demand only — no daemon; see
-[`operations/reconciliation.md`](../operations/reconciliation.md).) The web-app plist
-runs `…/envs/ssc-pacs/bin/uvicorn app:app --host 0.0.0.0 --port 8043` with
-`RunAtLoad` + `KeepAlive`.
-
-**Headless servers (no console login): use LaunchDaemons, not LaunchAgents.**
-A per-user LaunchAgent only loads inside a GUI login session — on a headless box
-accessed over SSH, `launchctl bootstrap gui/$UID …` (and `brew services`) fail with
-*"Domain does not support specified action"*. Install as **system LaunchDaemons**
-instead. This repo ships daemon **templates** in [`launchd/`](../../launchd/)
-(`*.plist.in`, with `__TOKENS__` for user/home/Homebrew prefix/conda env/repo
-path) and an installer that resolves those for this host (auto-derived; override
-in `deploy.env`), renders them, and does the whole cutover — Colima, Postgres, the
+`com.ssc.orthanc-storage-backup`, `com.ssc.cold-storage-health` jobs. The
+web-app daemon runs `…/envs/ssc-pacs/bin/uvicorn app:app --host 0.0.0.0 --port
+8043` with `RunAtLoad` + `KeepAlive`. (Reconciliation is on-demand only — no
+daemon; see [`operations/reconciliation.md`](../operations/reconciliation.md).)
+An installer resolves the tokens for this host (auto-derived; override in
+`deploy.env`), renders them, and does the whole cutover — Colima, Postgres, the
 Web App, **and** the nightly backup/health jobs:
 
 ```bash
@@ -284,7 +283,7 @@ Verify: warm a study in the UI (files appear under `dicom_data_root`), and
 
 | Component | Boot persistence on macOS |
 |---|---|
-| Orthanc (Docker) | `restart: unless-stopped` in compose **plus** the Colima VM supervised by the `com.ssc.colima` LaunchDaemon ([`launchd/com.ssc.colima.plist.in`](../../launchd/com.ssc.colima.plist.in), `KeepAlive` + `ThrottleInterval=30`). It runs a watchdog ([`scripts/macos/colima_watchdog.sh`](../../scripts/macos/colima_watchdog.sh)) that starts the VM at boot via the idempotent [`scripts/macos/colima_start.sh`](../../scripts/macos/colima_start.sh) and restarts it within ~30s on crash/stop. The container will not come back without the Colima VM running. (Do **not** point the daemon at `colima_start.sh` directly — it exits 0 once the VM is up, which `KeepAlive` would busy-loop.) |
+| Orthanc (Docker) | `restart: unless-stopped` in compose **plus** the Colima VM supervised by the `com.ssc.colima` watchdog LaunchDaemon (§6). The container cannot come back without the VM, which the watchdog starts at boot and restarts within ~30s on crash/stop. (Do **not** point the daemon at `colima_start.sh` directly — it exits 0 once the VM is up, which `KeepAlive` would busy-loop.) |
 | PostgreSQL | `com.ssc.postgres` LaunchDaemon (installed by `install_launchd.sh`). On a headless box `brew services` can't load a `gui/$UID` agent, so a system daemon running `postgres -D <datadir>` as `pere` is used instead. |
 | Web App | `com.ssc.webapp` LaunchDaemon (§6, `RunAtLoad` + `KeepAlive`). |
 
