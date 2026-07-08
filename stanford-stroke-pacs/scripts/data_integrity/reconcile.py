@@ -6,9 +6,13 @@ checks that referenced paths exist on disk, and emits a human-readable
 summary or machine-readable JSON report.
 
 Usage:
-    python scripts/reconcile.py               # human-readable summary
-    python scripts/reconcile.py --json         # write JSON report and print path
-    python scripts/reconcile.py --json --quiet # JSON only, no stdout
+    python scripts/data_integrity/reconcile.py                # human-readable summary
+    python scripts/data_integrity/reconcile.py --json         # write JSON report and print path
+    python scripts/data_integrity/reconcile.py --json --quiet # JSON only, no stdout
+
+Note: importing ``reconciliation`` fails fast when ``ORTHANC_ADMIN_USER`` /
+``ORTHANC_ADMIN_PASSWORD`` are unset — the ``db`` import chain load_dotenvs the
+repo ``.env``, which carries both, so run from a checkout with a populated .env.
 """
 
 from __future__ import annotations

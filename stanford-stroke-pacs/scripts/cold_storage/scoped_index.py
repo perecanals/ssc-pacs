@@ -1,18 +1,11 @@
 #!/usr/bin/env python3
 """Register specific series into Orthanc via the patched indexer's on-demand scan.
 
-Why this exists
----------------
-The patched Folder Indexer only discovers new files by re-walking every directory in
-``orthanc.json`` ``Indexer.Folders`` each ``Interval``. With the whole ``/dicom-data``
-tree configured (millions of files over virtiofs) a pass is glacial and does not scale.
-But in ``cold_path_cache`` mode the ONLY event that ever needs indexing is ingestion of
-new data — whose paths we already know from ``image_series.dicom_dir_path``.
-
 The SSC fork exposes ``POST /indexer/scan`` (see orthanc-indexer-patched/PATCHES.md):
 it scans exactly the folders you give it and registers their DICOMs — cost O(new data),
 independent of the total index size. This module is a thin client over that endpoint:
 no config edits, no Orthanc restarts, nothing to leave in a dirty state.
+(Steady-state ``Indexer.Folders`` is ``[]`` — this is the only indexing path.)
 
 - ``Force`` (optional) drops the target folders' existing index rows first, so
   "orphaned-row" series (a row exists but the instance was never registered, e.g. a

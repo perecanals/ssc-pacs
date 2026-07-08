@@ -5,22 +5,15 @@ Prune stale duplicate path rows from Orthanc's Folder Indexer index
 
 Why this exists
 ---------------
-The deployment runs the patched Folder Indexer with ``RemoveMissingFiles: false``
-(required so cold-storage eviction does not purge Orthanc's index). A side effect:
-the indexer never prunes path rows whose files disappear. During earlier
-migrations/re-ingests some series' DICOM files briefly lived under the *wrong*
-study directory; the indexer registered them there, then the data was reorganized
-so files now live under each series' canonical ``image_series.dicom_dir_path``.
-The result is Orthanc instances that carry **two** ``Files`` rows -- one valid
-(correct dir) and one stale (wrong dir, file gone). The plugin resolves an
-instance to a file with ``SELECT path FROM Files WHERE instanceId=?`` and takes the
-*first* row, so it intermittently returns the dead path -> Orthanc 500 -> OHIF
-shows a blank pane.
+With ``RemoveMissingFiles: false`` the patched indexer never prunes rows for
+vanished files, so an instance whose files once sat under a wrong directory can
+carry two ``Files`` rows -- one valid, one stale. The plugin takes the *first*
+row on lookup, so it intermittently serves the dead path -> Orthanc 500 -> blank
+OHIF pane. Invariant: a row is **stale** iff its dir != the DB-canonical dir for
+the instance's true series.
 
 Detection (warm-state independent)
 ----------------------------------
-A ``Files`` row is **stale** iff its directory != the DB-canonical directory for
-the instance's *true* SeriesInstanceUID:
   * instance -> true SeriesInstanceUID: Orthanc ``POST /tools/find`` (Level=Series,
     Query {PatientID}, Expand) -- the UID comes from the DICOM header, so it is
     correct regardless of where the file sits on disk.
