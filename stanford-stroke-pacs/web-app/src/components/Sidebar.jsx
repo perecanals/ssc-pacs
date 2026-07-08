@@ -5,7 +5,7 @@ import { groupByInstrument, LEVEL_ORDER, LEVEL_LABELS } from "../utils/table";
 import LabelValueFilter from "./Sidebar/LabelValueFilter";
 import "./Sidebar.css";
 
-export default function Sidebar({ level, filters, onFilterChange, open, onToggle }) {
+export default function Sidebar({ level, filters, onFilterChange, open, onToggle, labelsRefreshNonce = 0 }) {
   const [labelSummary, setLabelSummary] = useState([]);
   const [labelDefs, setLabelDefs] = useState([]);
   const [studyImportLabels, setStudyImportLabels] = useState([]);
@@ -29,9 +29,11 @@ export default function Sidebar({ level, filters, onFilterChange, open, onToggle
     }
   }, []);
 
+  // Refetch on mount and whenever an annotation mutation elsewhere bumps the
+  // nonce (Navigator relays it from the DataTable's onLabelsMutated).
   useEffect(() => {
     fetchLabels();
-  }, [fetchLabels]);
+  }, [fetchLabels, labelsRefreshNonce]);
 
   // "<level>:<name>" -> { datatype, options } for select-aware rendering.
   const defByKey = useMemo(() => {
@@ -109,11 +111,6 @@ export default function Sidebar({ level, filters, onFilterChange, open, onToggle
       });
     return () => { cancelled = true; };
   }, []);
-
-  useEffect(() => {
-    window.__refreshLabelSidebar = fetchLabels;
-    return () => { delete window.__refreshLabelSidebar; };
-  }, [fetchLabels]);
 
   const handleLabelClick = (label, labelLevel) => {
     if (filters.label === label && filters.labelLevel === labelLevel) {
@@ -324,4 +321,5 @@ Sidebar.propTypes = {
   onFilterChange: PropTypes.func.isRequired,
   open: PropTypes.bool.isRequired,
   onToggle: PropTypes.func.isRequired,
+  labelsRefreshNonce: PropTypes.number,
 };

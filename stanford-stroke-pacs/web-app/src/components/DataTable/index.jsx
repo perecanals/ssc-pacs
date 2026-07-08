@@ -38,6 +38,7 @@ function DataTableInner({
   previewOpen,
   previewUrl,
   onPreviewClose,
+  onLabelsMutated,
   serverPrefs,
 }) {
   const { currentUser, isAdmin } = useAuth();
@@ -239,7 +240,7 @@ function DataTableInner({
         }
       }
     }
-    window.__refreshLabelSidebar?.();
+    onLabelsMutated?.();
   };
 
   const handleSort = (key) => {
@@ -720,4 +721,5 @@ DataTable.propTypes = {
   previewOpen: PropTypes.bool,
   previewUrl: PropTypes.string,
   onPreviewClose: PropTypes.func,
+  onLabelsMutated: PropTypes.func,
 };

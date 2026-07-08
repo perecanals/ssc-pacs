@@ -69,6 +69,11 @@ export default function Navigator() {
     setSessionLoaded(true);
   }, [restoreLoaded, restoredLevel, restoredFilters, restoredPreviewHeight]);
 
+  // Bumped when the DataTable mutates annotations so the Sidebar refetches
+  // its label summary/definitions (counts + new select values).
+  const [labelsNonce, setLabelsNonce] = useState(0);
+  const handleLabelsMutated = useCallback(() => setLabelsNonce((n) => n + 1), []);
+
   const [previewSelection, setPreviewSelection] = useState(null);
   const [previewUrl, setPreviewUrl] = useState("");
   const [previewLoading, setPreviewLoading] = useState(false);
@@ -189,6 +194,7 @@ export default function Navigator() {
           onFilterChange={handleFilterChange}
           open={sidebarOpen}
           onToggle={toggleSidebar}
+          labelsRefreshNonce={labelsNonce}
         />
         <main className="navigator__main">
           <div className="navigator__content">
@@ -203,6 +209,7 @@ export default function Navigator() {
               previewOpen={previewOpen}
               previewUrl={previewUrl}
               onPreviewClose={() => setPreviewOpen(false)}
+              onLabelsMutated={handleLabelsMutated}
             />
             <PreviewPane
               selection={previewSelection}
