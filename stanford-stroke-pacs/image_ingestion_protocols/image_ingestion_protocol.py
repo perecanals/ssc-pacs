@@ -18,22 +18,23 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from utils import (
     anonymize_dicom_slice,
     convert_dicom_to_nifti,
-    identify_study_type,
     identify_series_type,
+    identify_study_type,
     max_same_position_count,
     name_sanity_check,
     should_create_nifti,
 )
 
 # Pull canonical paths from repo-root config.toml (same source of truth the
-# the web app uses). Avoids hardcoding /DATA2/pacs_imaging_data here.
+# web app uses). Avoids hardcoding /DATA2/pacs_imaging_data here.
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 _WEB_APP_DIR = _REPO_ROOT / "web-app"
 if str(_WEB_APP_DIR) not in sys.path:
     sys.path.insert(0, str(_WEB_APP_DIR))
+import warnings  # noqa: E402
+
 from config import DICOM_DATA_ROOT, STORAGE_MODE  # noqa: E402
 
-import warnings  # noqa: E402
 warnings.filterwarnings(
     "ignore",
     message=r"The value length .* exceeds the maximum length of .* allowed for VR LO\.",
@@ -75,9 +76,7 @@ class ImageIngestionProtocol:
         self.image_series = None
         self.clinical_data = None
 
-        # Canonical destination for loose DICOMs. Read from repo-root config.toml
-        # (web-app/config.py DICOM_DATA_ROOT) so the protocol always agrees
-        # with the running stack about where files live.
+        # Canonical destination for loose DICOMs.
         self.base_dir = str(DICOM_DATA_ROOT)
 
     def execute_image_ingestion_protocol(self, overwrite_if_exists=False):
@@ -164,7 +163,7 @@ class ImageIngestionProtocol:
         if STORAGE_MODE == "cold_path_cache":
             print(
                 "Skipping NIFTI generation in cold_path_cache mode "
-                "(use scripts/dicom_to_nifti.py to generate on demand)."
+                "(use scripts/dicom/dicom_to_nifti.py to generate on demand)."
             )
             # Initialize an empty nifti_path column so downstream upserts have it.
             if "nifti_path" not in self.case_series_table.columns:
@@ -215,10 +214,6 @@ class ImageIngestionProtocol:
             "skipped_existing_seriesinstanceuids":
                 list(getattr(self, "skipped_existing_series_uids", [])),
         }
-
-    def load_image_tables(self):
-        self.image_study = pd.read_sql_table("image_study", self.postgres_engine)
-        self.image_series = pd.read_sql_table("image_series", self.postgres_engine)
 
     def _load_case_rows_from_db(self, study_uids, include_series=False):
         study_uids = [str(study_uid).strip() for study_uid in study_uids if str(study_uid).strip()]
@@ -451,14 +446,12 @@ class ImageIngestionProtocol:
         return image_shape, slice_thickness, scan_axial_coverage_mm
 
     def create_series_table(self):
-        # Group every readable file in the case by its embedded
-        # SeriesInstanceUID rather than by directory. A DICOM series is defined
-        # by its SeriesInstanceUID, not by where its files happen to live:
-        # a "mixed" folder can hold several series, and one series' files can be
-        # split across folders. Emitting one row per UID (aggregating every file
-        # that carries it) is lossless and guarantees the upsert conflict key is
-        # unique within the batch, so the multi-row ON CONFLICT cannot raise a
-        # CardinalityViolation (see _upsert_dataframe).
+        # Group every readable file by its embedded SeriesInstanceUID, not by
+        # directory: mixed folders split into their true series, a series
+        # scattered across folders merges into one row. One row per UID also
+        # keeps the upsert conflict key unique within the batch, so the
+        # multi-row ON CONFLICT cannot raise a CardinalityViolation
+        # (see _upsert_dataframe).
         buckets = {}  # series_uid -> dict(paths, headers, study_uids, series_numbers, dirs)
         for root, _, files in os.walk(self.case_dir):
             for filename in sorted(files):
@@ -1242,6 +1235,10 @@ class ImageIngestionProtocol:
         shutil.rmtree(case_dir_abs)
 
     def create_nifti_files(self):
+        # Dormant by design (legacy mode only): should_create_nifti wants
+        # CTA/NCCT but identify_series_type never returns them, so no series
+        # converts today. Kept for future activation; on-demand conversion
+        # lives in scripts/dicom/dicom_to_nifti.py.
         self.case_series_table["nifti_path"] = ""
 
         for idx, row in self.case_series_table.iterrows():
@@ -1433,15 +1430,23 @@ class ImageIngestionProtocol:
             self._upsert_patient(connection)
             self._rollup_study_storage_sizes(connection)
 
+    # GUARDS ONLY, not schema management: Alembic is the canonical home of
+    # these columns (rev 0001 baseline has dicom_archive_path, rev 0012 the
+    # size columns) and of any new column. The IF NOT EXISTS ALTERs are kept as a safety net for
+    # DBs that predate the migrations. Note the lock interplay: even a no-op
+    # ALTER takes a momentary ACCESS EXCLUSIVE lock on the table, which queues
+    # behind a long-running reader (reconciliation.py deliberately ends its
+    # image_series transaction early for exactly this reason).
+
     def _require_dicom_archive_path_column(self):
-        """Add dicom_archive_path column to image_series if it does not exist."""
+        """Guard: add dicom_archive_path to image_series if absent."""
         with self.postgres_engine.begin() as conn:
             conn.execute(text(
                 "ALTER TABLE image_series ADD COLUMN IF NOT EXISTS dicom_archive_path TEXT"
             ))
 
     def _require_storage_size_columns(self):
-        """Add per-series/per-study storage size columns (decimal MB) if absent."""
+        """Guard: add per-series/per-study storage size columns (decimal MB) if absent."""
         with self.postgres_engine.begin() as conn:
             for table in ("image_series", "image_study"):
                 for col in ("compressed_size_mb", "decompressed_size_mb"):
@@ -1564,7 +1569,7 @@ class ImageIngestionProtocol:
         os.makedirs(os.path.dirname(archive), exist_ok=True)
 
         # Flat format: files stored at archive root (relative to dicom_dir),
-        # matching the layout produced by scripts/archive_all_series.py.
+        # matching the layout produced by scripts/cold_storage/archive_all_series.py.
         tmp_archive = archive + ".tmp"
         try:
             cctx = zstd.ZstdCompressor(level=3)
@@ -1620,11 +1625,9 @@ class ImageIngestionProtocol:
         successful archive is verified (file count match) before being
         published, courtesy of `_compress_series_dir`.
 
-        Loose DICOM files are NOT deleted — they remain for the Orthanc
-        Folder Indexer. See `scripts/cleanup_loose_dicoms.py` for the
-        opt-in cleanup pass once the new files have been indexed. Failed
-        series are skipped by cleanup (it requires
-        `dicom_archive_path IS NOT NULL`).
+        Loose DICOM files are NOT deleted here — cleanup happens after
+        Orthanc indexing (executor / scripts/cold_storage/cleanup_loose_dicoms.py),
+        which skips archive-less series.
         """
         if not self.cold_archive_root:
             return
@@ -1691,7 +1694,7 @@ class ImageIngestionProtocol:
                 f"case {os.path.basename(os.path.normpath(self.case_dir))}. "
                 f"Failed rows kept dicom_archive_path = NULL. "
                 f"See {log_path}. Retry with: "
-                f"`python scripts/archive_all_series.py --patient <patient_id>`"
+                f"`python scripts/cold_storage/archive_all_series.py --patient <patient_id>`"
             )
 
     def _write_compression_failure_log(self, failures: list[dict]) -> str:

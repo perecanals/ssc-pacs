@@ -1,16 +1,18 @@
-import os
-import sys
+import argparse
 import glob
 import json
-import queue
-import argparse
 import logging
+import os
+import queue
+import sys
 import threading
 import traceback
 from collections import deque
-from pathlib import Path
 from datetime import datetime
+from pathlib import Path
+
 import yaml
+
 from image_ingestion_protocol import ImageIngestionProtocol
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
@@ -20,15 +22,19 @@ WEB_APP_DIR = ROOT_DIR / "web-app"
 if str(WEB_APP_DIR) not in sys.path:
     sys.path.insert(0, str(WEB_APP_DIR))
 
-from labelled_table_sync import sync_labelled_rows  # noqa: E402
 from config import COLD_ARCHIVE_ROOT, DICOM_DATA_ROOT, STORAGE_MODE  # noqa: E402
+from labelled_table_sync import sync_labelled_rows  # noqa: E402
 
 DEFAULT_ENV_PATH = str(ROOT_DIR / ".env")
 
 
-# Custom class to redirect stdout/stderr to logger
 class StreamToLogger:
-    """Redirect print statements to logger"""
+    """Redirect print statements to the logger.
+
+    The protocol phases print(); this redirection is what lands them in the
+    run log — the same file the resume markers ride on. Keep prints as
+    prints; converting them to logging calls buys nothing.
+    """
     def __init__(self, logger, log_level=logging.INFO):
         self.logger = logger
         self.log_level = log_level
@@ -67,6 +73,8 @@ def configure_library_logging():
 
 # Log markers parsed by determine_resume_skip_set. These are strings this same
 # script emits, so the resume contract stays stable as long as they match.
+# NOTE: logs/ is load-bearing resume state — pruning old run logs discards
+# resume progress for their src_dirs.
 _SRC_DIR_MARKER = "Source directory: "
 _COMPLETED_MARKER = "Successfully completed processing case "
 
@@ -77,11 +85,8 @@ def determine_resume_skip_set(logs_dir, current_log_path, src_dir, nhc_list, log
     Scans every prior run log whose 'Source directory:' header matches src_dir
     and collects the cases with a 'Successfully completed processing case'
     marker, across all matching logs. Only proven successes are skipped —
-    cases that failed (per-case errors don't stop a run: e.g. every case after
-    the disk fills) or were interrupted mid-case lack the marker and get
-    re-processed. (The previous position-based resume — skip everything before
-    the last case the prior run *reached* — mis-skipped whole runs of failed
-    cases for exactly that reason.)
+    cases that failed (per-case errors don't stop a run) or were interrupted
+    mid-case lack the marker and get re-processed.
     """
     def _log(msg):
         if logger is not None:
@@ -103,7 +108,7 @@ def determine_resume_skip_set(logs_dir, current_log_path, src_dir, nhc_list, log
         if current is not None and os.path.abspath(log_path) == current:
             continue
         try:
-            with open(log_path, "r", encoding="utf-8", errors="replace") as f:
+            with open(log_path, encoding="utf-8", errors="replace") as f:
                 lines = f.readlines()
         except OSError:
             continue
@@ -591,8 +596,8 @@ def _indexing_worker(job_q, result_q, postgres_engine, logger):
 
 
 if __name__ == "__main__":
-    from sqlalchemy import create_engine
     from dotenv import load_dotenv
+    from sqlalchemy import create_engine
 
     parser = argparse.ArgumentParser(description="Execute the Stanford image ingestion protocol.")
     parser.add_argument(
@@ -656,11 +661,7 @@ if __name__ == "__main__":
     logger.info(f"Resume from prior run: {resume_enabled}")
 
     error_log_file_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'logs', f"error_log_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json")
-    if os.path.exists(error_log_file_path):
-        with open(error_log_file_path, 'r') as f:
-            error_log = json.load(f)
-    else:
-        error_log = {}
+    error_log = {}
 
     total_cases = 0
     processed_cases = 0
@@ -757,7 +758,7 @@ if __name__ == "__main__":
         else:
             logger.info("Resume disabled (--no-resume); processing all cases")
 
-        for idx, nhc in enumerate(nhc_list):
+        for nhc in nhc_list:
             if nhc in skip_cases:
                 logger.info(f"Skipping case {nhc} - completed in a prior run (resume)")
                 resumed_skipped += 1

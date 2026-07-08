@@ -1,5 +1,6 @@
-import SimpleITK as sitk
 import pydicom
+import SimpleITK as sitk
+
 
 def name_sanity_check(name):
     if isinstance(name, str):
@@ -14,14 +15,14 @@ def name_sanity_check(name):
     return str(name)
 
 def identify_study_type(study_series):
-    # CTA group prefixes -> To identify baseline studies
-    cta_prefixes = ["CTA", "Angio  ", "ANGIO TSA", "Angio TSA", "Angio Tsa", "AngioTC ", "CTA P.WILLIS 0.6 H20f", "TSA 0,60 Hv40 A2", "TRONCOS SUPRAAORTICOS + CEREBRAL 1,00 Bv36 S3", 'TSA+WILLIS']
-    # NCCT group prefixes -> To identify potential follow-up studies
-    ncct_follow_up_prefixes = ["CEREBRAL ", "NCCT  ", "CRANEO  "]
-    # Thrombectomy -> To identify thrombectomy studies
+    """Identify the type of a given study (assumes non-anonymized DICOM series).
+
+    Dormant by design: part of the parked study-type-prediction chain (see
+    ImageIngestionProtocol._predict_study_type) — its output is dropped before
+    upsert today, kept for future activation.
+    """
     thrombectomy_study_names_prefixes = ["Trombectomia"]
     thrombectomy_study_names_suffixes = ["Cabeza"]
-    """Identify the type of a given study (we assume non-anonymized dicom series only!)"""
     study_description_col = "studydescription" if "studydescription" in study_series.columns else "StudyDescription"
     series_description_col = "seriesdescription" if "seriesdescription" in study_series.columns else "SeriesDescription"
 
@@ -63,12 +64,12 @@ def anonymize_dicom_slice(dcm, study_id=None):
                                     ('ProtocolName', ''),
                                     ('StudyID', str(study_id)),
                                     ('ImageComments', '')]
-    
+
     # Change tags to anonymized values
     for element, new_value in changed_elements_with_values:
         try:
             dcm[element].value = new_value
-        except:
+        except Exception:
             pass
     # Add additional tags for anonymized dicoms
     dcm.add_new(pydicom.tag.Tag(0x00120063), "LO", "BASIC APPLICATION LEVEL CONFIDENTIALITY PROFILE")
@@ -242,22 +243,17 @@ def identify_series_type(modality, same_position_count, seriesdescription=None):
 
 
 def should_create_nifti(series_type):
+    # Currently unreachable in effect: identify_series_type never returns
+    # CTA/NCCT, so auto-NIfTI never fires in any mode. Kept for future use
+    # (on-demand path: scripts/dicom/dicom_to_nifti.py).
     return series_type in {"CTA", "NCCT"}
 
+
 def convert_dicom_to_nifti(input_path, output_path):
-    """
-    Passes dicom series to nifti.
+    """Convert a DICOM series directory to a NIfTI file.
 
-    Parameters
-    ----------
-    input_path : string
-        Path to the dicom series.
-    output_path : string
-        Path where final nifti will be stored.
-
-    Returns
-    -------
-
+    Live: consumed by scripts/dicom/dicom_to_nifti.py — keep name/signature
+    stable.
     """
     reader = sitk.ImageSeriesReader()
     dicom_names = reader.GetGDCMSeriesFileNames(input_path)
