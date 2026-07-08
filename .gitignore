@@ -29,6 +29,10 @@ venv/
 .coverage
 **/.coverage
 htmlcov/
+.pytest_cache/
+**/.pytest_cache/
+.ruff_cache/
+**/.ruff_cache/
 
 # Benchmarks / temp
 .tmp_bench/
