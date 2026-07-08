@@ -187,7 +187,6 @@ export default function Sidebar({ level, filters, onFilterChange, open, onToggle
         <div className="sidebar__inner">
           <h1 className="sidebar__group-title">Quick Filters</h1>
 
-          {/* Dataset (patient view only) */}
           {/* Dataset (all levels) */}
           <div className="sidebar__section">
             <h2 className="sidebar__section-title">Dataset</h2>

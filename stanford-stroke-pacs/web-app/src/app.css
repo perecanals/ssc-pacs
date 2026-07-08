@@ -36,10 +36,6 @@
   @apply px-3 py-1.5 text-xs rounded-md bg-primary text-white border border-primary cursor-pointer hover:bg-primary-hover;
 }
 
-.input-field {
-  @apply w-full px-2.5 py-1.5 border border-border rounded-md text-sm outline-none focus:border-primary;
-}
-
 .link-btn {
   @apply text-primary text-xs font-medium bg-transparent border-none cursor-pointer hover:underline;
 }
@@ -67,8 +63,4 @@
          hover:border-primary/35 hover:text-primary
          disabled:opacity-40 disabled:cursor-default
          disabled:hover:border-transparent disabled:hover:text-text-muted;
-}
-
-.pill-btn--active {
-  @apply text-primary border-primary/35 bg-primary/10;
 }

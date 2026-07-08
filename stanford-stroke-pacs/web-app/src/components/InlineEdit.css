@@ -17,23 +17,11 @@
   @apply text-green-600 font-bold;
 }
 
-.inline-edit__check-count {
-  @apply text-[10px] text-text-muted ml-0.5;
-}
-
-.inline-edit__pill-list {
-  @apply flex flex-wrap gap-1;
-}
-
 /* BoolEdit — checkbox scales with the cell's font-size */
 .bool-edit__checkbox {
   @apply cursor-pointer accent-primary align-middle m-0 block;
   width: 1.15em;
   height: 1.15em;
-}
-
-.bool-edit__others {
-  @apply text-[10px] text-text-muted ml-0.5 align-super;
 }
 
 /* SelectEdit */
@@ -45,10 +33,6 @@
   @apply px-2 py-0 text-text-muted border border-dashed border-border rounded cursor-pointer hover:border-primary hover:text-primary bg-transparent align-middle;
   font-size: 0.85em;
   line-height: 1.4;
-}
-
-.select-edit__others {
-  @apply text-[10px] text-text-muted ml-0.5 align-super;
 }
 
 /* Portaled to <body> with position:fixed (coordinates set inline from the
@@ -109,8 +93,4 @@
 
 .value-edit__input--text {
   @apply w-full min-w-[80px];
-}
-
-.value-edit__others {
-  @apply text-[10px] text-text-muted ml-0.5 align-super;
 }

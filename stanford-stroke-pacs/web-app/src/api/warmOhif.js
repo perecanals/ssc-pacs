@@ -121,11 +121,6 @@ export async function queueWarmPatient(patientId) {
   return res.json();
 }
 
-/** Aggregate cache status for a patient: {total, cold, warming, hot, error}. */
-export async function getPatientCacheStatus(patientId) {
-  return apiGet(`/api/patients/${encodeURIComponent(patientId)}/cache-status`);
-}
-
 /**
  * Cache status for many studies, patients, and/or series in one request.
  * Returns {studies: {uid: status}, patients: {id: {total, cold, warming, hot,
