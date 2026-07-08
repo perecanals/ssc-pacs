@@ -19,6 +19,27 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - Release = `git tag vX.Y && git push --tags` + changelog entry, done. No
   other tooling. Mention any included Alembic migration in the entry.
 
+## Working practices (every change)
+
+Routine hygiene that applies across the whole repo — do these as part of the
+work, not as an afterthought:
+
+- **Tests & lint**: `make test` and `make lint` pass before a change is done;
+  add or adjust tests for new behavior (backend pytest, frontend vitest,
+  ingestion pytest).
+- **Docs**: when you change behavior, config, commands, or schema, update the
+  matching doc under `stanford-stroke-pacs/documentation/`. That tree is routed
+  by `documentation/context.md` — start there to find the right doc, and keep
+  its index accurate whenever you add, move, or remove a doc.
+- **Schema**: every schema change is a **new** Alembic revision under
+  `web-app/alembic/versions/` (never edit a shipped one; they run at app
+  startup). Mirror upstream-table DDL into `ssc-sql-db/` and name the migration
+  in the changelog entry.
+- **Verify against reality**: check claims — counts, sizes, paths, versions —
+  against the live system before repeating them; never hardcode a volatile
+  number in a doc, point at the command that produces it.
+- **Changelog / release**: see "Versioning and commits" above.
+
 ## Repository layout
 
 ```

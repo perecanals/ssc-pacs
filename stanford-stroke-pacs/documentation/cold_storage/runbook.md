@@ -44,9 +44,9 @@ curl -s -u "${ORTHANC_ADMIN_USER}:${ORTHANC_ADMIN_PASSWORD}" \
   http://localhost:8042/statistics | python3 -m json.tool
 ```
 
-The pre-migration loose DICOM backup (a full copy of the loose tree kept on the
-old Linux host before the move) is a separate safety net; its current fate is
-not tracked here — confirm on that host before assuming it exists or is gone.
+There is no separate loose-DICOM backup on this host: the archives under
+`cold_archive_root` are canonical, and the old Linux host's loose-tree copy does
+not exist here (that safety net belonged to the pre-migration deployment).
 
 ---
 
