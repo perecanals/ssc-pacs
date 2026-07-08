@@ -22,19 +22,21 @@ from orthanc_client import orthanc_system_check
 router = APIRouter()
 
 _GIT_SHA: str | None = None
-_ROOT_DIR = Path(__file__).resolve().parent.parent.parent
+# Outer git root (ssc-pacs/), four levels up from routes/admin.py:
+# routes/ -> web-app/ -> stanford-stroke-pacs/ -> ssc-pacs/
+_GIT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 
 
 def _resolve_git_sha() -> str:
     global _GIT_SHA
     if _GIT_SHA is not None:
         return _GIT_SHA
-    head = _ROOT_DIR / ".git" / "HEAD"
+    head = _GIT_ROOT / ".git" / "HEAD"
     try:
         if head.is_file():
             ref = head.read_text().strip()
             if ref.startswith("ref: "):
-                ref_path = _ROOT_DIR / ".git" / ref[5:]
+                ref_path = _GIT_ROOT / ".git" / ref[5:]
                 if ref_path.is_file():
                     _GIT_SHA = ref_path.read_text().strip()[:12]
                     return _GIT_SHA
@@ -147,7 +149,7 @@ def metrics_endpoint():
 # Reconciliation report (admin-only)
 # ---------------------------------------------------------------------------
 
-_REPORTS_DIR = _ROOT_DIR / "maintenance" / "reconciliation-reports"
+_REPORTS_DIR = _GIT_ROOT / "maintenance" / "reconciliation-reports"
 
 
 @router.get("/api/admin/reconciliation/latest")

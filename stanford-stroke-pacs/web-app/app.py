@@ -66,9 +66,9 @@ async def _eviction_loop() -> None:
             evicted = run_eviction()
             if evicted:
                 for uid in evicted:
-                    logger.info("eviction_loop: evicted study", extra={"study_uid": uid})
+                    logger.info("eviction_loop: evicted series", extra={"series_uid": uid})
                 logger.info(
-                    "eviction_loop: removed %d studies (sample=%s)",
+                    "eviction_loop: removed %d series (sample=%s)",
                     len(evicted), evicted[:10],
                 )
         except Exception:
@@ -77,7 +77,7 @@ async def _eviction_loop() -> None:
             reaped = reap_stale_warming()
             if reaped:
                 logger.info(
-                    "eviction_loop: reset %d stale-warming studies to cold (sample=%s)",
+                    "eviction_loop: reset %d stale-warming series to cold (sample=%s)",
                     len(reaped), reaped[:10],
                 )
         except Exception:
