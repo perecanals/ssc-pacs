@@ -5,54 +5,18 @@ with two SSC changes: the **`RemoveMissingFiles`** flag and an **on-demand scope
 endpoint** (`POST/GET /indexer/scan`). See **[PATCHES.md](PATCHES.md)** for the full,
 canonical description of both (rationale, API, config, rebuild/deploy).
 
-When set to `false`, the plugin **skips the scan-time cleanup** that removes
-DICOM instances from Orthanc's index when their backing files disappear from
-disk. This makes the plugin compatible with cold-storage workflows where
-files are legitimately moved/deleted and restored on demand.
-
-Default is `true` (fully backward-compatible with upstream behavior).
-
----
-
 ## Why this exists
 
-The upstream Folder Indexer scans its configured folder on an interval and:
+The upstream indexer's scan loop removes index entries whose backing files are
+missing on disk — incompatible with the `cold_path_cache` workflow, where loose
+DICOMs are legitimately evicted (kept as `*.tar.zst` archives) and restored on
+demand. `RemoveMissingFiles: false` skips that cleanup pass so the index stays
+stable across evict/warm cycles; the scoped scan endpoint registers new data
+per case without a continuous whole-tree scan. `RemoveMissingFiles` defaults to
+`true` (fully backward-compatible with upstream behavior).
 
-1. Adds any new files it finds (→ Orthanc main DB)
-2. Updates any files whose size/mtime changed
-3. **Removes any DB entries whose files are missing on disk** ← the problem
-
-Step 3 is hardcoded in `Plugin.cpp::LookupDeletedFiles()`. For the Stanford
-Stroke PACS `cold_path_cache` workflow, studies are evicted by deleting their
-loose DICOMs (they're preserved as `*.tar.zst` archives). Without the patch,
-the Folder Indexer's next scan would remove them from Orthanc's index, and
-even restoring the files to their original paths wouldn't bring them back —
-the index entries are gone.
-
-With `RemoveMissingFiles: false`, the scan loop skips the cleanup pass entirely.
-Missing files are ignored; the index stays stable. New files are still picked
-up as usual, so routine ingestion continues to work without an Orthanc restart.
-
----
-
-## The patch
-
-Three small edits to `src/Sources/Plugin.cpp`:
-
-1. A new static global `removeMissingFiles_` (default `true`)
-2. Reads the new config option in `OrthancPluginInitialize`:
-   ```cpp
-   removeMissingFiles_ = indexer.GetBooleanValue("RemoveMissingFiles", true);
-   ```
-3. Guards the `LookupDeletedFiles()` call in `MonitorDirectories`:
-   ```cpp
-   if (removeMissingFiles_)
-   {
-     try { LookupDeletedFiles(); } catch (...) { ... }
-   }
-   ```
-
-Grep for `SSC fork` in `src/Sources/Plugin.cpp` to find the exact change sites.
+Full rationale, API, and change sites: [PATCHES.md](PATCHES.md). Grep for
+`SSC fork` in `src/Sources/` to find the exact edits.
 
 Upstream source: `hg clone https://orthanc.uclouvain.be/hg/orthanc-indexer/`
 
@@ -65,7 +29,7 @@ The Dockerfile uses a two-stage build: Ubuntu 25.10 (matching
 official Orthanc image.
 
 ```bash
-cd /home/perecanals/ssc-pacs/orthanc-indexer-patched
+cd orthanc-indexer-patched
 docker build -t ssc-orthanc:patched-indexer .
 ```
 
@@ -91,12 +55,17 @@ docker run --rm --entrypoint cat orthancteam/orthanc:latest /etc/os-release
    ```json
    "Indexer": {
      "Enable": true,
-     "Folders": ["/dicom-data"],
+     "Folders": [],
      "Interval": 60,
-     "RemoveMissingFiles": false
+     "RemoveMissingFiles": false,
+     "ScanRoots": ["/dicom-data"]
    }
    ```
-3. Restart Orthanc: `cd stanford-stroke-pacs && docker compose down && docker compose up -d`
+   (`Folders: []` = no continuous scan; new data is registered via scoped
+   `POST /indexer/scan` calls under `ScanRoots`. A legacy deployment that wants
+   the upstream continuous scan sets `Folders: ["/dicom-data"]` instead.)
+3. Restart Orthanc: `cd stanford-stroke-pacs && scripts/orthanc/dc.sh down && scripts/orthanc/dc.sh up -d`
+   (use the wrapper, not bare `docker compose` — it resolves the DICOM mount from `config.toml`)
 4. Verify the patch is active: `docker logs ssc-orthanc | grep RemoveMissingFiles`
    — you should see the startup banner:
    ```

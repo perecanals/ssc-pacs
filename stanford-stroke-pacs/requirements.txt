@@ -1,12 +1,16 @@
-pandas
-python-dotenv
-SQLAlchemy
-psycopg2-binary
-numpy
-pydicom
-SimpleITK
-requests
-bcrypt
-pyyaml
-zipstream-ng
-zstandard
+# Python deps for the stack's operational scripts (stanford-stroke-pacs/scripts/*)
+# and the image_ingestion_protocols/ pipeline. The web app has its own pinned set
+# in web-app/requirements.txt; the repo-root requirements.txt covers only the
+# ssc-sql-db/ CSV import helpers.
+pandas==3.0.1
+python-dotenv==1.2.2
+SQLAlchemy==2.0.48
+psycopg2-binary==2.9.11
+numpy==2.4.3
+pydicom==3.0.1
+SimpleITK==2.5.3
+requests==2.32.5
+bcrypt==5.0.0
+pyyaml==6.0.3
+zipstream-ng==1.9.0
+zstandard==0.25.0

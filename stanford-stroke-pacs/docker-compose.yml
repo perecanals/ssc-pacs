@@ -1,7 +1,7 @@
 services:
   orthanc:
-    # Custom image with a patched Folder Indexer plugin that honours
-    # the "RemoveMissingFiles" config flag. See /home/perecanals/pacs/orthanc-indexer-patched
+    # Custom image with a patched Folder Indexer plugin (RemoveMissingFiles flag +
+    # scoped /indexer/scan). Build it first from ../orthanc-indexer-patched (see its README).
     image: ssc-orthanc:patched-indexer
     container_name: ssc-orthanc
     # NETWORKING — this file targets LINUX: host networking lets the container

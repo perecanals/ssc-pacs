@@ -70,6 +70,8 @@ render() {
 }
 
 # Order matters: colima (docker) → postgres → webapp → scheduled jobs.
+# Note: systemd's dormant cold-archive-mirror timer has NO launchd counterpart
+# by design (Tier-2, never enabled); everything else is mirrored 1:1.
 DAEMONS=(
   com.ssc.colima
   com.ssc.postgres

@@ -19,15 +19,11 @@ warming_timeout_minutes = 30
 # plus `min_free_bytes` of headroom. .zst typically expands ~3× for DICOM.
 warming_disk_safety_factor = 3.0
 warming_disk_min_free_bytes = 104857600  # 100 MiB
-# How many STUDIES warm (decompress) concurrently. POST /api/studies/{uid}/warm
-# returns 202; extraction runs in the background. Decompression is
-# disk-BANDWIDTH bound, not CPU bound (measured: the warm process sits at a few
-# % CPU, waiting on small-file writes to the shared ThunderBay volume). So more
-# workers does NOT speed things up — N concurrent extractions just split the
-# fixed disk throughput N ways, making each study slower. Keep this LOW: fewer
-# in-flight warms means each gets more of the pipe and the case a rater just
-# clicked is ready sooner. The real lever for speed is reducing competing disk
-# I/O (CrashPlan/Spotlight/other users), not this number.
+# How many STUDIES warm (decompress) concurrently (POST /warm returns 202;
+# extraction runs in the background). Warming is disk-bandwidth bound, not CPU
+# bound (measured) — more workers just split the fixed disk throughput, making
+# each study slower. Keep LOW; the real speed lever is reducing competing disk
+# I/O, not this number.
 warm_workers = 2
 
 [backup]

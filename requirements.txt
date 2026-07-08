@@ -1,3 +1,6 @@
+# Python deps for the repo-root ssc-sql-db/ CSV import helpers only.
+# The PACS stack's scripts + ingestion pipeline use stanford-stroke-pacs/requirements.txt;
+# the web app uses stanford-stroke-pacs/web-app/requirements.txt.
 pandas==3.0.1
 openpyxl==3.1.5
 python-dotenv==1.2.2
