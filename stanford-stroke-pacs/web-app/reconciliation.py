@@ -1,5 +1,6 @@
 """Two-DB reconciliation: compare image_series (stanford-stroke) vs Orthanc index.
 
+Also runs intra-DB integrity checks (annotations vs their spine tables).
 Read-only observer — never mutates either database or the filesystem.
 
 Public API
@@ -123,6 +124,39 @@ def _get_orthanc_statistics(session: requests.Session) -> dict[str, Any]:
 # DB helpers
 # ---------------------------------------------------------------------------
 
+def _get_orphaned_annotations(conn) -> list[dict[str, Any]]:
+    """Annotations whose entity no longer exists in its spine table.
+
+    Checks each level against its own key: patient → ``patient``,
+    study → ``image_study``, series → ``image_series``. Orphans appear when
+    entity rows are deleted/renamed out from under existing annotations
+    (annotations has no FK to the upstream tables).
+    """
+    with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+        cur.execute(
+            "SELECT 'patient' AS level, a.patient_id AS entity_id, "
+            "       a.label, a.created_by "
+            "FROM annotations a "
+            "WHERE a.level = 'patient' AND a.patient_id IS NOT NULL "
+            "  AND NOT EXISTS (SELECT 1 FROM patient p "
+            "                  WHERE p.patient_id = a.patient_id) "
+            "UNION ALL "
+            "SELECT 'study', a.studyinstanceuid, a.label, a.created_by "
+            "FROM annotations a "
+            "WHERE a.level = 'study' AND a.studyinstanceuid IS NOT NULL "
+            "  AND NOT EXISTS (SELECT 1 FROM image_study st "
+            "                  WHERE st.studyinstanceuid = a.studyinstanceuid) "
+            "UNION ALL "
+            "SELECT 'series', a.seriesinstanceuid, a.label, a.created_by "
+            "FROM annotations a "
+            "WHERE a.level = 'series' AND a.seriesinstanceuid IS NOT NULL "
+            "  AND NOT EXISTS (SELECT 1 FROM image_series se "
+            "                  WHERE se.seriesinstanceuid = a.seriesinstanceuid) "
+            "ORDER BY 1, 2, 3"
+        )
+        return [dict(r) for r in cur.fetchall()]
+
+
 def _get_db_series(conn) -> list[dict[str, Any]]:
     """Return all image_series rows with a non-null seriesinstanceuid."""
     with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
@@ -167,12 +201,13 @@ def diff_image_series_vs_orthanc(
 
     t0 = time.time()
 
-    # 1. DB rows
+    # 1. DB rows + intra-DB orphan check (annotations vs their spine tables)
     db_rows = _get_db_series(conn)
     db_by_uid = {r["seriesinstanceuid"]: r for r in db_rows}
     db_uids = set(db_by_uid.keys())
+    orphaned_annotations = _get_orphaned_annotations(conn)
 
-    # This SELECT is the only DB work in this function — the Orthanc calls below
+    # These SELECTs are the only DB work in this function — the Orthanc calls below
     # are HTTP and the classify/disk-stat loops touch no DB. End the transaction
     # now so we do NOT keep an ACCESS SHARE lock on image_series open across the
     # (potentially many-minute) per-row is_file() disk scan. Holding it
@@ -235,6 +270,7 @@ def diff_image_series_vs_orthanc(
         "in_db_not_in_orthanc": in_db_not_in_orthanc,
         "in_orthanc_not_in_db": in_orthanc_not_in_db,
         "dicom_archive_missing": dicom_archive_missing,
+        "orphaned_annotations": orphaned_annotations,
     }
 
     report = {
@@ -263,6 +299,7 @@ def snapshot_summary_from_mismatches(
         "in_db_not_in_orthanc": len(mismatches.get("in_db_not_in_orthanc", [])),
         "in_orthanc_not_in_db": len(mismatches.get("in_orthanc_not_in_db", [])),
         "dicom_archive_missing": len(mismatches.get("dicom_archive_missing", [])),
+        "orphaned_annotations": len(mismatches.get("orphaned_annotations", [])),
         "db_series_count": db_count,
         "orthanc_series_count": orthanc_count,
         "matched": matched,
