@@ -86,8 +86,11 @@ if [[ "$DRY_RUN" == yes ]]; then
   for d in "${DAEMONS[@]}"; do render "$SRC/$d.plist.in" > "$out/$d.plist"; done
   echo "==> Rendered ${#DAEMONS[@]} plists into $out"
   echo "--- com.ssc.webapp.plist ---"; cat "$out/com.ssc.webapp.plist"
-  if grep -rl '__[A-Z_]*__' "$out" >/dev/null 2>&1; then
-    echo "  !! unsubstituted tokens remain:" >&2; grep -rn '__[A-Z_]*__' "$out" >&2
+  # Match only the tokens render() substitutes — '__[A-Z_]*__' also hits the
+  # templates' "Do not edit __TOKENS__" header comment (false positive).
+  tokens='__(REPO_ROOT|DEPLOY_USER|HOME_DIR|BREW_PREFIX|CONDA_ENV_BIN)__'
+  if grep -rlE "$tokens" "$out" >/dev/null 2>&1; then
+    echo "  !! unsubstituted tokens remain:" >&2; grep -rnE "$tokens" "$out" >&2
     exit 1
   fi
   # Validate plist syntax if plutil is available.

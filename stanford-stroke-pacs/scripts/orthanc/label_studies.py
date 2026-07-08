@@ -11,6 +11,7 @@ Usage:
     python label_studies.py
 """
 
+import argparse
 import os
 import sys
 from pathlib import Path
@@ -76,6 +77,11 @@ def apply_label(session, orthanc_id, label):
 
 
 def main():
+    # No flags — but parse argv so `--help` documents instead of running.
+    argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    ).parse_args()
+
     if not SRC_DB["user"]:
         print("Error: database credentials not set. Check your .env file.", file=sys.stderr)
         sys.exit(1)
