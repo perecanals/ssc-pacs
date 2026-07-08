@@ -7,17 +7,24 @@ function buildOhifLinkPath(studyinstanceuid, seriesinstanceuid) {
   return `/api/ohif-link/${encodeURIComponent(studyinstanceuid)}${q ? `?${q}` : ""}`;
 }
 
-export async function getStorageMode() {
-  try {
-    const res = await apiFetch("/api/storage-mode");
-    if (!res.ok) return "legacy";
-    const ct = res.headers.get("content-type") || "";
-    if (!ct.includes("application/json")) return "legacy";
-    const data = await res.json();
-    return data.storage_mode || "legacy";
-  } catch {
-    return "legacy";
-  }
+// Cached for the page's lifetime — the mode can't change without a backend
+// restart, and DataTable mounts + preview clicks would otherwise re-fetch it.
+let storageModePromise = null;
+
+export function getStorageMode() {
+  storageModePromise ??= (async () => {
+    try {
+      const res = await apiFetch("/api/storage-mode");
+      if (!res.ok) return "legacy";
+      const ct = res.headers.get("content-type") || "";
+      if (!ct.includes("application/json")) return "legacy";
+      const data = await res.json();
+      return data.storage_mode || "legacy";
+    } catch {
+      return "legacy";
+    }
+  })();
+  return storageModePromise;
 }
 
 /**

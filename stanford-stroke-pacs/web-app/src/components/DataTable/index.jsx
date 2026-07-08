@@ -26,7 +26,7 @@ import ChildRows, { DownloadIcon } from "./ChildRows";
 import WarmButton from "./WarmButton";
 import CopyPathButtons from "./CopyPathButtons";
 import { getStorageMode } from "../../api/warmOhif";
-import "../DataTable.css";
+import "./DataTable.css";
 
 function DataTableInner({
   level,
