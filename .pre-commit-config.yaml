@@ -6,6 +6,9 @@ repos:
         args: [--markdown-linebreak-ext=md]
       - id: end-of-file-fixer
       - id: check-yaml
+        # The macOS compose override uses the compose-specific `!reset` tag,
+        # which plain YAML loaders reject (load-bearing — do not remove the tag).
+        exclude: ^stanford-stroke-pacs/docker-compose\.override\.macos\.yml$
       - id: check-added-large-files
         args: [--maxkb=500]
 

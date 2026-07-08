@@ -23,10 +23,20 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
-      - run: pip install ruff
+      # requirements-dev.txt pins ruff — an unpinned `pip install ruff` let a
+      # ruff release break CI without any repo change.
+      - run: pip install -r stanford-stroke-pacs/web-app/requirements-dev.txt
+      # ruff's first-party import detection is cwd-sensitive: lint web-app and
+      # the ingestion package from their own directories (matches Makefile and
+      # the pre-commit hook). web-app/pyproject.toml is the single ruleset.
       - name: Run ruff on web-app
         working-directory: stanford-stroke-pacs/web-app
         run: ruff check .
+      - name: Run ruff on scripts
+        run: ruff check stanford-stroke-pacs/scripts --config stanford-stroke-pacs/web-app/pyproject.toml
+      - name: Run ruff on image_ingestion_protocols
+        working-directory: stanford-stroke-pacs/image_ingestion_protocols
+        run: ruff check . --config ../web-app/pyproject.toml
 
   backend-tests:
     name: Backend tests (pytest)
@@ -76,6 +86,26 @@ jobs:
             --tb=short \
             -v
 
+  ingestion-tests:
+    name: Ingestion tests (pytest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Install dependencies
+        # Stack requirements cover the ingestion package's imports (pandas,
+        # pydicom, SQLAlchemy, …); web-app requirements-dev pins pytest.
+        run: |
+          pip install -r stanford-stroke-pacs/requirements.txt \
+                      -r stanford-stroke-pacs/web-app/requirements-dev.txt
+      - name: Run pytest
+        # DB-free: the scratch-Postgres e2e is gated on SSC_INGEST_AUDIT=1 and
+        # auto-skips here.
+        working-directory: stanford-stroke-pacs/image_ingestion_protocols
+        run: python -m pytest tests/ --tb=short -v
+
   frontend-tests:
     name: Frontend tests (vitest)
     runs-on: ubuntu-latest
@@ -87,6 +117,9 @@ jobs:
       - name: Install dependencies
         working-directory: stanford-stroke-pacs/web-app
         run: npm ci
+      - name: Run eslint
+        working-directory: stanford-stroke-pacs/web-app
+        run: npm run lint
       - name: Run vitest
         working-directory: stanford-stroke-pacs/web-app
         run: npx vitest run
