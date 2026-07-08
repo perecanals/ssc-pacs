@@ -345,6 +345,19 @@ function ValueEdit({
   const [value, setValue] = useState(ann?.value || "");
   const originalRef = useRef(ann?.value || "");
   const [saving, setSaving] = useState(false);
+  const inputRef = useRef(null);
+
+  // Resync when another user's edit arrives via a reload (bool/select editors
+  // get this via their pending-override pattern) — but never clobber a focused
+  // or locally edited field.
+  const annValue = ann?.value || "";
+  useEffect(() => {
+    if (annValue === originalRef.current) return;
+    const focused = inputRef.current && document.activeElement === inputRef.current;
+    if (focused || value !== originalRef.current) return;
+    originalRef.current = annValue;
+    setValue(annValue);
+  }, [annValue, value]);
 
   const doSave = async () => {
     const trimmed = value.trim();
@@ -391,6 +404,7 @@ function ValueEdit({
   return (
     <span title={ann?.created_by ? `Last edited by ${ann.created_by}` : undefined}>
       <input
+        ref={inputRef}
         type={datatype === "int" ? "number" : "text"}
         value={value}
         onChange={(e) => setValue(e.target.value)}
