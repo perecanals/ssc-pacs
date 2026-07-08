@@ -4,7 +4,7 @@ Operational and diagnostic scripts for the SSC PACS stack. Run from
 `stanford-stroke-pacs/` unless noted otherwise.
 
 All Python scripts expect the `ssc-pacs` conda environment and a valid `.env`
-file at the repo root.
+file at the stack root (`stanford-stroke-pacs/.env`).
 
 **CLI polarity convention:** anything that mutates DB/disk/index is a dry-run
 by default and applies only with `--execute`; interactive prompts have a
