@@ -120,10 +120,6 @@ export function buildBuiltinColumnCatalog(activeLevel) {
       level: builtinLevel,
       defaultVisible:
         LEVEL_RANK[builtinLevel] >= LEVEL_RANK[activeLevel] && col.defaultVisible !== false,
-      legacyKeys:
-        builtinLevel === activeLevel
-          ? [col.key, ...(col.key === "import_id" ? ["integration_id"] : [])]
-          : [],
     })),
   );
 }
