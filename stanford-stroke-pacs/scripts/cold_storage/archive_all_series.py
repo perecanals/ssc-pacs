@@ -3,6 +3,10 @@
 Offline job: build one tar.zst per series from image_series.dicom_dir_path and
 populate dicom_archive_path. Does not delete loose DICOMs.
 
+Dry-run by default (prints the pending series + sample archive paths);
+``--execute`` writes archives and updates image_series. Idempotent: existing
+archives are skipped, so it doubles as the retry path for compression failures.
+
 Default layout matches the evaluation script:
   archive = COLD_ROOT / relpath(dicom_dir, DICOM_ROOT).parent / f"{leaf}.tar.zst"
 """
@@ -119,7 +123,10 @@ def main() -> int:
     )
     ap.add_argument("--cold-root", type=Path, default=DEFAULT_COLD)
     ap.add_argument("--patient", help="Only series for this patient_id")
-    ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument(
+        "--execute", action="store_true",
+        help="Write archives and update image_series. Default is a dry-run preview.",
+    )
     ap.add_argument("--workers", type=int, default=1, help="Process workers (1 = sequential in main)")
     ap.add_argument("--zstd-level", type=int, default=6)
     args = ap.parse_args()
@@ -139,7 +146,7 @@ def main() -> int:
         conn.close()
 
     print(f"Series to process: {len(rows)}")
-    if args.dry_run:
+    if not args.execute:
         for suid, dpath in rows[:20]:
             try:
                 arch = archive_path_for_series_dir(Path(dpath), data_root, cold_root)
@@ -148,6 +155,7 @@ def main() -> int:
                 print(f"  {suid} SKIP {e}")
         if len(rows) > 20:
             print(f"  ... and {len(rows) - 20} more")
+        print("Dry-run (default): nothing written. Re-run with --execute to archive.")
         return 0
 
     total = len(rows)

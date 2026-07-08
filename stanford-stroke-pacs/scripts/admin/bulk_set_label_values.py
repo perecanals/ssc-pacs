@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
 """Bulk-set annotation label values from a CSV / Excel table (admin backdoor).
 
-Driven entirely by CLI flags. The only interactive prompt is the y/n
-confirmation when the target label does not yet exist and must be created.
+Driven entirely by CLI flags. Dry-run by default — nothing is written without
+``--execute``. The only interactive prompt is the y/n confirmation when the
+target label does not yet exist and must be created (``--yes`` bypasses it).
 
 Examples
 --------
-Dry-run (no DB writes):
+Dry-run (default; validate and report, no DB writes):
 
-    sudo python scripts/admin/bulk_set_label_values.py \\
+    python scripts/admin/bulk_set_label_values.py \\
         --file /tmp/series_quality.csv \\
         --level series \\
         --id-column seriesinstanceuid \\
@@ -16,19 +17,18 @@ Dry-run (no DB writes):
         --label series_quality \\
         --datatype select \\
         --options 'good,acceptable,poor' \\
-        --instrument 'manual review' \\
-        --dry-run
+        --instrument 'manual review'
 
 Apply, auto-confirm label creation:
 
-    sudo python scripts/admin/bulk_set_label_values.py \\
+    python scripts/admin/bulk_set_label_values.py \\
         --file /tmp/study_modality_check.xlsx \\
         --level study \\
         --id-column studyinstanceuid \\
         --value-column has_dwi \\
         --label has_dwi \\
         --datatype bool \\
-        --yes
+        --execute --yes
 """
 
 from __future__ import annotations
@@ -108,8 +108,8 @@ def _parse_args() -> argparse.Namespace:
         help="Sheet name or index for Excel files (default: first sheet).",
     )
     parser.add_argument(
-        "--dry-run", action="store_true",
-        help="Validate and report; do not write anything.",
+        "--execute", action="store_true",
+        help="Apply the changes. Default is a dry-run: validate and report only.",
     )
     parser.add_argument(
         "--yes", action="store_true",
@@ -302,8 +302,7 @@ def _existing_entity_ids(conn, level: str, candidate_ids: list[str]) -> set[str]
 
 def main() -> None:
     args = _parse_args()
-    if os.geteuid() != 0:
-        sys.exit("Error: this script must be run with sudo.")
+    dry_run = not args.execute
     audit_user = _audit_user()
 
     df = _load_table(args.file, args.sheet)
@@ -325,7 +324,7 @@ def main() -> None:
         label_def = _fetch_label_def(conn, args.label)
         if label_def is None:
             print(f"Label {args.label!r} does not exist.")
-            if args.dry_run:
+            if dry_run:
                 print(f"  Would create at level={args.level}, "
                       f"datatype={args.datatype}, instrument={args.instrument!r}")
             else:
@@ -396,7 +395,7 @@ def main() -> None:
             if value is None:
                 skipped_blank += 1
                 continue
-            if args.dry_run:
+            if dry_run:
                 applied += 1
                 touched_ids.append(entity_id)
                 continue
@@ -405,10 +404,10 @@ def main() -> None:
             touched_ids.append(entity_id)
 
         # --- Sync labelled mirror table ----------------------------------
-        if applied and not args.dry_run:
+        if applied and not dry_run:
             sync_labelled_rows(conn, args.level, touched_ids)
 
-        if args.dry_run:
+        if dry_run:
             conn.rollback()
             print("\nDry-run summary (no DB changes committed):")
         else:

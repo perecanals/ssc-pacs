@@ -2,7 +2,7 @@
 set -euo pipefail
 
 if [ $# -lt 1 ]; then
-    echo "Usage: sudo bash remove_label.sh <label_name>"
+    echo "Usage: bash remove_label.sh <label_name> [--yes]"
     exit 1
 fi
 

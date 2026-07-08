@@ -6,18 +6,27 @@ Cold storage is keyed by the series (one ``series_cache_state`` row per series);
 study/patient status is derived by aggregating these rows. This script is the
 natural reconcile — disk presence is ground truth.
 
+Dry-run by default (prints what would change); ``--execute`` rewrites
+``series_cache_state``.
+
 Run with:
     conda activate ssc-pacs
     cd stanford-stroke-pacs
-    python scripts/cold_storage/rebuild_cache_state.py [--dry-run]
+    python scripts/cold_storage/rebuild_cache_state.py [--execute]
 """
+import argparse
 import os
 import sys
 import time
-import argparse
 from datetime import datetime, timezone
+from pathlib import Path
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../web-app"))
+from dotenv import load_dotenv
+
+REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+load_dotenv(REPO_ROOT / ".env")
+
+sys.path.insert(0, str(REPO_ROOT / "web-app"))
 from db import get_conn  # noqa: E402
 
 
@@ -36,8 +45,8 @@ def ts():
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--dry-run", action="store_true",
-                        help="Print what would change without writing to DB")
+    parser.add_argument("--execute", action="store_true",
+                        help="Write the changes. Default is a dry-run report.")
     args = parser.parse_args()
 
     t_start = time.monotonic()
@@ -98,8 +107,8 @@ def main():
     print(f"  → warm but archive-less (left as-is): {skipped_no_archive}")
     print(f"  → already correct:   {len(rows) - len(to_hot) - len(to_cold) - skipped_no_archive}")
 
-    if args.dry_run:
-        print("\n--dry-run: no changes written.")
+    if not args.execute:
+        print("\nDry-run (default): no changes written. Re-run with --execute to apply.")
         return
 
     if to_hot:
