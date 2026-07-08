@@ -102,14 +102,14 @@ For annotations that existed before the trigger was installed, run the
 one-time backfill script:
 
 ```bash
-conda activate pacs
-cd stanford-stroke-pacs
+conda activate ssc-pacs
+cd stanford-stroke-pacs   # checkout root; the script lives one level up under maintenance/
 
 # Preview
-python scripts/admin/backfill_annotation_history.py --dry-run
+python ../maintenance/scripts/backfill_annotation_history.py --dry-run
 
 # Apply
-python scripts/admin/backfill_annotation_history.py --execute
+python ../maintenance/scripts/backfill_annotation_history.py --execute
 ```
 
 The script inserts one synthetic `I` row per annotation that has no history

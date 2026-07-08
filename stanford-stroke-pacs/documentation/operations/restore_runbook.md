@@ -12,9 +12,17 @@ step is unclear, fix the doc, not your memory.
 
 ## What a complete recovery restores
 
-A full recovery touches four independent backup artifacts (all under
-`/DATA2/pg_backups/`, except the cold mirror). Restore whichever you lost, in
-this order:
+Throughout this runbook, **`$BR`** is the backup root — `config.toml`
+`[backup].backup_root` (production: `/Volumes/ThunderBay_RAID1/ssc-pacs-backups`).
+Set it once per session:
+
+```bash
+cd /opt/ssc-pacs/ssc-pacs/stanford-stroke-pacs
+BR=$(python3 -c "import tomllib;print(tomllib.load(open('config.toml','rb'))['backup']['backup_root'])")
+```
+
+A full recovery touches four independent backup artifacts (all under `$BR`,
+except the cold mirror). Restore whichever you lost, in this order:
 
 1. **`stanford-stroke`** — Web App data: annotations, users, labels, prefs — §1.
    *Fatal loss; no other copy.*
@@ -37,16 +45,16 @@ everything to a **new host**, see [`cluster_migration.md`](cluster_migration.md)
 
 ```bash
 # 1. Confirm latest backups exist and are recent
-ls -lh /DATA2/pg_backups/stanford-stroke/ /DATA2/pg_backups/orthanc_db/ \
-       /DATA2/pg_backups/orthanc_storage/
+ls -lh "$BR/stanford-stroke/" "$BR/orthanc_db/" "$BR/orthanc_storage/"
 
 # 2. Verify checksums (catches silent disk corruption)
-cd /DATA2/pg_backups/stanford-stroke && sha256sum -c latest.dump.sha256
-cd /DATA2/pg_backups/orthanc_db     && sha256sum -c latest.dump.sha256
-cd /DATA2/pg_backups/orthanc_storage && sha256sum -c latest.tar.gz.sha256   # if restoring the volume
+( cd "$BR/stanford-stroke"  && sha256sum -c latest.dump.sha256 )
+( cd "$BR/orthanc_db"       && sha256sum -c latest.dump.sha256 )
+( cd "$BR/orthanc_storage"  && sha256sum -c latest.tar.gz.sha256 )   # if restoring the volume
 
 # 3. Confirm the PG client major matches the server major
-psql -h localhost -U perecanals -d postgres -c 'SHOW server_version;'
+#    ("$DB_USER" comes from .env, sourced below)
+psql -h localhost -U "$DB_USER" -d postgres -c 'SHOW server_version;'
 pg_dump --version    # must be >= server_version
 ```
 
@@ -57,7 +65,7 @@ previous timestamped dump in the same directory.
 Always source `.env` for credentials rather than typing the password:
 
 ```bash
-set -a; . /home/perecanals/ssc-pacs/stanford-stroke-pacs/.env; set +a
+set -a; . /opt/ssc-pacs/ssc-pacs/stanford-stroke-pacs/.env; set +a
 export PGPASSWORD="$DB_PASSWORD"
 ```
 
@@ -78,7 +86,7 @@ pg_restore \
     -d "$DEST" \
     --no-owner --no-privileges \
     --jobs=4 \
-    /DATA2/pg_backups/stanford-stroke/latest.dump
+    "$BR/stanford-stroke/latest.dump"
 
 # Spot-check
 psql -h "$DB_HOST" -U "$DB_USER" -d "$DEST" -c "
@@ -96,7 +104,8 @@ If counts look right, go to 1b. Otherwise try an older dump.
 "backup taken" and "restore performed":
 
 ```bash
-sudo systemctl stop ssc-web-app
+# macOS (production): sudo launchctl bootout system/com.ssc.webapp
+sudo launchctl bootout system/com.ssc.webapp   # Linux: sudo systemctl stop ssc-web-app
 ```
 
 Then promote the scratch DB. Two options:
@@ -118,7 +127,7 @@ psql -h "$DB_HOST" -U "$DB_USER" -d postgres -c \
 createdb -h "$DB_HOST" -U "$DB_USER" stanford-stroke
 pg_restore -h "$DB_HOST" -U "$DB_USER" -d stanford-stroke \
     --no-owner --no-privileges --jobs=4 \
-    /DATA2/pg_backups/stanford-stroke/latest.dump
+    "$BR/stanford-stroke/latest.dump"
 ```
 
 Option A is preferred — the broken DB stays around (renamed) for forensic
@@ -127,7 +136,8 @@ analysis and you get a sub-second cutover.
 Restart Web App and validate:
 
 ```bash
-sudo systemctl start ssc-web-app
+# macOS (production): sudo launchctl bootstrap system /Library/LaunchDaemons/com.ssc.webapp.plist
+sudo launchctl bootstrap system /Library/LaunchDaemons/com.ssc.webapp.plist   # Linux: sudo systemctl start ssc-web-app
 curl -sf http://localhost:8043/api/labels/summary | python3 -m json.tool | head
 ```
 
@@ -150,9 +160,11 @@ psql -h "$DB_HOST" -U "$DB_USER" -d postgres \
 
 ## 2. Restore `orthanc_db` (Orthanc index)
 
-Orthanc's index is **rebuildable** from the on-disk DICOMs (the Folder
-Indexer plugin re-scans on startup), but a restore from the dump is
-faster than re-indexing 13k+ series. Prefer the dump.
+Orthanc's index is **rebuildable** from the DICOMs, but a restore from the
+dump is far faster than re-registering the whole corpus (check the current
+scale with `GET /statistics` — it reports the live study/series/instance
+counts). Prefer the dump. Note there is **no continuous re-scan** on startup
+(`Folders: []`), so a from-scratch rebuild is not automatic — see §2c.
 
 ### 2a. Restore into a scratch DB
 
@@ -165,7 +177,7 @@ pg_restore \
     -d "$DEST" \
     --no-owner --no-privileges \
     --jobs=4 \
-    /DATA2/pg_backups/orthanc_db/latest.dump
+    "$BR/orthanc_db/latest.dump"
 
 # Spot-check (Orthanc tables: resources, attachedfiles, metadata, etc.)
 psql -h "$DB_HOST" -U "$DB_USER" -d "$DEST" -c "
@@ -177,25 +189,37 @@ psql -h "$DB_HOST" -U "$DB_USER" -d "$DEST" -c "
 ### 2b. Cut over
 
 ```bash
-# Stop Orthanc so it lets go of orthanc_db
-docker compose -f /home/perecanals/ssc-pacs/stanford-stroke-pacs/docker-compose.yml down
+cd /opt/ssc-pacs/ssc-pacs/stanford-stroke-pacs
+
+# Stop Orthanc so it lets go of orthanc_db. Use dc.sh — a bare `docker compose`
+# fails the ${DICOM_MOUNT_SOURCE:?} guard.
+scripts/orthanc/dc.sh down
 
 psql -h "$DB_HOST" -U "$DB_USER" -d postgres -c "
   ALTER DATABASE orthanc_db RENAME TO orthanc_db_broken_$(date -u +%Y%m%dT%H%M);
   ALTER DATABASE \"$DEST\" RENAME TO orthanc_db;
 "
 
-docker compose -f /home/perecanals/ssc-pacs/stanford-stroke-pacs/docker-compose.yml up -d
+scripts/orthanc/dc.sh up -d
 docker logs -f ssc-orthanc | grep -i 'index\|ready\|http'
 ```
 
-### 2c. (Last resort) rebuild from disk
+### 2c. (Last resort) rebuild the index
 
-If both `orthanc_db` and the most recent dump are unusable, drop the DB,
-let Orthanc recreate the schema on first boot, and let the patched
-Folder Indexer re-scan `/DATA2/pacs_imaging_data` (or the cold-warmed
-copies). This takes hours and re-creates labels — read
-`documentation/cold_storage/` and `scripts/orthanc/enrich_orthanc.py` first.
+If both `orthanc_db` and its most recent dump are unusable, the index must be
+rebuilt — but note this is **not** an automatic on-boot re-scan. In
+`cold_path_cache` mode the DICOM tree is **empty at rest** (files live in
+`*.tar.zst` archives), and `orthanc.json` runs no continuous scan
+(`Folders: []`), so a fresh Orthanc boots with an empty index.
+
+Rebuilding means, per study: **warm** the series (extract archives back to
+`dicom_data_root`) and then **register** the materialized folders via bounded
+scoped passes (`scripts/cold_storage/reindex_missing_series.py`, which drives
+the patched indexer's `POST /indexer/scan`). Across the whole corpus this is a
+multi-day operation and re-creates OE2 labels — read
+`documentation/cold_storage/` and re-run `scripts/orthanc/enrich_orthanc.py`
+/ `scripts/orthanc/label_studies.py` afterwards. Restoring the dump (§2a/§2b)
+plus the storage volume (§2d) is dramatically preferable.
 
 ### 2d. Restore the Orthanc storage volume (OHIF SR annotations + indexer DB)
 
@@ -207,27 +231,29 @@ restored volume is portable across hosts as long as the new container keeps the
 DICOM bind-mount at `/dicom-data` (no reindex needed).
 
 ```bash
-ARCHIVE=/DATA2/pg_backups/orthanc_storage/latest.tar.gz
+cd /opt/ssc-pacs/ssc-pacs/stanford-stroke-pacs
+ARCHIVE="$BR/orthanc_storage/latest.tar.gz"
 sha256sum -c "${ARCHIVE}.sha256"          # pre-flight integrity
 
-COMPOSE=/home/perecanals/ssc-pacs/stanford-stroke-pacs/docker-compose.yml
 VOL=stanford-stroke-pacs_ssc-orthanc-storage
 
-# Stop Orthanc so nothing is using the volume
-docker compose -f "$COMPOSE" down
+# Stop Orthanc so nothing is using the volume (dc.sh — bare compose fails the
+# DICOM_MOUNT_SOURCE guard).
+scripts/orthanc/dc.sh down
 
 # Wipe + reload the named volume. busybox tar reads the gzip stream; running as
 # root in-container avoids host permission issues with the volume's files.
 docker run --rm -i -v "$VOL:/vol" alpine sh -c 'rm -rf /vol/* && tar -xzf - -C /vol' < "$ARCHIVE"
 
-docker compose -f "$COMPOSE" up -d
+scripts/orthanc/dc.sh up -d
 docker logs -f ssc-orthanc | grep -i 'index\|ready\|http'
 ```
 
-Verify the SR annotations are back (expect the pre-incident count, e.g. 98):
+Verify the SR annotations are back — compare against the pre-incident SR count
+(record it before any destructive step; `GET /statistics` / the query below):
 
 ```bash
-set -a; . /home/perecanals/ssc-pacs/stanford-stroke-pacs/.env; set +a
+set -a; . /opt/ssc-pacs/ssc-pacs/stanford-stroke-pacs/.env; set +a
 curl -s -u "$ORTHANC_ADMIN_USER:$ORTHANC_ADMIN_PASSWORD" \
      -X POST http://localhost:8042/tools/find \
      -d '{"Level":"Series","Query":{"Modality":"SR"},"Expand":false}' \
@@ -253,13 +279,14 @@ In production, once the cold mirror is enabled (see
 # (warming reads from cold_archive_root; if you're restoring INTO
 # cold_archive_root from the mirror, no warm should be in flight)
 
+# CAR = config.toml [storage].cold_archive_root
+CAR=$(python3 -c "import tomllib;print(tomllib.load(open('config.toml','rb'))['storage']['cold_archive_root'])")
+
 # Restore everything
-rsync -a --info=stats2 \
-    "$COLD_MIRROR_DEST"/ /DATA2/pacs_imaging_data_compressed/
+rsync -a --info=stats2 "$COLD_MIRROR_DEST"/ "$CAR"/
 
 # Or restore a single series
-rsync -a "$COLD_MIRROR_DEST/<series-uid-prefix>/" \
-         /DATA2/pacs_imaging_data_compressed/<series-uid-prefix>/
+rsync -a "$COLD_MIRROR_DEST/<series-uid-prefix>/" "$CAR/<series-uid-prefix>/"
 ```
 
 Then verify by warming a recently-restored series:
@@ -281,7 +308,7 @@ DEST=ws01_drill_$(date +%s)
 createdb -h "$DB_HOST" -U "$DB_USER" "$DEST"
 pg_restore -h "$DB_HOST" -U "$DB_USER" -d "$DEST" \
     --no-owner --no-privileges --jobs=4 \
-    /DATA2/pg_backups/stanford-stroke/latest.dump
+    "$BR/stanford-stroke/latest.dump"
 
 # Compare against production
 for tbl in image_series annotations users label_definitions; do
@@ -300,6 +327,8 @@ dropdb -h "$DB_HOST" -U "$DB_USER" "$DEST"
 
 | Date | DB(s) | Result | Run by |
 |---|---|---|---|
-| 2026-04-15 | `stanford-stroke`, `orthanc_db` | PASS — row counts match production for `image_series`, `annotations`, `users`, `label_definitions`, plus top-10 Orthanc tables by row count | claude (WS01 acceptance) |
+| 2026-04-15 | `stanford-stroke`, `orthanc_db` | PASS — row counts match production for `image_series`, `annotations`, `users`, `label_definitions`, plus top-10 Orthanc tables by row count | claude (acceptance drill) |
 
-Run this drill quarterly. Update the table after each run.
+Run this drill quarterly. **A re-drill is due on the macOS production
+platform** — the last recorded run predates the migration (different service
+manager, backup root, and PostgreSQL install). Update the table after each run.

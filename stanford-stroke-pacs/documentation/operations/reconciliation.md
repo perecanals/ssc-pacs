@@ -33,6 +33,11 @@ python scripts/data_integrity/reconcile.py --json
 python scripts/data_integrity/reconcile.py --json --quiet
 ```
 
+> **Fail-fast:** importing the reconciliation module (via the `db` import
+> chain) raises immediately if `ORTHANC_ADMIN_USER` / `ORTHANC_ADMIN_PASSWORD`
+> are unset in `.env`. If `reconcile.py` errors out before doing any work,
+> check those credentials first.
+
 ---
 
 ## On-demand only (no scheduled job)
@@ -81,25 +86,32 @@ curl -b cookies.txt http://localhost:8043/api/admin/reconciliation/latest | jq .
 A series exists in `image_series` but is not indexed by Orthanc.
 
 **Common causes:**
-- Loose DICOMs were deleted before Orthanc indexed them.
-- Ingest pipeline (`image_ingestion_protocols/`) completed the DB insert
-  but Orthanc's Folder Indexer hasn't scanned yet (wait for `Interval`
-  seconds and re-check).
+- A per-case scoped registration (`POST /indexer/scan`) failed or was
+  interrupted (e.g. Orthanc OOM-killed mid-scan), so the series was never
+  registered. There is **no continuous Folder Indexer scan** (`Folders: []`),
+  so it will not self-heal — it must be re-registered explicitly.
+- Loose DICOMs were deleted before the series was ever registered.
 - In `cold_path_cache` mode: series is cold (files evicted) and the patched
   Folder Indexer removed the index entry.  This should not happen with
   `RemoveMissingFiles: false` — investigate the Orthanc config.
 
-**Investigation:**
+**Remediation.** Warming does **not** fix this — warm/evict is index-neutral
+(with `RemoveMissingFiles: false`, extracting files adds no index rows). The
+fix is to **re-register** the series with the patched indexer's scoped scan,
+in bounded passes:
+
 ```bash
-# Check if the archive exists
+# Confirm the archive/dir the series expects
 psql -d stanford-stroke -c \
   "SELECT dicom_dir_path, dicom_archive_path FROM image_series
    WHERE seriesinstanceuid = '<uid>';"
 
-# If archive exists, warm the study
-curl -X POST -b cookies.txt http://localhost:8043/api/studies/<study_uid>/warm
+# Backfill every missing series (bounded passes; safe, idempotent)
+python scripts/cold_storage/reindex_missing_series.py --execute
+#   or a targeted list:
+python scripts/cold_storage/scoped_index.py --series <uid1,uid2>
 
-# Re-check after Orthanc re-scans
+# Re-check — in_db_not_in_orthanc should drop
 python scripts/data_integrity/reconcile.py | grep '<uid>'
 ```
 
@@ -152,20 +164,51 @@ python scripts/cold_storage/list_unarchived_series.py
 python scripts/cold_storage/archive_all_series.py --patient <patient_id>
 ```
 
+### `orphaned_annotations`
+
+An `annotations` row whose entity no longer exists in the patient / study /
+series spine — i.e. a `patient`, `image_study`, or `image_series` key that was
+deleted (or never ingested) out from under a label. Detected by
+`reconcile.py` (`orphaned_annotations`) and **included in `total_mismatches`**,
+so a non-zero count here fails a "clean" reconciliation the same as an index
+drift.
+
+**Common causes:**
+- Upstream re-ingestion deleted and recreated rows with different keys.
+- An annotation was written against an entity that was later removed.
+
+**Investigation:**
+```bash
+# The JSON report lists the offending annotation_id / entity_id under
+# mismatches.orphaned_annotations:
+python scripts/data_integrity/reconcile.py --json
+jq '.mismatches.orphaned_annotations' \
+  maintenance/reconciliation-reports/<latest>.json
+```
+
+Resolve by re-ingesting the missing entity (if it should exist) or deleting
+the stale annotation via the API / a manual `DELETE` (if the entity is gone
+for good).
+
 ---
 
 ## Prometheus metrics
 
-The reconciliation run updates these gauges (added in WS 06):
+The reconciliation run updates these gauges:
 
 | Metric | Type | Labels | Description |
 |--------|------|--------|-------------|
-| `reconciliation_mismatches_total` | gauge | `category` | Count per mismatch category |
+| `reconciliation_mismatches_total` | gauge | `category` (incl. `orphaned_annotations`) | Count per mismatch category |
 | `reconciliation_last_run_timestamp` | gauge | — | Unix epoch of last run |
 | `reconciliation_duration_seconds` | gauge | — | Duration of last run |
 
-These are refreshed by the CLI script on every run.  The web app
-`/metrics` endpoint exposes them alongside the other application metrics.
+> **These are CLI-process-local.** `reconcile.py` calls
+> `update_reconciliation_metrics` inside its **own** process registry and
+> then exits, so the values die with the process. The web app runs in a
+> **separate process** and never calls it — the web app `/metrics` endpoint
+> therefore shows these gauges as **0 / absent**, not the real last-run
+> values. To surface them in Prometheus you would need to wire the web app to
+> read the latest JSON report at scrape time (not currently implemented).
 
 ---
 

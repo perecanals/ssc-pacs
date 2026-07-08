@@ -2,7 +2,21 @@
 
 **Purpose:** Day-2 commands and quick API examples. For first-time deploy see [`../guides/installation_and_deployment.md`](../guides/installation_and_deployment.md). For runtime/config context see [`../reference/runtime_and_config.md`](../reference/runtime_and_config.md).
 
-Run commands from the **repo root** unless noted.
+**Two "roots".** Script paths (`scripts/...`) are relative to the **stack root**
+`stanford-stroke-pacs/`. `make` targets run from the **checkout root**
+`/opt/ssc-pacs/ssc-pacs/` (where the `Makefile` lives). Each block below says
+which it assumes.
+
+**Production platform.** Production runs on **macOS via launchd** (9
+`com.ssc.*` LaunchDaemons; web app = `com.ssc.webapp`). Linux/systemd
+equivalents are shown alongside where they differ. Any bare
+`sudo systemctl …` line is the Linux form only.
+
+**Destructive-flag polarity.** The mutating cold-storage/label scripts are
+**dry-run by default** and only write with `--execute`:
+`archive_all_series.py`, `bulk_set_label_values.py`, `rebuild_cache_state.py`,
+`prune_stale_index_paths.py`, `reindex_missing_series.py`. (`remove_label.py`
+prompts unless you pass `--yes`.)
 
 ---
 
@@ -31,32 +45,43 @@ scripts/orthanc/dc.sh restart
 ./scripts/admin/teardown.sh
 ```
 
-### Web App (native systemd service)
+### Web App (native service)
+
+**macOS (production — launchd):**
 
 ```bash
-# Start / stop / restart
-sudo systemctl start ssc-web-app
-sudo systemctl stop ssc-web-app
-sudo systemctl restart ssc-web-app
+# Restart (the common one)
+sudo launchctl kickstart -k system/com.ssc.webapp
 
-# Check status
+# Stop / start
+sudo launchctl bootout system/com.ssc.webapp
+sudo launchctl bootstrap system /Library/LaunchDaemons/com.ssc.webapp.plist
+
+# Live logs (flat JSON files — pipe through jq)
+tail -f ~/Library/Logs/ssc-web-app.log ~/Library/Logs/ssc-web-app.err
+
+# Install / re-render all daemons (one-time or after editing a *.plist.in)
+sudo scripts/macos/install_launchd.sh
+```
+
+**Linux (systemd):**
+
+```bash
+sudo systemctl start|stop|restart ssc-web-app
 sudo systemctl status ssc-web-app
-
-# View live logs
 sudo journalctl -u ssc-web-app -f
+sudo scripts/linux/install_systemd.sh   # installs unit templates + enables
 
-# Enable auto-start on boot (one-time setup)
-sudo cp systemd/ssc-web-app.service /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable --now ssc-web-app
-
-# Rebuild frontend after code changes
+# Rebuild frontend after code changes (either platform)
 cd web-app && npm run build
-sudo systemctl restart ssc-web-app
+sudo launchctl kickstart -k system/com.ssc.webapp   # Linux: sudo systemctl restart ssc-web-app
 
 # Run manually (development, with auto-reload)
 cd web-app && uvicorn app:app --port 8043 --reload
 ```
+
+> The service units are installed from `*.in` templates by the installer
+> scripts above — not by hand-copying files into `/etc` or `/Library`.
 
 ---
 
@@ -89,6 +114,18 @@ python scripts/admin/manage_users.py set-datasets alice --none  # revoke all acc
 
 # Remove a user
 python scripts/admin/manage_users.py remove alice
+
+# Verify .env and orthanc_users.json agree on the service account
+python scripts/admin/manage_users.py check-service-account   # exits non-zero on drift
+```
+
+Rename a dataset tag across the `patient` table and every user's grants
+(keeps access intact when a cohort is renamed; dry-run default, `--execute`
+to apply):
+
+```bash
+python scripts/admin/rename_dataset_value.py --from-value lvo --to-value 'CRISP2/LVO'
+python scripts/admin/rename_dataset_value.py --from-value lvo --to-value 'CRISP2/LVO' --execute
 ```
 
 Dataset grants control which patients a non-admin user sees in the web app
@@ -126,12 +163,16 @@ This rewrites `ORTHANC_ADMIN_PASSWORD` in `.env` and the matching entry in
 
 ```bash
 docker restart ssc-orthanc
-sudo systemctl restart ssc-web-app
+sudo launchctl kickstart -k system/com.ssc.webapp   # Linux: sudo systemctl restart ssc-web-app
 ```
 
 ---
 
 ## SSH tunnel (run from local machine)
+
+Ready-made wrappers ship per-OS: `scripts/connectivity/tunnel/linux/tunnel.sh`,
+`scripts/connectivity/tunnel/macos/tunnel.command`, and
+`scripts/connectivity/tunnel/windows/tunnel.cmd`. Or open it by hand:
 
 ```bash
 # Open tunnel (includes web app app on 8043)
@@ -164,16 +205,22 @@ kill $(lsof -ti :8042 -sTCP:LISTEN)
 # Orthanc container resource usage
 docker stats ssc-orthanc --no-stream
 
-# Orthanc container logs (follow)
-docker compose logs -f orthanc
+# Orthanc container logs (follow) — use dc.sh or the container name directly;
+# bare `docker compose logs` fails the DICOM_MOUNT_SOURCE guard.
+scripts/orthanc/dc.sh logs -f orthanc
+docker logs -f ssc-orthanc
 
 # Recent Orthanc logs only
 docker logs --since 5m ssc-orthanc
 
-# Web App logs (systemd)
+# Web App logs — macOS (flat JSON files)
+tail -f ~/Library/Logs/ssc-web-app.log ~/Library/Logs/ssc-web-app.err
+# Linux (systemd journal)
 sudo journalctl -u ssc-web-app -f
-sudo journalctl -u ssc-web-app --since "5 min ago"
 ```
+
+For the full logging/metrics/health reference see
+[`observability.md`](observability.md).
 
 ---
 
@@ -190,6 +237,34 @@ python scripts/data_integrity/reconcile.py --json --quiet # quiet mode (on-deman
 
 # Enrich studies/series with patient_id, seriesdescription (re-run after new indexing)
 python scripts/orthanc/enrich_orthanc.py
+```
+
+---
+
+## Schema migrations (Alembic — `stanford-stroke` only)
+
+From `stanford-stroke-pacs/web-app/` with `conda activate ssc-pacs`. Full
+workflow in [`schema_migrations.md`](schema_migrations.md).
+
+```bash
+alembic current              # revision applied to this DB (prod may trail repo head until restart)
+alembic history              # revision graph
+alembic upgrade head         # apply pending revisions (also runs at app startup)
+alembic revision -m "<msg>"  # scaffold a new revision (hand-edit it)
+```
+
+Do **not** run Alembic against `orthanc_db`.
+
+---
+
+## Ingesting new imaging data
+
+Site-specific SSC pipeline. Copy the example YAML, edit it, then run (from
+`stanford-stroke-pacs/image_ingestion_protocols/`, `conda activate ssc-pacs`).
+See [`../reference/image_ingestion_protocol.md`](../reference/image_ingestion_protocol.md).
+
+```bash
+python execute_image_ingestion_protocol.py [--config path/to/config.yaml]
 ```
 
 ---
@@ -235,81 +310,65 @@ Users can add custom labels through the OE2 UI. All labels are shared across use
 
 Multi-level annotations live in the `stanford-stroke` database; see [`../reference/data_stores.md`](../reference/data_stores.md).
 
+Authenticated endpoints need the JWT cookie. Log in once and reuse the jar:
+
+```bash
+curl -s -c cookies.txt -X POST http://localhost:8043/api/login \
+  -H 'Content-Type: application/json' -d '{"username":"alice","password":"..."}'
+```
+
 ```bash
 # Rebuild frontend and restart the web app service
 cd web-app && npm run build
-sudo systemctl restart ssc-web-app
+sudo launchctl kickstart -k system/com.ssc.webapp   # Linux: sudo systemctl restart ssc-web-app
 
 # List all annotation labels via the API
-curl -s http://localhost:8043/api/labels | python3 -m json.tool
+curl -s -b cookies.txt http://localhost:8043/api/labels | python3 -m json.tool
 
 # Label summary with counts
-curl -s http://localhost:8043/api/labels/summary | python3 -m json.tool
+curl -s -b cookies.txt http://localhost:8043/api/labels/summary | python3 -m json.tool
 
 # Search series (optional filters: label, patient_id, modality, description, study_type)
-curl -s 'http://localhost:8043/api/series?label=hemorrhagic&per_page=10' | python3 -m json.tool
+curl -s -b cookies.txt 'http://localhost:8043/api/series?label=hemorrhagic&per_page=10' | python3 -m json.tool
 
-# Add an annotation via API (writes use JWT in browser; for curl you typically need auth cookie)
-curl -s -X POST http://localhost:8043/api/annotations \
+# Add an annotation via API
+curl -s -b cookies.txt -X POST http://localhost:8043/api/annotations \
   -H 'Content-Type: application/json' \
   -d '{"seriesinstanceuid":"1.2.3...", "studyinstanceuid":"1.2.3...", "label":"reviewed", "created_by":"alice"}'
 
 # Remove an annotation by ID
-curl -s -X DELETE http://localhost:8043/api/annotations/42
+curl -s -b cookies.txt -X DELETE http://localhost:8043/api/annotations/42
 
-# Remove a label entirely (definition + annotation rows) — run from repo root
-sudo ./scripts/admin/remove_label.py "My Label Name"
+# Remove a label entirely (definition + annotation rows). Prompts for
+# confirmation unless --yes. Run from the stack root; no sudo needed.
+./scripts/admin/remove_label.py "My Label Name" --yes
 
 # Bulk-set a label's values from a CSV/Excel table (admin backdoor).
 # Creates the label if it does not exist (interactive y/n unless --yes).
-sudo bash scripts/admin/bulk_set_label_values.sh \
+# Dry-run by default; add --execute to write. No sudo needed.
+bash scripts/admin/bulk_set_label_values.sh \
     --file /tmp/series_quality.csv --level series \
     --id-column seriesinstanceuid --value-column quality \
     --label series_quality --datatype select --options 'good,acceptable,poor' \
-    --dry-run
+    --execute
 ```
 
-### Removing the web app app
-
-1. Stop and disable the service: `sudo systemctl disable --now ssc-web-app`
-2. Remove the unit file: `sudo rm /etc/systemd/system/ssc-web-app.service`
-3. Delete the `web-app/` folder and `systemd/ssc-web-app.service`
-4. (Optional) drop web-app-owned tables in `stanford-stroke` if you no longer need them
-
-Orthanc is unaffected.
-
----
-
-## Backend module structure
-
-The web app backend is split into focused modules under `web-app/`:
-
-| Module | Purpose |
-|--------|---------|
-| `app.py` | Entry point: lifespan, middleware, router registration (~230 lines) |
-| `db.py` | Single source of truth for `DB_CONFIG` and `ThreadedConnectionPool` |
-| `auth.py` | JWT utilities (`create_jwt`, `decode_jwt`, `get_current_user`) |
-| `orthanc_client.py` | Orthanc REST wrappers (`orthanc_lookup`, `orthanc_system_check`) |
-| `common.py` | Shared SQL builders, annotation helpers, constants |
-| `config.py` | Loads `config.toml` settings |
-| `cache_manager.py` | Cold-storage warm/evict logic |
-| `routes/*.py` | `APIRouter` submodules (auth, studies, annotations, labels, etc.) |
-
-**Scripts** under `scripts/` import `DB_CONFIG` and `get_conn` from
-`web-app/db.py` (via `sys.path` insertion). They no longer define their
-own database config inline.
+The backend module map lives in
+[`../reference/architecture.md`](../reference/architecture.md); scripts import
+`DB_CONFIG` / `get_conn` from `web-app/db.py`.
 
 ---
 
 ## Testing and code quality
 
-Run from the **repo root** with `conda activate pacs`.
+Run from the **checkout root** (`/opt/ssc-pacs/ssc-pacs/`, where the
+`Makefile` lives) with `conda activate ssc-pacs`.
 
 ```bash
 # One-time dev setup (Python deps, Node deps, pre-commit hooks)
 make install-dev
 
-# Run all tests (backend + frontend)
+# Run all tests (backend + frontend + ingestion)
 make test
 
 # Backend only (pytest — needs local Postgres; creates scratch DB)
@@ -318,13 +377,17 @@ make test-backend
 # Frontend only (vitest — no Postgres needed)
 make test-frontend
 
-# Lint (ruff on web-app/)
+# Ingestion protocol only (DB-free; e2e cases gated on SSC_INGEST_AUDIT=1)
+make test-ingestion
+
+# Lint: ruff on web-app + scripts + image_ingestion_protocols, then eslint on the frontend
 make lint
 ```
 
 **CI:** GitHub Actions runs on every push to `main` and every PR
-(`.github/workflows/ci.yml`). Required jobs: lint, backend-tests,
-frontend-tests, frontend-build. The mypy job is advisory (non-blocking).
+(`.github/workflows/ci.yml`). Jobs: `lint` (ruff ×3 surfaces),
+`backend-tests`, `ingestion-tests`, `frontend-tests` (eslint + vitest),
+`frontend-build`. The `mypy` job is advisory (non-blocking).
 
 **Pre-commit hooks:** Installed by `make install-dev`. Runs ruff and prettier
 on `web-app/` files automatically before each `git commit`.
@@ -358,6 +421,56 @@ curl -s -u admin:<password> http://localhost:8042/system | python3 -m json.tool
 ## Cold storage
 
 See [`../cold_storage/runbook.md`](../cold_storage/runbook.md) for evaluation, archiver, and mode switching.
+
+### Warm / evict / status (per series or per study)
+
+```bash
+# Study-level (cache-status is a derived aggregate over the study's series)
+curl -b cookies.txt      http://localhost:8043/api/studies/<uid>/cache-status
+curl -b cookies.txt -X POST http://localhost:8043/api/studies/<uid>/warm    # 202; poll until "hot"
+curl -b cookies.txt -X POST http://localhost:8043/api/studies/<uid>/evict
+
+# Series-level (the cache-state unit is the series)
+curl -b cookies.txt      http://localhost:8043/api/series/<series-uid>/cache-status
+curl -b cookies.txt -X POST http://localhost:8043/api/series/<series-uid>/warm
+curl -b cookies.txt -X POST http://localhost:8043/api/series/<series-uid>/evict
+```
+
+### Archiving, sizing, cleanup, health (all dry-run by default)
+
+```bash
+# Compress series to *.tar.zst (dry-run default; --execute writes + records paths)
+python scripts/cold_storage/archive_all_series.py --dry-run
+python scripts/cold_storage/archive_all_series.py --workers 4 --execute
+
+# Backfill per-series/study storage sizes (compressed/decompressed MB)
+python scripts/cold_storage/backfill_storage_sizes.py            # everything missing
+python scripts/cold_storage/backfill_storage_sizes.py --label my_batch --workers 4
+
+# Triage series with loose files but no archive (compression failures)
+python scripts/cold_storage/list_unarchived_series.py --count
+python scripts/cold_storage/list_unarchived_series.py --patient 4-0551
+
+# Delete loose DICOMs that are safe to remove (archive exists + Orthanc indexed)
+python scripts/cold_storage/cleanup_loose_dicoms.py                  # dry-run
+python scripts/cold_storage/cleanup_loose_dicoms.py --execute
+
+# Verify (and optionally repair) archive integrity
+python scripts/cold_storage/verify_and_repair_archives.py
+
+# Cold-storage health probe (stuck warming, orphan dirs, disk free)
+python scripts/cold_storage/cold_storage_health.py
+```
+
+### DICOM → NIfTI (on demand)
+
+```bash
+python scripts/dicom/dicom_to_nifti.py --dir /path/to/DICOM
+python scripts/dicom/dicom_to_nifti.py --archive /path/to/DICOM.tar.zst --out /tmp/x.nii.gz
+python scripts/dicom/dicom_to_nifti.py --series-uid <uid> --warm-if-cold
+```
+
+### Repair the Orthanc index
 
 Repair stale Orthanc index entries (duplicate-path rot that makes OHIF panes blank):
 
@@ -397,31 +510,55 @@ python scripts/cold_storage/scoped_index.py --series <suid1,suid2> [--granularit
 
 ## Backups
 
-PostgreSQL backups run nightly via systemd timers. Strategy and rationale in
-[`backup_strategy.md`](backup_strategy.md). Recovery procedure in
-[`restore_runbook.md`](restore_runbook.md).
+PostgreSQL + Orthanc-storage backups run nightly — via launchd on macOS
+(`com.ssc.pg-backup-{stanford-stroke,orthanc,freshness}`,
+`com.ssc.orthanc-storage-backup`), via systemd timers on Linux. Strategy and
+rationale in [`backup_strategy.md`](backup_strategy.md). Recovery procedure in
+[`restore_runbook.md`](restore_runbook.md). The dump root is `config.toml`
+`[backup].backup_root` (production: `/Volumes/ThunderBay_RAID1/ssc-pacs-backups`).
 
 ```bash
-# On-demand backup (also runs nightly via timer)
+# On-demand backup (also runs nightly)
 ./scripts/backup/backup_pg_db.sh stanford-stroke
 ./scripts/backup/backup_pg_db.sh orthanc_db
 
-# Inspect latest dumps
-ls -lh /DATA2/pg_backups/stanford-stroke/ /DATA2/pg_backups/orthanc_db/
+# Inspect latest dumps (BR = the [backup].backup_root from config.toml)
+BR=$(python3 -c "import tomllib;print(tomllib.load(open('config.toml','rb'))['backup']['backup_root'])")
+ls -lh "$BR/stanford-stroke/" "$BR/orthanc_db/"
 
 # Verify checksums
-( cd /DATA2/pg_backups/stanford-stroke && sha256sum -c latest.dump.sha256 )
+( cd "$BR/stanford-stroke" && sha256sum -c latest.dump.sha256 )
 
-# Check timer schedule
-systemctl list-timers 'pg-backup-*'
-
-# Tail the most recent backup run
-sudo journalctl -u pg-backup-stanford-stroke.service -e
-sudo journalctl -u pg-backup-orthanc.service -e
+# Check schedule / tail the most recent run
+sudo launchctl list | grep com.ssc.pg-backup          # macOS
+tail -n 50 ~/Library/Logs/com.ssc.pg-backup-stanford-stroke.err   # macOS
+#   Linux: systemctl list-timers 'pg-backup-*'
+#          sudo journalctl -u pg-backup-stanford-stroke.service -e
 
 # Run the freshness monitor manually
 ./scripts/backup/check_backup_freshness.sh    # exit 0 = fresh, 2 = stale or missing
 ```
 
-The cold-archive mirror (Tier 2) is implemented but **dormant** on the dev
-host — see `backup_strategy.md` §4 for the production cutover steps.
+The cold-archive mirror (Tier 2) is implemented but **dormant** — see
+`backup_strategy.md` §4 for the production cutover steps.
+
+---
+
+## Cutting a release
+
+Versioning is deliberately minimal: a `vX.Y` git tag plus a 2–3 line entry in
+the root `CHANGELOG.md`. Cut one when a change is changelog-worthy (a DB
+migration, a user-visible change, a state you'd want to roll back to, or an
+accumulation of small fixes). Bump `X` only for scary upgrades (irreversible
+migration, storage-mode change); otherwise bump `Y`.
+
+```bash
+# 1. Add a 2-3 line entry to the root CHANGELOG.md (note any Alembic migration).
+# 2. Tag and push.
+git tag vX.Y
+git push --tags
+```
+
+That's the whole procedure — no other tooling. `git describe --tags` may show
+production a few commits past the last tag (e.g. `v1.2-3-g<sha>`); that is
+expected. (`CHANGELOG.md` is created at the v1.0 audit→main merge.)

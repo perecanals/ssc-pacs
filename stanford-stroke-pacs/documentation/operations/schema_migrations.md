@@ -17,7 +17,7 @@ lives at `stanford-stroke-pacs/web-app/alembic/versions/`.
   this is a no-op (no DDL emitted, no transaction opened).
 - **CLI** — from `stanford-stroke-pacs/web-app/`:
   ```bash
-  conda activate pacs
+  conda activate ssc-pacs
   alembic current     # show the revision applied to this DB
   alembic history     # full revision graph
   alembic upgrade head
@@ -38,8 +38,24 @@ stanford-stroke-pacs/web-app/
     ├── env.py                   # builds DB URL from .env; include_object filter
     ├── script.py.mako           # template for `alembic revision`
     └── versions/
-        └── 0001_baseline.py     # snapshot of prod schema as of 2026-04-15
+        ├── 0001_baseline.py     # snapshot of prod schema as of 2026-04-15
+        ├── 0002_warming_started_at.py
+        ├── 0003_annotations_history.py
+        ├── 0004_label_def_instrument.py
+        ├── 0005_users_must_change_password.py
+        ├── 0006_create_patient_table.py
+        ├── 0007_cache_state_queued_status.py
+        ├── 0008_users_allowed_datasets.py
+        ├── 0009_label_value_options.py
+        ├── 0010_series_cache_state.py
+        ├── 0011_image_table_indexes.py
+        ├── 0012_upstream_size_columns.py
+        ├── 0013_drop_snapshot_tables.py
+        └── 0014_annotation_index_cleanup.py
 ```
+
+The chain is linear (`0001` → `0014`). `alembic history` prints the live
+graph; `alembic heads` should always show a single head.
 
 ---
 
@@ -52,7 +68,7 @@ production on 2026-04-15. They fall in three groups:
 |---|---|---|
 | web-app-owned | `annotations`, `label_definitions`, `users`, `user_preferences`, `series_cache_state` | Future Alembic revisions (the per-study `cache_state` and dead `orthanc_resource_map` were replaced/dropped by `0010_series_cache_state`) |
 | Upstream raw | `patient`, `image_series`, `image_study`, `lvo_clinical_data` | External ingest pipeline (out of scope for Alembic; `patient` also has a `CREATE TABLE IF NOT EXISTS` bootstrap in revision `0006`) |
-| Dynamic labelled / snapshot | `image_series_labelled`, `image_study_labelled`, `patient_labelled`, `snapshot_patients`, `snapshot_studys`, `snapshot_seriess` | `web-app/labelled_table_sync.py`, based on `label_definitions`. The `*_labelled` mirrors are refreshed **in the background after each annotation write** (eventually consistent — not in the request transaction) plus on demand via the "Refresh Labelled Tables" button, bulk-label scripts, and image ingest |
+| Dynamic labelled mirrors | `image_series_labelled`, `image_study_labelled`, `patient_labelled` | `web-app/labelled_table_sync.py`, based on `label_definitions`. Refreshed **in the background after each annotation write** (eventually consistent — not in the request transaction) plus on demand via the "Refresh Labelled Tables" button, bulk-label scripts, and image ingest. (The `snapshot_*` tables that once lived here were dropped by `0013_drop_snapshot_tables`.) |
 
 The upstream and dynamic groups are excluded from Alembic's `--autogenerate`
 proposals via `include_object` in `alembic/env.py` — autogenerate will
@@ -61,7 +77,7 @@ mentions it.
 
 The baseline still **creates** those tables so that `alembic upgrade head`
 on a fresh empty DB produces a schema that matches production for the
-schema-diff acceptance gate (workstream 04 §6).
+schema-diff acceptance gate.
 
 ---
 
@@ -81,7 +97,8 @@ applied to prod via `alembic stamp` — no DDL re-runs.
 
 ```bash
 cd stanford-stroke-pacs/web-app
-conda activate pacs
+conda activate ssc-pacs
+set -a; . ../.env; set +a   # DB_USER / DB_PASSWORD for the psql/pg_dump calls below
 
 # 1. Generate a new revision file (manually edit it — the project doesn't
 #    use SQLAlchemy models, so --autogenerate will be empty).
@@ -92,19 +109,21 @@ alembic revision -m "add foo column to bar"
 #    - downgrade() — best-effort reverse (or `op.execute("-- irreversible")`)
 
 # 3. Test on a scratch DB:
-PGPASSWORD=… psql -h localhost -U perecanals -d postgres \
+psql -h localhost -U "$DB_USER" -d postgres \
     -c "DROP DATABASE IF EXISTS stanford_stroke_scratch;"
-PGPASSWORD=… psql -h localhost -U perecanals -d postgres \
+psql -h localhost -U "$DB_USER" -d postgres \
     -c "CREATE DATABASE stanford_stroke_scratch;"
 DB_NAME=stanford_stroke_scratch alembic upgrade head
 DB_NAME=stanford_stroke_scratch alembic downgrade -1   # if reversible
 DB_NAME=stanford_stroke_scratch alembic upgrade head
 
-# 4. Verify schema diff against production (only `alembic_version` should differ):
-PGPASSWORD=… pg_dump --schema-only --no-owner --no-privileges \
-    -h localhost -U perecanals -d stanford-stroke > /tmp/prod-schema.sql
-PGPASSWORD=… pg_dump --schema-only --no-owner --no-privileges \
-    -h localhost -U perecanals -d stanford_stroke_scratch > /tmp/scratch-schema.sql
+# 4. Verify schema diff against production (only `alembic_version` should differ).
+#    Get prod to head first (prod trails repo head until the next web-app restart
+#    applies the outstanding revisions), or the diff flags the un-applied ones:
+pg_dump --schema-only --no-owner --no-privileges \
+    -h localhost -U "$DB_USER" -d stanford-stroke > /tmp/prod-schema.sql
+pg_dump --schema-only --no-owner --no-privileges \
+    -h localhost -U "$DB_USER" -d stanford_stroke_scratch > /tmp/scratch-schema.sql
 diff <(grep -v -E '^(\\restrict|\\unrestrict|-- Dumped|-- PostgreSQL)' /tmp/prod-schema.sql) \
      <(grep -v -E '^(\\restrict|\\unrestrict|-- Dumped|-- PostgreSQL)' /tmp/scratch-schema.sql)
 
@@ -128,6 +147,22 @@ diff <(grep -v -E '^(\\restrict|\\unrestrict|-- Dumped|-- PostgreSQL)' /tmp/prod
 - Touch only web-app-owned tables. Changes to upstream tables
   (`image_*`, `lvo_clinical_data`) belong in the external ingest project.
 
+### Destructive downgrades — read before running `downgrade`
+
+`alembic downgrade` is **not universally safe** on this chain. Some
+`downgrade()` bodies destroy data or don't actually reverse their upgrade.
+Know these before stepping backwards past them:
+
+| Revision | `downgrade()` does | Hazard |
+|---|---|---|
+| `0006_create_patient_table` | `DROP TABLE public.patient CASCADE` | Drops the patient spine **and everything FK-referencing it** — full data loss for that table tree. |
+| `0009_label_value_options` | `DROP TABLE public.label_value_options` | Loses every configured select-option; the labels revert to free-text. |
+| `0010_series_cache_state` | recreates the old **study-keyed** `cache_state` table | Reintroduces the superseded per-study cache schema — incompatible with the current per-series `series_cache_state`. |
+| `0013_drop_snapshot_tables` | `pass` (silent no-op) | Does **not** recreate the dropped `snapshot_*` tables — violates this doc's own "raise on irreversible" convention. Downgrading through it leaves the schema unchanged, so a subsequent re-upgrade is fine, but don't expect the snapshots back. |
+
+For anything past these, prefer a fresh forward revision or a restore from
+backup over a blind `downgrade`.
+
 ---
 
 ## Production rollout (one-time)
@@ -136,8 +171,8 @@ The first time Alembic is deployed to a live DB that already matches the
 baseline, **stamp** the DB instead of running the upgrade:
 
 ```bash
-cd /home/perecanals/ssc-pacs/stanford-stroke-pacs/web-app
-conda activate pacs
+cd /opt/ssc-pacs/ssc-pacs/stanford-stroke-pacs/web-app
+conda activate ssc-pacs
 
 # 1. Backup first (see operations/backup_strategy.md).
 # 2. Stamp:
@@ -145,8 +180,9 @@ alembic stamp 0001_baseline
 # 3. Verify:
 alembic current   # should print: 0001_baseline (head)
 # 4. Restart web app. init_db() will see head and emit no DDL.
-sudo systemctl restart ssc-web-app
-sudo journalctl -u ssc-web-app -n 50 --no-pager
+#    macOS (production): sudo launchctl kickstart -k system/com.ssc.webapp
+sudo launchctl kickstart -k system/com.ssc.webapp   # Linux: sudo systemctl restart ssc-web-app
+tail -n 50 ~/Library/Logs/ssc-web-app.err           # Linux: journalctl -u ssc-web-app -n 50
 ```
 
 If a future deployment needs to apply outstanding revisions (the normal
@@ -161,7 +197,8 @@ no manual steps required.
   table yet. Either you forgot the `stamp` step, or this is a fresh
   scratch DB (run `alembic upgrade head`).
 - **`init_db()` fails on startup** — read the traceback from
-  `journalctl -u ssc-web-app`. Common cause: a new revision references
+  `~/Library/Logs/ssc-web-app.err` (Linux: `journalctl -u ssc-web-app`).
+  Common cause: a new revision references
   a table or column that doesn't exist; rerun the test from §"Adding a new
   schema change".
 - **Schema drift suspected** — re-run the diff procedure against prod.

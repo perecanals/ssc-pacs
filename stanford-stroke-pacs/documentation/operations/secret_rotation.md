@@ -27,15 +27,17 @@ Rotating invalidates every live session — users will need to log in again.
 python -c 'import secrets; print(secrets.token_hex(32))'
 
 # 2. Edit .env on the host.
-sudo -e /home/perecanals/ssc-pacs/stanford-stroke-pacs/.env
+sudo -e /opt/ssc-pacs/ssc-pacs/stanford-stroke-pacs/.env
 #    Replace the JWT_SECRET=... line with the new value.
 
 # 3. Reload Web App to pick it up. All existing cookies are now invalid.
-sudo systemctl restart ssc-web-app
+#    macOS (production): sudo launchctl kickstart -k system/com.ssc.webapp
+#    Linux (systemd):    sudo systemctl restart ssc-web-app
+sudo launchctl kickstart -k system/com.ssc.webapp
 
 # 4. Spot-check that the service came back up and auth still works for a
-#    fresh login:
-sudo systemctl status ssc-web-app
+#    fresh login (web-app logs are flat JSON files on macOS):
+tail -n 50 ~/Library/Logs/ssc-web-app.err   # Linux: sudo journalctl -u ssc-web-app -n 50
 curl -s -o /dev/null -w "%{http_code}\n" http://localhost:8043/
 ```
 
@@ -52,7 +54,8 @@ longest `session_absolute_timeout_hours` interval.
 
 - **Empty secret after edit.** The service now **fails fast** at startup
   with `RuntimeError: JWT_SECRET must be set ...`. Check
-  `journalctl -u ssc-web-app -n 50` and restore the value.
+  `~/Library/Logs/ssc-web-app.err` (Linux: `journalctl -u ssc-web-app -n 50`)
+  and restore the value.
 - **Cookies still show old value in the browser.** Expected — the browser
   keeps the old cookie until it expires or the user hits a protected page
   and gets a 401. Clearing cookies or logging in again is the workaround.
@@ -74,19 +77,23 @@ atomically.
 ### Procedure
 
 ```bash
-cd /home/perecanals/ssc-pacs/stanford-stroke-pacs
+cd /opt/ssc-pacs/ssc-pacs/stanford-stroke-pacs
 
 # 1. Rotate the password in both .env and orthanc_users.json in one go:
 python scripts/admin/manage_users.py rotate-service-account
 
 # 2. Restart both consumers:
+#    macOS (production): sudo launchctl kickstart -k system/com.ssc.webapp
+#    Linux (systemd):    sudo systemctl restart ssc-web-app
 docker restart ssc-orthanc
-sudo systemctl restart ssc-web-app
+sudo launchctl kickstart -k system/com.ssc.webapp
 
-# 3. Verify the service account works against Orthanc and that Web App can
-#    still proxy:
+# 3. Verify .env and orthanc_users.json agree, the service account works
+#    against Orthanc, and Web App can still proxy:
+python scripts/admin/manage_users.py check-service-account   # exits non-zero on drift
 curl -u admin:<newpass> http://localhost:8042/system | head -5
-sudo journalctl -u ssc-web-app -n 50 | grep -iE 'orthanc|401' || echo 'no auth errors'
+grep -iE 'orthanc|401' ~/Library/Logs/ssc-web-app.err || echo 'no auth errors'
+#    Linux: sudo journalctl -u ssc-web-app -n 50 | grep -iE 'orthanc|401'
 ```
 
 ### What can go wrong
@@ -109,17 +116,21 @@ coordinated with whoever owns the Postgres role.
 
 ```bash
 # 1. Change the role password in Postgres (example; exact command is
-#    site-specific):
-sudo -u postgres psql -c "ALTER USER stanford_app WITH PASSWORD '<newpass>';"
+#    site-specific). The production host runs a user-level Homebrew PostgreSQL,
+#    so connect as the instance owner rather than via `sudo -u postgres`:
+psql -d postgres -c "ALTER USER stanford_app WITH PASSWORD '<newpass>';"
+#    Linux with a system PostgreSQL: sudo -u postgres psql -c "ALTER USER ..."
 
 # 2. Update .env.
-sudo -e /home/perecanals/ssc-pacs/stanford-stroke-pacs/.env
+sudo -e /opt/ssc-pacs/ssc-pacs/stanford-stroke-pacs/.env
 
 # 3. Restart Web App. Startup will now fail-fast if DB_USER/DB_PASSWORD
 #    are missing, but an *incorrect* password surfaces as connection errors
 #    on the first request — watch the logs.
-sudo systemctl restart ssc-web-app
-sudo journalctl -u ssc-web-app -f
+#    macOS (production): sudo launchctl kickstart -k system/com.ssc.webapp
+#    Linux (systemd):    sudo systemctl restart ssc-web-app
+sudo launchctl kickstart -k system/com.ssc.webapp
+tail -f ~/Library/Logs/ssc-web-app.err   # Linux: sudo journalctl -u ssc-web-app -f
 ```
 
 ---
@@ -127,10 +138,10 @@ sudo journalctl -u ssc-web-app -f
 ## Appendix — relevant config
 
 - `stanford-stroke-pacs/.env` — all secrets listed above.
-- `stanford-stroke-pacs/config.toml` — `[web app]` section controls
+- `stanford-stroke-pacs/config.toml` — `[web-app]` section controls
   session durations (`session_timeout_hours`,
   `session_absolute_timeout_hours`) and the `cookie_secure` flag that
   accompanies rotated JWTs.
-- `stanford-stroke-pacs/web-app/db.py` — startup helper `_require_env()`
+- `stanford-stroke-pacs/web-app/db.py` — startup helper `require_env()`
   enforces that required secrets (`DB_USER`, `DB_PASSWORD`,
   `ORTHANC_ADMIN_USER`, `ORTHANC_ADMIN_PASSWORD`, `JWT_SECRET`) are non-empty.

@@ -4,8 +4,12 @@ The web app service emits JSON-structured logs, exposes a dependency
 health probe at `/healthz`, and serves Prometheus metrics at `/metrics`.
 This document is the operator-facing reference for all three.
 
-Prometheus and Grafana run as a Docker Compose stack at
-`~/monitoring/`. See §6 for management commands and access URLs.
+> **Scope note.** §§1–3 (logging, `/healthz`, `/metrics`) describe what the
+> **running web app** exposes today — all live. §§4–5 (Prometheus + Grafana
+> scraping stack) are a **future-install template, not currently deployed**
+> (decision 2026-07-07: not reinstalling the `~/monitoring/` stack). The web
+> app emits metrics regardless; nothing is scraping them. `grafana_dashboard.json`
+> is kept as the importable template for when a stack is stood up again.
 
 ---
 
@@ -58,40 +62,54 @@ enables verbose output from warm/evict and annotation CRUD. Bump it
 temporarily when diagnosing a sticky warm failure:
 
 ```bash
-sudo systemctl set-environment LOG_LEVEL=DEBUG
-sudo systemctl restart ssc-web-app
-# ...reproduce, then...
-sudo systemctl unset-environment LOG_LEVEL
-sudo systemctl restart ssc-web-app
+# macOS (production): add LOG_LEVEL to the daemon's EnvironmentVariables dict
+# in /Library/LaunchDaemons/com.ssc.webapp.plist, then kickstart:
+sudo /usr/libexec/PlistBuddy -c "Add :EnvironmentVariables:LOG_LEVEL string DEBUG" \
+  /Library/LaunchDaemons/com.ssc.webapp.plist
+sudo launchctl kickstart -k system/com.ssc.webapp
+# ...reproduce, then delete the key and kickstart again:
+sudo /usr/libexec/PlistBuddy -c "Delete :EnvironmentVariables:LOG_LEVEL" \
+  /Library/LaunchDaemons/com.ssc.webapp.plist
+sudo launchctl kickstart -k system/com.ssc.webapp
+
+# Linux (systemd):
+#   sudo systemctl set-environment LOG_LEVEL=DEBUG && sudo systemctl restart ssc-web-app
+#   sudo systemctl unset-environment LOG_LEVEL     && sudo systemctl restart ssc-web-app
 ```
 
 ### Reading logs
 
-Running under systemd, the web app writes to the journal. JSON is
-harder to grep casually than plain text, so use `jq`:
+On the macOS production host the daemon writes flat JSON files at
+`~/Library/Logs/ssc-web-app.log` (stdout) and `ssc-web-app.err` (stderr).
+Each line is a JSON object, so pipe through `jq`:
 
 ```bash
 # Last 50 lines, pretty-printed
-sudo journalctl -u ssc-web-app -n 50 -o cat | jq .
+tail -n 50 ~/Library/Logs/ssc-web-app.log | jq .
 
 # All lines for one request
 RID=$(curl -sI http://localhost:8043/api/me | grep -i X-Request-ID | cut -d: -f2 | tr -d ' \r')
-sudo journalctl -u ssc-web-app --since "5 minutes ago" | grep "\"request_id\": \"$RID\""
+grep "\"request_id\": \"$RID\"" ~/Library/Logs/ssc-web-app.log
 
 # All warm/evict activity for one study
-sudo journalctl -u ssc-web-app -o cat | jq 'select(.study_uid == "<UID>")'
+jq 'select(.study_uid == "<UID>")' ~/Library/Logs/ssc-web-app.log
 
-# Just the request rate for the last hour
-sudo journalctl -u ssc-web-app --since "1 hour ago" -o cat \
-  | jq -r 'select(.message == "request") | [.http_status, .http_path_template] | @tsv' \
-  | sort | uniq -c | sort -rn
+# Just the request rate over the whole file
+jq -r 'select(.message == "request") | [.http_status, .http_path_template] | @tsv' \
+  ~/Library/Logs/ssc-web-app.log | sort | uniq -c | sort -rn
 ```
+
+On Linux the same records come from the journal
+(`sudo journalctl -u ssc-web-app -o cat | jq .`).
 
 ### Rotation
 
-The systemd journal holds the logs; the web app does not write to a
-file sink. Retention is controlled globally by `/etc/systemd/journald.conf`.
-Recommended settings for the PACS host:
+macOS: the flat log files are rotated by the OS `newsyslog`/`ASL` machinery
+(or add a `newsyslog.d` entry to cap size). The web app itself does not
+manage rotation.
+
+Linux (systemd journal): retention is controlled globally by
+`/etc/systemd/journald.conf` — recommended for the PACS host:
 
 ```ini
 # /etc/systemd/journald.conf — merge these in the [Journal] block.
@@ -102,14 +120,9 @@ MaxFileSec=1day
 ForwardToSyslog=no
 ```
 
-Apply:
-
-```bash
-sudo systemctl restart systemd-journald
-```
-
-This caps the journal at ~2 GiB and keeps at most 30 days of history,
-which is enough for incident triage without eating the root volume.
+Apply with `sudo systemctl restart systemd-journald`. This caps the journal
+at ~2 GiB and keeps ~30 days of history — enough for incident triage without
+eating the root volume.
 
 ---
 
@@ -197,163 +210,73 @@ incremented from the **worker thread** that runs the extraction
 the synchronous 202 response. The `insufficient_disk_space` variant
 is still emitted from the route handler at precheck time.
 
-### Prometheus scrape config
+### Reconciliation gauges (CLI-process-local — not on the web app `/metrics`)
 
-The live config is at `~/monitoring/prometheus.yml`. It scrapes
-`host.docker.internal:8043` (the web app, as seen from inside the
-Prometheus container) every 30 s. If you move Prometheus to a
-different host, adjust the target:
+`scripts/data_integrity/reconcile.py` also defines gauges:
 
-```yaml
-scrape_configs:
-  - job_name: ssc-web-app
-    metrics_path: /metrics
-    static_configs:
-      - targets: ['host.docker.internal:8043']
-    scrape_interval: 30s
-    scrape_timeout: 10s
-```
+| Name                                 | Type  | Labels | Meaning |
+|--------------------------------------|-------|--------|---------|
+| `reconciliation_mismatches_total`    | gauge | `category` ∈ {`in_db_not_in_orthanc`, `in_orthanc_not_in_db`, `dicom_archive_missing`, `orphaned_annotations`} | Count per mismatch category from the last run. |
+| `reconciliation_last_run_timestamp`  | gauge | —      | Unix epoch of the last reconciliation run. |
+| `reconciliation_duration_seconds`    | gauge | —      | Duration of the last run. |
 
-### Recommended alert rules (pseudo-PromQL)
+**These do not appear on the web app `/metrics` endpoint.** `reconcile.py`
+updates them in its **own** process registry and then exits — the web app is
+a separate process and never calls that code, so scraping `:8043/metrics`
+shows them as 0 / absent. See
+[`reconciliation.md`](reconciliation.md#prometheus-metrics).
 
-Not provisioned automatically — copy into your Alertmanager / Grafana
-alert config once Prometheus is running.
+### Scraping and alerting
 
-```yaml
-groups:
-  - name: ssc-web-app
-    rules:
-      - alert: WebAppDown
-        expr: up{job="ssc-web-app"} == 0
-        for: 2m
-      - alert: WebAppHighErrorRate
-        expr: sum(rate(http_requests_total{status=~"5.."}[5m]))
-              / sum(rate(http_requests_total[5m])) > 0.05
-        for: 10m
-      - alert: WebAppLatencyP95
-        expr: histogram_quantile(
-                0.95,
-                sum by (le) (rate(http_request_duration_seconds_bucket[5m]))
-              ) > 2
-        for: 10m
-      - alert: ColdStorageWarmFailures
-        expr: rate(cold_storage_warm_total{result!="success"}[15m]) > 0
-        for: 15m
-      - alert: ColdStorageWarmingStuck
-        # More than 3 rows in 'warming' for sustained time suggests the
-        # watchdog timeout is too high or something is crash-looping.
-        expr: cold_storage_warming_rows > 3
-        for: 10m
-      - alert: LegacyDicomRootLowDisk
-        expr: cold_storage_disk_free_bytes < 50e9   # 50 GiB
-        for: 15m
-```
+Nothing scrapes `/metrics` today (see the scope note at the top). When a stack
+is stood up again, a Prometheus scrape target and a starter set of alert rules
+(web app down, 5xx error rate, p95 latency, cold-storage warm failures,
+warming stuck, low disk) are part of that reinstall — see §4.
 
 ---
 
-## 4. Grafana dashboard
+## 4. Future: Prometheus + Grafana stack (NOT DEPLOYED)
 
-The **SSC Web App** dashboard is auto-provisioned when Grafana starts
-— no manual import needed. It lives in two places:
+> **Not currently deployed.** The `~/monitoring/` Docker Compose stack
+> (Prometheus + Grafana) was retired (decision 2026-07-07: not reinstalling).
+> Nothing scrapes the web app's `/metrics` today. This section is the
+> reinstall template for standing it back up.
 
-| Copy | Purpose |
+The importable Grafana dashboard is kept in the repo:
+
+| File | Purpose |
 |------|---------|
-| `documentation/operations/grafana_dashboard.json` | Portable template with `${DS_PROMETHEUS}` variable (for manual import into a different Grafana) |
-| `~/monitoring/dashboards/ssc-companion.json` | Provisioned copy with the datasource UID hard-coded to `ssc-prometheus` (loaded automatically). The filename predates the Companion→Navigator/Web App rename and was kept to avoid disturbing the running Grafana provisioning. |
+| `documentation/operations/grafana_dashboard.json` | Portable **SSC Web App** dashboard with a `${DS_PROMETHEUS}` datasource variable — import into any Grafana. Panels: request rate, p50/p95 latency, warm/evict success rate, cold-storage disk free, warming rows over time. |
 
-**Panels:** request rate, p50/p95 latency, warm/evict success rate,
-cold-storage disk free, warming rows over time.
+A minimal reinstall would recreate a `~/monitoring/` (or equivalent) with:
 
-If you edit the dashboard in the Grafana UI and want to persist the
-changes, export the JSON and overwrite both copies above.
+```
+docker-compose.yml   # Prometheus + Grafana services
+prometheus.yml       # scrape target host.docker.internal:8043 (see §3)
+provisioning/         # Grafana datasource (Prometheus) + dashboard loader
+dashboards/           # a copy of grafana_dashboard.json, datasource UID filled in
+```
+
+The `prometheus.yml` scrape target is `host.docker.internal:8043` (the web app
+as seen from inside the container), scraped every 30 s. Provision a starter
+alert set alongside it: web app down (`up == 0`), 5xx error rate
+(`http_requests_total{status=~"5.."}` share > 5%), p95 latency
+(`http_request_duration_seconds` > 2 s), cold-storage warm failures
+(`cold_storage_warm_total{result!="success"}`), warming stuck
+(`cold_storage_warming_rows > 3`), and low disk (`cold_storage_disk_free_bytes`).
+
+Bring it up with `docker compose up -d`, reach Grafana at
+`http://localhost:3000` (default `admin`/`admin`) and Prometheus at
+`http://localhost:9090`, tunnelling those ports over SSH as needed.
+Prometheus `rate()` handles the counter resets from a web app restart, so no
+operator action is needed across restarts.
 
 ---
 
-## 5. Monitoring stack (`~/monitoring/`)
-
-Prometheus and Grafana run as Docker containers managed by
-`~/monitoring/docker-compose.yml`.
-
-### Access
-
-| Service    | URL                        | Credentials        |
-|------------|----------------------------|---------------------|
-| Grafana    | `http://localhost:3000`    | `admin` / `admin` (change on first login) |
-| Prometheus | `http://localhost:9090`    | no auth             |
-| Web App `/healthz` | `http://localhost:8043/healthz` | no auth |
-| Web App `/metrics`  | `http://localhost:8043/metrics`  | no auth |
-
-**Via SSH tunnel** (from a laptop):
-
-```bash
-ssh -L 3000:localhost:3000 -L 9090:localhost:9090 -L 8043:localhost:8043 <host>
-```
-
-Then open `http://localhost:3000` in your browser, go to
-_Dashboards_ > _SSC Web App_.
-
-### Directory layout
-
-```
-~/monitoring/
-├── docker-compose.yml          # Prometheus + Grafana services
-├── prometheus.yml              # Scrape config (web app on :8043)
-├── provisioning/
-│   ├── datasources/
-│   │   └── prometheus.yml      # Auto-wires Prometheus datasource in Grafana
-│   └── dashboards/
-│       └── default.yml         # Tells Grafana to load from /dashboards/
-└── dashboards/
-    └── ssc-companion.json    # Auto-provisioned dashboard (legacy filename)
-```
-
-### Common operations
-
-```bash
-cd ~/monitoring
-
-# Start / stop
-docker compose up -d
-docker compose down
-
-# View logs
-docker compose logs -f prometheus
-docker compose logs -f grafana
-
-# Restart after editing prometheus.yml (hot-reload)
-curl -X POST http://localhost:9090/-/reload
-
-# Check Prometheus is scraping the web app
-curl -s http://localhost:9090/api/v1/targets | python3 -m json.tool
-
-# Check web app target health
-curl -s http://localhost:9090/api/v1/query?query=up | python3 -m json.tool
-```
-
-### Data retention
-
-Prometheus keeps 30 days of time-series data (set via
-`--storage.tsdb.retention.time=30d` in docker-compose.yml). Data is
-stored in a Docker volume (`monitoring_prometheus_data`). To wipe and
-start fresh:
-
-```bash
-cd ~/monitoring && docker compose down -v && docker compose up -d
-```
-
-### If the web app restarts
-
-Prometheus will show a brief gap in the time series (the scrape returns
-an error until the web app is back). Counters reset to zero on
-restart; Prometheus' `rate()` handles resets gracefully. No operator
-action needed.
-
----
-
-## 6. Frontend correlation
+## 5. Frontend correlation
 
 The request-ID middleware writes `X-Request-ID` on every response. The
 frontend's `api/client.js` wrapper should surface this header in error
-toasts so a user-visible error message can be grepped straight out of
-the journal (`journalctl ... | grep <request_id>`). Wiring that up is a
-follow-up task — not part of WS 06.
+toasts so a user-visible error message can be grepped straight out of the
+logs (`grep <request_id> ~/Library/Logs/ssc-web-app.log`). Wiring that up is
+a follow-up task.

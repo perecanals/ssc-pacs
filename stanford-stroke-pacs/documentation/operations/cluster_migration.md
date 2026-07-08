@@ -162,8 +162,12 @@ something reads them (e.g. warming records each series' `cache_path` from its
 | `image_series` | `dicom_dir_path`, `nifti_path` | `dicom_archive_path` |
 | `image_study` | `study_path` | — |
 | `series_cache_state` | `cache_path` (holds the series' `dicom_dir_path`) | — |
-| `image_series_labelled` (snapshot) | `dicom_dir_path`, `nifti_path` | `dicom_archive_path` |
-| `image_study_labelled` (snapshot) | `study_path` | — |
+| `image_series_labelled` (labelled mirror) | `dicom_dir_path`, `nifti_path` | `dicom_archive_path` |
+| `image_study_labelled` (labelled mirror) | `study_path` | — |
+
+The `/DATA2/... → /Users/you/pacs/...` prefixes below are the **worked example
+from the 2026-06 Linux→macOS port** — substitute your own source/target roots
+(the target must equal the new `config.toml` `[storage]` roots).
 
 ```sql
 -- Loose-tree prefix. The '…/pacs_imaging_data/%' guard (trailing slash) excludes
@@ -236,7 +240,7 @@ the four things that a port can get wrong:
 4. **Host paths re-pointed** — no row in any host-path column carries an
    un-migrated prefix (`image_series` `dicom_dir_path`/`nifti_path`,
    `image_study.study_path`, `series_cache_state.cache_path`, and the
-   `*_labelled` snapshots), and every recorded `dicom_archive_path` exists on disk.
+   `*_labelled` mirrors), and every recorded `dicom_archive_path` exists on disk.
 
 ```bash
 python scripts/migration/reconcile_migration.py            # full check
@@ -249,7 +253,7 @@ trusting the deployment.
 ### 4b. `scripts/data_integrity/reconcile.py`
 
 Once the migration check passes, run the standard two-DB reconciliation for the
-full per-series diff (and to populate the Prometheus gauges). It compares
+full per-series diff. It compares
 `SeriesInstanceUID` between `image_series` and Orthanc's index and confirms
 archive paths exist on disk, reporting four mismatch categories: *in DB not
 in Orthanc*, *in Orthanc not in DB*, *dicom_archive_path missing*, and

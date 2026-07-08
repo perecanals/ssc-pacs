@@ -1,22 +1,23 @@
 # Upgrading dependencies
 
-The PACS stack pins every layer — Python packages, the conda env, the
-upstream Orthanc image, and the web app frontend's npm deps — so that a
-rebuild months from now produces the same bytes. This doc covers how to
-bump a pin on purpose.
-
-See [`maintenance/workstreams/02-dependency-pinning.md`](../../../maintenance/workstreams/02-dependency-pinning.md)
-for the rationale.
+The PACS stack pins every layer — Python packages, the upstream Orthanc
+image, and the web app frontend's npm deps — so that a rebuild months from
+now produces the same bytes. This doc covers how to bump a pin on purpose.
 
 ---
 
 ## What is pinned, and where
 
+Python deps are split across **three** pinned requirement sets, each scoped
+to a distinct surface (there is no conda `environment.yml` — the env is
+provisioned straight from these files):
+
 | Layer | File | Form |
 |---|---|---|
-| Root Python deps | `requirements.txt` | `pkg==X.Y.Z` |
-| Web App Python deps | `stanford-stroke-pacs/web-app/requirements.txt` | `pkg==X.Y.Z` |
-| Conda base env | `stanford-stroke-pacs/environment.yml` | `--from-history` (python + ipykernel) |
+| ssc-sql-db CSV import helpers | `requirements.txt` (checkout root) | `pkg==X.Y.Z` |
+| Stack scripts + ingestion pipeline | `stanford-stroke-pacs/requirements.txt` | `pkg==X.Y.Z` |
+| Web App runtime | `stanford-stroke-pacs/web-app/requirements.txt` | `pkg==X.Y.Z` |
+| Web App dev/test | `stanford-stroke-pacs/web-app/requirements-dev.txt` | `pkg==X.Y.Z` (pytest, ruff, mypy, …) |
 | Web App Node deps | `stanford-stroke-pacs/web-app/package-lock.json` | npm lockfile |
 | Upstream Orthanc image | `orthanc-indexer-patched/Dockerfile` | `FROM orthancteam/orthanc@sha256:...` |
 | Patched Orthanc image | `stanford-stroke-pacs/docker-compose.yml` | local tag `ssc-orthanc:patched-indexer` (rebuild-driven) |
@@ -27,21 +28,23 @@ for the rationale.
 
 1. Activate the env:
    ```bash
-   conda activate pacs
+   conda activate ssc-pacs
    ```
-2. Edit the pin in `requirements.txt` (root) **and**
-   `stanford-stroke-pacs/web-app/requirements.txt` if the package appears
-   in both (e.g. `psycopg2-binary`, `python-dotenv`). Keep versions in sync
-   across the two files.
-3. Apply the change:
+2. Edit the pin in **every** requirement set where the package appears —
+   a shared dep like `psycopg2-binary` or `python-dotenv` is listed in more
+   than one of the three files. Keep versions in sync across them.
+3. Apply the change (install whichever sets you touched):
    ```bash
-   pip install -r requirements.txt
-   pip install -r stanford-stroke-pacs/web-app/requirements.txt
+   pip install -r requirements.txt                                   # ssc-sql-db helpers
+   pip install -r stanford-stroke-pacs/requirements.txt              # stack scripts + ingestion
+   pip install -r stanford-stroke-pacs/web-app/requirements.txt      # web app runtime
    ```
-4. Re-run the test suite (`make test` from the repo root), then smoke-test:
+4. Re-run the test suite (`make test` from the checkout root), then smoke-test:
    ```bash
-   sudo systemctl restart ssc-web-app
-   sudo journalctl -u ssc-web-app -n 50
+   # macOS (production): sudo launchctl kickstart -k system/com.ssc.webapp
+   # Linux (systemd):    sudo systemctl restart ssc-web-app
+   sudo launchctl kickstart -k system/com.ssc.webapp
+   tail -n 50 ~/Library/Logs/ssc-web-app.err   # Linux: sudo journalctl -u ssc-web-app -n 50
    curl -sf http://localhost:8043/healthz
    ```
 5. Commit the pin change.
@@ -57,23 +60,16 @@ for the rationale.
 3. Rebuild and roll out:
    ```bash
    npm ci && npm run build
-   sudo systemctl restart ssc-web-app
+   # macOS (production): sudo launchctl kickstart -k system/com.ssc.webapp
+   sudo launchctl kickstart -k system/com.ssc.webapp   # Linux: sudo systemctl restart ssc-web-app
    ```
 
 Note: production builds use `npm ci` (not `npm install`) so that a
 lockfile drift fails the build instead of silently resolving.
 
-## Bump the conda env
-
-The `environment.yml` tracks only explicit installs (`conda env export
---from-history`). To add a package:
-
-1. `conda install -n pacs <pkg>`
-2. Regenerate:
-   ```bash
-   conda env export -n pacs --from-history > stanford-stroke-pacs/environment.yml
-   ```
-3. Commit.
+Adding a new Python dependency: pin it in whichever of the three requirement
+sets owns that surface (there is no conda `environment.yml`), then `pip
+install -r` that file.
 
 ## Bump the Orthanc image
 

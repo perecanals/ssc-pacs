@@ -1,8 +1,13 @@
 # Backup strategy
 
-**Status (2026-04-15):** Tier 1 active on the dev host. Tier 2 (cold-archive
-mirror) implemented but **dormant** — activation is part of the production
-cutover checklist below.
+**Status:** Tier 1 is **active on the macOS production host** (all four daemons
+run via launchd — `com.ssc.pg-backup-{stanford-stroke,orthanc,freshness}` and
+`com.ssc.orthanc-storage-backup`). Tier 2 (cold-archive mirror) is implemented
+but **dormant** — activation is part of the cutover checklist below.
+
+Paths below use the production values where concrete; the single source of
+truth for the backup root is `config.toml` `[backup].backup_root`
+(production: `/Volumes/ThunderBay_RAID1/ssc-pacs-backups`).
 
 This document is the single source of truth for what is backed up, how, where,
 and how to recover. Restore steps live in
@@ -16,8 +21,8 @@ and how to recover. Restore steps live in
 |---|---|---|---|
 | `stanford-stroke` PostgreSQL DB | host PostgreSQL 16 | **Yes — Tier 1, daily** | Authored content (annotations, users, label defs, preferences) cannot be reconstructed |
 | `orthanc_db` PostgreSQL DB | host PostgreSQL 16 | **Yes — Tier 1, daily** | Orthanc's index — rebuildable from disk but slow; cheap to back up |
-| Cold DICOM archives `/DATA2/pacs_imaging_data_compressed/` | local disk | **No on dev**, mirror script implemented for production (Tier 2) | Dev: re-ingest from source is acceptable. Production: requires a destination |
-| Uncompressed/warm DICOM tree (`dicom_data_root`, e.g. `/DATA2/pacs_imaging_data/`) | local disk | No | Reconstructible from cold archives on demand |
+| Cold DICOM archives (`cold_archive_root`) | local disk | **Not yet** — mirror script implemented (Tier 2, dormant) | Re-ingest from source is currently acceptable; a mirror needs a destination |
+| Uncompressed/warm DICOM tree (`dicom_data_root`) | local disk | No | Reconstructible from cold archives on demand |
 | Orthanc storage volume (`…_ssc-orthanc-storage` at `/var/lib/orthanc/db`) | docker volume | **Yes — Tier 1, daily** | Holds OHIF-authored DICOM SR annotations (**no other copy**) + the Folder Indexer `indexer-plugin.db` (rebuild = full cold-archive decompression + reindex) |
 | Orthanc container filesystem (rootfs) | docker | No | Stateless; rebuilt from `docker compose up` + the `ssc-orthanc:patched-indexer` image |
 | Web App `dist/` build output | local | No | Reproducible via `npm run build` |
@@ -40,12 +45,13 @@ and how to recover. Restore steps live in
 
 ---
 
-## 3. Tier 1 — PostgreSQL DBs + Orthanc storage volume (active on dev)
+## 3. Tier 1 — PostgreSQL DBs + Orthanc storage volume (active in production)
 
 ### Tooling
 
 `pg_dump --format=custom --compress=6 --no-owner --no-privileges` per
-database, run nightly by a systemd timer. Custom format (`-Fc`) is chosen
+database, run nightly by a scheduled job (launchd on macOS production,
+systemd timer on Linux). Custom format (`-Fc`) is chosen
 over `pg_basebackup` + WAL because:
 
 - The dev RPO of 24 h does not justify WAL archiving complexity.
@@ -60,8 +66,14 @@ nightly logical dumps as a portable safety net.
 
 ### Tooling version requirement
 
-`pg_dump` from `postgresql-client-N` requires `N >= server_version`. The
-host runs PostgreSQL **16.2**. Install client 16+:
+`pg_dump` from the client package requires `client_major >= server_major`.
+The **production** host runs a **user-level Homebrew PostgreSQL** — the
+`pg_dump` in the same Homebrew prefix already matches the server, so no
+extra client install is needed; just keep Homebrew's `postgresql@N` current
+with the server.
+
+On a **Linux** host with a system PostgreSQL, install the matching client
+from the PGDG apt repo:
 
 ```bash
 sudo install -d -m 0755 /etc/apt/keyrings
@@ -78,7 +90,7 @@ When the server is upgraded, install the matching client major.
 ### Layout on disk
 
 ```
-/DATA2/pg_backups/
+<backup_root>/          # config.toml [backup].backup_root
 ├── orthanc_db/
 │   ├── 20260415T024500Z.dump
 │   ├── 20260415T024500Z.dump.sha256
@@ -135,10 +147,14 @@ volume-backup timers; no `docker pause` is used.
 | `scripts/backup/backup_orthanc_storage.sh` | snapshot the storage volume via a `:ro` helper container, write sha256, rotate retention |
 | `scripts/backup/orthanc_storage_snapshot.py` | in-container helper: consistent SQLite snapshot + gzip-tar stream to stdout |
 | `scripts/backup/check_backup_freshness.sh` | exit nonzero if any latest dump/archive is older than `MAX_AGE_HOURS` (default from `config.toml` `[backup].max_age_hours`, else 36) |
-| `systemd/pg-backup-stanford-stroke.{service,timer}` | nightly dump of `stanford-stroke` (02:15 + jitter) |
-| `systemd/pg-backup-orthanc.{service,timer}` | nightly dump of `orthanc_db` (02:30 + jitter) |
-| `systemd/orthanc-storage-backup.{service,timer}` | nightly snapshot of the Orthanc storage volume (02:45 + jitter) |
-| `systemd/pg-backup-freshness.{service,timer}` | hourly freshness check |
+| `systemd/pg-backup-stanford-stroke.{service,timer}.in` · `launchd/com.ssc.pg-backup-stanford-stroke.plist.in` | nightly dump of `stanford-stroke` |
+| `systemd/pg-backup-orthanc.{service,timer}.in` · `launchd/com.ssc.pg-backup-orthanc.plist.in` | nightly dump of `orthanc_db` |
+| `systemd/orthanc-storage-backup.{service,timer}.in` · `launchd/com.ssc.orthanc-storage-backup.plist.in` | nightly snapshot of the Orthanc storage volume |
+| `systemd/pg-backup-freshness.{service,timer}.in` · `launchd/com.ssc.pg-backup-freshness.plist.in` | periodic freshness check |
+
+The `.in` templates are rendered and installed by the platform installers
+(`scripts/macos/install_launchd.sh` / `scripts/linux/install_systemd.sh`) —
+not hand-copied.
 
 ### Configuration
 
@@ -151,7 +167,7 @@ checkout. Settings resolve in this precedence order:
    default:
    ```toml
    [backup]
-   backup_root   = "/DATA2/pg_backups"
+   backup_root    = "/Volumes/ThunderBay_RAID1/ssc-pacs-backups"
    retention_days = 60
    max_age_hours  = 36
    ```
@@ -164,72 +180,65 @@ Path resolution is location-relative: `scripts/_lib.sh` derives
 `$STACK_DIR/.env` — i.e. the repo's own `.env`, found without editing any
 absolute path. Override with `BACKUP_ENV_FILE=...` for a non-standard location.
 
-### Installation on the dev host
+### Installation
+
+The backup daemons/timers are installed by the platform installer, which
+renders the `.in` templates and enables the jobs. Run from the stack root
+(`/opt/ssc-pacs/ssc-pacs/stanford-stroke-pacs`):
 
 ```bash
-cd /home/perecanals/ssc-pacs/stanford-stroke-pacs
-
-# Stage units in /etc
-sudo cp systemd/pg-backup-stanford-stroke.service \
-        systemd/pg-backup-stanford-stroke.timer \
-        systemd/pg-backup-orthanc.service \
-        systemd/pg-backup-orthanc.timer \
-        systemd/orthanc-storage-backup.service \
-        systemd/orthanc-storage-backup.timer \
-        systemd/pg-backup-freshness.service \
-        systemd/pg-backup-freshness.timer \
-        /etc/systemd/system/
-sudo systemctl daemon-reload
-
-# Enable + start the timers
-sudo systemctl enable --now \
-    pg-backup-stanford-stroke.timer \
-    pg-backup-orthanc.timer \
-    orthanc-storage-backup.timer \
-    pg-backup-freshness.timer
-
-# Verify
-systemctl list-timers 'pg-backup-*' 'orthanc-storage-backup*'
+sudo scripts/macos/install_launchd.sh    # macOS (production): loads the com.ssc.* daemons
+sudo scripts/linux/install_systemd.sh    # Linux: installs + enables the systemd timers
 ```
 
 ### Verification
 
 ```bash
+cd /opt/ssc-pacs/ssc-pacs/stanford-stroke-pacs
+BR=$(python3 -c "import tomllib;print(tomllib.load(open('config.toml','rb'))['backup']['backup_root'])")
+
 # Latest archives on disk
-ls -lh /DATA2/pg_backups/orthanc_db/ /DATA2/pg_backups/stanford-stroke/ /DATA2/pg_backups/orthanc_storage/
+ls -lh "$BR/orthanc_db/" "$BR/stanford-stroke/" "$BR/orthanc_storage/"
 
 # Run the freshness monitor manually
-/home/perecanals/ssc-pacs/stanford-stroke-pacs/scripts/backup/check_backup_freshness.sh
+scripts/backup/check_backup_freshness.sh
 echo "exit=$?"   # 0 = fresh, 2 = stale or missing
 
 # Run a backup on demand (any time)
-/home/perecanals/ssc-pacs/stanford-stroke-pacs/scripts/backup/backup_pg_db.sh stanford-stroke
-/home/perecanals/ssc-pacs/stanford-stroke-pacs/scripts/backup/backup_pg_db.sh orthanc_db
-/home/perecanals/ssc-pacs/stanford-stroke-pacs/scripts/backup/backup_orthanc_storage.sh
+scripts/backup/backup_pg_db.sh stanford-stroke
+scripts/backup/backup_pg_db.sh orthanc_db
+scripts/backup/backup_orthanc_storage.sh
 ```
 
 ### Monitoring / alerting (TODO)
 
-The freshness check runs hourly. To page on failure, set
-`OnFailure=` on `pg-backup-freshness.service` once an alerting webhook
-exists (e.g. a `notify-on-failure@.service` instance). Until then,
-nonzero exits show up in `journalctl -u pg-backup-freshness`.
+The freshness check runs periodically. To page on failure, wire an alerting
+webhook (Linux: `OnFailure=` on `pg-backup-freshness.service`). Until then,
+nonzero exits show up in the daemon log —
+`~/Library/Logs/com.ssc.pg-backup-freshness.err` on macOS, or
+`journalctl -u pg-backup-freshness` on Linux.
 
 ---
 
-## 4. Tier 2 — cold-archive mirror (DORMANT on dev)
+## 4. Tier 2 — cold-archive mirror (DORMANT)
 
-The script and systemd units are committed but the timer is **not**
-enabled on the dev host. There is no `/DATA3/` on this machine and DICOM
-loss is recoverable via re-ingestion.
+The script and **systemd** units are committed but the timer is **not**
+enabled. No offsite destination is provisioned yet, and DICOM loss is
+currently recoverable via re-ingestion.
+
+> **Known gap:** only **systemd** templates exist for the mirror
+> (`systemd/cold-archive-mirror.{service,timer}.in`). There is **no
+> `launchd/com.ssc.cold-archive-mirror.plist.in`**, so the cutover checklist
+> below is not yet executable as-is on the macOS production host — a launchd
+> template (or a manual `launchd`/cron equivalent) must be authored first.
 
 ### Files
 
 | Path | Role |
 |---|---|
 | `scripts/cold_storage/mirror_cold_archive.sh` | `rsync -a --delete` from `SOURCE_DIR` to `COLD_MIRROR_DEST` (no-op if `COLD_MIRROR_DEST` unset) |
-| `systemd/cold-archive-mirror.service` | reads `/etc/default/pacs-cold-mirror`, runs the script |
-| `systemd/cold-archive-mirror.timer` | nightly at 03:30 + jitter, **not enabled by default** |
+| `systemd/cold-archive-mirror.service.in` | reads `/etc/default/pacs-cold-mirror`, runs the script |
+| `systemd/cold-archive-mirror.timer.in` | nightly, **not enabled by default** |
 
 ### Production cutover checklist
 
@@ -243,7 +252,7 @@ loss is recoverable via re-ingestion.
 3. Create `/etc/default/pacs-cold-mirror` (mode 0644, root-owned):
 
    ```ini
-   SOURCE_DIR=/DATA2/pacs_imaging_data_compressed
+   SOURCE_DIR=<cold_archive_root>   # config.toml [storage].cold_archive_root
    COLD_MIRROR_DEST=/path/to/mirror
    # Optional rsync tuning, e.g.:
    # RSYNC_EXTRA_ARGS=--bwlimit=50000
@@ -256,15 +265,15 @@ loss is recoverable via re-ingestion.
    sudo journalctl -u cold-archive-mirror.service -e
    ```
 
-5. Enable the timer:
+5. Enable the timer (Linux; on macOS author a launchd plist first — see the
+   gap note above):
 
    ```bash
-   sudo cp systemd/cold-archive-mirror.{service,timer} /etc/systemd/system/
-   sudo systemctl daemon-reload
+   sudo scripts/linux/install_systemd.sh   # renders + installs the .in templates
    sudo systemctl enable --now cold-archive-mirror.timer
    ```
 
-6. Switch the freshness monitor to include the cold mirror:
+6. Switch the freshness monitor to include the cold mirror (Linux example):
 
    ```bash
    sudo systemctl edit pg-backup-freshness.service
@@ -273,7 +282,7 @@ loss is recoverable via re-ingestion.
    ```ini
    [Service]
    ExecStart=
-   ExecStart=/home/perecanals/ssc-pacs/stanford-stroke-pacs/scripts/backup/check_backup_freshness.sh --include-cold-archive
+   ExecStart=/opt/ssc-pacs/ssc-pacs/stanford-stroke-pacs/scripts/backup/check_backup_freshness.sh --include-cold-archive
    EnvironmentFile=/etc/default/pacs-cold-mirror
    ```
 
@@ -295,13 +304,13 @@ results are in that file.
 
 ## 6. Future upgrades
 
-- **PITR:** add `archive_mode = on` + `archive_command` to ship WAL to
-  `/DATA2/pg_wal_archive/` (or remote), then `pg_basebackup` weekly.
+- **PITR:** add `archive_mode = on` + `archive_command` to ship WAL to a
+  dedicated archive dir (or remote), then `pg_basebackup` weekly.
   Recovery becomes "restore basebackup, replay WAL up to a chosen
   timestamp." Drops `stanford-stroke` RPO toward seconds. Cost: a host
   PostgreSQL config change + monitoring WAL disk usage.
-- **Offsite logical dumps:** rsync `/DATA2/pg_backups/` to a second
-  machine on a daily timer. Trivial once a second host exists.
+- **Offsite logical dumps:** rsync the backup root to a second machine on a
+  daily timer. Trivial once a second host exists.
 - **`pgbackrest`:** consider for production-grade differential basebackups
   with built-in retention and parallel restore. Heavier than the current
   setup but more complete.
@@ -312,8 +321,8 @@ results are in that file.
 
 | Risk | Likelihood | Impact | Mitigation |
 |---|---|---|---|
-| Backup disk fills up | med | med | `RETENTION_DAYS` rotation in script; monitor `/DATA2` usage separately |
-| pg_dump version drifts behind server after PG upgrade | low | high | Re-install `postgresql-client-N` matching new server major |
+| Backup disk fills up | med | med | `RETENTION_DAYS` rotation in script; monitor the backup-root volume separately |
+| pg_dump version drifts behind server after PG upgrade | low | high | Keep the client major (Homebrew `postgresql@N` / `postgresql-client-N`) matching the new server major |
 | Restore tested in isolation but fails in real incident | med | high | Quarterly restore drill; keep `restore_runbook.md` current |
-| `.env` rotates and the backup script silently uses stale creds | low | high | Backup failure surfaces in `pg-backup-freshness` within 36h |
-| Dump lands on the same physical disk as the live DB | med | med | Tier 1 is single-disk on dev by design; production should mount `/DATA2` separate from PG data |
+| `.env` rotates and the backup script silently uses stale creds | low | high | Backup failure surfaces in the freshness check within `max_age_hours` |
+| Dump lands on the same physical disk as the live DB | med | med | Keep `backup_root` on a volume separate from the PG data directory (production writes to the ThunderBay RAID) |
