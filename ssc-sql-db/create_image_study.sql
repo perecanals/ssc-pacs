@@ -1,6 +1,9 @@
 -- Create table in the stanford-stroke database.
 -- Derived from public.stanford_ctas_soren_dicom_series in stanford_data.
 -- This script only defines the table; it does not load any data.
+--
+-- Manual-bootstrap MIRROR only: the canonical fresh-install path is Alembic
+-- (revisions 0001 + 0011 + 0012). Keep this file in sync with those.
 
 \connect "stanford-stroke"
 
@@ -13,6 +16,8 @@ CREATE TABLE IF NOT EXISTS public.image_study (
     study_path text,
     protocolname text,
     manufacturer text,
+    import_id integer,
+    import_label text,
     -- Rollups of image_series sizes (decimal MB); stamped only when every
     -- child series has sizes (backfill_storage_sizes.py / ingestion).
     compressed_size_mb double precision,
