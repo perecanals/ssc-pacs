@@ -50,6 +50,10 @@ jobs:
       DB_PORT: "5432"
       DB_USER: ci_user
       DB_PASSWORD: ci_pass
+      # This database is never created in CI (the service only has "postgres");
+      # tests/conftest.py overrides DB_NAME with its own scratch DB. Kept so any
+      # accidental pre-fixture connection fails loudly instead of hitting a
+      # real-looking database.
       DB_NAME: stanford-stroke
       JWT_SECRET: ci-test-jwt-secret-32bytes!!!!
       ORTHANC_ADMIN_USER: ci_orthanc
