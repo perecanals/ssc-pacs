@@ -160,7 +160,6 @@ def load_config(config_path):
     defaults = {
         "env_path": DEFAULT_ENV_PATH,
         "database": "stanford-stroke",
-        "src_dir": "/home/perecanals/pacs/imaging_database_test",
         "overwrite_if_exists": False,
         "anonymize_files": False,
         "delete_originals_after_verification": False,
@@ -173,6 +172,8 @@ def load_config(config_path):
         "pipeline_indexing": True,
     }
     merged_config = {**defaults, **config}
+    if not merged_config.get("src_dir"):
+        raise ValueError(f"src_dir is required in the YAML config: {config_path}")
     merged_config["compress_workers"] = max(
         1, int(merged_config["compress_workers"] or 1))
     if merged_config["overwrite_if_exists"] and merged_config["pipeline_indexing"]:
@@ -633,9 +634,13 @@ if __name__ == "__main__":
     load_dotenv(dotenv_path=env_path)
     DB_USER = os.getenv("DB_USER")
     DB_PASSWORD = os.getenv("DB_PASSWORD")
+    # Same env keys + defaults as web-app/db.py, so ingestion always talks to
+    # the same PostgreSQL the running stack does.
+    DB_HOST = os.getenv("DB_HOST", "localhost")
+    DB_PORT = os.getenv("DB_PORT", "5432")
 
     postgres_engine = create_engine(
-        f"postgresql://{DB_USER}:{DB_PASSWORD}@localhost:5432/{config['database']}"
+        f"postgresql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{config['database']}"
     )
     run_import_id = ImageIngestionProtocol.get_next_import_id(postgres_engine)
 

@@ -796,28 +796,12 @@ class ImageIngestionProtocol:
                     f"Wiping old files and re-ingesting."
                 )
                 # Path safety: only delete under base_dir / cold_archive_root.
-                if isinstance(old_dir, str) and old_dir:
-                    base_abs = os.path.abspath(self.base_dir)
-                    old_dir_abs = os.path.abspath(old_dir)
-                    if (
-                        old_dir_abs.startswith(base_abs + os.sep)
-                        and os.path.isdir(old_dir_abs)
-                    ):
-                        shutil.rmtree(old_dir_abs, ignore_errors=True)
-                        print(f"  removed old DICOM dir {old_dir_abs}")
-                if (
-                    self.cold_archive_root
-                    and isinstance(old_archive, str)
-                    and old_archive
+                if self._remove_dir_under(self.base_dir, old_dir):
+                    print(f"  removed old DICOM dir {os.path.abspath(old_dir)}")
+                if self.cold_archive_root and self._remove_file_under(
+                    self.cold_archive_root, old_archive
                 ):
-                    cold_abs = os.path.abspath(self.cold_archive_root)
-                    old_archive_abs = os.path.abspath(old_archive)
-                    if (
-                        old_archive_abs.startswith(cold_abs + os.sep)
-                        and os.path.isfile(old_archive_abs)
-                    ):
-                        os.remove(old_archive_abs)
-                        print(f"  removed stale archive {old_archive_abs}")
+                    print(f"  removed stale archive {os.path.abspath(old_archive)}")
 
             if drop_unverifiable_uids:
                 print(
@@ -889,15 +873,9 @@ class ImageIngestionProtocol:
                 shutil.rmtree(path, ignore_errors=True)
 
         if self.cold_archive_root:
-            cold_abs = os.path.abspath(self.cold_archive_root)
             for archive in sorted(set(archives_to_remove)):
-                archive_abs = os.path.abspath(archive)
-                if (
-                    archive_abs.startswith(cold_abs + os.sep)
-                    and os.path.isfile(archive_abs)
-                ):
-                    print(f"Removing stale archive: {archive_abs}")
-                    os.remove(archive_abs)
+                if self._remove_file_under(self.cold_archive_root, archive):
+                    print(f"Removing stale archive: {os.path.abspath(archive)}")
 
         if not study_rows.empty:
             patient_id = self._safe_text(study_rows.iloc[0].get("patient_id"))
@@ -946,22 +924,45 @@ class ImageIngestionProtocol:
             self.image_series["studyinstanceuid"].astype(str) != str(study_instance_uid)
         ].reset_index(drop=True)
 
-    def _is_strictly_inside_base_dir(self, path) -> bool:
-        """True iff ``path`` is strictly inside ``base_dir``.
+    @staticmethod
+    def _strictly_inside(root, path) -> bool:
+        """True iff ``path`` is strictly inside ``root``.
 
         Uses commonpath, not a string prefix — a bare ``startswith`` would let
-        e.g. ``/DATA2/pacs_imaging_data_loose_backup`` pass for base_dir
+        e.g. ``/DATA2/pacs_imaging_data_loose_backup`` pass for root
         ``/DATA2/pacs_imaging_data``.
         """
-        if not isinstance(path, str) or not path:
+        if not isinstance(path, str) or not path or not root:
             return False
-        base_abs = os.path.abspath(self.base_dir)
+        root_abs = os.path.abspath(str(root))
         path_abs = os.path.abspath(path)
         try:
-            return path_abs != base_abs and os.path.commonpath([base_abs, path_abs]) == base_abs
+            return path_abs != root_abs and os.path.commonpath([root_abs, path_abs]) == root_abs
         except ValueError:
             # Different drives / mixed absolute-relative — not inside.
             return False
+
+    def _is_strictly_inside_base_dir(self, path) -> bool:
+        return self._strictly_inside(self.base_dir, path)
+
+    # DB-supplied paths are only ever deleted through these two helpers, which
+    # refuse anything outside the given root.
+
+    @classmethod
+    def _remove_dir_under(cls, root, path) -> bool:
+        """rmtree ``path`` iff strictly inside ``root``; True if removed."""
+        if cls._strictly_inside(root, path) and os.path.isdir(os.path.abspath(path)):
+            shutil.rmtree(os.path.abspath(path), ignore_errors=True)
+            return True
+        return False
+
+    @classmethod
+    def _remove_file_under(cls, root, path) -> bool:
+        """Remove file ``path`` iff strictly inside ``root``; True if removed."""
+        if cls._strictly_inside(root, path) and os.path.isfile(os.path.abspath(path)):
+            os.remove(os.path.abspath(path))
+            return True
+        return False
 
     def _remove_empty_parent_dirs(self, path):
         current_path = os.path.dirname(path)
@@ -1019,77 +1020,44 @@ class ImageIngestionProtocol:
             return None
         return int(values.max())
 
-    def _require_import_id_columns(self):
-        missing_tables = []
-        db_inspector = inspect(self.postgres_engine)
-        image_series_columns = {
-            column["name"] for column in db_inspector.get_columns("image_series")
-        }
-        image_study_columns = {
-            column["name"] for column in db_inspector.get_columns("image_study")
-        }
-        if "import_id" not in image_series_columns:
-            missing_tables.append("image_series")
-        if "import_id" not in image_study_columns:
-            missing_tables.append("image_study")
+    @staticmethod
+    def _require_columns(postgres_engine, column, tables, hint):
+        """Raise unless ``column`` exists in every table in ``tables``."""
+        db_inspector = inspect(postgres_engine)
+        missing_tables = [
+            table
+            for table in tables
+            if column not in {c["name"] for c in db_inspector.get_columns(table)}
+        ]
         if missing_tables:
             raise ValueError(
-                "Missing required import_id column in "
-                f"{', '.join(missing_tables)}. "
-                "Run the import_id rename migration before executing the protocol."
+                f"Missing required {column} column in "
+                f"{', '.join(missing_tables)}. {hint}"
             )
+
+    _IMPORT_ID_HINT = "Run the import_id rename migration before executing the protocol."
+
+    def _require_import_id_columns(self):
+        self._require_columns(
+            self.postgres_engine, "import_id",
+            ("image_series", "image_study"), self._IMPORT_ID_HINT)
 
     def _require_import_label_columns(self):
-        missing_tables = []
-        db_inspector = inspect(self.postgres_engine)
-        image_series_columns = {
-            column["name"] for column in db_inspector.get_columns("image_series")
-        }
-        image_study_columns = {
-            column["name"] for column in db_inspector.get_columns("image_study")
-        }
-        if "import_label" not in image_series_columns:
-            missing_tables.append("image_series")
-        if "import_label" not in image_study_columns:
-            missing_tables.append("image_study")
-        if missing_tables:
-            raise ValueError(
-                "Missing required import_label column in "
-                f"{', '.join(missing_tables)}. "
-                "Run the import_label migration before executing the protocol."
-            )
+        self._require_columns(
+            self.postgres_engine, "import_label",
+            ("image_series", "image_study"),
+            "Run the import_label migration before executing the protocol.")
 
     def _require_number_of_slices_column(self):
-        db_inspector = inspect(self.postgres_engine)
-        image_series_columns = {
-            column["name"] for column in db_inspector.get_columns("image_series")
-        }
-        if "number_of_slices" not in image_series_columns:
-            raise ValueError(
-                "Missing required number_of_slices column in image_series. "
-                "Run: ALTER TABLE image_series ADD COLUMN IF NOT EXISTS number_of_slices INTEGER;"
-            )
+        self._require_columns(
+            self.postgres_engine, "number_of_slices", ("image_series",),
+            "Run: ALTER TABLE image_series ADD COLUMN IF NOT EXISTS number_of_slices INTEGER;")
 
     @staticmethod
     def get_next_import_id(postgres_engine):
-        db_inspector = inspect(postgres_engine)
-        image_series_columns = {
-            column["name"] for column in db_inspector.get_columns("image_series")
-        }
-        image_study_columns = {
-            column["name"] for column in db_inspector.get_columns("image_study")
-        }
-        missing_tables = []
-        if "import_id" not in image_series_columns:
-            missing_tables.append("image_series")
-        if "import_id" not in image_study_columns:
-            missing_tables.append("image_study")
-        if missing_tables:
-            raise ValueError(
-                "Missing required import_id column in "
-                f"{', '.join(missing_tables)}. "
-                "Run the import_id rename migration before executing the protocol."
-            )
+        ImageIngestionProtocol._require_columns(
+            postgres_engine, "import_id", ("image_series", "image_study"),
+            ImageIngestionProtocol._IMPORT_ID_HINT)
 
         metadata = MetaData()
         image_series_table = Table("image_series", metadata, autoload_with=postgres_engine)
