@@ -4,6 +4,21 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **Never run `sudo` commands yourself** — there is no terminal to enter the password, so they always fail. Ask the user to run them (suggest the `! <command>` prefix so the output lands in the session).
 
+## Versioning and commits
+
+- **Commits**: `area: imperative summary` (e.g. `web-app: fix healthz version`,
+  `ingestion: path-safety guards`). Group logical changes; no drive-by edits.
+- **Small fixes** are commit + service restart, nothing more — production may
+  legitimately run a few commits past the last tag (`git describe --tags`
+  shows e.g. `v1.2-3-g<sha>`).
+- **Cut a release** (tag `vX.Y` + 2–3 plain lines in root `CHANGELOG.md`) when
+  a change is changelog-worthy: includes a DB migration, is a user-visible
+  feature/behavior change, is a state you'd want to roll back to, or enough
+  small fixes accumulated to name a checkpoint. Bump `X` only for scary
+  upgrades (irreversible migration, storage-mode change); otherwise bump `Y`.
+- Release = `git tag vX.Y && git push --tags` + changelog entry, done. No
+  other tooling. Mention any included Alembic migration in the entry.
+
 ## Repository layout
 
 ```
