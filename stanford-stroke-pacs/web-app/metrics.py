@@ -16,7 +16,7 @@ concrete path.
 
 from __future__ import annotations
 
-import shutil
+import time
 
 from prometheus_client import CollectorRegistry, Counter, Gauge, Histogram
 
@@ -92,8 +92,6 @@ reconciliation_duration_seconds = Gauge(
 
 def update_reconciliation_metrics(summary: dict, duration: float) -> None:
     """Update Prometheus gauges from a reconciliation summary."""
-    import time as _time
-
     for category in (
         "in_db_not_in_orthanc",
         "in_orthanc_not_in_db",
@@ -102,11 +100,11 @@ def update_reconciliation_metrics(summary: dict, duration: float) -> None:
         reconciliation_mismatches_total.labels(category=category).set(
             summary.get(category, 0)
         )
-    reconciliation_last_run_timestamp.set(_time.time())
+    reconciliation_last_run_timestamp.set(time.time())
     reconciliation_duration_seconds.set(duration)
 
 
-def refresh_cold_storage_gauges(get_conn, dicom_data_root) -> None:
+def refresh_cold_storage_gauges() -> None:
     """Refresh the scrape-time gauges.
 
     Called from the /metrics handler so the values reflect current state
@@ -114,6 +112,12 @@ def refresh_cold_storage_gauges(get_conn, dicom_data_root) -> None:
     Exceptions here must never prevent /metrics from serving — we swallow
     them and leave the last-known value in place.
     """
+    # Lazy imports keep metrics a leaf module: importing it must not require
+    # DB secrets or config.toml (it is pulled in by logging/startup paths).
+    from cache_manager import disk_free_bytes
+    from config import DICOM_DATA_ROOT
+    from db import get_conn
+
     try:
         conn = get_conn()
         try:
@@ -129,14 +133,7 @@ def refresh_cold_storage_gauges(get_conn, dicom_data_root) -> None:
         pass
 
     try:
-        # shutil.disk_usage walks up to the nearest existing ancestor so
-        # this works even when dicom_data_root is transiently empty.
-        p = dicom_data_root
-        while not p.exists():
-            if p.parent == p:
-                break
-            p = p.parent
-        cold_storage_disk_free_bytes.set(shutil.disk_usage(p).free)
+        cold_storage_disk_free_bytes.set(disk_free_bytes(DICOM_DATA_ROOT))
     except Exception:
         pass
 

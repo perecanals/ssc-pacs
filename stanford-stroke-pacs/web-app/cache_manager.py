@@ -1,28 +1,24 @@
 """Cold storage: warm/evict series into their original dicom paths.
 
-The **series is the single source of truth**. ``series_cache_state`` is keyed by
-``seriesinstanceuid``; ``warm_series([uid, ...])`` is the one warm primitive.
-Study- and patient-level operations are thin, behaviour-preserving wrappers:
-``warm_study`` warms every series of a study (in one call → one executor task),
-``warm_patient`` warms every series under a patient, and study/patient *status*
-is a derived aggregate over the relevant series rows (binary readiness: a study
-is ``hot`` only when all its series are hot — exactly as before).
+The series is the unit of cache state: ``series_cache_state`` is keyed by
+``seriesinstanceuid``; ``warm_series``/``evict_series`` are the primitives and
+study/patient operations are thin wrappers (a study is ``hot`` only when all
+its series are hot). Warm/evict is index-neutral — Orthanc's index rows persist
+across eviction (``RemoveMissingFiles: false``).
 
-Robustness invariants (unchanged in spirit, now per series):
+Invariants:
 
-* Every ``series_cache_state`` row holding ``status='warming'`` also has
-  ``warming_started_at = now()``. The watchdog in :func:`warm_series` treats rows
-  older than ``WARMING_TIMEOUT_MINUTES`` as recoverable and re-warms them.
-* :func:`warm_series` refuses to extract a series if its target filesystem cannot
-  fit ``WARMING_DISK_SAFETY_FACTOR * compressed`` bytes plus
-  ``WARMING_DISK_MIN_FREE_BYTES`` of headroom. On insufficient space that series'
-  row is reset to ``status='cold'`` and an :class:`InsufficientDiskSpaceError`
-  is recorded (the route's synchronous precheck surfaces 507 first).
-* :func:`evict_series` only deletes a ``series_cache_state`` row after its
-  ``rmtree`` succeeds. A failed eviction leaves the row intact for retry.
+* Every ``status='warming'`` row has ``warming_started_at`` set; the watchdog in
+  :func:`warm_series` re-warms rows older than ``WARMING_TIMEOUT_MINUTES``.
+* :func:`warm_series` refuses to extract without
+  ``WARMING_DISK_SAFETY_FACTOR * compressed + WARMING_DISK_MIN_FREE_BYTES`` free
+  at the target; the series row is reset to ``cold`` and
+  :class:`InsufficientDiskSpaceError` raised (the route precheck surfaces 507).
+* :func:`evict_series` deletes a cache row only after its ``rmtree`` succeeds;
+  a failed eviction leaves the row intact for retry.
 * Each series is warmed under its own advisory lock, acquired and released
-  sequentially — **at most one series lock is ever held at a time**, so warming a
-  whole study cannot deadlock against a concurrent warm.
+  sequentially — at most one lock held at a time, so a whole-study warm cannot
+  deadlock against a concurrent warm.
 """
 
 from __future__ import annotations
@@ -51,20 +47,33 @@ from db import get_conn
 
 logger = logging.getLogger(__name__)
 
-_conn = get_conn  # Backward-compat alias used throughout this module.
-
 ADV_LOCK_KEY = 8741002
 
-# Reusable SQL fragment: a series' *effective* cache status, where a
-# 'warming'/'queued' row stuck past the warming timeout is reported as 'cold'
-# (abandoned warm — worker died, or a queue dropped on app restart). Assumes the
-# series_cache_state row is aliased `cs` (LEFT JOIN-friendly: a missing row also
-# reads 'cold'). Takes one %s param: the timeout in minutes.
-_EFFECTIVE_STATUS_SQL = (
-    "CASE WHEN cs.status IN ('warming', 'queued') "
-    "AND cs.warming_started_at < now() - (%s * interval '1 minute') "
-    "THEN 'cold' ELSE COALESCE(cs.status, 'cold') END"
-)
+
+def effective_status_sql(alias: str = "cs.") -> str:
+    """SQL fragment: a series' *effective* cache status, where a
+    'warming'/'queued' row stuck past the warming timeout reads 'cold'
+    (abandoned warm — worker died, or a queue dropped on app restart).
+    LEFT JOIN-friendly: a missing row also reads 'cold'. Takes one %s
+    param: the timeout in minutes. ``alias`` prefixes the columns
+    (e.g. ``"cs."``; ``""`` when querying series_cache_state directly).
+    """
+    return (
+        f"CASE WHEN {alias}status IN ('warming', 'queued') "
+        f"AND {alias}warming_started_at < now() - (%s * interval '1 minute') "
+        f"THEN 'cold' ELSE COALESCE({alias}status, 'cold') END"
+    )
+
+
+# Status row returned when a series/study has no cache state at all.
+_COLD_STATUS_ROW = {
+    "status": "cold",
+    "error_message": None,
+    "warmed_at": None,
+    "last_accessed_at": None,
+    "warming_started_at": None,
+    "cache_path": None,
+}
 
 
 class InsufficientDiskSpaceError(RuntimeError):
@@ -188,14 +197,19 @@ def _advisory_unlock(cur, key_text: str) -> None:
     )
 
 
-def _disk_free_bytes(path: Path) -> int:
-    """Return free bytes on the filesystem holding `path` (or its nearest existing ancestor)."""
+def disk_usage_at(path: Path):
+    """shutil.disk_usage for the filesystem holding `path` (walks up to the
+    nearest existing ancestor, so it works while the path is transiently absent)."""
     p = path
     while not p.exists():
         if p.parent == p:
             break
         p = p.parent
-    return shutil.disk_usage(p).free
+    return shutil.disk_usage(p)
+
+
+def disk_free_bytes(path: Path) -> int:
+    return disk_usage_at(path).free
 
 
 def _estimate_required_bytes(archives: list[tuple[str, Path]]) -> int:
@@ -226,7 +240,7 @@ def _series_for_studies(study_uids: list[str]) -> list[str]:
     """Return every seriesinstanceuid belonging to the given studies."""
     if not study_uids:
         return []
-    conn = _conn()
+    conn = get_conn()
     try:
         with conn.cursor() as cur:
             cur.execute(
@@ -239,13 +253,11 @@ def _series_for_studies(study_uids: list[str]) -> list[str]:
 
 
 def _series_for_patient(patient_id: str) -> list[str]:
-    conn = _conn()
+    conn = get_conn()
     try:
         with conn.cursor() as cur:
             cur.execute(
-                "SELECT s.seriesinstanceuid FROM image_series s "
-                "JOIN image_study st ON st.studyinstanceuid = s.studyinstanceuid "
-                "WHERE st.patient_id = %s",
+                "SELECT seriesinstanceuid FROM image_series WHERE patient_id = %s",
                 (patient_id,),
             )
             return [r[0] for r in cur.fetchall()]
@@ -255,7 +267,7 @@ def _series_for_patient(patient_id: str) -> list[str]:
 
 def list_patient_study_uids(patient_id: str) -> list[str]:
     """Return every studyinstanceuid belonging to a patient (warm-all fan-out)."""
-    conn = _conn()
+    conn = get_conn()
     try:
         with conn.cursor() as cur:
             cur.execute(
@@ -268,7 +280,7 @@ def list_patient_study_uids(patient_id: str) -> list[str]:
 
 
 def _study_path(study_uid: str) -> str | None:
-    conn = _conn()
+    conn = get_conn()
     try:
         with conn.cursor() as cur:
             cur.execute(
@@ -282,12 +294,8 @@ def _study_path(study_uid: str) -> str | None:
 
 
 def _collapse_status(effs: list[str]) -> str:
-    """Collapse a study's per-series effective statuses to one binary-readiness status.
-
-    A study is ``hot`` only when *all* its series are hot (matches the previous
-    study-level semantics). Otherwise: any warming → warming; else any queued →
-    queued; else any error → error; else cold.
-    """
+    """Collapse per-series effective statuses to one study status: ``hot`` only
+    when *all* series are hot; else warming > queued > error > cold."""
     if not effs:
         return "cold"
     if all(e == "hot" for e in effs):
@@ -319,7 +327,7 @@ def _estimate_for_series_rows(series_rows: list[dict[str, Any]]) -> dict[str, An
 
     required = _estimate_required_bytes(archives_to_extract)
     target = Path(archives_to_extract[0][0]).parent
-    available = _disk_free_bytes(target)
+    available = disk_free_bytes(target)
     return {"required_bytes": required, "available_bytes": available, "target": target}
 
 
@@ -334,7 +342,7 @@ def estimate_warm_disk_space(studyinstanceuid: str) -> dict[str, Any] | None:
     """
     if STORAGE_MODE != "cold_path_cache":
         return None
-    conn = _conn()
+    conn = get_conn()
     try:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             cur.execute(
@@ -352,7 +360,7 @@ def estimate_warm_series_disk_space(series_uids: list[str]) -> dict[str, Any] | 
     """Synchronous disk precheck for the series warm route handler (see above)."""
     if STORAGE_MODE != "cold_path_cache" or not series_uids:
         return None
-    conn = _conn()
+    conn = get_conn()
     try:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             cur.execute(
@@ -373,7 +381,7 @@ def estimate_warm_series_disk_space(series_uids: list[str]) -> dict[str, Any] | 
 
 def get_series_cache_status(seriesinstanceuid: str) -> dict[str, Any]:
     """Per-series cache status row (the same dict shape the study endpoint returns)."""
-    conn = _conn()
+    conn = get_conn()
     try:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             cur.execute(
@@ -384,14 +392,7 @@ def get_series_cache_status(seriesinstanceuid: str) -> dict[str, Any]:
             )
             row = cur.fetchone()
         if not row:
-            return {
-                "status": "cold",
-                "error_message": None,
-                "warmed_at": None,
-                "last_accessed_at": None,
-                "warming_started_at": None,
-                "cache_path": None,
-            }
+            return dict(_COLD_STATUS_ROW)
         out = dict(row)
         for k in ("warmed_at", "last_accessed_at", "warming_started_at"):
             if out.get(k):
@@ -406,14 +407,11 @@ def get_batch_series_status(series_uids: list[str]) -> dict[str, str]:
     out = {uid: "cold" for uid in series_uids}
     if not series_uids:
         return out
-    conn = _conn()
+    conn = get_conn()
     try:
         with conn.cursor() as cur:
             cur.execute(
-                "SELECT seriesinstanceuid, "
-                "CASE WHEN status IN ('warming', 'queued') "
-                "AND warming_started_at < now() - (%s * interval '1 minute') "
-                "THEN 'cold' ELSE status END "
+                f"SELECT seriesinstanceuid, {effective_status_sql(alias='')} "
                 "FROM series_cache_state WHERE seriesinstanceuid = ANY(%s)",
                 (WARMING_TIMEOUT_MINUTES, list(series_uids)),
             )
@@ -425,18 +423,13 @@ def get_batch_series_status(series_uids: list[str]) -> dict[str, str]:
 
 
 def get_cache_status(studyinstanceuid: str) -> dict[str, Any]:
-    """Study cache status, derived by aggregating the study's series rows.
-
-    Returns the same dict shape as the old per-study read (``status``,
-    ``error_message``, ``warmed_at``, ``last_accessed_at``, ``warming_started_at``,
-    ``cache_path``) so the ohif-link probe and the cache-status endpoint are
-    unchanged. Binary readiness: ``hot`` only when every series is hot.
-    """
-    conn = _conn()
+    """Study cache status, aggregated over the study's series rows
+    (``hot`` only when every series is hot; same dict shape as the series read)."""
+    conn = get_conn()
     try:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             cur.execute(
-                f"SELECT {_EFFECTIVE_STATUS_SQL} AS eff, "
+                f"SELECT {effective_status_sql()} AS eff, "
                 "       cs.warmed_at, cs.last_accessed_at, cs.warming_started_at, cs.error_message "
                 "FROM image_series s "
                 "LEFT JOIN series_cache_state cs ON cs.seriesinstanceuid = s.seriesinstanceuid "
@@ -448,14 +441,7 @@ def get_cache_status(studyinstanceuid: str) -> dict[str, Any]:
         conn.close()
 
     if not rows:
-        return {
-            "status": "cold",
-            "error_message": None,
-            "warmed_at": None,
-            "last_accessed_at": None,
-            "warming_started_at": None,
-            "cache_path": None,
-        }
+        return dict(_COLD_STATUS_ROW)
 
     effs = [r["eff"] for r in rows]
     status = _collapse_status(effs)
@@ -491,11 +477,11 @@ def get_batch_cache_status(uids: list[str]) -> dict[str, str]:
     out = {uid: "cold" for uid in uids}
     if not uids:
         return out
-    conn = _conn()
+    conn = get_conn()
     try:
         with conn.cursor() as cur:
             cur.execute(
-                f"SELECT s.studyinstanceuid, {_EFFECTIVE_STATUS_SQL} AS eff "
+                f"SELECT s.studyinstanceuid, {effective_status_sql()} AS eff "
                 "FROM image_series s "
                 "LEFT JOIN series_cache_state cs ON cs.seriesinstanceuid = s.seriesinstanceuid "
                 "WHERE s.studyinstanceuid = ANY(%s)",
@@ -524,11 +510,11 @@ def _patient_status_counts(patient_ids: list[str]) -> dict[str, dict[str, int]]:
     }
     if not patient_ids:
         return counts
-    conn = _conn()
+    conn = get_conn()
     try:
         with conn.cursor() as cur:
             cur.execute(
-                f"SELECT st.patient_id, st.studyinstanceuid, {_EFFECTIVE_STATUS_SQL} AS eff "
+                f"SELECT st.patient_id, st.studyinstanceuid, {effective_status_sql()} AS eff "
                 "FROM image_study st "
                 "LEFT JOIN image_series s ON s.studyinstanceuid = st.studyinstanceuid "
                 "LEFT JOIN series_cache_state cs ON cs.seriesinstanceuid = s.seriesinstanceuid "
@@ -579,7 +565,7 @@ def mark_queued_series(series_uids: list[str]) -> None:
     """
     if STORAGE_MODE != "cold_path_cache" or not series_uids:
         return
-    conn = _conn()
+    conn = get_conn()
     try:
         with conn.cursor() as cur:
             cur.executemany(
@@ -622,7 +608,7 @@ def reap_stale_warming(min_age_minutes: float | None = None) -> list[str]:
         return []
     age = WARMING_TIMEOUT_MINUTES if min_age_minutes is None else min_age_minutes
     reaped: list[str] = []
-    conn = _conn()
+    conn = get_conn()
     try:
         with conn.cursor() as cur:
             cur.execute(
@@ -658,7 +644,7 @@ def reap_stale_warming(min_age_minutes: float | None = None) -> list[str]:
 
 
 def touch_access_series(seriesinstanceuid: str) -> None:
-    conn = _conn()
+    conn = get_conn()
     try:
         with conn.cursor() as cur:
             cur.execute(
@@ -672,12 +658,9 @@ def touch_access_series(seriesinstanceuid: str) -> None:
 
 
 def touch_access(studyinstanceuid: str) -> None:
-    """Touch every series of a study, so whole-study warmth ages together.
-
-    Keeps per-series eviction TTL equivalent to the old per-study TTL for
-    whole-study access patterns (a study open touches all its series at once).
-    """
-    conn = _conn()
+    """Touch every series of a study, so whole-study warmth ages (and is
+    evicted) together."""
+    conn = get_conn()
     try:
         with conn.cursor() as cur:
             cur.execute(
@@ -775,7 +758,7 @@ def _warm_one_series(cur, conn, seriesinstanceuid: str, row: dict[str, Any] | No
     if not _is_series_dir_warm(dir_path):
         required = _estimate_required_bytes([(dir_path, archive)])
         target = Path(dir_path).parent
-        available = _disk_free_bytes(target)
+        available = disk_free_bytes(target)
         if available < required:
             _upsert_series_status(
                 cur, seriesinstanceuid, "cold",
@@ -845,7 +828,9 @@ def warm_series(series_uids: list[str]) -> dict[str, Any]:
     if not series_uids:
         return {"ok": True, "series_count": 0, "extract_seconds": 0.0, "errors": []}
 
-    conn = _conn()
+    # Holds this pooled connection for the whole extraction — bounded by
+    # WARM_WORKERS (2) ≪ POOL_MAX (20), so the pool cannot be starved.
+    conn = get_conn()
     cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
     try:
         cur.execute(
@@ -903,22 +888,17 @@ def warm_series(series_uids: list[str]) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
-# Study / patient warm wrappers (behaviour-preserving)
+# Study / patient warm wrappers
 # ---------------------------------------------------------------------------
 
 
 def warm_study(studyinstanceuid: str) -> dict[str, Any]:
-    """Warm every series of a study (unchanged whole-study behaviour).
-
-    A thin wrapper over :func:`warm_series` — one call, so the route still submits
-    exactly one executor task per study warm. Returns a study-shaped result dict
-    compatible with the previous implementation.
-    """
+    """Warm every series of a study — one :func:`warm_series` call, one executor
+    task; returns a study-shaped result dict."""
     if STORAGE_MODE != "cold_path_cache":
         return {"ok": True, "skipped": True, "reason": "not_cold_path_cache_mode"}
 
-    series_uids = _study_series_uids(studyinstanceuid)
-    res = warm_series(series_uids)
+    res = warm_series(_series_for_studies([studyinstanceuid]))
     if res.get("skipped"):
         return res
 
@@ -938,10 +918,6 @@ def warm_study(studyinstanceuid: str) -> dict[str, Any]:
         else:
             out["error"] = res.get("error", "warm_failed")
     return out
-
-
-def _study_series_uids(studyinstanceuid: str) -> list[str]:
-    return _series_for_studies([studyinstanceuid])
 
 
 def warm_patient(patient_id: str) -> dict[str, Any]:
@@ -964,7 +940,7 @@ def evict_series(series_uids: list[str]) -> dict[str, Any]:
     """
     if not series_uids:
         return {"ok": True, "evicted": []}
-    conn = _conn()
+    conn = get_conn()
     try:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             cur.execute(
@@ -1006,8 +982,8 @@ def evict_series(series_uids: list[str]) -> dict[str, Any]:
 
 
 def evict_study(studyinstanceuid: str) -> dict[str, Any]:
-    """Evict every series of a study (unchanged whole-study behaviour)."""
-    evict_series(_study_series_uids(studyinstanceuid))
+    """Evict every series of a study."""
+    evict_series(_series_for_studies([studyinstanceuid]))
     logger.info("evict_study: evicted", extra=_log_extra(studyinstanceuid))
     return {"ok": True, "evicted": studyinstanceuid}
 
@@ -1015,13 +991,12 @@ def evict_study(studyinstanceuid: str) -> dict[str, Any]:
 def run_eviction() -> list[str]:
     """Evict series whose hot rows have not been accessed within the TTL.
 
-    Per-series TTL: because :func:`touch_access` touches all of a study's series
-    together, an idle study's series all age out together and are evicted in the
-    same sweep — equivalent to the old whole-study eviction.
+    Because :func:`touch_access` touches all of a study's series together, an
+    idle study's series age out and are evicted in the same sweep.
     """
     if STORAGE_MODE != "cold_path_cache":
         return []
-    conn = _conn()
+    conn = get_conn()
     try:
         with conn.cursor() as cur:
             cur.execute(

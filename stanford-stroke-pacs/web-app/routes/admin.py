@@ -4,19 +4,22 @@ from __future__ import annotations
 
 import json
 import os
-import shutil
 from pathlib import Path
 
 import psycopg2
 import psycopg2.extras
 from fastapi import APIRouter, Depends, HTTPException
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
+from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from pydantic import BaseModel
 
 import dataset_access
 from auth import require_admin
+from cache_manager import disk_usage_at
 from config import DICOM_DATA_ROOT, STORAGE_MODE
 from db import DB_CONFIG, get_conn
+from metrics import REGISTRY as METRICS_REGISTRY
+from metrics import refresh_cold_storage_gauges
 from orthanc_client import orthanc_system_check
 
 router = APIRouter()
@@ -107,12 +110,7 @@ def healthz():
         body["orthanc_api_error"] = orthanc_err
 
     try:
-        p = DICOM_DATA_ROOT
-        while not p.exists():
-            if p.parent == p:
-                break
-            p = p.parent
-        du = shutil.disk_usage(p)
+        du = disk_usage_at(DICOM_DATA_ROOT)
         body["disk_free_percent_dicom_data_root"] = round(du.free * 100.0 / du.total, 1)
         body["disk_free_bytes_dicom_data_root"] = int(du.free)
     except Exception as e:
@@ -132,14 +130,8 @@ def healthz():
 @router.get("/metrics")
 def metrics_endpoint():
     """Prometheus exposition — unauthenticated, same as /healthz."""
-    from fastapi.responses import Response as _Response
-    from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
-
-    from metrics import REGISTRY as METRICS_REGISTRY
-    from metrics import refresh_cold_storage_gauges
-
-    refresh_cold_storage_gauges(get_conn, DICOM_DATA_ROOT)
-    return _Response(
+    refresh_cold_storage_gauges()
+    return Response(
         content=generate_latest(METRICS_REGISTRY),
         media_type=CONTENT_TYPE_LATEST,
     )
