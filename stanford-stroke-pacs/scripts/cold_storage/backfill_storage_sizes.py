@@ -2,8 +2,8 @@
 """Backfill compressed/decompressed storage sizes (MB) for every series + study.
 
 Populates ``image_series.compressed_size_mb`` / ``decompressed_size_mb`` and the
-study-level rollups on ``image_study`` (creating the columns if absent). Sizes
-are decimal MB (bytes / 1e6).
+study-level rollups on ``image_study`` (columns are Alembic-managed, rev 0012;
+a guard adds them on pre-migration DBs). Sizes are decimal MB (bytes / 1e6).
 
 Per series:
 - compressed_size_mb   = file size of ``dicom_archive_path`` (NULL if no archive)
@@ -48,6 +48,10 @@ sys.path.insert(0, str(REPO_ROOT / "web-app"))
 
 from db import DB_CONFIG  # noqa: E402
 
+# GUARDS ONLY, not schema management: Alembic rev 0012 is the canonical home of
+# the size columns; these IF NOT EXISTS ALTERs are a safety net for DBs that
+# predate the migration. Note: even a no-op ALTER takes a momentary ACCESS
+# EXCLUSIVE lock on the table — avoid running mid-ingestion out of habit.
 SERIES_COLUMNS_SQL = (
     "ALTER TABLE image_series ADD COLUMN IF NOT EXISTS compressed_size_mb double precision",
     "ALTER TABLE image_series ADD COLUMN IF NOT EXISTS decompressed_size_mb double precision",
