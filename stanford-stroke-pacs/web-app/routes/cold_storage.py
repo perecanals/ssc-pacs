@@ -85,11 +85,9 @@ def api_storage_mode(user: str = Depends(get_current_user)):
 def _run_warm_with_metrics(studyinstanceuid: str) -> None:
     """Run warm_study in a worker thread and emit the result-labelled counter.
 
-    Runs in the bounded ``app.state.warm_executor`` pool. Failure here does
-    not surface to the HTTP client (which already returned 202); the worker's
-    own except block in :func:`cache_manager.warm_study` sets
-    ``series_cache_state.status='error'`` so the frontend learns via the
-    ``/cache-status`` poll loop.
+    Failure here never reaches the HTTP client (it already got its 202);
+    warm errors land in ``series_cache_state.status='error'`` and surface via
+    the ``/cache-status`` poll loop.
     """
     try:
         result = warm_study(studyinstanceuid)
@@ -188,12 +186,8 @@ async def api_warm_series(
     request: Request,
     scope: list[str] | None = Depends(get_dataset_scope),
 ):
-    """Queue a single series for warming. Returns 202 immediately.
-
-    The per-series analogue of the study warm endpoint — lets a rater decompress
-    one series without waiting for its whole study. Same bounded executor pool,
-    same synchronous disk-space precheck (507).
-    """
+    """Queue a single series for warming (per-series analogue of the study
+    warm: same executor pool, same 507 disk precheck)."""
     check_series_access(seriesinstanceuid, scope)
 
     est = estimate_warm_series_disk_space([seriesinstanceuid])
@@ -252,14 +246,9 @@ async def api_warm_patient(
     request: Request,
     scope: list[str] | None = Depends(get_dataset_scope),
 ):
-    """Queue every study of a patient for warming. Returns 202 immediately.
-
-    Fans each study into the same bounded ``app.state.warm_executor`` pool as
-    the per-study endpoint. Per-study disk-space prechecks run inside the
-    worker (``warm_study``), so a single study failing for space does not block
-    the rest; clients observe progress via
-    ``GET /api/patients/{id}/cache-status``.
-    """
+    """Queue every study of a patient for warming, one executor task per study.
+    Disk prechecks run inside each worker, so one study failing for space does
+    not block the rest."""
     check_patient_access(patient_id, scope)
 
     uids = list_patient_study_uids(patient_id)

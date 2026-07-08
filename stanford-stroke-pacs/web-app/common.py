@@ -115,12 +115,8 @@ def check_series_access(seriesinstanceuid: str, scope: list[str] | None) -> None
 
 def record_label_value(cur, label: str, value: str | None, created_by: str | None) -> None:
     """Upsert one value into the select-label vocabulary (label_value_options).
-
-    Used on annotation writes and label-definition seeding so the inline-edit
-    dropdown and the column filter share one fast, indexed source of truth.
-    No-ops for empty values. Runs on the caller's cursor so it commits atomically
-    with the surrounding write. Idempotent via ON CONFLICT.
-    """
+    Runs on the caller's cursor so it commits atomically with the surrounding
+    write; no-ops for empty values; idempotent via ON CONFLICT."""
     if value is None:
         return
     trimmed = value.strip()
@@ -171,29 +167,12 @@ def build_label_filter_sql(
     operator: str = "IN",
     value_predicate: str = "",
 ) -> str:
-    """Return a SQL fragment that filters *entity_id_expr* by an annotation.
-
-    Parameters
-    ----------
-    entity_level : str
-        Level of the current listing (``"patient"``, ``"study"``, ``"series"``).
-    label_level : str | None
-        Level of the annotation to filter on.  Falls back to *entity_level*.
-    entity_id_expr : str
-        Column expression to match (e.g. ``"p.patient_id"``, ``"st.studyinstanceuid"``).
-    operator : str
-        ``"IN"`` or ``"NOT IN"`` — for boolean false filters.
-    value_predicate : str
-        Additional SQL appended inside the innermost ``SELECT``, after
-        ``label = %s``.  For example ``"AND LOWER(COALESCE(value, '')) LIKE
-        LOWER(%s)"`` (two ``%s`` placeholders total) or
-        ``"AND COALESCE(value, '') = ANY(%s)"`` (two ``%s`` placeholders).
-
-    Returns
-    -------
-    str
-        A SQL fragment suitable for use in a WHERE clause.  The caller must
-        supply the corresponding parameters.
+    """WHERE fragment filtering *entity_id_expr* (at *entity_level*) by an
+    annotation at *label_level* (falls back to entity_level; cross-level goes
+    through the parent column or an intermediate table). ``operator`` is
+    ``"IN"``/``"NOT IN"`` (boolean false filters). ``value_predicate`` is extra
+    SQL after ``label = %s`` — e.g. ``"AND COALESCE(value, '') = ANY(%s)"`` —
+    making two ``%s`` placeholders total; the caller binds the params.
     """
     ll = label_level if label_level in VALID_LEVELS else entity_level
     ann_key = _ANNOTATION_KEY[ll]

@@ -25,14 +25,9 @@ router = APIRouter()
 
 
 def _sync_labelled_rows_bg(level: str, entity_id: str | None) -> None:
-    """Refresh the *_labelled mirror table for one entity, off the request path.
-
-    Runs after the response is sent, on its own pooled connection — the annotation
-    write has already committed, so this reads the latest state and a failure here
-    only logs (it can never roll back or block the user's save). The mirror tables
-    have no audit trigger, so the absence of `app.audit_user` on this connection is
-    irrelevant; audit attribution happens on the in-request annotations write.
-    """
+    """Refresh the *_labelled mirror row for one entity, off the request path.
+    The annotation write has already committed; a failure here only logs — it
+    can never roll back or block the user's save."""
     conn = get_conn()
     try:
         sync_labelled_rows(conn, level, [entity_id])

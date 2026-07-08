@@ -116,13 +116,9 @@ def get_label_values(
     label_name: str,
     user: str = Depends(get_current_user),
 ):
-    """Return the known values (controlled vocabulary) for a select-type label.
-
-    Reads the indexed ``label_value_options`` table — a fast lookup kept in sync
-    on annotation writes — instead of scanning the annotations table. The
-    vocabulary is global: every value is visible to anyone who can see the
-    column (only value strings are shared, never patient data).
-    """
+    """Known values (controlled vocabulary) for a select-type label, from the
+    indexed ``label_value_options`` table. The vocabulary is global — value
+    strings only, never patient data."""
     conn = get_conn()
     try:
         with conn.cursor() as cur:
@@ -162,12 +158,9 @@ def _serialize_label_def_row(row: dict) -> dict:
 
 
 def _merge_select_value_options(cur, rows: list[dict]) -> None:
-    """Replace each select-type def's ``options`` with the effective vocabulary.
-
-    The effective set = curated ``label_definitions.options`` ∪ the live values in
-    ``label_value_options``. This is what the column filter consumes, so values
-    created inline reach the filter. Mutates ``rows`` in place; one batched query.
-    """
+    """Replace each select-type def's ``options`` with the effective vocabulary:
+    curated ``label_definitions.options`` ∪ live ``label_value_options`` — so
+    values created inline reach the column filter. One batched query."""
     select_names = [r["name"] for r in rows if r.get("datatype") == "select"]
     if not select_names:
         return
