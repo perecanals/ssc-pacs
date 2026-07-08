@@ -252,3 +252,28 @@ def test_must_change_gate_lifts_after_password_change(client):
 
     after = client.get("/api/labels")
     assert after.status_code == 200
+
+
+# ---------------------------------------------------------------------------
+# Login rate limit (wired via rate_limit.limiter decorating the endpoint)
+# ---------------------------------------------------------------------------
+
+
+def test_login_rate_limit_returns_429(client):
+    """The N+1th login attempt within the window must 429 with Retry-After."""
+    import rate_limit as rate_limit_mod
+    from config import LOGIN_RATE_LIMIT_PER_5MIN
+
+    rate_limit_mod.limiter.enabled = True
+    try:
+        last = None
+        for _ in range(LOGIN_RATE_LIMIT_PER_5MIN + 1):
+            last = client.post(
+                "/api/login", json={"username": "nobody", "password": "wrong"}
+            )
+        assert last.status_code == 429, last.text
+        assert "Retry-After" in last.headers
+        assert last.json() == {"detail": "Too many attempts; please wait and retry."}
+    finally:
+        rate_limit_mod.limiter.enabled = False
+        rate_limit_mod.limiter.reset()

@@ -11,21 +11,15 @@ from pathlib import Path
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
-from slowapi import Limiter
 from slowapi.errors import RateLimitExceeded
-from slowapi.util import get_remote_address
 
 import auth as _auth
 from auth import create_jwt, decode_jwt
-from config import (
-    LOGIN_RATE_LIMIT_PER_5MIN,
-    STORAGE_MODE,
-    WARM_WORKERS,
-    effective_config_summary,
-)
+from config import STORAGE_MODE, WARM_WORKERS, effective_config_summary
 from db import audit_user_var, close_pool, get_conn, init_pool
 from logging_config import configure_logging, request_id_ctx, user_ctx
 from metrics import http_request_duration_seconds, http_requests_total
+from rate_limit import limiter
 from routes import admin, annotations, cold_storage, labels, preferences, proxy, static, studies
 from routes import auth as auth_routes
 
@@ -138,10 +132,10 @@ async def lifespan(application: FastAPI):
 app = FastAPI(title="SSC Series Annotations", lifespan=lifespan)
 
 # ---------------------------------------------------------------------------
-# Rate limiter
+# Rate limiter (the login endpoint decorates itself; slowapi requires the
+# limiter on app.state plus the 429 handler below)
 # ---------------------------------------------------------------------------
 
-limiter = Limiter(key_func=get_remote_address)
 app.state.limiter = limiter
 
 
@@ -307,17 +301,6 @@ async def request_id_middleware(request: Request, call_next):
             audit_user_var.reset(audit_token)
         if user_token is not None:
             user_ctx.reset(user_token)
-
-
-# ---------------------------------------------------------------------------
-# Apply rate limit to login route (slowapi needs the app instance)
-# ---------------------------------------------------------------------------
-
-@app.on_event("startup")
-def _apply_rate_limits():
-    for route in app.routes:
-        if getattr(route, "path", None) == "/api/login" and getattr(route, "methods", None):
-            route.endpoint = limiter.limit(f"{LOGIN_RATE_LIMIT_PER_5MIN}/5 minutes")(route.endpoint)
 
 
 # ---------------------------------------------------------------------------

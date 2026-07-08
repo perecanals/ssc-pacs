@@ -252,7 +252,9 @@ def client(seeded_db):
         auth_mod.JWT_SECRET = "test-jwt-secret-for-ci"
 
         # Disable slowapi rate limiting so login-heavy test runs don't 429.
-        app_mod.limiter.enabled = False
+        import rate_limit as rate_limit_mod
+
+        rate_limit_mod.limiter.enabled = False
 
         # TestClient uses http://testserver — Secure cookies won't be sent.
         original_cookie_secure = auth_mod.COOKIE_SECURE
@@ -267,7 +269,7 @@ def client(seeded_db):
         db_mod.DB_CONFIG.update(original_db_config)
         auth_mod.JWT_SECRET = original_jwt
         auth_mod.COOKIE_SECURE = original_cookie_secure
-        app_mod.limiter.enabled = True
+        rate_limit_mod.limiter.enabled = True
 
 
 @pytest.fixture()

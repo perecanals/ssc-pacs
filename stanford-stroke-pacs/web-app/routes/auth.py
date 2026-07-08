@@ -8,8 +8,9 @@ from pydantic import BaseModel
 
 import auth as _auth
 from auth import create_jwt, get_current_user, get_optional_user
-from config import SESSION_TIMEOUT_HOURS
+from config import LOGIN_RATE_LIMIT_PER_5MIN, SESSION_TIMEOUT_HOURS
 from db import get_conn
+from rate_limit import limiter
 
 router = APIRouter()
 
@@ -31,11 +32,8 @@ class ChangePasswordRequest(BaseModel):
 
 
 @router.post("/api/login")
+@limiter.limit(f"{LOGIN_RATE_LIMIT_PER_5MIN}/5 minutes")
 def login(request: Request, body: LoginRequest, response: Response):
-    # Rate limiting is applied via the limiter on app.state (see app.py).
-    # The limiter decorator is attached in app.py after router registration
-    # because slowapi needs the app instance.  The route is still protected
-    # — the middleware-level limiter catches it.
     conn = get_conn()
     try:
         with conn.cursor() as cur:
