@@ -883,6 +883,14 @@ class ImageIngestionProtocol:
         ]
 
         for path in sorted(set(paths_to_remove), key=len, reverse=True):
+            # Path safety: these paths come from the DB — never rmtree
+            # anything outside the ingestion base_dir.
+            if not self._is_strictly_inside_base_dir(path):
+                print(
+                    f"WARNING: refusing to remove path outside base_dir "
+                    f"({self.base_dir}): {path}"
+                )
+                continue
             if os.path.isdir(path):
                 print(f"Removing directory: {path}")
                 shutil.rmtree(path, ignore_errors=True)
@@ -945,10 +953,26 @@ class ImageIngestionProtocol:
             self.image_series["studyinstanceuid"].astype(str) != str(study_instance_uid)
         ].reset_index(drop=True)
 
+    def _is_strictly_inside_base_dir(self, path) -> bool:
+        """True iff ``path`` is strictly inside ``base_dir``.
+
+        Uses commonpath, not a string prefix — a bare ``startswith`` would let
+        e.g. ``/DATA2/pacs_imaging_data_loose_backup`` pass for base_dir
+        ``/DATA2/pacs_imaging_data``.
+        """
+        if not isinstance(path, str) or not path:
+            return False
+        base_abs = os.path.abspath(self.base_dir)
+        path_abs = os.path.abspath(path)
+        try:
+            return path_abs != base_abs and os.path.commonpath([base_abs, path_abs]) == base_abs
+        except ValueError:
+            # Different drives / mixed absolute-relative — not inside.
+            return False
+
     def _remove_empty_parent_dirs(self, path):
         current_path = os.path.dirname(path)
-        base_dir_abs = os.path.abspath(self.base_dir)
-        while os.path.abspath(current_path).startswith(base_dir_abs) and current_path != base_dir_abs:
+        while self._is_strictly_inside_base_dir(current_path):
             if not os.path.isdir(current_path):
                 current_path = os.path.dirname(current_path)
                 continue
