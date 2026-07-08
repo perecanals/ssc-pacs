@@ -15,17 +15,21 @@
 # batches report "nothing to do" and cost nothing.
 #
 # Usage:
-#   ./run_all_batches.sh                 # batch2..batch7 (default)
+#   ./run_all_batches.sh                 # batch1..batch7 (default)
 #   ./run_all_batches.sh batch3 batch4   # only the named batches, in order
+#
+# SRC_ROOT / LABEL_PREFIX / CONDA_ENV are env-overridable for the next
+# campaign, e.g.:
+#   SRC_ROOT=/Volumes/Disk/NEW_COHORT LABEL_PREFIX=new ./run_all_batches.sh b1 b2
 #
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-SRC_ROOT="/Volumes/ThunderBay_RAID1/LVO_SIR-CRISP2"
+SRC_ROOT="${SRC_ROOT:-/Volumes/ThunderBay_RAID1/LVO_SIR-CRISP2}"
 BASE_CONFIG="$SCRIPT_DIR/execute_image_ingestion_protocol.yaml"
 CONFIG_DIR="$SCRIPT_DIR/batch_configs"
-LABEL_PREFIX="sir"
-CONDA_ENV="ssc-pacs"
+LABEL_PREFIX="${LABEL_PREFIX:-sir}"
+CONDA_ENV="${CONDA_ENV:-ssc-pacs}"
 
 # Batches to ingest, in order. Note: rapid_processed is intentionally excluded
 # (it is not a patient batch and reuses batch IDs). Override via CLI args.
