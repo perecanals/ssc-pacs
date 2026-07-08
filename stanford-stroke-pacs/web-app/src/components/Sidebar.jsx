@@ -1,34 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import PropTypes from "prop-types";
 import { apiGet } from "../api/client";
-import { compareLabelDefsDefault, LEVEL_ORDER, LEVEL_LABELS } from "../utils/table";
+import { groupByInstrument, LEVEL_ORDER, LEVEL_LABELS } from "../utils/table";
 import LabelValueFilter from "./Sidebar/LabelValueFilter";
 import "./Sidebar.css";
-
-const UNASSIGNED = "__unassigned__";
-
-// Same default ordering as the data table's columns: instrument groups
-// alphabetical (unassigned last), and within each instrument by label
-// creation time (oldest first) via the shared compareLabelDefsDefault.
-function groupLabelsByInstrument(labels) {
-  const groups = new Map();
-  for (const l of labels) {
-    const key = l.instrument || UNASSIGNED;
-    if (!groups.has(key)) groups.set(key, []);
-    groups.get(key).push(l);
-  }
-  return Array.from(groups.entries())
-    .map(([key, ls]) => ({
-      key,
-      name: key === UNASSIGNED ? "Unassigned" : key,
-      labels: [...ls].sort(compareLabelDefsDefault),
-    }))
-    .sort((a, b) => {
-      if (a.key === UNASSIGNED) return 1;
-      if (b.key === UNASSIGNED) return -1;
-      return a.name.localeCompare(b.name);
-    });
-}
 
 export default function Sidebar({ level, filters, onFilterChange, open, onToggle }) {
   const [labelSummary, setLabelSummary] = useState([]);
@@ -156,7 +131,7 @@ export default function Sidebar({ level, filters, onFilterChange, open, onToggle
       out[lvl].push(l);
     }
     for (const lvl of Object.keys(out)) {
-      out[lvl] = groupLabelsByInstrument(out[lvl]);
+      out[lvl] = groupByInstrument(out[lvl]);
     }
     return out;
   }, [labelSummary]);
@@ -262,7 +237,7 @@ export default function Sidebar({ level, filters, onFilterChange, open, onToggle
                     >
                       {LEVEL_LABELS[lvl]}
                     </div>
-                    {!isLevelCollapsed && groupedByLevel[lvl].map(({ key, name, labels }) => {
+                    {!isLevelCollapsed && groupedByLevel[lvl].map(({ key, name, items: labels }) => {
                       const instrumentKey = `${lvl}:${key}`;
                       const isInstrumentCollapsed = collapsedInstruments.has(instrumentKey);
                       return (

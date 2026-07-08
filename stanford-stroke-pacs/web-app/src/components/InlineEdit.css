@@ -72,6 +72,10 @@
   @apply w-full text-left px-3 py-1.5 text-xs text-primary hover:bg-dropdown-hover cursor-pointer bg-transparent border-none;
 }
 
+.select-edit__create-name {
+  @apply font-semibold;
+}
+
 .select-edit__empty {
   @apply px-3 py-2 text-xs text-text-muted;
 }

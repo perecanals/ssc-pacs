@@ -128,6 +128,46 @@ export function buildBuiltinColumnCatalog(activeLevel) {
   );
 }
 
+// Display formatting for built-in column values: dates humanized, numeric
+// series columns rounded to 2dp, everything else passed through.
+export function formatBuiltinValue(sourceKey, raw) {
+  if (sourceKey === "acquisitiondatetime") return formatDatetime(raw);
+  if (sourceKey === "slicethickness" || sourceKey === "scanaxialcoverage_mm") return formatNumber(raw);
+  return raw;
+}
+
+// Narrow columns (Patient ID, Stroke Date) get trimmed padding + 1% width
+// (see the --narrow CSS modifiers).
+export function isNarrowCol(col) {
+  return !!col.builtin && (col.sourceKey === "patient_id" || col.sourceKey === "stroke_date");
+}
+
+const UNASSIGNED_INSTRUMENT = "__unassigned__";
+
+// Group labels/columns by instrument for menus: groups alphabetical with
+// Unassigned last, items within each group in the shared default label order.
+// Accepts label-summary rows and column objects alike (compareLabelDefsDefault
+// reads .name or .label; items need .instrument and .created_at).
+export function groupByInstrument(items) {
+  const groups = new Map();
+  for (const item of items) {
+    const key = item.instrument || UNASSIGNED_INSTRUMENT;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(item);
+  }
+  return Array.from(groups.entries())
+    .map(([key, members]) => ({
+      key,
+      name: key === UNASSIGNED_INSTRUMENT ? "Unassigned" : key,
+      items: [...members].sort(compareLabelDefsDefault),
+    }))
+    .sort((a, b) => {
+      if (a.key === UNASSIGNED_INSTRUMENT) return 1;
+      if (b.key === UNASSIGNED_INSTRUMENT) return -1;
+      return a.name.localeCompare(b.name);
+    });
+}
+
 export function formatDatetime(iso) {
   if (!iso) return "";
   const d = new Date(iso);

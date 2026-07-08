@@ -1,6 +1,6 @@
 import PropTypes from "prop-types";
 import SelectFilterControl from "./SelectFilterControl";
-import { getTextFilterValue } from "../../utils/table";
+import { getTextFilterValue, isNarrowCol } from "../../utils/table";
 
 export default function TableHeader({
   config,
@@ -49,7 +49,7 @@ export default function TableHeader({
             }${dragColKeyRef.current === c.key ? " dt__th--dragging" : ""}${
               dragOverKey === c.key && dropSide === "before" ? " dt__th--drop-before" : ""
             }${dragOverKey === c.key && dropSide === "after" ? " dt__th--drop-after" : ""}${
-              c.builtin && (c.sourceKey === "patient_id" || c.sourceKey === "stroke_date") ? " dt__th--narrow" : ""
+              isNarrowCol(c) ? " dt__th--narrow" : ""
             }`}
           >
             {c.label}
@@ -109,7 +109,7 @@ export default function TableHeader({
               frozenFirstCol && idx === 0
                 ? config.expandable ? " dt__filter-th--frozen-first-offset" : " dt__filter-th--frozen-first"
                 : ""
-            }${c.builtin && (c.sourceKey === "patient_id" || c.sourceKey === "stroke_date") ? " dt__filter-th--narrow" : ""}`}
+            }${isNarrowCol(c) ? " dt__filter-th--narrow" : ""}`}
           >
             {c.builtin && config.filterParamMap[c.sourceKey] ? (
               <input

@@ -267,6 +267,10 @@
   @apply inline-block transition-transform;
 }
 
+.dt__expand-arrow--open {
+  @apply rotate-90;
+}
+
 .dt__td {
   @apply px-3 border-b border-border whitespace-nowrap align-middle;
   font-size: calc(0.875rem * var(--dt-font-scale, 1));
@@ -381,6 +385,10 @@
 
 .dt__child-expand-arrow {
   @apply inline-block transition-transform text-[10px];
+}
+
+.dt__child-expand-arrow--open {
+  @apply rotate-90;
 }
 
 .dt__child-td {

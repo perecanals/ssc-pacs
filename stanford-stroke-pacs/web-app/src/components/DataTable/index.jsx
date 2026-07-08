@@ -13,10 +13,9 @@ import {
   LEVEL_CONFIG,
   buildBuiltinColumnCatalog,
   buildPatientStudiesUrl,
-  formatDatetime,
-  formatNumber,
+  formatBuiltinValue,
+  isNarrowCol,
   normalizeSelectFilterValues,
-  hasFilterValue,
 } from "../../utils/table";
 import useTableData from "./useTableData";
 import usePreferencePersistence from "./usePreferencePersistence";
@@ -341,11 +340,7 @@ function DataTableInner({
 
   const renderCellValue = (row, col) => {
     if (col.builtin) {
-      const raw = row[col.sourceKey] ?? "";
-      if (col.sourceKey === "acquisitiondatetime") return formatDatetime(raw);
-      if (col.sourceKey === "slicethickness" || col.sourceKey === "scanaxialcoverage_mm")
-        return formatNumber(raw);
-      return raw;
+      return formatBuiltinValue(col.sourceKey, row[col.sourceKey] ?? "");
     }
     const labelName = col.key.replace("label:", "");
     return (
@@ -546,16 +541,15 @@ function DataTableInner({
                     >
                       {config.expandable && (
                         <td className={`dt__expand-cell${frozenFirstCol ? " dt__expand-cell--frozen" : ""}`}>
-                          <span className={`dt__expand-arrow ${isExpanded ? "rotate-90" : ""}`}>{"\u25B6"}</span>
+                          <span className={`dt__expand-arrow${isExpanded ? " dt__expand-arrow--open" : ""}`}>{"\u25B6"}</span>
                         </td>
                       )}
                       {mainTableCols.map((c, idx) => {
-                        const isNarrow = c.builtin && (c.sourceKey === "patient_id" || c.sourceKey === "stroke_date");
                         return (
                           <td key={c.key}
                             className={`dt__td${frozenFirstCol && idx === 0
                               ? config.expandable ? " dt__td--frozen-first-offset" : " dt__td--frozen-first" : ""}${
-                              isNarrow ? " dt__td--narrow" : ""}${!c.builtin ? " dt__td--label" : ""}`}
+                              isNarrowCol(c) ? " dt__td--narrow" : ""}${!c.builtin ? " dt__td--label" : ""}`}
                             onClick={!c.builtin && (config.expandable || level === "series") ? (e) => e.stopPropagation() : undefined}
                           >
                             {renderCellValue(row, c)}

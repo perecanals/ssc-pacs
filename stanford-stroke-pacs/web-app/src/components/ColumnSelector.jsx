@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import PropTypes from "prop-types";
 import {
   compareLabelDefsDefault,
+  groupByInstrument,
   DEFAULT_VISIBLE_LABEL_NAMES,
   LEVEL_LABELS,
   LEVEL_ORDER,
@@ -12,8 +13,6 @@ import "./ColumnSelector.css";
 const COLUMN_KEY_MIGRATIONS = {
   integration_id: "import_id",
 };
-
-const UNASSIGNED = "__unassigned__";
 
 export function useColumnPrefs(labelDefs, builtinCols, level, initialPrefs = {}) {
   const builtinKeyAliases = useMemo(() => {
@@ -43,6 +42,7 @@ export function useColumnPrefs(labelDefs, builtinCols, level, initialPrefs = {})
       description: d.description,
       options: d.options || [],
       instrument: d.instrument || null,
+      created_at: d.created_at,
       labelDef: d,
     })),
     [labelDefs],
@@ -154,27 +154,6 @@ export function useColumnPrefs(labelDefs, builtinCols, level, initialPrefs = {})
   };
 }
 
-function groupLabelsByInstrument(labels) {
-  const groups = new Map();
-  for (const c of labels) {
-    const key = c.instrument || UNASSIGNED;
-    if (!groups.has(key)) groups.set(key, []);
-    groups.get(key).push(c);
-  }
-  return Array.from(groups.entries())
-    .map(([key, cols]) => ({
-      key,
-      name: key === UNASSIGNED ? "Unassigned" : key,
-      cols,
-    }))
-    .sort((a, b) => {
-      if (a.key === UNASSIGNED) return 1;
-      if (b.key === UNASSIGNED) return -1;
-      if (b.cols.length !== a.cols.length) return b.cols.length - a.cols.length;
-      return a.name.localeCompare(b.name);
-    });
-}
-
 export default function ColumnSelector({
   allCols,
   visibleKeys,
@@ -207,7 +186,7 @@ export default function ColumnSelector({
       .filter(({ cols }) => cols.length > 0);
 
   const builtinGroups = groupByLevel(builtins);
-  const instrumentGroups = useMemo(() => groupLabelsByInstrument(labels), [labels]);
+  const instrumentGroups = useMemo(() => groupByInstrument(labels), [labels]);
 
   const visibleSet = useMemo(() => new Set(visibleKeys), [visibleKeys]);
 
@@ -259,7 +238,7 @@ export default function ColumnSelector({
           {instrumentGroups.length === 0 && (
             <div className="col-selector__empty">No labels defined yet.</div>
           )}
-          {instrumentGroups.map(({ key, name, cols }) => {
+          {instrumentGroups.map(({ key, name, items: cols }) => {
             const keys = cols.map((c) => c.key);
             const visibleCount = keys.filter((k) => visibleSet.has(k)).length;
             const allVisible = visibleCount === keys.length;

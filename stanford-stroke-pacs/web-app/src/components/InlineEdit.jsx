@@ -318,7 +318,7 @@ function SelectEdit({ level, entity, labelName, defOptions = [], ann, onMutated 
                 disabled={saving}
                 className="select-edit__create-btn"
               >
-                Create &ldquo;<span className="font-semibold">{trimmed}</span>&rdquo;
+                Create &ldquo;<span className="select-edit__create-name">{trimmed}</span>&rdquo;
               </button>
             )}
             {filtered.length === 0 && !showCreate && (

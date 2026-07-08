@@ -3,15 +3,7 @@ import PropTypes from "prop-types";
 import InlineEdit from "../InlineEdit";
 import WarmButton from "./WarmButton";
 import CopyPathButtons from "./CopyPathButtons";
-import { formatDatetime, formatNumber } from "../../utils/table";
-
-// Display formatting for built-in columns, shared with index.jsx's
-// renderCellValue: dates humanized, numeric series columns rounded to 2dp.
-const formatBuiltinValue = (sourceKey, raw) => {
-  if (sourceKey === "acquisitiondatetime") return formatDatetime(raw);
-  if (sourceKey === "slicethickness" || sourceKey === "scanaxialcoverage_mm") return formatNumber(raw);
-  return raw;
-};
+import { formatBuiltinValue, isNarrowCol } from "../../utils/table";
 
 const DownloadIcon = () => (
   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
@@ -54,12 +46,9 @@ function GrandChildTable({
           <table className="dt__gc-table">
             <thead className="dt__gc-thead">
               <tr className="dt__gc-head-row">
-                {grandChildCols.map((c) => {
-                  const isNarrow = c.builtin && (c.sourceKey === "patient_id" || c.sourceKey === "stroke_date");
-                  return (
-                    <th key={c.key} className={`dt__gc-th${isNarrow ? " dt__gc-th--narrow" : ""}`}>{c.label}</th>
-                  );
-                })}
+                {grandChildCols.map((c) => (
+                  <th key={c.key} className={`dt__gc-th${isNarrowCol(c) ? " dt__gc-th--narrow" : ""}`}>{c.label}</th>
+                ))}
                 <th className="dt__gc-th">Actions</th>
                 <th className="dt__gc-th dt__gc-th--spacer" aria-hidden="true" />
               </tr>
@@ -79,10 +68,8 @@ function GrandChildTable({
                   >
                     {grandChildCols.map((c) => {
                       if (c.builtin) {
-                        const raw = gc[c.sourceKey] ?? "";
-                        const display = formatBuiltinValue(c.sourceKey, raw);
-                        const isNarrow = c.sourceKey === "patient_id" || c.sourceKey === "stroke_date";
-                        return <td key={c.key} className={`dt__gc-td${isNarrow ? " dt__gc-td--narrow" : ""}`}>{display}</td>;
+                        const display = formatBuiltinValue(c.sourceKey, gc[c.sourceKey] ?? "");
+                        return <td key={c.key} className={`dt__gc-td${isNarrowCol(c) ? " dt__gc-td--narrow" : ""}`}>{display}</td>;
                       }
                       const labelName = c.key.replace("label:", "");
                       return (
@@ -183,14 +170,11 @@ export default function ChildRows({
       <thead className="dt__child-thead">
         <tr className="dt__child-head-row">
           {childIsExpandable && <th className="dt__child-th--expand" />}
-          {childCols.map((c) => {
-            const isNarrow = c.builtin && (c.sourceKey === "patient_id" || c.sourceKey === "stroke_date");
-            return (
-              <th key={c.key} className={`dt__child-th${isNarrow ? " dt__child-th--narrow" : ""}`}>
-                {c.label}
-              </th>
-            );
-          })}
+          {childCols.map((c) => (
+            <th key={c.key} className={`dt__child-th${isNarrowCol(c) ? " dt__child-th--narrow" : ""}`}>
+              {c.label}
+            </th>
+          ))}
           <th className="dt__child-th">Actions</th>
           <th className="dt__child-th dt__child-th--spacer" aria-hidden="true" />
         </tr>
@@ -217,17 +201,15 @@ export default function ChildRows({
               >
                 {childIsExpandable && (
                   <td className="dt__child-expand-cell">
-                    <span className={`dt__child-expand-arrow ${isGrandExpanded ? "rotate-90" : ""}`}>
+                    <span className={`dt__child-expand-arrow${isGrandExpanded ? " dt__child-expand-arrow--open" : ""}`}>
                       {"\u25B6"}
                     </span>
                   </td>
                 )}
                 {childCols.map((c) => {
                   if (c.builtin) {
-                    const raw = child[c.sourceKey] ?? "";
-                    const display = formatBuiltinValue(c.sourceKey, raw);
-                    const isNarrow = c.sourceKey === "patient_id" || c.sourceKey === "stroke_date";
-                    return <td key={c.key} className={`dt__child-td${isNarrow ? " dt__child-td--narrow" : ""}`}>{display}</td>;
+                    const display = formatBuiltinValue(c.sourceKey, child[c.sourceKey] ?? "");
+                    return <td key={c.key} className={`dt__child-td${isNarrowCol(c) ? " dt__child-td--narrow" : ""}`}>{display}</td>;
                   }
                   const labelName = c.key.replace("label:", "");
                   return (
