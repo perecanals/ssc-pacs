@@ -7,7 +7,9 @@ if [[ "$(id -u)" -ne 0 ]]; then
 fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ENV_FILE="$SCRIPT_DIR/../.env"
+# stanford-stroke-pacs/ — two levels up from scripts/admin/
+STACK_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
+ENV_FILE="$STACK_DIR/.env"
 
 source "$ENV_FILE"
 
@@ -34,7 +36,7 @@ done
 
 echo ""
 echo "Stopping and removing Orthanc container and volume..."
-cd "$SCRIPT_DIR"
+cd "$STACK_DIR"
 docker compose down -v
 
 echo "Dropping Orthanc database and role from PostgreSQL..."
