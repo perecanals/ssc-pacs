@@ -12,10 +12,9 @@ Two verified bugs (audit stage 00, item B8):
 
 These exercise the guards without a database.
 
-Run with: pytest image_ingestion_protocols/test_path_safety.py
+Run with: pytest tests/test_path_safety.py
 """
 
-import os
 from types import SimpleNamespace
 
 import pandas as pd

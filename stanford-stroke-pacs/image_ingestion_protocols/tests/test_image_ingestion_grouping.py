@@ -6,7 +6,7 @@ series scattered across folders is merged into one row. These tests build tiny
 synthetic DICOM trees and exercise create_series_table /
 add_paths_and_copy_dicom_files without a database.
 
-Run with: pytest image_ingestion_protocols/test_image_ingestion_grouping.py
+Run with: pytest tests/test_image_ingestion_grouping.py
 """
 
 import os
