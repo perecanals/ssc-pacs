@@ -32,6 +32,7 @@ function restore(session) {
         level: "patient",
         filters: DEFAULT_FILTERS,
         previewHeight: null,
+        sidebarOpen: true,
         defaultFilters: DEFAULT_FILTERS,
         ...props,
       }),
@@ -97,6 +98,47 @@ describe("useSessionStatePersistence — dataset/import-label restore", () => {
     const result = restore({ level: "patient", filters: { modality: "CT" } });
     await waitFor(() => expect(result.current.loaded).toBe(true));
     expect(result.current.restoredFilters.modality).toBeNull();
+  });
+});
+
+describe("useSessionStatePersistence — sidebarOpen", () => {
+  beforeEach(() => {
+    apiGet.mockReset();
+    apiFetch.mockClear();
+  });
+
+  it("restores a stored closed sidebar; defaults to open when absent", async () => {
+    const closed = restore({ level: "patient", sidebarOpen: false });
+    await waitFor(() => expect(closed.current.loaded).toBe(true));
+    expect(closed.current.restoredSidebarOpen).toBe(false);
+
+    const absent = restore({ level: "patient" });
+    await waitFor(() => expect(absent.current.loaded).toBe(true));
+    expect(absent.current.restoredSidebarOpen).toBe(true);
+  });
+
+  it("includes sidebarOpen in the debounced save", async () => {
+    apiGet.mockReset();
+    apiGet.mockResolvedValue({ prefs: { session: null } });
+    const { result, rerender } = renderHook(
+      ({ sidebarOpen }) =>
+        useSessionStatePersistence({
+          ready: true,
+          currentUser: "tester",
+          level: "patient",
+          filters: DEFAULT_FILTERS,
+          previewHeight: null,
+          sidebarOpen,
+          defaultFilters: DEFAULT_FILTERS,
+        }),
+      { initialProps: { sidebarOpen: true } },
+    );
+    await waitFor(() => expect(result.current.loaded).toBe(true));
+
+    rerender({ sidebarOpen: false });
+    await waitFor(() => expect(apiFetch).toHaveBeenCalled(), { timeout: 3000 });
+    const body = JSON.parse(apiFetch.mock.calls.at(-1)[1].body);
+    expect(body.prefs.session.sidebarOpen).toBe(false);
   });
 });
 

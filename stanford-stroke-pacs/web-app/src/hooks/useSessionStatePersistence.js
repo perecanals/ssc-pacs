@@ -48,20 +48,25 @@ function sanitizeSession(session, defaultFilters) {
   const previewHeight = Number.isFinite(rawHeight)
     ? Math.min(4000, Math.max(320, Math.round(rawHeight)))
     : null;
-  return { level, filters, previewHeight };
+  // Sidebar visibility; anything but an explicit false means open.
+  const sidebarOpen = session?.sidebarOpen !== false;
+  // Key order must match latestSession.current — the restored-echo check
+  // compares JSON strings.
+  return { level, filters, previewHeight, sidebarOpen };
 }
 
 // Persists the Navigator's session state (current hierarchy level + sidebar
-// quick filters + preview-pane height) under the `_global` preferences level,
-// and restores it on mount. The PUT owns the entire `_global` prefs row — if
-// another consumer ever stores state there, this must merge, not replace.
-export default function useSessionStatePersistence({ ready, currentUser, level, filters, previewHeight, defaultFilters }) {
+// quick filters + sidebar visibility + preview-pane height) under the
+// `_global` preferences level, and restores it on mount. The PUT owns the
+// entire `_global` prefs row — if another consumer ever stores state there,
+// this must merge, not replace.
+export default function useSessionStatePersistence({ ready, currentUser, level, filters, previewHeight, sidebarOpen, defaultFilters }) {
   const [restored, setRestored] = useState(null);
   const latestSession = useRef(null);
   const hydrated = useRef(false);
   const restoredJson = useRef(null);
 
-  latestSession.current = { level, filters, previewHeight };
+  latestSession.current = { level, filters, previewHeight, sidebarOpen };
 
   useEffect(() => {
     // Wait for the auth probe to settle so the GET fires once, as the
@@ -103,12 +108,13 @@ export default function useSessionStatePersistence({ ready, currentUser, level, 
     }
     restoredJson.current = null;
     scheduleSave();
-  }, [scheduleSave, currentUser, level, filters, previewHeight]);
+  }, [scheduleSave, currentUser, level, filters, previewHeight, sidebarOpen]);
 
   return {
     loaded: restored !== null,
     restoredLevel: restored?.level,
     restoredFilters: restored?.filters,
     restoredPreviewHeight: restored?.previewHeight ?? null,
+    restoredSidebarOpen: restored?.sidebarOpen ?? true,
   };
 }

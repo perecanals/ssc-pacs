@@ -30,22 +30,14 @@ export const DEFAULT_FILTERS = {
 export default function Navigator() {
   const { loading: authLoading, currentUser } = useAuth();
   const [level, setLevel] = useState("patient");
-  const [sidebarOpen, setSidebarOpen] = useState(
-    () => window.localStorage.getItem("sidebar:open") !== "false",
-  );
-  const toggleSidebar = useCallback(() => {
-    setSidebarOpen((prev) => {
-      const next = !prev;
-      window.localStorage.setItem("sidebar:open", String(next));
-      return next;
-    });
-  }, []);
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const toggleSidebar = useCallback(() => setSidebarOpen((prev) => !prev), []);
   const [filters, setFilters] = useState(DEFAULT_FILTERS);
   // null = the CSS default height; a number once the user drag-resizes.
   const [previewHeight, setPreviewHeight] = useState(null);
 
-  // Restore last session's level + sidebar filters + preview-pane height
-  // from the `_global` preferences bucket; saves them back (debounced)
+  // Restore last session's level + sidebar filters/visibility + preview-pane
+  // height from the `_global` preferences bucket; saves them back (debounced)
   // whenever they change.
   const [sessionLoaded, setSessionLoaded] = useState(false);
   const {
@@ -53,12 +45,14 @@ export default function Navigator() {
     restoredLevel,
     restoredFilters,
     restoredPreviewHeight,
+    restoredSidebarOpen,
   } = useSessionStatePersistence({
     ready: !authLoading,
     currentUser,
     level,
     filters,
     previewHeight,
+    sidebarOpen,
     defaultFilters: DEFAULT_FILTERS,
   });
   useEffect(() => {
@@ -66,8 +60,9 @@ export default function Navigator() {
     setLevel(restoredLevel);
     setFilters(restoredFilters);
     setPreviewHeight(restoredPreviewHeight);
+    setSidebarOpen(restoredSidebarOpen);
     setSessionLoaded(true);
-  }, [restoreLoaded, restoredLevel, restoredFilters, restoredPreviewHeight]);
+  }, [restoreLoaded, restoredLevel, restoredFilters, restoredPreviewHeight, restoredSidebarOpen]);
 
   // Bumped when the DataTable mutates annotations so the Sidebar refetches
   // its label summary/definitions (counts + new select values).
