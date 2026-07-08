@@ -34,7 +34,7 @@ required** — `web-app/config.py` fails fast if it is missing.
 | `.env` | DB + Orthanc-service-account creds, `JWT_SECRET`, `ORTHANC_URL`, optional `ORTHANC_HTTP_PORT`/`ORTHANC_DICOM_PORT` | **Yes** | No (`.env.example` is) | **Authoritative** for all secrets | **Yes** — copy from `.env.example`, fill in |
 | `config.toml` | `[storage]` mode + paths + cold-cache tuning, `[backup]`, `[web-app]` session/auth | No | Yes (required) | **Authoritative** for non-secret ops | **Yes** — set mode + paths for this host |
 | `deploy.env` | per-host service-unit identity (user, paths, conda) | No | No (`deploy.env.example` is) | **Authoritative** override; else auto-derived | Only if auto-derivation is wrong |
-| `orthanc.json` | Orthanc structural config: ports (in-image default), Folder Indexer (`/dicom-data`, `RemoveMissingFiles:false`), plugins | No | Yes | **Authoritative** for Orthanc structure; ports are overridable from `.env` | No |
+| `orthanc.json` | Orthanc structural config: ports (in-image default), Folder Indexer (`ScanRoots: ["/dicom-data"]`, `Folders: []`, `RemoveMissingFiles:false`), plugins | No | Yes | **Authoritative** for Orthanc structure; ports are overridable from `.env` | No |
 | `orthanc_users.json` | Orthanc service-account + admin plaintext creds | **Yes** | No | **Derived** from `.env` + DB via `manage_users.py` | No — never hand-edit |
 | `docker-compose.yml` | Orthanc service (Linux base, host networking); DB env from `.env`; DICOM mount from `${DICOM_MOUNT_SOURCE}` | No | Yes | **Derived** — interpolates `.env` + `dc.sh` | No |
 | `docker-compose.override.macos.yml` | macOS deltas (ports, `host.docker.internal`, drop host net) | No | Yes | Static (platform delta) | No |

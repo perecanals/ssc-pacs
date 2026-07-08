@@ -29,59 +29,23 @@ In short:
 
 ## 2. Construction Rationale
 
-### 2.1 Why the web app exists
+Orthanc Explorer 2 handles PACS operations and study-level review but not the
+richer SSC annotation workflow, so the Web App adds multi-level annotations
+(vs study-only labeling), research-oriented cross-level filtering, inherited
+annotation visibility, and a table-centric surface where review and annotation
+happen together.
 
-Orthanc Explorer 2 is useful for PACS operations and study-level review, but it
-does not provide the richer workflow needed for the SSC annotation use case.
+Key design choices:
 
-The Web App was built to support:
-
-- multi-level annotations instead of study-only labeling
-- research-oriented filtering across patients, studies, and series
-- inherited annotation visibility from parent rows
-- a table-centric workflow where image review and annotation happen together
-
-### 2.2 Why React + FastAPI
-
-The app uses:
-
-- **FastAPI** for the REST API, auth, and static-file serving
-- **React** for the interactive browser UI
-- **Vite** for frontend development and production builds
-
-This split was chosen because:
-
-- the backend needs straightforward database and auth logic
-- the frontend needs dynamic table state, nesting, filtering, and inline editing
-- the production deployment should stay simple: one native service on port
-  `8043`, no frontend Node process
-
-### 2.3 Why a generic hierarchical table
-
-Instead of separate screens or separate table implementations, the web app
-uses one configurable `DataTable` component for patients, studies, and series.
-
-This keeps behavior consistent across levels:
-
-- sorting
-- filtering
-- column visibility
-- annotation rendering
-- expansion into child rows
-
-It also reduces duplication for future feature work.
-
-### 2.4 Why embed OHIF
-
-Originally, OHIF integration was mainly "open in new tab."
-
-The embedded preview pane was added so users can:
-
-- click a study or series row
-- review images without leaving the web app
-- continue annotating with the relevant row context still visible
-
-This improves the workflow significantly for rapid review and labeling.
+- **React + FastAPI + Vite** — FastAPI serves the REST API, auth, and the
+  pre-built frontend as static files; React drives the dynamic table state,
+  nesting, filtering, and inline editing. Production stays one native service on
+  `:8043` with no Node process.
+- **One generic `DataTable`** for patients, studies, and series — keeps sorting,
+  filtering, column visibility, annotation rendering, and row expansion
+  consistent across levels and avoids duplicate table implementations.
+- **Embedded OHIF preview pane** (vs open-in-new-tab only) — lets users review
+  a study/series row's images without leaving the annotation workflow.
 
 ---
 
@@ -267,43 +231,23 @@ visible in the active table display for as long as the filter is active. If the
 column was not already part of the user's saved column selection, it hides again
 when the sidebar label is cleared.
 
-### 5.6 Snapshot refresh
-
-Authenticated users can rebuild the snapshot tables used for export/reporting.
-
-This gives the app an explicit "refresh derived reporting state" action without
-mixing that logic into routine browsing.
-
-### 5.7 Per-user dataset access
+### 5.6 Per-user dataset access
 
 Every non-admin user has a dataset scope (`users.allowed_datasets`, a subset
-of the `patient.dataset` cohort tags such as `PRECISE` / `CRISP2/LVO`). The backend
-enforces it on every patient-data endpoint:
+of the `patient.dataset` cohort tags such as `PRECISE` / `CRISP2/LVO`) that
+gates what they see:
 
-- list endpoints return only patients (and their studies/series) whose
-  `dataset` overlaps the scope; `/api/datasets` and
-  `/api/study-import-labels` narrow their option lists the same way
-- detail endpoints keyed by an entity id return **404** for out-of-scope ids
-  (indistinguishable from nonexistent), including OHIF link resolution,
-  warm/evict/cache-status, and annotation reads/writes
-- the DICOMweb proxy rejects out-of-scope StudyInstanceUIDs with 403 (cached
-  per study, so image streaming performance is unaffected)
-- deny-by-default: a user with no grants sees an empty table; admins bypass
+- list endpoints return only in-scope patients (and their studies/series);
+  the sidebar's Dataset and Import-label option lists narrow the same way
+- detail endpoints keyed by an entity id return **404** for out-of-scope ids;
+  the DICOMweb proxy 403s out-of-scope studies; deny-by-default (no grants =
+  empty table), and admins bypass
+- admins manage grants in the **`/admin` page** (users × datasets checkbox grid)
+  or via `scripts/admin/manage_users.py set-datasets`; `/api/me` exposes
+  `allowed_datasets` to the SPA
 
-Admins manage grants in the **`/admin` page** (a users × datasets checkbox
-grid, linked from an admin-only Landing card) backed by
-`GET /api/admin/users` and `PUT /api/admin/users/{username}/datasets`
-(validates tags against `patient.dataset`, 422 on unknown), or via
-`scripts/admin/manage_users.py set-datasets` (which additionally allows
-granting tags that don't exist yet). `/api/me` exposes `allowed_datasets`
-to the SPA.
-
-Known limitation: `/api/labels` and `/api/labels/summary` return label names
-and aggregate counts computed across **all** data (no identifiers or values
-leak; per-scope counts were judged not worth the query complexity).
-`/api/labels/{name}/values` returns a select label's controlled vocabulary
-from `label_value_options` — a **global** value set (not scoped per dataset);
-only the value strings are shared, never patient data.
+The exact enforcement points, TTL caches, and the `/api/labels*` known
+limitation are canonical in [`architecture.md`](architecture.md) §5.4.
 
 ---
 
@@ -347,34 +291,15 @@ Its responsibility is workflow, annotation, and review support.
 
 ## 8. Relevant Files
 
-The most important Web App files are:
+To avoid a second drifting copy, the module inventory lives in one place each:
 
-- `web-app/app.py` - FastAPI entry point (lifespan, middleware, router registration)
-- `web-app/routes/` - API route modules (auth, studies, annotations, labels, cold_storage, admin, preferences, static)
-- `web-app/db.py` - DB connection pool and `DB_CONFIG` (single source of truth)
-- `web-app/auth.py` - JWT utilities and auth dependencies (incl. `get_dataset_scope`)
-- `web-app/dataset_access.py` - per-user dataset scopes + TTL caches (proxy guard)
-- `web-app/common.py` - shared label-filter SQL builders, dataset-scope SQL helpers, annotation helpers
-- `web-app/orthanc_client.py` - Orthanc REST API wrappers
-- `web-app/cache_manager.py` - cold-storage warm/evict logic
-- `web-app/src/pages/Navigator.jsx` - page-level layout and preview state
-- `web-app/src/components/DataTable/` - hierarchical table (split into focused modules):
-  - `index.jsx` - orchestrator, main body rendering
-  - `ChildRows.jsx` - child + grandchild expandable row rendering
-  - `TableHeader.jsx` - column headers, sort carets, filter inputs
-  - `SelectFilterControl.jsx` - dropdown filter for select-type columns
-  - `useTableData.js` - data fetch hook
-  - `usePreferencePersistence.js` - debounced server-side pref save
-  - `useDragColumns.js` - column drag-and-drop reorder
-  - `actions.js` - DICOM download, OHIF link, refresh actions
-- `web-app/src/utils/colors.js` - shared color palette (NOTION_COLORS, hashStr, valueColor)
-- `web-app/src/utils/table.js` - table constants (LEVEL_CONFIG), formatters, filter helpers
-- `web-app/src/components/PreviewPane.jsx` - embedded OHIF pane
-- `web-app/src/components/TopBar.jsx` - top navigation and controls host
-- `web-app/src/components/Sidebar.jsx` - global filters and labels
-- `web-app/src/components/InlineEdit.jsx` - in-table annotation editing
-- `web-app/src/components/ColumnSelector.jsx` - column visibility and order control
-- `web-app/src/components/LabelDefModal.jsx` - label-definition creation UI
+- **Backend module responsibilities** (`app.py`, `routes/`, `db.py`, `auth.py`,
+  `dataset_access.py`, `common.py`, `orthanc_client.py`, `cache_manager.py`,
+  `reconciliation.py`, `rate_limit.py`, `labelled_table_sync.py`): see the
+  Architecture section of the repo `CLAUDE.md` (one line per module) and
+  [`architecture.md`](architecture.md).
+- **Frontend routes, components, and `DataTable` internals**: see
+  [`web_app_frontend.md`](web_app_frontend.md).
 
 ---
 

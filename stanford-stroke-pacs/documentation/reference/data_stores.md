@@ -1,6 +1,6 @@
 # Data stores (PostgreSQL)
 
-**Purpose:** Authoritative reference for logical databases, source tables, web-app-owned tables, and optional cold-storage schema. For query/join behavior at a glance, see also [How the web app queries the DB](#how-the-web app-queries-the-db). Stack context: [`architecture.md`](architecture.md).
+**Purpose:** Authoritative reference for logical databases, source tables, web-app-owned tables, and optional cold-storage schema. For query/join behavior at a glance, see also [How the web app queries the DB](#how-the-web-app-queries-the-db). For the dual-DB rationale see [`architecture.md`](architecture.md) §3.
 
 This PACS stack uses **one PostgreSQL server** but **two logical databases** with separate responsibilities:
 
@@ -46,10 +46,13 @@ These tables drive browsing in the Navigator UI:
   - key fields: `study_id` (the patient id; joined as `c.study_id = patient.patient_id`), `stroke_date` (TEXT)
 - **`image_study`** (study-level imaging metadata)
   - typical fields: `patient_id`, `studyinstanceuid`, `studydescription`, `study_type`, `study_path`, `acquisitiondatetime`, `import_id`, `import_label`
+  - storage-size rollups (Alembic `0012`, `double precision`, decimal MB): `compressed_size_mb`, `decompressed_size_mb` — stay NULL until every child series has that size
 - **`image_series`** (series-level imaging metadata)
   - typical fields: `patient_id`, `studyinstanceuid`, `seriesinstanceuid`, `seriesdescription`, `modality`, `acquisitiondatetime`
   - file pointers: `dicom_dir_path`, `nifti_path`
   - optional cold storage: **`dicom_archive_path`** — path to per-series `*.tar.zst` when using `cold_path_cache` mode
+  - storage sizes (Alembic `0012`, `double precision`, decimal MB): `compressed_size_mb`, `decompressed_size_mb`
+  - classification: **`series_type`** — geometry-first CTP/PWI/DWI/NULL tag (see [`image_ingestion_protocol.md`](image_ingestion_protocol.md) §How `series_type` is detected)
   - ingestion bookkeeping: `import_id`, `import_label`
   - geometry-derived: `imageshape`, **`number_of_slices`**, `slicethickness`, `scanaxialcoverage_mm`
 
@@ -66,11 +69,11 @@ startup. See [`../operations/schema_migrations.md`](../operations/schema_migrati
 for the workflow when adding a new revision.
 
 - **`users`**: the single source of truth for end-user authentication (bcrypt password hashes). The `is_admin` column gates `/api/admin/*` endpoints and the "Orthanc Explorer" Landing card; admins are also mirrored into `orthanc_users.json` by `scripts/admin/manage_users.py` so they can reach `:8042` directly.
-- **`annotations`**: multi-level (patient / study / series) annotations.
+- **`annotations`**: multi-level (patient / study / series) annotations. Rows whose entity id no longer exists in the source tables surface as the `orphaned_annotations` category in [`../operations/reconciliation.md`](../operations/reconciliation.md).
 - **`label_definitions`**: label registry (level-aware; supports bool/int/text/select).
 - **`label_value_options`**: known values (controlled vocabulary) per select-type label. Indexed `(label, value)` lookup kept in sync on annotation writes and label-definition creation; the live source feeding the inline-edit dropdown and the column filter (replaces a `SELECT DISTINCT` scan of `annotations`). Global (not dataset-scoped); values persist once created.
 - **`user_preferences`**: per-user persisted table layout/state and Navigator session state (JSONB).
-- **`snapshot_patients` / `snapshot_studys` / `snapshot_seriess`**: refreshable export-oriented snapshot tables.
+- **`patient_labelled` / `image_study_labelled` / `image_series_labelled`**: per-level mirror tables that join each source table with its level's annotations pivoted into label columns. Maintained (eventually consistent) by `web-app/labelled_table_sync.py` — refreshed in the background after each annotation write and once per batch at the end of an ingestion run. Used for labelled-pivot / export views; the live table read path never depends on them. (These replaced the former `snapshot_*` tables, dropped by Alembic `0013_drop_snapshot_tables`.)
 
 Audit:
 
@@ -107,7 +110,7 @@ table.
 
 ## Web App table DDL (logical reference)
 
-Migrations in `web-app/app.py` are authoritative; this section mirrors the intended shape for documentation readers.
+The Alembic revisions under `web-app/alembic/versions/` are authoritative (app startup only runs `alembic upgrade head`); this section mirrors the intended shape for documentation readers.
 
 ### `annotations`
 
@@ -142,11 +145,13 @@ level       TEXT NOT NULL DEFAULT 'series'
 datatype    TEXT NOT NULL DEFAULT 'bool'
             CHECK (datatype IN ('bool', 'int', 'text', 'select'))
 options     TEXT
+instrument  TEXT                       -- free-text grouping (NULL = "Unassigned"); Alembic 0004
 created_by  TEXT NOT NULL
 created_at  TIMESTAMPTZ DEFAULT now()
 ```
 
-`options` holds the **curated** select values as a JSON array (set at creation;
+`instrument` groups labels in the sidebar and default column order (instruments
+alphabetical, unassigned last). `options` holds the **curated** select values as a JSON array (set at creation;
 not editable afterward). For select labels the *effective* option list returned
 by `GET /api/label-definitions` is `options` ∪ the live values in
 `label_value_options` — so values created inline while annotating appear in both
@@ -218,7 +223,7 @@ level and sidebar quick filters, restored on the user's next visit.
 history_id       BIGSERIAL PRIMARY KEY
 operation        CHAR(1) NOT NULL           -- I | U | D
 operation_at     TIMESTAMPTZ DEFAULT now()
-operation_by     TEXT DEFAULT 'system'
+operation_by     TEXT NOT NULL DEFAULT 'system'
 annotation_id    INTEGER NOT NULL
 level            TEXT NOT NULL
 entity_id        TEXT NOT NULL

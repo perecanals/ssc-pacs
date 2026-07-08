@@ -32,9 +32,10 @@ tunnel.
 
 ```
             ┌─────────────────────────────────────────────────────────────────┐
-            │                         Host: stroke                            │
+            │                          Single host                            │
+            │        (macOS launchd in production; Linux systemd too)         │
             │                                                                 │
- Browser ───┼──► :8043  ssc-web-app.service  (FastAPI + React, systemd)     │
+ Browser ───┼──► :8043  web app  (FastAPI + React, native service)          │
  (via SSH   │         │                                                       │
   tunnel)   │         │  ┌──────────── service-to-service ─────────────┐      │
             │         ▼  ▼                                              │     │
@@ -52,8 +53,9 @@ tunnel.
             │              └──► /dicom-data :ro  (bind mount)                 │
             │                     │                                           │
             │                     ▼                                           │
-            │  /DATA2/pacs_imaging_data/     ← loose DICOMs (hot)             │
-            │  /DATA2/pacs_imaging_data_compressed/  ← *.tar.zst (cold)       │
+            │  [storage].dicom_data_root/    ← loose DICOMs (hot)            │
+            │  [storage].cold_archive_root/  ← *.tar.zst (cold)              │
+            │       (paths from config.toml; see runtime_and_config.md)       │
             │                                                                 │
             └─────────────────────────────────────────────────────────────────┘
 ```
@@ -79,9 +81,11 @@ Orthanc Explorer 2 web apps.
 
 - Runs as a Docker container in host-network mode.
 - Uses a **custom image** `ssc-orthanc:patched-indexer` built locally from
-  [`/home/perecanals/ssc-pacs/orthanc-indexer-patched/`](../../../orthanc-indexer-patched/README.md).
-- Image = `orthancteam/orthanc:latest` + a patched Folder Indexer `.so`
-  that honours `RemoveMissingFiles: false` (required by `cold_path_cache`).
+  [`orthanc-indexer-patched/`](../../../orthanc-indexer-patched/README.md).
+- Image = a digest-pinned base (see
+  [`orthanc-indexer-patched/Dockerfile`](../../../orthanc-indexer-patched/README.md))
+  + a patched Folder Indexer `.so` that honours `RemoveMissingFiles: false`
+  (required by `cold_path_cache`).
 - Storage backend is the Folder Indexer plugin itself
   (`ORTHANC__POSTGRESQL__ENABLE_STORAGE=false`). DICOM instances are never
   copied into Orthanc's own storage — they're referenced by filesystem path
@@ -96,39 +100,45 @@ does not embed its own OHIF build — it builds a URL to Orthanc's OHIF
 (`/ohif/viewer?StudyInstanceUIDs=...&SeriesInstanceUIDs=...`) and loads
 it in an iframe inside the Navigator's preview pane.
 
-### 3.3 Web App (`ssc-web-app.service`)
+### 3.3 Web App
 
 Role: research-oriented browsing + annotation UI that Orthanc Explorer 2
 doesn't cover.
 
 - FastAPI app (`web-app/app.py`) served by uvicorn on `:8043`.
 - Serves the pre-built React frontend (`web-app/dist/`) as static files.
-- systemd unit `ssc-web-app.service`, runs in the `pacs` conda env.
-- Reads `web-app/config.py` → repo-root `config.toml` for non-secrets
+- Runs as a native service — launchd (`com.ssc.webapp`) in production on macOS,
+  or the `ssc-web-app.service` systemd unit on Linux — in the `ssc-pacs` conda env.
+- Reads `web-app/config.py` → stack-root `config.toml` for non-secrets
   (storage mode, paths, session length).
-- Reads secrets from repo-root `.env`.
+- Reads secrets from stack-root `.env`.
 - Talks to both `stanford-stroke` (research data + own tables) and Orthanc
   (service-to-service REST for OHIF link resolution and the occasional
   lookup).
 
 ### 3.4 Custom Folder Indexer plugin
 
-Lives at `/home/perecanals/ssc-pacs/orthanc-indexer-patched/`. Upstream is the
+Source at [`orthanc-indexer-patched/`](../../../orthanc-indexer-patched/README.md).
+Upstream is the
 [Orthanc Folder Indexer plugin](https://orthanc.uclouvain.be/book/plugins/indexer.html);
-the fork adds one config flag:
+the fork adds the `RemoveMissingFiles` config flag. The deployed
+`orthanc.json` runs with no continuous scan:
 
 ```json
 "Indexer": {
   "Enable": true,
-  "Folders": ["/dicom-data"],
+  "Folders": [],
+  "ScanRoots": ["/dicom-data"],
   "Interval": 60,
   "RemoveMissingFiles": false
 }
 ```
 
-When `RemoveMissingFiles: false`, the scan loop does **not** remove DICOM
-instances whose files have disappeared. That keeps Orthanc's index stable
-during eviction/rewarm cycles — foundational for `cold_path_cache`.
+`Folders: []` means the plugin does **not** walk the whole tree on a timer;
+new data is registered on demand per case via `POST /indexer/scan` from the
+ingestion executor (see §7). When `RemoveMissingFiles: false`, the index does
+**not** drop DICOM instances whose files have disappeared — keeping the index
+stable during eviction/rewarm cycles, foundational for `cold_path_cache`.
 
 ---
 
@@ -170,8 +180,11 @@ One PostgreSQL server hosts both. Connection params and credentials are in
 │  ├── user_preferences   (JSONB, per-level)       │
 │  ├── annotations        (level='patient'|        │
 │  │                       'study'|'series')       │
+│  ├── annotations_history (audit trail)           │
 │  ├── label_definitions  (level-aware)            │
-│  └── snapshot_patients / _studies / _seriess     │
+│  ├── label_value_options (select vocabulary)     │
+│  └── {patient,image_study,image_series}_labelled │
+│         (per-level labelled mirror tables)       │
 │                                                  │
 │  Cold storage bookkeeping:                       │
 │  └── series_cache_state (per-series hot/cold;    │
@@ -183,27 +196,27 @@ See [`data_stores.md`](data_stores.md) for column-by-column detail.
 
 ### 4.2 Filesystem
 
+Both roots come from `config.toml` `[storage]` (see
+[`runtime_and_config.md`](runtime_and_config.md)):
+
 ```
-/DATA2/
-├── pacs_imaging_data/                (dicom_data_root — transient in
-│                                      cold_path_cache mode, permanent in
-│                                      legacy mode. Bind-mounted read-only
-│                                      into the Orthanc container as
+{dicom_data_root}/                    (transient in cold_path_cache mode,
+│                                      permanent in legacy mode. Bind-mounted
+│                                      read-only into the Orthanc container as
 │                                      /dicom-data.)
-│   └── {patient_id}/
-│       └── {studyinstanceuid}/
-│           └── {seriesdescription}/
-│               └── {seriesinstanceuid}/
-│                   ├── DICOM/               ← dicom_dir_path
-│                   └── NIFTI/image.nii.gz   ← legacy mode only
-│
-└── pacs_imaging_data_compressed/    (cold_archive_root — canonical in
-    │                                 cold_path_cache mode)
-    └── {patient_id}/
-        └── {studyinstanceuid}/
-            └── {seriesdescription}/
-                └── {seriesinstanceuid}/
-                    └── DICOM.tar.zst        ← dicom_archive_path
+└── {patient_id}/
+    └── {studyinstanceuid}/
+        └── {seriesdescription}/
+            └── {seriesinstanceuid}/
+                ├── DICOM/               ← dicom_dir_path
+                └── NIFTI/image.nii.gz   ← legacy mode only
+
+{cold_archive_root}/                  (canonical in cold_path_cache mode)
+└── {patient_id}/
+    └── {studyinstanceuid}/
+        └── {seriesdescription}/
+            └── {seriesinstanceuid}/
+                └── DICOM.tar.zst        ← dicom_archive_path
 ```
 
 The archive path deterministically mirrors the loose path — swap
@@ -346,19 +359,21 @@ batch:
   (legacy only) create NIFTI sibling
         │
         ▼
-  upsert image_study + image_series
+  upsert image_study + image_series (+ patient)
         │
         ▼
   (optional) delete source case_dir
         │
         ▼
-  Folder Indexer picks up new loose files on next scan (≤ Interval s)
-  and adds them to Orthanc's index
+  per-case Orthanc registration: the executor issues POST /indexer/scan
+  scoped to this case's study folders (no timer, no restart); an
+  end-of-run sanity pass re-verifies every series
         │
         ▼
-  (cold_path_cache only, manual step) scripts/cold_storage/cleanup_loose_dicoms.py
-  removes loose copies once Orthanc has indexed them and the archive
-  is verified intact
+  (cold_path_cache, automatic by default: cleanup_loose_after_indexing=true)
+  each case's loose DICOMs are deleted once indexed + verified; the archive
+  stays canonical. Set false to keep loose files for a manual
+  scripts/cold_storage/cleanup_loose_dicoms.py pass.
 ```
 
 Per-series compression failures are **non-fatal**: the case completes with
@@ -372,41 +387,26 @@ Details: [`image_ingestion_protocol.md`](image_ingestion_protocol.md).
 
 ## 8. Auth model
 
-End users authenticate only to Web App. The PostgreSQL `users` table is the
-single source of truth for end-user identity.
+End users authenticate only to Web App (the PostgreSQL `users` table is the
+single source of truth for end-user identity); admins and the service account
+also have `orthanc_users.json` entries for direct Orthanc access. Web App
+reverse-proxies `/ohif/*` and `/dicom-web/*` to Orthanc with the service-account
+credential, so end users never present credentials to Orthanc directly. Every
+non-admin also carries a per-user `allowed_datasets` scope.
 
-| Role | Credential store | Reaches |
-|---|---|---|
-| End user (any logged-in Web App user) | `users` table (bcrypt) + JWT cookie | Web App API, OHIF and DICOMweb via Web App's reverse proxy |
-| Admin (`users.is_admin = TRUE`) | `users` (Web App login) + entry in `orthanc_users.json` | Everything above, plus direct `:8042/ui/app/` and `:8042/ohif/` as themselves |
-| Service account (`ORTHANC_ADMIN_USER` in `.env`) | `orthanc_users.json` + `.env` | Web App's proxy attaches it on every upstream call; host-local scripts use it for direct Orthanc access |
-
-Web App proxies `/ohif/*` and `/dicom-web/*` to Orthanc using the service
-account (see `web-app/routes/proxy.py`). End users never present credentials
-to Orthanc directly.
-
-`scripts/admin/manage_users.py`:
-- `add` / `passwd` / `remove` always update the `users` table; they also update
-  `orthanc_users.json` when the affected user is an admin
-- `rotate-service-account` rewrites `ORTHANC_ADMIN_PASSWORD` in `.env` and the
-  matching `orthanc_users.json` entry atomically (does not touch the DB)
+Full auth model — end-user/admin/service-account roles, provisioning via
+`scripts/admin/manage_users.py`, and §5.4 dataset-level authorization — is
+canonical in [`architecture.md`](architecture.md) §5.
 
 ---
 
 ## 9. Portable vs site-specific
 
-| Layer | Portable | Site-specific |
-|---|---|---|
-| Orthanc + OHIF + Explorer 2 + custom indexer | ✅ | |
-| Web App app (FastAPI + React) | ✅ | |
-| `cold_path_cache` stack (archiver, cleanup, cache_manager) | ✅ | |
-| `scripts/admin/manage_users.py`, `init_orthanc_db.sh` | ✅ | |
-| `stanford-stroke` schema (expects `patient`, `image_study`, `image_series`; `lvo_clinical_data` optional clinical side-table) | schema shape portable | column conventions SSC-ish |
-| `image_ingestion_protocols/` | | ❌ assumes SSC layout + metadata rules |
-| `scripts/orthanc/enrich_orthanc.py` | | ❌ specific to an anonymised-headers deployment |
-
-For a fresh deployment with an equivalent metadata-ingest pipeline, the
-Web App + Orthanc + cold storage stack drops in cleanly.
+The Orthanc + OHIF + Explorer 2 + custom-indexer layer, the Web App, the
+`cold_path_cache` stack, and `manage_users.py` / `init_orthanc_db.sh` are
+portable; `image_ingestion_protocols/` and `scripts/orthanc/enrich_orthanc.py`
+are SSC-specific. The full portability breakdown and fresh-deployment guidance
+are canonical in [`architecture.md`](architecture.md) §7.
 
 ---
 

@@ -31,10 +31,13 @@ not stop the batch; errors are written to `logs/error_log_*.json`.
 ## Entry point
 
 ```bash
-cd /home/perecanals/ssc-pacs/stanford-stroke-pacs/image_ingestion_protocols
-conda activate pacs
+cd stanford-stroke-pacs/image_ingestion_protocols
+conda activate ssc-pacs
 python execute_image_ingestion_protocol.py [--config path/to/config.yaml]
 ```
+
+To ingest a series of batches, `run_all_batches.sh` drives the driver over the
+per-batch YAMLs under `batch_configs/` in order.
 
 By default it reads `execute_image_ingestion_protocol.yaml` next to the
 script. That file is **gitignored** (it holds site/run-specific paths) —
@@ -88,7 +91,7 @@ dataset: "crisp2"                           # optional, cohort tag recorded on t
 |---|---|
 | `env_path` | Path to `.env` for DB credentials. Defaults to `<repo>/.env`. |
 | `database` | PostgreSQL database name (usually `stanford-stroke`) |
-| `src_dir` | Directory containing per-patient subdirectories to ingest |
+| `src_dir` | **Required** — directory containing per-patient subdirectories to ingest. No default; the driver raises `ValueError` at config load if it is missing. |
 | `overwrite_if_exists` | Controls behavior when a `StudyInstanceUID` is already in `image_study`. **`false` (default — append + drift detect):** keep the existing `image_study` row untouched; for each series, append it if `SeriesInstanceUID` is new, skip it if `(SeriesUID, number_of_slices)` matches the DB, and **re-ingest** it if the SeriesUID is in DB but the on-disk slice count differs from `image_series.number_of_slices` (wiping the stale `dicom_dir_path` and `dicom_archive_path` for that series first). Series whose DB `number_of_slices` is NULL emit a warning and are skipped — set this flag to `true` to force re-ingest. **`true` (full overwrite):** for each matching StudyInstanceUID, delete the existing rows in `image_study`, `image_series`, `image_study_labelled`, `image_series_labelled`, and the on-disk DICOM tree + cold archives, then re-ingest from the new scan. Any series previously in DB but not in the new scan does NOT survive. |
 | `anonymize_files` | Strip identifying DICOM headers during copy |
 | `delete_originals_after_verification` | After verifying every file copied successfully, remove the source case directory |
@@ -108,10 +111,10 @@ the batch, so you can later find everything that came in together.
 
 Storage paths and storage mode are read from `config.toml` by both
 `ImageIngestionProtocol` and the `execute_image_ingestion_protocol.py`
-driver (via `web-app/config.py`). This eliminates the previous hardcoded
-`/DATA2/pacs_imaging_data` and the YAML's separate `cold_archive_root`. You
-no longer need to keep multiple files in sync; the only path you typically
-edit is `[storage]` in `config.toml`.
+driver (via `web-app/config.py`). This eliminates the previously hardcoded
+storage path and the YAML's separate `cold_archive_root`. You no longer need
+to keep multiple files in sync; the only path you typically edit is
+`[storage]` in `config.toml`.
 
 The driver validates the resolved configuration at startup:
 - If `mode = "cold_path_cache"` but no `cold_archive_root` can be resolved,
@@ -167,14 +170,14 @@ the tar.
 | Step | Method | Notes |
 |------|--------|-------|
 | 1 | `create_series_table` | Recursively walks `case_dir`, reads each file's DICOM header, and **buckets files by `SeriesInstanceUID`** — one DataFrame row per real series, with the aggregated list of source file paths. A series is defined by its UID, not its folder: same-UID files spread across folders are **merged** into one row; a "mixed" folder holding several UIDs is **split** into its true series; `number_of_slices` = count of files carrying that UID. Files under one UID that disagree on `SeriesNumber`/`StudyInstanceUID` (a standard violation) trigger a **loud WARNING** and are kept merged — a suspected true UID collision to inspect at source (no split, no UID re-mint). This guarantees the upsert conflict key is unique within the batch. See [How series are identified](#how-series-are-identified). |
-| 2 | `create_study_table` | Groups series by StudyInstanceUID, computes per-study metadata, predicts `study_type` from `stroke_date` |
+| 2 | `create_study_table` | Groups series by StudyInstanceUID, computes per-study metadata, and classifies `study_type` (BASELINE/FOLLOW_UP) from `stroke_date`. **Kept-dormant-by-design:** the classifier still runs and the value is stored, but nothing downstream currently consumes `study_type` beyond display — retained for planned future use, not an active feature. |
 | 3 | `filter_existing_studies` | Decides per study/series what to do given the current DB state. Always loads both `image_study` and `image_series` for the scanned `StudyInstanceUID`s. **Append mode (`overwrite_if_exists=false`):** for studies already in DB, drops the study row from the working set so the persisted `import_id` / `import_label` / `study_path` are preserved; then per series, drops the series row if `(SeriesUID, number_of_slices)` matches DB, keeps it for re-ingest if the slice count drifted (and wipes the stale `dicom_dir_path` and `dicom_archive_path` from disk before re-copy), keeps it if the SeriesUID is new, or warns-and-skips if DB `number_of_slices` is NULL. **Overwrite mode (`overwrite_if_exists=true`):** calls `overwrite_existing_study()`, which deletes the on-disk DICOM directories, stale cold archives, and the rows in `image_study`, `image_series`, `image_study_labelled`, and `image_series_labelled` for that study, all in one transaction — orphan rows from series that no longer exist on disk cannot survive. |
 | 4 | `load_clinical_data_table` | Reads `lvo_clinical_data` |
 | 5 | `validate_studies_against_clinical_data` | Drops studies whose `patient_id` doesn't match a clinical row or whose `studydate` is outside the allowed stroke-date window |
 | 6 | `assign_import_id` / `assign_import_label` | Tags all rows with the batch import_id/label |
 | 7 | `add_paths_and_copy_dicom_files` | **Copies DICOMs** from source → `{dicom_data_root}/{patient_id}/{studyUID}/{seriesDesc}/{seriesUID}/DICOM/`. Copies the series' aggregated file list (which may span several source folders); on a destination basename collision it **renames** the file (`…__dupN`) so nothing is overwritten. Optionally anonymizes. Sets `dicom_dir_path` and records the source→dest pairs for verification. |
 | 8 | `compress_cold_archives` | **Only if `cold_archive_root` is set.** For each series, creates `{cold_archive_root}/.../DICOM.tar.zst`. Sets `dicom_archive_path` on each row. **Per-series strict, batch soft**: each archive is built to a `.tmp` sibling, member-count verified, and atomically renamed — so a published archive is always valid. A failure on one series does NOT abort the case; the loop continues and failures are collected. After the loop, a WARNING is printed summarizing `N/M` failed, and a JSON report is written to `image_ingestion_protocols/logs/compression_failures_<timestamp>.json` (includes seriesinstanceuid, studyinstanceuid, dicom_dir_path, error). Failed rows keep `dicom_archive_path = NULL` — retriable via `scripts/cold_storage/archive_all_series.py --patient <id>`. Idempotent: existing archives are re-verified rather than rebuilt; corrupted ones are detected and rebuilt. |
-| 9 | `create_nifti_files` | In `legacy` mode: runs DICOM→NIFTI conversion for select series and writes `{seriesUID}/NIFTI/image.nii.gz`. In `cold_path_cache` mode: **skipped.** NIFTIs would accumulate orphaned once their sibling loose DICOMs are cleaned up. Generate on demand via `scripts/dicom/dicom_to_nifti.py` (see [`../recipes/dicom_processing.md`](../recipes/dicom_processing.md)). |
+| 9 | `create_nifti_files` | In `legacy` mode: runs DICOM→NIFTI conversion for select series and writes `{seriesUID}/NIFTI/image.nii.gz`. In `cold_path_cache` mode (production): **skipped by design** — NIFTIs would orphan once their sibling loose DICOMs are cleaned up. The conversion code is kept-dormant-by-design (available for a future legacy-style run); generate NIFTIs on demand via `scripts/dicom/dicom_to_nifti.py` (see [`../recipes/dicom_processing.md`](../recipes/dicom_processing.md)). |
 | 10 | `format_column_names` | Normalizes DataFrame column names, including adding `dicom_archive_path` to the set of columns to upsert |
 | 11 | `_require_import_id_columns` / `_require_import_label_columns` / `_require_number_of_slices_column` / `_require_dicom_archive_path_column` | Auto-DDL: `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` for any columns the protocol writes that don't yet exist. Safe to run against a fresh DB. |
 | 12 | `update_postgres_tables` | Upserts `image_series`, `image_study`, then `patient` — all in one transaction. `_upsert_patient` registers one row per patient: `stroke_date = MIN(image_study.acquisitiondatetime)` (recomputed across all of the patient's studies), `import_id`/`import_label` keep the **origin** (first-seen, preserved on conflict), and `dataset` is the deduped union of the `dataset` config across batches. As a belt-and-suspenders guard, `_upsert_dataframe` drops any rows duplicated on the conflict key (keep-last, with a WARNING) before the INSERT — so a stray duplicate can never again roll back a whole case via `CardinalityViolation` (`ON CONFLICT DO UPDATE` cannot touch the same target twice). |
@@ -201,8 +204,14 @@ two folders resolved to the same UID, emitted a duplicate conflict key that
 aborted the whole case with a `CardinalityViolation`. Grouping by UID is lossless
 and keeps the conflict key unique by construction.
 
-Regression coverage: `image_ingestion_protocols/test_image_ingestion_grouping.py`
-(mixed-folder split, cross-folder merge, collision warning, copy-collision rename).
+Regression coverage lives under `image_ingestion_protocols/tests/`:
+`test_image_ingestion_grouping.py` (mixed-folder split, cross-folder merge,
+collision warning, copy-collision rename), plus `test_series_type.py`,
+`test_resume.py`, `test_index_job.py`, `test_compression.py`,
+`test_filter_existing.py`, `test_path_safety.py`, `test_required_columns.py`,
+`test_load_config.py`, and `conftest.py`. A gated end-to-end test
+(`test_end_to_end_scratch_db.py`) runs only with `SSC_INGEST_AUDIT=1` and a
+local Postgres. Run them via `make test-ingestion` from the checkout root.
 
 ### How `series_type` is detected
 
@@ -228,11 +237,14 @@ BASELINE/FOLLOW_UP study classification. Enhanced-multiframe series whose
 per-frame geometry can't be decoded degrade to `NULL` rather than misclassifying.
 
 Thresholds live as constants in `utils.py` (`PERFUSION_MIN_FRAMES`,
-`DWI_FRAME_RANGE`, `MR_DYNAMIC_EXCLUDE`). A local maintenance helper to recompute
-`series_type` for existing rows from their on-disk or archived headers lives
-under the gitignored `hidden/ingestion_dev/backfill_series_type.py` (dry-run by
-default; `--execute` to write; `--patient` / `--import-label` / `--only-missing`
-filters), alongside the local unit tests for the detectors and resume logic.
+`DWI_FRAME_RANGE`, `MR_DYNAMIC_EXCLUDE`). `series_type` is **kept-dormant-by-design**:
+it is computed and stored at ingest, but nothing downstream consumes it yet
+(the value is retained for planned future use). A maintenance helper to
+recompute `series_type` for existing rows from their on-disk or archived headers
+lives at `maintenance/scripts/backfill_series_type.py` (checkout-root
+`maintenance/`, gitignored; dry-run by default, `--execute` to write, with
+`--patient` / `--import-label` / `--only-missing` filters). Its unit tests are
+tracked under `image_ingestion_protocols/tests/test_series_type.py`.
 
 ---
 
@@ -240,27 +252,32 @@ filters), alongside the local unit tests for the detectors and resume logic.
 
 ### Legacy mode
 
-Set `cold_archive_root: null` (or omit) in the YAML.
+Driven by `config.toml` `[storage].mode = "legacy"`; leave the YAML's
+`cold_archive_root` unset.
 
 ```
 source DICOMs
-  → copy to /DATA2/pacs_imaging_data/... (loose files)
+  → copy to {dicom_data_root}/... (loose files)
   → NIFTI alongside
   → upsert image_study / image_series (dicom_archive_path stays NULL)
 ```
 
-Orthanc's Folder Indexer scans the legacy tree on its interval (60 s by
-default) and indexes the new files automatically. No manual Orthanc action
-is required.
+Legacy mode relies on the Folder Indexer picking up new loose files. Note the
+**currently deployed** `orthanc.json` runs with `Folders: []` (no continuous
+whole-tree scan) — a legacy deployment would need `Folders` repopulated with
+the scan root (or the per-case `POST /indexer/scan` path used in
+`cold_path_cache`) for automatic indexing.
 
 ### cold_path_cache mode
 
-Set `cold_archive_root: /DATA2/pacs_imaging_data_compressed` in the YAML.
+Driven by `config.toml` `[storage].mode = "cold_path_cache"`; the archive root
+comes from `[storage].cold_archive_root` — leave the YAML's `cold_archive_root`
+unset (override only for one-off experiments).
 
 ```
 source DICOMs
-  → copy to /DATA2/pacs_imaging_data/... (loose files)
-  → compress to /DATA2/pacs_imaging_data_compressed/.../DICOM.tar.zst
+  → copy to {dicom_data_root}/... (loose files)
+  → compress to {cold_archive_root}/.../DICOM.tar.zst
   → (NIFTI generation skipped — produce on demand via scripts/dicom/dicom_to_nifti.py)
   → upsert image_study / image_series (dicom_archive_path populated)
 ```
@@ -359,8 +376,8 @@ Use **`scripts/cold_storage/cleanup_loose_dicoms.py`** to do this safely. The sc
    The NIFTI sibling (`.../<seriesUID>/NIFTI/`) is preserved.
 
 ```bash
-cd /home/perecanals/ssc-pacs/stanford-stroke-pacs
-conda activate pacs
+cd stanford-stroke-pacs
+conda activate ssc-pacs
 
 # Dry-run by default — see what would be cleaned
 python scripts/cold_storage/cleanup_loose_dicoms.py
@@ -376,18 +393,14 @@ python scripts/cold_storage/cleanup_loose_dicoms.py --execute --no-deep-verify
 ```
 
 The script aborts immediately if `STORAGE_MODE != "cold_path_cache"` to
-prevent accidental data loss in `legacy` mode. It is safe to run
-repeatedly and is suitable for cron — for example, to clean up loose
-DICOMs from any new ingestion within 5 minutes:
-
-```cron
-*/5 * * * * cd /home/perecanals/ssc-pacs/stanford-stroke-pacs && \
-  /home/perecanals/miniconda3/envs/pacs/bin/python scripts/cold_storage/cleanup_loose_dicoms.py \
-  --execute --no-deep-verify --quiet >> logs/cleanup_loose_dicoms.log 2>&1
-```
-
-Run a deep-verify pass periodically (weekly or so) to catch any archive
-corruption that the fast path would miss.
+prevent accidental data loss in `legacy` mode. It is safe to run repeatedly and
+is schedulable (`conda run -n ssc-pacs python scripts/cold_storage/cleanup_loose_dicoms.py --execute --no-deep-verify --quiet`);
+with `cleanup_loose_after_indexing: true` (the default) the ingestion run
+already cleans per case, so a standalone schedule is only needed when running
+with cleanup disabled. On the macOS production host scheduling is via launchd,
+not cron — see [`../operations/commands.md`](../operations/commands.md). Run a
+deep-verify pass periodically (weekly or so) to catch archive corruption the
+fast path would miss.
 
 ---
 
@@ -434,13 +447,13 @@ ls /path/to/new_cases_root/
 
 # 2. Edit execute_image_ingestion_protocol.yaml
 #    (first run: copy execute_image_ingestion_protocol.example.yaml)
-#    - src_dir: /path/to/new_cases_root
-#    - cold_archive_root: /DATA2/pacs_imaging_data_compressed   # in cold_path_cache
+#    - src_dir: /path/to/new_cases_root   (required)
 #    - import_label: "2026-04-research-batch"
+#    (leave cold_archive_root unset — config.toml [storage].cold_archive_root supplies it)
 
 # 3. Run
-cd /home/perecanals/ssc-pacs/stanford-stroke-pacs/image_ingestion_protocols
-conda activate pacs
+cd stanford-stroke-pacs/image_ingestion_protocols
+conda activate ssc-pacs
 python execute_image_ingestion_protocol.py
 
 # 4. Watch the log
@@ -448,7 +461,8 @@ tail -f logs/execute_image_ingestion_protocol_*.log
 
 # 5. After completion, check the summary — it prints total/processed/skipped/failed
 
-# 6. Verify Orthanc picked up the new data (within ~60 s of writing loose files)
+# 6. Verify Orthanc picked up the new data (registered per case during the run
+#    via POST /indexer/scan; the end-of-run sanity pass reconciles any misses)
 source ../.env
 psql -d stanford-stroke -c "
   SELECT COUNT(*) FROM image_series WHERE import_label = '2026-04-research-batch';"

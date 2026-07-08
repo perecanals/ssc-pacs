@@ -8,8 +8,7 @@
 
 The web app backend (`web-app/app.py` + `web-app/routes/`) is a FastAPI service that:
 
-- creates its app-owned tables on startup (via Alembic migrations)
-- runs schema migrations (`MIGRATE_SQL`) to evolve the schema
+- creates and evolves its app-owned tables on startup (runs `alembic upgrade head`)
 - serves the landing page at `/`
 - serves the Navigator UI via SPA catch-all for all non-API routes
 - exposes read APIs for browsing patients, studies, series, annotations,
@@ -20,7 +19,6 @@ The web app backend (`web-app/app.py` + `web-app/routes/`) is a FastAPI service 
 - attaches both own-level annotations and inherited parent-level annotations
   to every returned row
 - resolves OHIF links by querying Orthanc's REST API
-- rebuilds snapshot tables on demand via `POST /api/snapshots/refresh`
 
 ### Authentication
 
@@ -74,8 +72,10 @@ The web app frontend is a React single-page application built with Vite and
 Tailwind CSS. Source code lives in `web-app/src/`; the production build is in
 `web-app/dist/`. Component styles are in co-located `.css` files.
 
-The app has three routes:
+The app defines five routes (`App.jsx`):
 
+- `/login` — login page (`Login.jsx`)
+- `/change-password` — forced/self-service password change (`ChangePassword.jsx`)
 - `/` — Landing page with card links to Web App, Orthanc Explorer 2, and OHIF
 - `/app` — Web App annotation browser
 - `/admin` — admin-only user dataset-access page (`AdminUsers.jsx`): a
@@ -130,9 +130,13 @@ The Navigator page is decomposed into focused React components:
   levels. Split into focused modules: `index.jsx` (orchestrator), `ChildRows.jsx`
   (child/grandchild rendering), `TableHeader.jsx` (column headers + filter row),
   `SelectFilterControl.jsx` (dropdown filter), `useTableData.js` (data fetch),
-  `usePreferencePersistence.js` (debounced pref save), `useDragColumns.js`
-  (drag-reorder), `actions.js` (DICOM download, OHIF link, refresh). Shared
-  utilities in `utils/colors.js` and `utils/table.js` (LEVEL_CONFIG, formatters).
+  `usePreferencePersistence.js` (debounced pref save), `useColumnPrefs.js`
+  (column visibility/order/frozen state), `useDragColumns.js` (drag-reorder),
+  `useWarmStatus.js` (poll per-series/study cache status), `WarmButton.jsx`
+  (cold-storage warm trigger + spinner), `CopyPathButtons.jsx` (copy
+  dicom_dir_path / archive path), `actions.js` (DICOM download, OHIF link,
+  labelled-table refresh), and co-located `DataTable.css`. Shared utilities in
+  `utils/colors.js` and `utils/table.js` (LEVEL_CONFIG, formatters).
   Configurable per level via `LEVEL_CONFIG` (endpoint, columns, sort, filters,
   expand behavior). All components use `prop-types` for runtime prop validation.
   Key features:
@@ -201,11 +205,12 @@ The Navigator page is decomposed into focused React components:
     filters is delegated to `Web App` via an `onResetSidebarFilters`
     callback passed into `DataTable`.
   - **Server-persisted session state**: The Navigator's current hierarchy
-    level and sidebar quick-filter state are persisted per user under the
-    `_global` preferences level as `{"session": {"level", "filters"}}`
+    level, sidebar quick-filter state, sidebar visibility, and preview-pane
+    height are persisted per user under the `_global` preferences level as
+    `{"session": {"level", "filters", "sidebarOpen", "previewHeight"}}`
     (`src/hooks/useSessionStatePersistence.js`). The hook mirrors the table
     prefs pattern — debounced PUT on change, keepalive flush on tab close —
-    and on mount restores (and sanitizes) the saved pair; `Navigator.jsx`
+    and on mount restores (and sanitizes) the saved values; `Navigator.jsx`
     gates rendering until the restore resolves so the `DataTable` (keyed by
     level) mounts exactly once at the restored level with the restored
     filters. Stored values are validated against the known filter keys and
@@ -229,8 +234,12 @@ The Navigator page is decomposed into focused React components:
     are refreshed in the background after each write, so any labelled-pivot views
     are eventually consistent — but the live table reads `annotations` directly,
     so annotation values are always immediate.
-  - **Snapshot refresh**: Authenticated users can trigger a full snapshot
-    rebuild from the table summary row.
+  - **Sidebar label refresh (nonce channel)**: after a label definition is
+    created/edited/removed, the `DataTable`'s `onLabelsMutated` callback bumps a
+    `labelsNonce` counter in `Navigator.jsx`, which relays it to `Sidebar` as the
+    `labelsRefreshNonce` prop; the Sidebar re-fetches `/api/labels` on change.
+    This replaced the former global `window.__refreshLabelSidebar` hook with an
+    explicit React data-flow channel.
 - `InlineEdit` — handles `bool` (checkbox), `int` (number input), `text`
   (text input), and `select` (pill-style dropdown with search/create) label
   types. Accepts a `level` and generic `entity` prop so it can annotate at
@@ -268,12 +277,15 @@ The Navigator page is decomposed into focused React components:
 
 | Level   | Columns                                              |
 |---------|------------------------------------------------------|
-| Patient | Patient ID, Stroke Date                              |
-| Study   | Patient ID, Acquisition Date, Modality, Study Description |
-| Series  | Patient ID, Acquisition Date, Modality, Series Description, Slices, Slice Thickness (mm), Axial Coverage (mm) |
+| Patient | Patient ID, Stroke Date, Dataset, Study Import Labels |
+| Study   | Patient ID, Acquisition Date, Modality, Study Description, Dataset, Import ID, Import Label |
+| Series  | Patient ID, Acquisition Date, Modality, Series Description, Slices, Slice Thickness (mm), Axial Coverage (mm), Dataset, Import ID, Import Label |
 
-Study- and series-level rows include an OHIF action button. The Actions
-column is hidden entirely at the patient level since patients have no
+`Dataset` is a built-in column at all three levels (default-visible). The
+`Study Import Labels` column (Patient) and the `Import ID` / `Import Label`
+columns (Study and Series) ship **hidden by default** — available in the column
+selector. Study- and series-level rows include an OHIF action button; the
+Actions column is hidden entirely at the patient level since patients have no
 direct OHIF action.
 
 ### Embedded OHIF behavior
@@ -297,18 +309,13 @@ Orthanc Explorer and OHIF links on the landing page are dynamically built from
 
 ---
 
-## Snapshot tables (backend-driven)
+## Labelled mirror tables
 
-The web app can rebuild three snapshot tables on demand via
-`POST /api/snapshots/refresh`. Each snapshot is a `CREATE TABLE ... AS SELECT`
-that joins the source table with pivoted annotation columns for that level's
-label definitions:
-
-- `snapshot_patients` — from `patient` + patient-level annotations
-- `snapshot_studys` — from `image_study` + study-level annotations
-- `snapshot_seriess` — from `image_series` + series-level annotations
-
-These tables are dropped and recreated on each refresh and are intended for
-bulk export or periodic reporting.
+Per-level labelled mirror tables (`patient_labelled` / `image_study_labelled` /
+`image_series_labelled`) join each source table with its level's annotations
+pivoted into label columns, for labelled-pivot / export views. They are
+maintained (eventually consistent) by `web-app/labelled_table_sync.py` — the
+frontend never reads them directly, so annotation edits stay immediate in the
+live table.
 
 **Table DDL, indexes, and cold-storage columns** are documented in [`data_stores.md`](data_stores.md); migrations are managed via Alembic (`web-app/alembic/`).

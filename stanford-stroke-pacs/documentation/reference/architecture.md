@@ -12,83 +12,33 @@ database.
 
 The repo deploys one Docker service (Orthanc) and one native host service
 (the web app), and relies on one existing host PostgreSQL server plus an
-existing DICOM filesystem.
+existing DICOM filesystem. Users reach the ports through an SSH tunnel (no
+reverse proxy is bundled).
 
-```mermaid
-flowchart TD
-    Browser[BrowserViaSshTunnel] --> Orthanc8042["ssc-orthanc :8042 (Docker)"]
-    Browser --> WebApp8043["Web App :8043 (native FastAPI)"]
-    Orthanc8042 --> OrthancDb[OrthancIndexDb]
-    Orthanc8042 --> DicomTree[DicomTreeReadOnly]
-    WebApp8043 --> SscDb[stanford-stroke DB]
-    WebApp8043 --> Orthanc8042
-    SscDb --> Patient[patient]
-    SscDb --> LvoClinicalData[lvo_clinical_data]
-    SscDb --> ImageSeries[image_series]
-    SscDb --> ImageStudy[image_study]
-    SscDb --> AnnotationTables[annotations / label_definitions / users / user_preferences]
-    SscDb --> SnapshotTables[snapshot_patients / snapshot_studys / snapshot_seriess]
-```
-
-User-facing entry points:
-
-- `http://localhost:8042/ui/app/` for Orthanc Explorer 2
-- `http://localhost:8042/ohif/` for OHIF
-- `http://localhost:8043/` for the landing page
-- `http://localhost:8043/app/` for the web app app
-
-The repo does not include a reverse proxy. In the current deployment model,
-users normally reach these ports through an SSH tunnel.
+The full topology diagram, component list, and user-facing URL table are the
+canonical [`system_overview.md`](system_overview.md) §2–3; this document covers
+the *why* behind the deployed shape.
 
 ---
 
 ## 2. Service roles
 
-### 2.1 Orthanc
+**Orthanc** (container `ssc-orthanc`) is the PACS viewer/indexer layer: it
+indexes the read-only DICOM tree, keeps an internal PostgreSQL index, serves
+Orthanc Explorer 2 / OHIF / DICOMweb / the REST API, and stores study-level
+labels for Orthanc Explorer 2. It does **not** own the source DICOM files,
+generate the upstream `image_series`/`image_study` metadata, or store web-app
+annotations.
 
-The `orthanc` service (container `ssc-orthanc`) is the PACS viewer/indexer layer.
-
-It is responsible for:
-
-- scanning the read-only DICOM tree through the Folder Indexer
-- maintaining an internal PostgreSQL index
-- serving Orthanc Explorer 2
-- serving OHIF
-- exposing DICOMweb and the Orthanc REST API
-- storing study-level shared labels used by Orthanc Explorer 2
-
-It is not responsible for:
-
-- owning the source DICOM files
-- generating the upstream `image_series` and `image_study` metadata tables
-- storing web app annotations
-
-### 2.2 Web App
-
-The web app is a FastAPI application that runs natively on the host (managed
-by systemd), serving a React frontend and a REST API for multi-level
-annotation workflows that Orthanc Explorer 2 does not support.
-
-It is responsible for:
-
-- browsing patients (from the `patient` registry, LEFT JOINing
-  `lvo_clinical_data` for the clinical `stroke_date`), studies (from
-  `image_study`), and series (from `image_series`, JOINing `image_study` for `study_type`)
-- storing multi-level annotations (patient, study, series) in `annotations`
-- storing level-aware label definitions in `label_definitions`
-- cross-level label filtering (e.g. filtering patients by a series-level label)
-- inheriting parent-level annotations down to child rows
-- building refreshable snapshot tables for bulk export
-- authenticating users against `users`
-- generating study- and series-aware OHIF links by querying Orthanc
-- embedding OHIF inside the Navigator UI as a lower preview pane for row-driven
-  image review
-
-It is not responsible for:
-
-- indexing DICOMs
-- owning the main PACS metadata index
-- replacing Orthanc Explorer 2
+**Web App** is a FastAPI service (native host process) serving a React frontend
+and a REST API for the multi-level annotation workflow Orthanc Explorer 2 does
+not support. It browses patients (from the `patient` registry, LEFT JOINing
+`lvo_clinical_data` only for the clinical `stroke_date`), studies, and series;
+stores shared multi-level annotations and level-aware label definitions; does
+cross-level label filtering and downward annotation inheritance; authenticates
+against `users`; and builds study/series-aware OHIF links for the embedded
+preview pane. It does **not** index DICOMs, own the PACS metadata index, or
+replace Orthanc Explorer 2.
 
 ---
 
@@ -138,8 +88,10 @@ It contains:
   - `user_preferences` — per-user JSONB table display preferences (column
     visibility, order, sort, filters, frozen state) keyed by username and
     level
-- refreshable snapshot tables: `snapshot_patients`, `snapshot_studys`,
-  `snapshot_seriess`
+  - `patient_labelled` / `image_study_labelled` / `image_series_labelled` —
+    per-level mirror tables (source rows + annotations pivoted to label
+    columns) maintained by `labelled_table_sync.py` for labelled-pivot / export
+    views (eventually consistent; the live read path never depends on them)
 
 Optional cold-storage support adds columns and tables documented in
 [`data_stores.md`](data_stores.md).
@@ -162,24 +114,26 @@ The two-database design keeps responsibilities clean:
 
 ### 4.1 Imaging data
 
-1. DICOM files exist on the host filesystem at `/DATA2/pacs_imaging_data`.
+1. DICOM files exist on the host filesystem at `[storage].dicom_data_root`
+   (from `config.toml`).
 2. Docker bind-mounts that tree read-only into the Orthanc container as
-   `/dicom-data`.
-3. Orthanc's Folder Indexer scans the mount and writes its internal metadata
-   index into the Orthanc PostgreSQL database.
+   `/dicom-data` (source resolved by `scripts/orthanc/dc.sh`).
+3. Orthanc's Folder Indexer registers instances into its internal PostgreSQL
+   metadata index. In production the index is populated on demand per case
+   (`POST /indexer/scan`), not by a continuous whole-tree scan (`Folders: []`).
 4. OHIF and Orthanc Explorer 2 read through Orthanc, not directly from the
    research database.
 
 The DICOM Application Entity Title (AE Title) is configured as `SSC`.
 
-**Optional cold storage mode** (`mode = "cold_path_cache"` under `[storage]` in repo-root `config.toml`):
-canonical series payloads live as `*.tar.zst` under `cold_archive_root` (`/DATA2/pacs_imaging_data_compressed`).
+**Optional cold storage mode** (`mode = "cold_path_cache"` under `[storage]` in the stack-root `config.toml`):
+canonical series payloads live as `*.tar.zst` under `[storage].cold_archive_root`.
 On warm, the web app extracts an archive back to the **original** `dicom_dir_path` recorded in
 `image_series`; on evict it deletes those extracted files. This requires the custom
 `ssc-orthanc:patched-indexer` image with `"RemoveMissingFiles": false`, so Orthanc's index keeps
 pointing at the original paths even while the files are absent — no re-ingestion is needed.
-Legacy loose files under `/DATA2/pacs_imaging_data` are read directly when `mode = "legacy"`.
-(An earlier `cold_cache` design that warmed into a separate `/DATA2/pacs_hot_cache` and re-POSTed
+Legacy loose files under `[storage].dicom_data_root` are read directly when `mode = "legacy"`.
+(An earlier `cold_cache` design that warmed into a separate hot-cache dir and re-POSTed
 DICOMs to Orthanc was removed — see [`../cold_storage/design.md`](../cold_storage/design.md).)
 
 - Design rationale and benchmarks: [`../cold_storage/design.md`](../cold_storage/design.md)
@@ -187,9 +141,12 @@ DICOMs to Orthanc was removed — see [`../cold_storage/design.md`](../cold_stor
 
 ### 4.2 Metadata and annotations
 
-1. `patient`, `lvo_clinical_data`, `image_series`, and `image_study` provide the
-   metadata that drives the web app app (patient browsing from `patient`,
-   `lvo_clinical_data` joined for the clinical `stroke_date`).
+1. `patient`, `image_series`, and `image_study` provide the metadata that drives
+   the web app (patient browsing from the `patient` spine, studies from
+   `image_study`, series from `image_series`). `lvo_clinical_data` is **retired
+   as a roster**: it is never the patient source and is otherwise unqueried —
+   the patient list joins it in a single LEFT JOIN (`routes/studies.py`) only to
+   prefer its clinical `stroke_date` via `COALESCE`.
 2. The web app reads these tables to build patient, study, and series browsers
    with filtering, sorting, and pagination. Series listings JOIN `image_study`
    for `study_type`.
@@ -304,30 +261,19 @@ dataset (only the value strings are shared, never patient data).
 
 ## 6. Packaging model
 
-### 6.1 Orthanc packaging
+Packaging facts (compose wiring, service units, frontend build) are canonical in
+[`runtime_and_config.md`](runtime_and_config.md). Two points that matter
+architecturally:
 
-Orthanc uses the upstream image `orthancteam/orthanc:latest`.
-
-The repo provides:
-
-- `docker-compose.yml` for service wiring
-- `orthanc.json` for structural config
-- `orthanc_users.json` as a deploy-time file holding the service account plus
-  admin users (rotated via `scripts/admin/manage_users.py`)
-
-### 6.2 Web App packaging
-
-The web app runs natively on the host (no Docker container):
-
-- FastAPI served by uvicorn, managed by a systemd unit (`ssc-web-app.service`)
-- Python dependencies installed in the `pacs` conda environment
-- React frontend built with Vite + Tailwind CSS into `web-app/dist/`
-- FastAPI serves the built frontend as static files and provides the REST API
-- Node.js and npm are only needed at build time (to run `npm run build`);
-  no Node process runs in production
-
-To rebuild the frontend after changes: `cd web-app && npm run build`.
-To restart the service: `sudo systemctl restart ssc-web-app`.
+- **Orthanc** runs the locally-built custom image `ssc-orthanc:patched-indexer`
+  (a digest-pinned base plus the patched Folder Indexer — see
+  [`../../../orthanc-indexer-patched/Dockerfile`](../../../orthanc-indexer-patched/README.md)),
+  **not** an upstream registry image. The repo provides `docker-compose.yml`
+  (Orthanc only), `orthanc.json`, and the tool-managed `orthanc_users.json`.
+- **Web App** runs natively (no container): uvicorn under launchd
+  (`com.ssc.webapp`, current macOS production) or systemd
+  (`ssc-web-app.service`, Linux), serving the pre-built `web-app/dist/`. Node is
+  build-time only.
 
 ---
 
@@ -341,7 +287,8 @@ follow the same pattern:
 - `docker-compose.yml` (Orthanc only)
 - `orthanc.json`
 - `web-app/` (FastAPI backend + React frontend)
-- `ssc-web-app.service` (systemd unit)
+- the service-unit templates (`systemd/*.in`, `launchd/*.plist.in`) rendered by
+  the two installers
 - `scripts/admin/manage_users.py`
 - `init_orthanc_db.sh`
 
@@ -395,11 +342,14 @@ metadata-ingestion problem must be solved separately from the PACS deployment.
 
 Current repo behavior that matters architecturally:
 
-- `scripts/orthanc/check_status.sh` reads Orthanc credentials from repo-root `.env` (`ORTHANC_ADMIN_USER` / `ORTHANC_ADMIN_PASSWORD`)
+- `scripts/orthanc/check_status.sh` reads Orthanc credentials from the stack-root `.env` (`ORTHANC_ADMIN_USER` / `ORTHANC_ADMIN_PASSWORD`)
 - all Orthanc-facing helper scripts use `ORTHANC_ADMIN_USER` /
   `ORTHANC_ADMIN_PASSWORD` from `.env`
-- `scripts/admin/teardown.sh` is destructive (removes Orthanc resources, not just running
-  containers) and sources `.env` from two levels above the repo root — not the
-  repo-root `.env` used by everything else
+- **`scripts/admin/teardown.sh` is destructive** — it stops the stack, removes
+  Orthanc volumes, drops the Orthanc DB/role, and edits `.env` (it does not stop
+  the native web-app service). It reads `ENV_FILE="$STACK_DIR/.env"` — the same
+  stack-root `.env` (`stanford-stroke-pacs/.env`) everything else uses (an
+  earlier "two levels above the repo root" behavior no longer applies). The
+  destructiveness is confirmation-guarded; use with care.
 
 These are documentation-relevant caveats, not fundamental design choices.

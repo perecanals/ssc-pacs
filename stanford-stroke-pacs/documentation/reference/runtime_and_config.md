@@ -9,8 +9,13 @@
 | Piece | How it runs | Ports |
 |-------|-------------|-------|
 | Orthanc | Docker (`ssc-orthanc`), host networking, custom image `ssc-orthanc:patched-indexer` | HTTP `8042`, DICOM `4242` |
-| Web App | Native **systemd** (`ssc-web-app.service`), uvicorn | HTTP `8043` |
+| Web App | Native service, uvicorn — **launchd (`com.ssc.webapp`) on the current macOS production host; systemd (`ssc-web-app.service`) on Linux** | HTTP `8043` |
 | PostgreSQL | Host server (not in this repo) | configured in `.env` |
+
+Paths in this doc are relative to the **stack root** (`stanford-stroke-pacs/`,
+where `config.toml`, `.env`, `orthanc.json`, and `docker-compose.yml` live)
+unless a path is called out as relative to the git checkout root
+(`/opt/ssc-pacs/ssc-pacs`, the Makefile home).
 
 `docker-compose.yml` defines **Orthanc only**. The Web App is not a Compose service.
 
@@ -42,9 +47,11 @@ secret-bearing files:
 - DICOM server on `4242` (AET: `SSC`)
 - remote access
 - HTTP auth
-- Folder Indexer scanning `/dicom-data` every 60 seconds, with
-  `RemoveMissingFiles: false` so the scan never removes indexed files that
-  temporarily disappear (required by `cold_path_cache`)
+- Folder Indexer with `ScanRoots: ["/dicom-data"]`, `Folders: []` (no
+  continuous whole-tree scan), and `RemoveMissingFiles: false` so the index
+  never drops files that temporarily disappear (required by `cold_path_cache`).
+  New data is registered on demand per case via `POST /indexer/scan` from the
+  ingestion executor — see [`image_ingestion_protocol.md`](image_ingestion_protocol.md)
 - DICOMweb at `/dicom-web/`
 - OHIF at `/ohif`
 - Orthanc Explorer 2 as the default UI at `/ui/app/`
@@ -74,14 +81,15 @@ mount change is needed. See [`../cold_storage/runbook.md`](../cold_storage/runbo
 
 ## Web App runtime
 
-The web app runs natively on the host, managed by **`ssc-web-app.service`**:
+The web app runs natively on the host, managed by launchd (`com.ssc.webapp`)
+in production on macOS, or by the `ssc-web-app.service` systemd unit on Linux:
 
-- Python dependencies: typically a conda env named `pacs` or a venv; install from
+- Python dependencies: the `ssc-pacs` conda env (or a venv); install from
   `web-app/requirements.txt`
 - `uvicorn app:app --host 0.0.0.0 --port 8043`
-- loads `.env` from the repo root via `python-dotenv` (the parent of `web-app/`)
+- loads `.env` from the stack root via `python-dotenv` (the parent of `web-app/`)
 - serves the React frontend from `web-app/dist/` (pre-built by Vite)
-- non-secret tuning (storage paths, session length, `[backup]` settings) from repo-root **`config.toml`**
+- non-secret tuning (storage paths, session length, `[backup]` settings) from stack-root **`config.toml`**
   via `web-app/config.py`
 
 Frontend build:
@@ -89,34 +97,19 @@ Frontend build:
 - `cd web-app && npm install && npm run build`
 - Node.js and npm are build-time only
 
-Restart after code changes: `sudo systemctl restart ssc-web-app`.
+Restart after code changes: `sudo launchctl kickstart -k system/com.ssc.webapp`
+(macOS production) or `sudo systemctl restart ssc-web-app` (Linux). Platform
+equivalents table: [`../guides/deployment_on_mac.md`](../guides/deployment_on_mac.md) §8.
 
 ---
 
 ## User and auth provisioning
 
-**`scripts/admin/manage_users.py`** is the canonical tool for user management.
-
-It:
-
-- ensures `users` exists
-- adds, updates, or removes bcrypt-backed users in PostgreSQL
-- when the affected user has `is_admin=True`, also writes their plaintext
-  credential into `orthanc_users.json` so admins can reach Orthanc directly
-- provides a separate `rotate-service-account` subcommand that rotates the
-  service-account password in both `.env` (`ORTHANC_ADMIN_PASSWORD`) and the
-  matching entry in `orthanc_users.json`. It does not touch the DB.
-- provides `check-service-account` to verify those two stay in sync (exits
-  non-zero on mismatch — the one config pair not enforced at runtime).
-
-Runtime split:
-
-- End users authenticate to Web App (`:8043`) and reach OHIF and DICOMweb
-  through Web App's reverse proxy (`/ohif/*`, `/dicom-web/*`). They have no
-  direct credentials at Orthanc.
-- Orthanc (`:8042`) is reachable directly only to admins (with their own
-  `orthanc_users.json` entry) and to host-local scripts using the service
-  account from `.env`.
+`scripts/admin/manage_users.py` is the canonical tool for both user stores
+(`users` in PostgreSQL + admin/service-account mirror in `orthanc_users.json`),
+including `rotate-service-account` and `check-service-account`. The full auth
+model, runtime split, and provisioning flow are canonical in
+[`architecture.md`](architecture.md) §5.3.
 
 ---
 
@@ -124,7 +117,8 @@ Runtime split:
 
 1. Host prerequisites: Docker, PostgreSQL, Python, Node/npm for builds, DICOM tree
 2. Create `.env`; set storage mode + paths in `config.toml`
-3. `python3 -m pip install -r requirements.txt`
+3. `python3 -m pip install -r requirements.txt` (root-level script deps; the
+   `requirements.txt` lives at the git checkout root, one level above the stack root)
 4. `./init_orthanc_db.sh`
 5. `python scripts/admin/manage_users.py add <user> --admin` + `rotate-service-account`
 6. `scripts/orthanc/dc.sh up -d` (Orthanc — wrapper resolves the DICOM mount from
@@ -149,7 +143,7 @@ Runtime split:
 | `scripts/macos/install_launchd.sh` | Same, for the macOS `launchd/*.plist.in` daemons |
 | `init_orthanc_db.sh` | Create the Orthanc PostgreSQL role and database; idempotent; sources `.env` |
 | `scripts/orthanc/check_status.sh` | Orthanc-focused status check for container, REST API, and plugin endpoints |
-| `scripts/connectivity/tunnel.sh` | SSH tunnel helper for remote access |
+| `scripts/connectivity/tunnel/{linux,macos,windows}/` | Per-platform SSH tunnel helpers for remote access (`tunnel.sh` / `tunnel.command` / `tunnel.cmd`) |
 
 ### Data- and installation-specific scripts
 
@@ -166,7 +160,7 @@ Runtime split:
 
 ## Known caveats
 
-- **`scripts/admin/teardown.sh`** is destructive (stops stack, removes volumes, drops Orthanc DB/role, edits `.env`). It does **not** stop the web app systemd service. It sources `.env` from two levels above the repo root (`../../.env`), **not** the repo-root `.env` used by everything else — use with care.
+- **`scripts/admin/teardown.sh`** is destructive — full caveat (incl. its now-corrected `.env` source) is canonical in [`architecture.md`](architecture.md) §8.
 - **`docker-compose.yml`** uses a relative `env_file: .env` which resolves to `stanford-stroke-pacs/.env`. That file must exist.
 - **Custom Orthanc image** — the stack references `ssc-orthanc:patched-indexer` which is not on a registry. Fresh deployments must build it locally first (`cd orthanc-indexer-patched && docker build -t ssc-orthanc:patched-indexer .`) before `docker compose up`.
 
@@ -178,8 +172,11 @@ Runtime split:
 |------|---------|
 | `scripts/cold_storage/archive_all_series.py` | Offline archiver: compress all series to `tar.zst` for cold storage |
 | `scripts/data_integrity/dicom_path_sql_fs_audit.py` | Read-only audit comparing `image_series.dicom_dir_path` to actual filesystem |
-| `maintenance/scripts/orthanc_path_availability_test.py` (site-local, gitignored) | Verify Orthanc can serve instances when their files are present/absent on disk |
-| `maintenance/scripts/orthanc_holdout_case.py` (site-local, gitignored) | Temporarily hide/restore cases from the DICOM tree for manual OHIF testing |
+| `maintenance/scripts/orthanc_path_availability_test.py` (checkout-root `maintenance/`, gitignored) | Verify Orthanc can serve instances when their files are present/absent on disk |
+| `maintenance/scripts/orthanc_holdout_case.py` (checkout-root `maintenance/`, gitignored) | Temporarily hide/restore cases from the DICOM tree for manual OHIF testing |
+
+(`maintenance/` is a gitignored workspace at the git checkout root, one level
+above the stack root — not under `stanford-stroke-pacs/`.)
 
 ---
 
@@ -199,7 +196,11 @@ stanford-stroke-pacs/
 │   ├── app.py                    # FastAPI backend
 │   ├── cache_manager.py          # Cold storage warm/eviction
 │   ├── labelled_table_sync.py    # Per-level labelled mirror table helpers
+│   ├── reconciliation.py         # image_series vs Orthanc index reconciliation
+│   ├── dataset_access.py         # Per-user dataset scopes + TTL caches (proxy guard)
+│   ├── rate_limit.py             # Request rate limiter
 │   ├── config.py                 # Loads config.toml
+│   ├── alembic/                  # Schema migrations (versions/) — run at startup
 │   ├── requirements.txt
 │   ├── build.sh                  # npm run build helper
 │   └── src/                      # React frontend
@@ -216,7 +217,6 @@ stanford-stroke-pacs/
 │   └── orthanc/                  # enrich_orthanc, label_studies, check_status, dc.sh
 ├── systemd/                      # systemd unit TEMPLATES (*.in) — rendered by scripts/linux/install_systemd.sh
 ├── launchd/                      # macOS LaunchDaemon TEMPLATES (*.plist.in) — rendered by scripts/macos/install_launchd.sh
-├── benchmarks/                   # Cold storage benchmarks
 ├── image_ingestion_protocols/  # Legacy metadata pipeline
 ├── documentation/
 │   ├── context.md
