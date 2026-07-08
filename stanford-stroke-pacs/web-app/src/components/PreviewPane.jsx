@@ -3,18 +3,6 @@ import PropTypes from "prop-types";
 import usePaneResize from "../hooks/usePaneResize";
 import "./PreviewPane.css";
 
-function previewDescription(selection) {
-  if (!selection) return "Click a study or series row to preview images in OHIF.";
-  if (selection.sourceLevel === "series") {
-    return selection.description
-      ? `Opening study ${selection.studyinstanceuid} focused on series "${selection.description}".`
-      : `Opening study ${selection.studyinstanceuid} focused on the clicked series.`;
-  }
-  return selection.description
-    ? `Opening study "${selection.description}" in OHIF.`
-    : `Opening study ${selection.studyinstanceuid} in OHIF.`;
-}
-
 export default function PreviewPane({
   selection,
   previewUrl,

@@ -119,6 +119,7 @@ function DataTableInner({
   // loadMore() self-guards on loading/hasMore so fast scroll can't stack
   // requests. The sentinel is only rendered when there are rows, so the
   // observer never fires on an empty or still-loading list.
+  const listEmpty = items.length === 0;
   useEffect(() => {
     const root = scrollRef.current;
     const target = sentinelRef.current;
@@ -129,7 +130,7 @@ function DataTableInner({
     );
     io.observe(target);
     return () => io.disconnect();
-  }, [loadMore, items.length === 0, level]);
+  }, [loadMore, listEmpty, level]);
 
   const {
     dragColKey, dragOverKey, dropSide,

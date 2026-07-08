@@ -20,6 +20,26 @@ function SelectPill({ value, onClick, className = "" }) {
   );
 }
 
+SelectPill.propTypes = {
+  value: PropTypes.string.isRequired,
+  onClick: PropTypes.func,
+  className: PropTypes.string,
+};
+
+// Shape shared by the editor subcomponents below (dispatcher validates the
+// public props on InlineEdit itself).
+const editorPropTypes = {
+  level: PropTypes.oneOf(["patient", "study", "series"]).isRequired,
+  entity: PropTypes.object.isRequired,
+  labelName: PropTypes.string.isRequired,
+  ann: PropTypes.shape({
+    id: PropTypes.number,
+    value: PropTypes.string,
+    created_by: PropTypes.string,
+  }),
+  onMutated: PropTypes.func.isRequired,
+};
+
 function buildPayload(level, entity, labelName, value) {
   const base = { level, label: labelName, value };
   if (level === "patient") {
@@ -143,6 +163,8 @@ function BoolEdit({ level, entity, labelName, ann, onMutated }) {
     </span>
   );
 }
+
+BoolEdit.propTypes = editorPropTypes;
 
 // Keep in sync with .select-edit__dropdown in InlineEdit.css (max-h / min-w).
 const DROPDOWN_MAX_H = 260;
@@ -334,6 +356,11 @@ function SelectEdit({ level, entity, labelName, defOptions = [], ann, onMutated 
   );
 }
 
+SelectEdit.propTypes = {
+  ...editorPropTypes,
+  defOptions: PropTypes.arrayOf(PropTypes.string),
+};
+
 function ValueEdit({
   level,
   entity,
@@ -418,6 +445,11 @@ function ValueEdit({
     </span>
   );
 }
+
+ValueEdit.propTypes = {
+  ...editorPropTypes,
+  datatype: PropTypes.oneOf(["int", "text"]).isRequired,
+};
 
 InlineEdit.propTypes = {
   level: PropTypes.oneOf(["patient", "study", "series"]),

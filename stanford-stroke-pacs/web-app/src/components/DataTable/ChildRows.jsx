@@ -128,6 +128,23 @@ function GrandChildTable({
   );
 }
 
+GrandChildTable.propTypes = {
+  grandChildren: PropTypes.array,
+  grandChildCols: PropTypes.array.isRequired,
+  grandChildConfig: PropTypes.object.isRequired,
+  gcColSpan: PropTypes.number.isRequired,
+  activeRowKey: PropTypes.string,
+  isAdmin: PropTypes.bool,
+  downloadingSeries: PropTypes.string,
+  canWarm: PropTypes.bool,
+  seriesStatus: PropTypes.object,
+  onWarmSeries: PropTypes.func,
+  onGrandChildRowClick: PropTypes.func.isRequired,
+  onResolveOhifLink: PropTypes.func.isRequired,
+  onDicomDownload: PropTypes.func.isRequired,
+  onMutated: PropTypes.func.isRequired,
+};
+
 export default function ChildRows({
   parentRowId,
   childRows,
