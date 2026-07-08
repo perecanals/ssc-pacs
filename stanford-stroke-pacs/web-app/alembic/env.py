@@ -82,14 +82,11 @@ UPSTREAM_TABLES = frozenset({
 
 # Tables created/maintained by labelled_table_sync.py at runtime based on
 # label_definitions. Their shape changes with annotations, not with code, so
-# Alembic must not try to manage them.
+# Alembic must not try to manage them. (snapshot_* retired in revision 0013.)
 LABELLED_TABLES = frozenset({
     "image_series_labelled",
     "image_study_labelled",
     "patient_labelled",
-    "snapshot_patients",
-    "snapshot_studys",
-    "snapshot_seriess",
 })
 
 EXCLUDED_TABLES = UPSTREAM_TABLES | LABELLED_TABLES
