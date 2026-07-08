@@ -34,6 +34,7 @@ import json
 import os
 import shutil
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -82,27 +83,68 @@ def _stuck_warming_rows(conn) -> list[dict[str, Any]]:
         return [dict(r) for r in cur.fetchall()]
 
 
-def _orphan_warming_dirs(data_root: Path) -> list[str]:
-    """Find on-disk `*.warming` siblings under data_root.
+# Warm extraction creates `.warming` temp dirs as siblings of a series' DICOM
+# dir (cache_manager.py: dicom_dir.with_name(name + ".warming")), i.e. at a
+# fixed depth below data_root:
+#   {patient}/{study}/{series-desc}/{series-uid}/DICOM.warming   (depth 5)
+# Do NOT add slack levels: descending one level deeper means listing every
+# extracted DICOM payload dir's entries (minutes on the warm cache).
+_WARMING_SCAN_MAX_DEPTH = 5
 
-    Walks the legacy tree and collects directories whose name ends with
-    `.warming`. Returns the absolute paths so an operator can investigate
-    or `rm -rf` them. (A single warm in flight will normally have one,
-    so a small non-zero count immediately after a known-active warm is
-    not necessarily critical — the cron timer of 15min smooths that.)
+
+def _scan_subdirs(path: str) -> tuple[list[str], list[str]]:
+    """One dirs-only scandir: (subdirs to descend into, `*.warming` hits)."""
+    subdirs: list[str] = []
+    warming: list[str] = []
+    try:
+        with os.scandir(path) as it:
+            for entry in it:
+                try:
+                    if not entry.is_dir(follow_symlinks=False):
+                        continue
+                except OSError:
+                    # Permission/race during the walk — skip.
+                    continue
+                if entry.name.endswith(".warming"):
+                    warming.append(entry.path)
+                else:
+                    subdirs.append(entry.path)
+    except OSError:
+        pass
+    return subdirs, warming
+
+
+def _orphan_warming_dirs(data_root: Path) -> list[str]:
+    """Find on-disk `*.warming` dirs under data_root (depth-bounded scan).
+
+    Returns the absolute paths so an operator can investigate or `rm -rf`
+    them. (A single warm in flight will normally have one, so a small
+    non-zero count immediately after a known-active warm is not necessarily
+    critical — the cron timer of 15min smooths that.)
+
+    Deliberately NOT `rglob`: an unbounded recursive walk descends into every
+    extracted DICOM payload dir (thousands of files each) and hung the
+    timer-wired probe for minutes on a warm cache. `.warming` dirs live at a
+    fixed depth, so a dirs-only walk pruned at that depth suffices and never
+    lists DICOM file entries. The walk is breadth-first and threaded: it is
+    pure I/O latency (~200k scandirs on the warm cache), so parallel scandir
+    tiers cut minutes to seconds on slow external volumes.
     """
     if not data_root.exists():
         return []
     out: list[str] = []
-    # rglob is fine here; the legacy tree is bounded and we only match dirs.
-    for p in data_root.rglob("*.warming"):
-        try:
-            if p.is_dir():
-                out.append(str(p))
-        except OSError:
-            # Permission/race during the walk — skip.
-            continue
-    return out
+    level = [str(data_root)]  # dirs at depth `depth - 1`; entries land at `depth`
+    with ThreadPoolExecutor(max_workers=16) as ex:
+        for depth in range(1, _WARMING_SCAN_MAX_DEPTH + 1):
+            if not level:
+                break
+            next_level: list[str] = []
+            for subdirs, warming in ex.map(_scan_subdirs, level):
+                out.extend(warming)
+                if depth < _WARMING_SCAN_MAX_DEPTH:
+                    next_level.extend(subdirs)
+            level = next_level
+    return sorted(out)
 
 
 def _disk_free(data_root: Path) -> dict[str, int]:
