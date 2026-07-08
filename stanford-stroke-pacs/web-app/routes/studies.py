@@ -24,7 +24,6 @@ from cache_manager import (
     untar_zst,
 )
 from common import (
-    PATIENT_ID_COL,
     SERIES_FROM_CLAUSE,
     SERIES_SORT_WHITELIST,
     apply_label_filters,
@@ -106,10 +105,11 @@ def list_patients(
             # Patient level is sourced from the `patient` registry (one row per
             # patient, comprehensive). lvo_clinical_data is joined only to prefer
             # the clinical stroke_date when the patient is clinically matched;
-            # otherwise the imaging-derived patient.stroke_date is shown.
+            # otherwise the imaging-derived patient.stroke_date is shown. (Its
+            # patient-id column is historically named study_id.)
             from_clause = (
-                f"FROM patient p "
-                f"LEFT JOIN lvo_clinical_data c ON c.study_id = p.{PATIENT_ID_COL}"
+                "FROM patient p "
+                "LEFT JOIN lvo_clinical_data c ON c.study_id = p.patient_id"
             )
             # lvo_clinical_data.stroke_date is TEXT (free-form clinical date);
             # patient.stroke_date is a timestamp. Coalesce in text space — prefer
@@ -118,7 +118,7 @@ def list_patients(
             stroke_date_expr = "COALESCE(c.stroke_date, p.stroke_date::date::text)"
 
             if patient_id:
-                conditions.append(f"p.{PATIENT_ID_COL}::text LIKE %s")
+                conditions.append("p.patient_id::text LIKE %s")
                 params.append(f"%{patient_id}%")
             if stroke_date:
                 conditions.append(f"{stroke_date_expr}::text LIKE %s")
@@ -126,7 +126,7 @@ def list_patients(
             sil = (study_import_label or "").strip()
             if sil:
                 conditions.append(
-                    f"p.{PATIENT_ID_COL} IN ("
+                    "p.patient_id IN ("
                     "SELECT DISTINCT patient_id FROM image_study st WHERE st.import_label = %s "
                     "UNION "
                     "SELECT DISTINCT patient_id FROM image_series s WHERE s.import_label = %s)"
@@ -139,12 +139,12 @@ def list_patients(
                 params.append(ds)
             if label:
                 conditions.append(
-                    build_label_filter_sql("patient", label_level, f"p.{PATIENT_ID_COL}")
+                    build_label_filter_sql("patient", label_level, "p.patient_id")
                 )
                 params.append(label)
             apply_label_filters(
                 parse_label_filters(label_filters),
-                "patient", f"p.{PATIENT_ID_COL}", conditions, params,
+                "patient", "p.patient_id", conditions, params,
             )
 
             where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
@@ -156,7 +156,7 @@ def list_patients(
             total = cur.fetchone()["count"]
 
             order_expr = (
-                stroke_date_expr if sort_by == "stroke_date" else f"p.{PATIENT_ID_COL}"
+                stroke_date_expr if sort_by == "stroke_date" else "p.patient_id"
             )
             direction = "DESC" if sort_dir.lower() == "desc" else "ASC"
 
@@ -165,22 +165,22 @@ def list_patients(
                 "  SELECT string_agg(lbl, ', ' ORDER BY lbl) FROM ("
                 "    SELECT DISTINCT TRIM(sti.import_label) AS lbl "
                 "    FROM image_study sti "
-                f"    WHERE sti.patient_id = p.{PATIENT_ID_COL} "
+                "    WHERE sti.patient_id = p.patient_id "
                 "      AND sti.import_label IS NOT NULL AND TRIM(sti.import_label) <> '' "
                 "    UNION "
                 "    SELECT DISTINCT TRIM(s.import_label) AS lbl "
                 "    FROM image_series s "
-                f"    WHERE s.patient_id = p.{PATIENT_ID_COL} "
+                "    WHERE s.patient_id = p.patient_id "
                 "      AND s.import_label IS NOT NULL AND TRIM(s.import_label) <> '' "
                 "  ) u"
                 "), '') AS study_import_labels"
             )
             cur.execute(
-                f"SELECT p.{PATIENT_ID_COL} AS patient_id, "
+                "SELECT p.patient_id AS patient_id, "
                 f"{stroke_date_expr} AS stroke_date, {study_labels_agg}, "
                 f"array_to_string(p.dataset, ', ') AS dataset "
                 f"{from_clause} {where} "
-                f"ORDER BY {order_expr} {direction} NULLS LAST, p.{PATIENT_ID_COL} ASC "
+                f"ORDER BY {order_expr} {direction} NULLS LAST, p.patient_id ASC "
                 f"LIMIT %s OFFSET %s",
                 params + [per_page, offset],
             )

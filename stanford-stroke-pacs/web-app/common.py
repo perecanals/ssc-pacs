@@ -17,11 +17,6 @@ VALID_LEVELS = ("patient", "study", "series")
 
 LABEL_NAME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_]{0,62}$")
 
-# Patient-id column on the `patient` registry table (the patient-level spine).
-# lvo_clinical_data still names its equivalent column "study_id"; it is joined
-# explicitly on c.study_id = p.patient_id where clinical fields are needed.
-PATIENT_ID_COL = "patient_id"
-
 SERIES_FROM_CLAUSE = (
     "image_series s "
     "LEFT JOIN image_study st ON s.studyinstanceuid = st.studyinstanceuid"
