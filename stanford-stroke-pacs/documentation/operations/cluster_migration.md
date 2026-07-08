@@ -93,7 +93,8 @@ stores, both already covered above:
    ```
 
    Migrate it explicitly — or simply reuse the **nightly backup artifact** if one
-   exists (`/DATA2/pg_backups/orthanc_storage/latest.tar.gz`; see
+   exists (`<backup_root>/orthanc_storage/latest.tar.gz`, where `<backup_root>`
+   is `config.toml` `[backup].backup_root` on the source host; see
    [`backup_strategy.md`](backup_strategy.md) and `restore_runbook.md` §2d), which
    is already a consistent gzip tar of this volume:
 
@@ -129,17 +130,21 @@ nothing in `docker-compose.yml`, `orthanc.json`, or inside the container changes
   `/dicom-data` bind-mount **source** is derived from these by
   `scripts/orthanc/dc.sh` (exported as `DICOM_MOUNT_SOURCE`) — you no longer edit
   the compose `volumes:` by hand.
-- `orthanc.json`: leave `RemoveMissingFiles: false` and `Folders: ["/dicom-data"]`
-  unchanged.
+- `orthanc.json`: leave the shipped `Indexer` block unchanged —
+  `RemoveMissingFiles: false`, `Folders: []` (no continuous scan), and
+  `ScanRoots: ["/dicom-data"]` (the allow-list for scoped `POST /indexer/scan`
+  registrations).
 
 At rest the hot cache is empty (exactly as on the source server now); warm-on-
 demand extracts an archive → the container sees `/dicom-data/<tail>` → it
 matches the restored index → OHIF loads, no re-ingestion.
 
-> **Fallback if you cannot move the volume:** Orthanc will limp via rescan —
-> each study works only after it is warmed *and* the next Folder Indexer scan
-> (≤ `Interval` s) re-registers the materialized files. Migrating the volume
-> avoids that window and is strongly preferred.
+> **Fallback if you cannot move the volume:** there is no continuous rescan
+> (`Folders: []`), so Orthanc will not heal on its own — each study works only
+> after it is warmed *and* you re-register its materialized folders via a
+> scoped `POST /indexer/scan` (`scripts/cold_storage/scoped_index.py` /
+> `reindex_missing_series.py`). Migrating the volume avoids all of that and is
+> strongly preferred.
 
 ---
 
@@ -206,7 +211,7 @@ index expects. Mismatched tails make warmed files unreachable by Orthanc even
 though they exist on disk.
 
 > For the **macOS** runtime that follows this port (Colima instead of Docker
-> Desktop, headless LaunchDaemons, the Postgres `LC_ALL` requirement), see
+> Desktop, headless LaunchDaemons, Full Disk Access for external volumes), see
 > [`../guides/deployment_on_mac.md`](../guides/deployment_on_mac.md).
 
 ---
@@ -246,9 +251,10 @@ trusting the deployment.
 Once the migration check passes, run the standard two-DB reconciliation for the
 full per-series diff (and to populate the Prometheus gauges). It compares
 `SeriesInstanceUID` between `image_series` and Orthanc's index and confirms
-archive paths exist on disk, reporting three mismatch categories: *in DB not
-in Orthanc*, *in Orthanc not in DB*, and *dicom_archive_path missing*. Full
-detail in [`reconciliation.md`](reconciliation.md).
+archive paths exist on disk, reporting four mismatch categories: *in DB not
+in Orthanc*, *in Orthanc not in DB*, *dicom_archive_path missing*, and
+*orphaned annotations* (annotation rows whose entity is gone from the spine
+tables). Full detail in [`reconciliation.md`](reconciliation.md).
 
 ```bash
 python scripts/data_integrity/reconcile.py            # human-readable summary

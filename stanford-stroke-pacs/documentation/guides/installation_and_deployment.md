@@ -2,6 +2,20 @@
 
 **Purpose:** Fresh-server runbook only. For the full map of *where every config value lives and what must stay in sync* see [`../reference/configuration_sources.md`](../reference/configuration_sources.md). For packaging facts and config file roles see [`../reference/runtime_and_config.md`](../reference/runtime_and_config.md). For architecture see [`../reference/architecture.md`](../reference/architecture.md).
 
+> **Platform:** this runbook targets **Linux** (systemd, host networking).
+> Production currently runs on **macOS** — for that platform read this document
+> for the sequence, then apply the deltas in
+> [`deployment_on_mac.md`](deployment_on_mac.md) (Colima, launchd, Homebrew
+> Postgres).
+
+> **Directory terms used below.** The git checkout root (`ssc-pacs/`) holds
+> `ssc-sql-db/`, the `Makefile`, and a repo-root `requirements.txt` scoped to
+> the `ssc-sql-db/` import helpers. The **stack root** is
+> `stanford-stroke-pacs/` inside it — `.env`, `config.toml`,
+> `docker-compose.yml`, `scripts/`, `web-app/`, and the stack
+> `requirements.txt` all live there. Commands below run from the **stack
+> root** unless stated otherwise.
+
 > **Three files, two installers.** A fresh deploy edits only `.env` (secrets),
 > `config.toml` (non-secret ops), and optionally `deploy.env` (per-host identity),
 > then runs `scripts/orthanc/dc.sh up -d` and the unit installer for the platform.
@@ -84,16 +98,25 @@ The host should satisfy all of the following:
 - writable checkout of this repository
 - filesystem path for the DICOM repository chosen and available
 
-For the helper scripts, install Python packages from the repo root
-`requirements.txt`.
+For the helper scripts, install Python packages from the **stack root**
+`stanford-stroke-pacs/requirements.txt` (§5 Step 1). One more prerequisite the
+compose file assumes: the custom Orthanc image **`ssc-orthanc:patched-indexer`**
+is not on any registry — it must be **built on the host** before bring-up (§5
+Step 5).
 
 ---
 
 ## 3. Required environment configuration
 
-Create a local `.env` file in the repo root before first start.
+Create a local `.env` file in the **stack root** (`stanford-stroke-pacs/.env` —
+`docker-compose.yml` loads it via a relative `env_file: .env`) before first
+start. Start from the tracked template:
 
-Variables expected by the current codebase:
+```bash
+cp .env.example .env    # then fill in real values
+```
+
+Variables expected by the current codebase (same key set as `.env.example`):
 
 | Variable | Purpose |
 |----------|---------|
@@ -114,7 +137,7 @@ Optional: `ORTHANC_HTTP_PORT` / `ORTHANC_DICOM_PORT` change the Orthanc ports in
 one place (default `8042` / `4242` if unset).
 
 Non-secret web app tuning (storage paths, storage mode, session length) lives in
-repo-root **`config.toml`** (loaded by `web-app/config.py`). `config.toml` is
+the stack-root **`config.toml`** (loaded by `web-app/config.py`). `config.toml` is
 **required** — the web app fails fast at startup if it is missing — and ships in
 the repo; edit it in place for this host. Per-host service-unit identity (OS user,
 repo path, conda python) is auto-derived by the installers and overridable in
@@ -164,17 +187,19 @@ not function as documented.
 
 Use this order for a new deployment.
 
-### Step 1. Install root Python dependencies
+### Step 1. Install the stack's script dependencies
 
-From the repo root:
+From the stack root (`stanford-stroke-pacs/`):
 
 ```bash
 python3 -m pip install -r requirements.txt
 ```
 
-This installs the dependencies needed by root-level helper scripts such as:
+This installs the dependencies needed by the stack's helper scripts, e.g.:
 
-- `scripts/admin/manage_users.py`
+- `scripts/admin/manage_users.py` (needs `bcrypt` — only in this file, not the
+  checkout-root `requirements.txt`, which covers just the `ssc-sql-db/` import
+  helpers)
 - `scripts/orthanc/enrich_orthanc.py`
 - `scripts/orthanc/label_studies.py`
 
@@ -286,6 +311,8 @@ internally when proxying.
 
 ```bash
 # 1. Create the first admin (DB + orthanc_users.json):
+#    Admins bypass dataset access control. Non-admin users are DENY-BY-DEFAULT:
+#    created without --datasets they see NO data — see §9.
 python scripts/admin/manage_users.py add <username> --admin
 
 # 2. Set the Orthanc service-account password (.env + orthanc_users.json):
@@ -308,9 +335,21 @@ Why this matters before first start:
   least the service-account entry — without it, Web App's proxy and host-local
   scripts will get 401s from Orthanc.
 
-### Step 5. Start Orthanc (Docker)
+### Step 5. Build the patched Orthanc image, then start Orthanc (Docker)
 
-Run:
+`docker-compose.yml` references the custom image
+**`ssc-orthanc:patched-indexer`** — a fork of the Folder Indexer plugin with the
+`RemoveMissingFiles` flag and the scoped `/indexer/scan` endpoint (required for
+`cold_path_cache`, and the image the stack runs in every mode). It is **not on
+any registry**: build it once on the host or bring-up fails with "image not
+found". From the checkout root:
+
+```bash
+cd orthanc-indexer-patched
+docker build -t ssc-orthanc:patched-indexer .    # see its README.md for platform notes
+```
+
+Then, from the stack root:
 
 ```bash
 scripts/orthanc/dc.sh up -d
@@ -322,7 +361,7 @@ from `config.toml` and (on macOS) applies the override. This starts
 
 ### Step 6. Install Web App Python dependencies
 
-From the repo root (use your preferred env, e.g. conda `pacs`):
+From the stack root (use your preferred env, e.g. conda `ssc-pacs`):
 
 ```bash
 python3 -m pip install -r web-app/requirements.txt
@@ -351,16 +390,28 @@ This replaces the old `sudo cp systemd/ssc-web-app.service …` step (and the
 separate backup-timer copy in §9) — one command installs everything. The dormant
 `cold-archive-mirror.timer` is left disabled by default.
 
-### Step 9. Wait for Orthanc indexing
+### Step 9. Index the DICOM tree into Orthanc
 
-Orthanc's Folder Indexer scans `/dicom-data` on startup and then periodically.
+**The shipped `orthanc.json` does NOT scan continuously**: its `Indexer` block
+has `"Folders": []` (plus `"ScanRoots": ["/dicom-data"]`), so the monitor is
+idle and a fresh deploy indexes **nothing** until you trigger it. Pick one:
 
-Depending on dataset size, this may take significant time.
+- **Scoped scans (how this deployment runs):** register data on demand via the
+  patched plugin's `POST /indexer/scan` endpoint — the ingestion pipeline does
+  this per case, and `scripts/cold_storage/scoped_index.py` /
+  `scripts/cold_storage/reindex_missing_series.py` do it in bulk (bounded
+  passes — large unbounded registrations can OOM the container; see
+  `documentation/cold_storage/`).
+- **Continuous scan (upstream behavior):** set
+  `"Folders": ["/dicom-data"]` in `orthanc.json` and restart Orthanc; the
+  indexer then scans on startup and every `Interval` seconds. Suitable for a
+  simple `legacy`-mode install; do **not** combine with `cold_path_cache`
+  bulk loads.
 
-Useful checks while indexing:
+Depending on dataset size, indexing may take significant time. Useful checks:
 
 ```bash
-docker compose logs -f orthanc
+scripts/orthanc/dc.sh logs -f orthanc      # dc.sh, not bare docker compose (mount var)
 curl -s -u <user>:<pass> http://localhost:8042/statistics | python3 -m json.tool
 ```
 
@@ -412,11 +463,12 @@ After startup, validate each layer separately.
 
 ### 6.1 Container and API checks
 
-Basic checks:
+Basic checks (always via the `dc.sh` wrapper — bare `docker compose` errors
+that `DICOM_MOUNT_SOURCE` is unset):
 
 ```bash
-docker compose ps
-docker compose logs -f orthanc
+scripts/orthanc/dc.sh ps
+scripts/orthanc/dc.sh logs -f orthanc
 ```
 
 Orthanc system and statistics:
@@ -430,13 +482,17 @@ Web App service:
 
 ```bash
 sudo systemctl status ssc-web-app
+curl -s http://localhost:8043/healthz | python3 -m json.tool   # unauthenticated liveness + version
 ```
 
-Web App read APIs:
+Web App read APIs require a login cookie (unauthenticated calls return **401**):
 
 ```bash
-curl -s http://localhost:8043/api/labels | python3 -m json.tool
-curl -s 'http://localhost:8043/api/series?per_page=5' | python3 -m json.tool
+curl -s -c cookies.txt -X POST http://localhost:8043/api/login \
+  -H 'Content-Type: application/json' \
+  -d '{"username": "<user>", "password": "<pass>"}'
+curl -s -b cookies.txt http://localhost:8043/api/labels | python3 -m json.tool
+curl -s -b cookies.txt 'http://localhost:8043/api/series?per_page=5' | python3 -m json.tool
 ```
 
 ### 6.2 Provided helper checks
@@ -453,8 +509,11 @@ Current caveats:
 - `scripts/orthanc/check_status.sh` reads Orthanc credentials from `.env` (no hardcoded values)
 - `scripts/orthanc/check_status.sh` validates the `ssc-orthanc` container and Orthanc only, not
   the web app
-- `scripts/data_integrity/reconcile.py` uses `ORTHANC_ADMIN_USER` /
-  `ORTHANC_ADMIN_PASSWORD`
+- `scripts/data_integrity/reconcile.py` imports the web app's modules (`db`,
+  `reconciliation`, `metrics`), so it needs `web-app/requirements.txt`
+  installed (Step 6), and it fails fast unless `.env` provides both
+  `ORTHANC_ADMIN_USER`/`ORTHANC_ADMIN_PASSWORD` **and** the `PG_ORTHANC_*`
+  credentials (it bulk-reads `orthanc_db` read-only)
 
 ### 6.3 Browser checks
 
@@ -510,7 +569,9 @@ ssh -N \
   <user>@<server>
 ```
 
-The repo's `scripts/connectivity/tunnel.sh` forwards all three ports (`8042`, `8043`, `4242`).
+The repo ships per-platform tunnel helpers that forward all three ports
+(`8042`, `8043`, `4242`): `scripts/connectivity/tunnel/linux/tunnel.sh`,
+`.../macos/tunnel.command`, and `.../windows/tunnel.cmd`.
 
 ---
 
@@ -520,16 +581,16 @@ For contributors who want to run the test suite and linters locally.
 
 ### Prerequisites
 
-- Python 3.12+ with the `pacs` conda environment
+- Python 3.12+ with the `ssc-pacs` conda environment
 - Node.js 20+ and npm
 - A local PostgreSQL instance (the test suite creates a scratch DB)
 
 ### One-time setup
 
-From the repo root:
+From the checkout root (where the `Makefile` lives):
 
 ```bash
-conda activate pacs
+conda activate ssc-pacs
 make install-dev
 ```
 
@@ -539,20 +600,21 @@ and installs pre-commit hooks so linting runs automatically before each commit.
 ### Running tests
 
 ```bash
-make test          # backend + frontend
-make test-backend  # pytest only (requires Postgres)
-make test-frontend # vitest only (no Postgres needed)
+make test            # backend + frontend + ingestion
+make test-backend    # pytest only (requires Postgres)
+make test-frontend   # vitest only (no Postgres needed)
+make test-ingestion  # ingestion-protocol suite (no Postgres needed)
 ```
 
 ### Running linters
 
 ```bash
-make lint          # ruff check
+make lint          # ruff (web-app, scripts, ingestion) + eslint
 ```
 
 ### CI
 
-Every push to `main` and every PR triggers GitHub Actions CI (`.github/workflows/ci.yml`). Required jobs: lint, backend-tests, frontend-tests, frontend-build. The mypy job is advisory (non-blocking).
+Every push to `main` and every PR triggers GitHub Actions CI (`.github/workflows/ci.yml`). Required jobs: lint, backend-tests, ingestion-tests, frontend-tests, frontend-build. The mypy job is advisory (non-blocking).
 
 Pre-commit hooks run locally before each commit if installed via `make install-dev` (or `pre-commit install`).
 
@@ -562,21 +624,32 @@ Pre-commit hooks run locally before each commit if installed via `make install-d
 
 Common actions after deployment:
 
-Add a user:
+Add a user. **Dataset grants are deny-by-default**: a non-admin created
+without `--datasets` sees **no data at all** — grant the `patient.dataset`
+cohorts the user may see at creation time (or later with `set-datasets`):
 
 ```bash
-python scripts/admin/manage_users.py add <username>
-docker restart ssc-orthanc
+python scripts/admin/manage_users.py add <username> --datasets 'PRECISE,CRISP2/LVO'
+python scripts/admin/manage_users.py set-datasets <username> --all   # or a csv, or --none
 ```
 
 Change a user password:
 
 ```bash
 python scripts/admin/manage_users.py passwd <username>
+```
+
+Restart Orthanc **only** when `orthanc_users.json` changed — i.e. after adding
+or changing an **admin** user (`--admin`, mirrored into the JSON) or rotating
+the service account. Regular-user changes live in PostgreSQL only and need no
+restart:
+
+```bash
 docker restart ssc-orthanc
 ```
 
-If the changed user is the Orthanc service account used by the web app:
+If the changed credential is the Orthanc service account used by the web app
+(`rotate-service-account`), also:
 
 ```bash
 sudo systemctl restart ssc-web-app
@@ -630,9 +703,8 @@ them.
 These are current implementation mismatches worth remembering during deployment:
 
 - `scripts/admin/teardown.sh` is destructive and should not be used casually; it does not
-  stop the web app systemd service
-- `scripts/admin/teardown.sh` sources `.env` from two levels above the repo root (`../../.env`),
-  **not** the repo-root `.env` used by web app and helper scripts
+  stop the web app systemd service (it sources the stack-root `.env`, resolved
+  relative to its own location)
 - bring the stack up with `scripts/orthanc/dc.sh`, not bare `docker compose` — the
   DICOM mount source comes from `config.toml` via the wrapper, so bare
   `docker compose up` errors that `DICOM_MOUNT_SOURCE` is unset

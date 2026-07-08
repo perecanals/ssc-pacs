@@ -56,8 +56,10 @@ and it waits for the RAID to mount before starting:
 scripts/macos/colima_start.sh
 # equivalent to:
 #   colima start --cpu 4 --memory 8 --disk 100 --mount-type virtiofs \
-#     --mount /opt/ssc-pacs/ssc-pacs/stanford-stroke-pacs:r \
-#     --mount /Volumes/ThunderBay_RAID1:w
+#     --mount <stack root>:r \
+#     --mount <data mount>:w
+# where <data mount> is derived from config.toml: the common parent of
+# [storage].dicom_data_root and cold_archive_root (override: COLIMA_DATA_MOUNT).
 ```
 
 The VM is sized at 4 vCPU / 8 GB. vCPUs matter when a study loads in OHIF, which
@@ -282,7 +284,7 @@ Verify: warm a study in the UI (files appear under `dicom_data_root`), and
 
 | Component | Boot persistence on macOS |
 |---|---|
-| Orthanc (Docker) | `restart: unless-stopped` in compose **plus** the Colima VM supervised by the `com.ssc.colima` LaunchDaemon ([`launchd/com.ssc.colima.plist`](../../launchd/com.ssc.colima.plist), `KeepAlive` + `ThrottleInterval=30`). It runs a watchdog ([`scripts/macos/colima_watchdog.sh`](../../scripts/macos/colima_watchdog.sh)) that starts the VM at boot via the idempotent [`scripts/macos/colima_start.sh`](../../scripts/macos/colima_start.sh) and restarts it within ~30s on crash/stop. The container will not come back without the Colima VM running. (Do **not** point the daemon at `colima_start.sh` directly — it exits 0 once the VM is up, which `KeepAlive` would busy-loop.) |
+| Orthanc (Docker) | `restart: unless-stopped` in compose **plus** the Colima VM supervised by the `com.ssc.colima` LaunchDaemon ([`launchd/com.ssc.colima.plist.in`](../../launchd/com.ssc.colima.plist.in), `KeepAlive` + `ThrottleInterval=30`). It runs a watchdog ([`scripts/macos/colima_watchdog.sh`](../../scripts/macos/colima_watchdog.sh)) that starts the VM at boot via the idempotent [`scripts/macos/colima_start.sh`](../../scripts/macos/colima_start.sh) and restarts it within ~30s on crash/stop. The container will not come back without the Colima VM running. (Do **not** point the daemon at `colima_start.sh` directly — it exits 0 once the VM is up, which `KeepAlive` would busy-loop.) |
 | PostgreSQL | `com.ssc.postgres` LaunchDaemon (installed by `install_launchd.sh`). On a headless box `brew services` can't load a `gui/$UID` agent, so a system daemon running `postgres -D <datadir>` as `pere` is used instead. |
 | Web App | `com.ssc.webapp` LaunchDaemon (§6, `RunAtLoad` + `KeepAlive`). |
 
@@ -314,9 +316,15 @@ bash 4+ features — e.g. `scripts/backup/backup_pg_db.sh` and
 `scripts/backup/backup_orthanc_storage.sh` use `mapfile` and will fail under it.
 That is why §2 installs Homebrew `bash`; invoke those scripts with it
 (`/opt/homebrew/bin/bash scripts/backup/backup_pg_db.sh ...`) or put it first on
-`PATH`. There is no `systemd` on macOS, so the nightly backups must be wired
-through `launchd` (or `cron`) the same way the web app uses a launchd job —
-the backup **scripts** themselves are platform-agnostic.
+`PATH`. The nightly backup/health jobs themselves are already installed as
+launchd daemons by `install_launchd.sh` (§6) — the rendered plists put Homebrew
+bash/coreutils first on `PATH`.
+
+**Backup-schedule delta vs systemd:** launchd's `StartCalendarInterval` (02:15)
+does **not** fire missed runs — if the box is powered off overnight, that
+night's backup is skipped until the next 02:15 (systemd's timers use
+`Persistent=true` and catch up on boot). `check_backup_freshness.sh` /
+`com.ssc.pg-backup-freshness` flags the resulting staleness.
 
 ---
 
