@@ -28,7 +28,7 @@ audit_user_var: contextvars.ContextVar[str] = contextvars.ContextVar(
 )
 
 
-def _require_env(name: str) -> str:
+def require_env(name: str) -> str:
     """Return the value of env var *name*, or abort with a clear error."""
     value = os.getenv(name)
     if value is None or value.strip() == "":
@@ -43,8 +43,8 @@ DB_CONFIG: dict[str, str] = dict(
     host=os.getenv("DB_HOST", "localhost"),
     port=os.getenv("DB_PORT", "5432"),
     dbname=os.getenv("DB_NAME", "stanford-stroke"),
-    user=_require_env("DB_USER"),
-    password=_require_env("DB_PASSWORD"),
+    user=require_env("DB_USER"),
+    password=require_env("DB_PASSWORD"),
 )
 
 POOL_MIN = 2

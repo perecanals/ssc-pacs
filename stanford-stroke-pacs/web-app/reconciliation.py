@@ -18,16 +18,10 @@ from typing import Any
 
 import psycopg2.extras
 import requests
-from dotenv import load_dotenv
 
-_REPO_ROOT = Path(__file__).resolve().parent.parent
-load_dotenv(_REPO_ROOT / ".env")
+from orthanc_client import ORTHANC_PASS, ORTHANC_URL, ORTHANC_USER
 
 logger = logging.getLogger(__name__)
-
-ORTHANC_URL = os.getenv("ORTHANC_URL", "http://localhost:8042")
-ORTHANC_USER = os.getenv("ORTHANC_ADMIN_USER", "")
-ORTHANC_PASS = os.getenv("ORTHANC_ADMIN_PASSWORD", "")
 
 # Read-only connection to Orthanc's PostgreSQL index (same credentials the
 # Orthanc container uses, from .env). Used only to bulk-read series UIDs.

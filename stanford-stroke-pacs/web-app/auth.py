@@ -13,9 +13,9 @@ from config import (
     SESSION_ABSOLUTE_TIMEOUT_HOURS,
     SESSION_TIMEOUT_HOURS,
 )
-from db import _require_env, get_conn
+from db import get_conn, require_env
 
-JWT_SECRET = _require_env("JWT_SECRET")
+JWT_SECRET = require_env("JWT_SECRET")
 JWT_ALGORITHM = "HS256"
 JWT_EXPIRY_HOURS = SESSION_TIMEOUT_HOURS
 JWT_ABSOLUTE_TIMEOUT_SECONDS = int(SESSION_ABSOLUTE_TIMEOUT_HOURS * 3600)

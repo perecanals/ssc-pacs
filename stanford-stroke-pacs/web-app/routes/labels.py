@@ -7,7 +7,7 @@ import math
 
 import psycopg2
 import psycopg2.extras
-from fastapi import APIRouter, Cookie, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
 from auth import get_current_user
@@ -227,8 +227,10 @@ def list_label_definitions(
 
 
 @router.post("/api/label-definitions", status_code=201)
-def create_label_definition(body: LabelDefinitionCreate, auth_token: str | None = Cookie(None)):
-    username = get_current_user(auth_token)
+def create_label_definition(
+    body: LabelDefinitionCreate,
+    username: str = Depends(get_current_user),
+):
     if body.datatype not in ("bool", "int", "text", "select"):
         raise HTTPException(status_code=400, detail="datatype must be bool, int, text, or select")
     if body.level not in VALID_LEVELS:
@@ -283,7 +285,7 @@ def create_label_definition(body: LabelDefinitionCreate, auth_token: str | None 
 def update_label_definition(
     label_id: int,
     body: LabelDefinitionUpdate,
-    auth_token: str | None = Cookie(None),
+    user: str = Depends(get_current_user),
 ):
     """Edit `description` and/or `instrument` on an existing label.
 
@@ -292,8 +294,6 @@ def update_label_definition(
     annotation entity-id constraints; renaming/retyping belongs in a
     dedicated migration flow.
     """
-    get_current_user(auth_token)
-
     updates: list[str] = []
     params: list[object] = []
     fields = body.model_dump(exclude_unset=True)
@@ -354,10 +354,9 @@ def list_instruments(user: str = Depends(get_current_user)):
 
 @router.post("/api/labelled-tables/refresh")
 def refresh_labelled_tables(
-    auth_token: str | None = Cookie(None),
     level: list[str] | None = Query(None),
+    user: str = Depends(get_current_user),
 ):
-    get_current_user(auth_token)
     conn = get_conn()
     try:
         counts = rebuild_labelled_tables(conn, levels=level)

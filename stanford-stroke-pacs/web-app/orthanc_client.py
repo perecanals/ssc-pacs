@@ -1,22 +1,22 @@
-"""Thin wrapper around Orthanc REST API calls used by the web app."""
+"""Thin wrapper around Orthanc REST API calls used by the web app.
+
+Single source of truth for the Orthanc service-account credentials
+(ORTHANC_URL / ORTHANC_USER / ORTHANC_PASS) — reconciliation.py and
+routes/proxy.py import them from here.
+"""
 
 from __future__ import annotations
 
 import os
-from pathlib import Path
 from typing import Any
 
 import requests
-from dotenv import load_dotenv
 
-_REPO_ROOT = Path(__file__).resolve().parent.parent
-load_dotenv(_REPO_ROOT / ".env")
-
-from db import _require_env  # noqa: E402
+from db import require_env  # importing db loads .env
 
 ORTHANC_URL = os.getenv("ORTHANC_URL", "http://localhost:8042")
-ORTHANC_USER = _require_env("ORTHANC_ADMIN_USER")
-ORTHANC_PASS = _require_env("ORTHANC_ADMIN_PASSWORD")
+ORTHANC_USER = require_env("ORTHANC_ADMIN_USER")
+ORTHANC_PASS = require_env("ORTHANC_ADMIN_PASSWORD")
 
 
 def orthanc_lookup(studyinstanceuid: str, *, timeout: int = 5) -> list[dict[str, Any]]:

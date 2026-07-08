@@ -24,47 +24,12 @@ from cache_manager import (
     warm_series,
     warm_study,
 )
-from common import ensure_patient_access, ensure_series_access, ensure_study_access
+from common import check_patient_access, check_series_access, check_study_access
 from config import STORAGE_MODE
 from db import get_conn
 from metrics import cold_storage_evict_total, cold_storage_warm_total
 
 router = APIRouter()
-
-
-def _check_study_access(studyinstanceuid: str, scope: list[str] | None) -> None:
-    """404 if the study's patient is outside the caller's dataset scope."""
-    if scope is None:
-        return
-    conn = get_conn()
-    try:
-        with conn.cursor() as cur:
-            ensure_study_access(cur, studyinstanceuid, scope)
-    finally:
-        conn.close()
-
-
-def _check_patient_access(patient_id: str, scope: list[str] | None) -> None:
-    if scope is None:
-        return
-    conn = get_conn()
-    try:
-        with conn.cursor() as cur:
-            ensure_patient_access(cur, patient_id, scope)
-    finally:
-        conn.close()
-
-
-def _check_series_access(seriesinstanceuid: str, scope: list[str] | None) -> None:
-    """404 if the series' patient is outside the caller's dataset scope."""
-    if scope is None:
-        return
-    conn = get_conn()
-    try:
-        with conn.cursor() as cur:
-            ensure_series_access(cur, seriesinstanceuid, scope)
-    finally:
-        conn.close()
 
 
 def _filter_in_scope(uids: list[str], patient_ids: list[str], scope: list[str]):
@@ -163,7 +128,7 @@ async def api_warm_study(
     A synchronous disk-space precheck still surfaces 507 directly so
     callers get a structured error before any background work is queued.
     """
-    _check_study_access(studyinstanceuid, scope)
+    check_study_access(studyinstanceuid, scope)
 
     est = estimate_warm_disk_space(studyinstanceuid)
     if est and est["available_bytes"] < est["required_bytes"]:
@@ -195,7 +160,7 @@ def api_evict_study(
     studyinstanceuid: str,
     scope: list[str] | None = Depends(get_dataset_scope),
 ):
-    _check_study_access(studyinstanceuid, scope)
+    check_study_access(studyinstanceuid, scope)
     try:
         result = evict_study(studyinstanceuid)
     except Exception as e:
@@ -213,7 +178,7 @@ def api_cache_status(
     studyinstanceuid: str,
     scope: list[str] | None = Depends(get_dataset_scope),
 ):
-    _check_study_access(studyinstanceuid, scope)
+    check_study_access(studyinstanceuid, scope)
     return get_cache_status(studyinstanceuid)
 
 
@@ -229,7 +194,7 @@ async def api_warm_series(
     one series without waiting for its whole study. Same bounded executor pool,
     same synchronous disk-space precheck (507).
     """
-    _check_series_access(seriesinstanceuid, scope)
+    check_series_access(seriesinstanceuid, scope)
 
     est = estimate_warm_series_disk_space([seriesinstanceuid])
     if est and est["available_bytes"] < est["required_bytes"]:
@@ -259,7 +224,7 @@ def api_evict_series(
     seriesinstanceuid: str,
     scope: list[str] | None = Depends(get_dataset_scope),
 ):
-    _check_series_access(seriesinstanceuid, scope)
+    check_series_access(seriesinstanceuid, scope)
     try:
         evict_series([seriesinstanceuid])
     except Exception as e:
@@ -277,7 +242,7 @@ def api_series_cache_status(
     seriesinstanceuid: str,
     scope: list[str] | None = Depends(get_dataset_scope),
 ):
-    _check_series_access(seriesinstanceuid, scope)
+    check_series_access(seriesinstanceuid, scope)
     return get_series_cache_status(seriesinstanceuid)
 
 
@@ -295,7 +260,7 @@ async def api_warm_patient(
     the rest; clients observe progress via
     ``GET /api/patients/{id}/cache-status``.
     """
-    _check_patient_access(patient_id, scope)
+    check_patient_access(patient_id, scope)
 
     uids = list_patient_study_uids(patient_id)
     # Persist 'queued' markers up front so the whole patient shows Queued
@@ -316,7 +281,7 @@ def api_patient_cache_status(
     patient_id: str,
     scope: list[str] | None = Depends(get_dataset_scope),
 ):
-    _check_patient_access(patient_id, scope)
+    check_patient_access(patient_id, scope)
     return get_patient_cache_status(patient_id)
 
 

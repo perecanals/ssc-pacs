@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import bcrypt
-from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, Response
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel
 
 import auth as _auth
@@ -68,8 +68,7 @@ def logout(response: Response):
 
 
 @router.get("/api/me")
-def me(auth_token: str | None = Cookie(None)):
-    username = get_optional_user(auth_token)
+def me(username: str | None = Depends(get_optional_user)):
     if not username:
         return {
             "username": None,

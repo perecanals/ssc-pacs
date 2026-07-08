@@ -11,6 +11,8 @@ import re
 
 from fastapi import HTTPException
 
+from db import get_conn
+
 VALID_LEVELS = ("patient", "study", "series")
 
 LABEL_NAME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_]{0,62}$")
@@ -84,6 +86,31 @@ def ensure_series_access(cur, seriesinstanceuid: str, scope: list[str] | None) -
         "WHERE s.seriesinstanceuid = %s AND p.dataset && %s::text[]",
         seriesinstanceuid, scope, "Series not found",
     )
+
+
+def _check_access(ensure_fn, entity_id: str, scope: list[str] | None) -> None:
+    """Conn-opening variant of the ``ensure_*`` checks, for handlers that
+    have no cursor of their own. No-op for admins (scope None)."""
+    if scope is None:
+        return
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            ensure_fn(cur, entity_id, scope)
+    finally:
+        conn.close()
+
+
+def check_patient_access(patient_id: str, scope: list[str] | None) -> None:
+    _check_access(ensure_patient_access, patient_id, scope)
+
+
+def check_study_access(studyinstanceuid: str, scope: list[str] | None) -> None:
+    _check_access(ensure_study_access, studyinstanceuid, scope)
+
+
+def check_series_access(seriesinstanceuid: str, scope: list[str] | None) -> None:
+    _check_access(ensure_series_access, seriesinstanceuid, scope)
 
 
 # ---------------------------------------------------------------------------
