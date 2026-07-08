@@ -1,6 +1,6 @@
 # PACS documentation context
 
-One **Orthanc** container (`ssc-orthanc`), one **Web App** service on the host (**systemd**, port `8043`), and **two logical PostgreSQL databases** (`orthanc_db` + `stanford-stroke`).
+One **Orthanc** container (`ssc-orthanc`), one native-host **Web App** service on port `8043` (macOS launchd in production, `com.ssc.webapp`; systemd templates for Linux), and **two logical PostgreSQL databases** (`orthanc_db` + `stanford-stroke`).
 
 **Give an agent only what it needs:**
 
@@ -31,5 +31,4 @@ One **Orthanc** container (`ssc-orthanc`), one **Web App** service on the host (
 | Cold storage design | [`cold_storage/design.md`](cold_storage/design.md) |
 | Cold storage operations | [`cold_storage/runbook.md`](cold_storage/runbook.md) |
 | DICOM processing recipes (NIFTI, archive inspection, cleanup) | [`recipes/dicom_processing.md`](recipes/dicom_processing.md) |
-| Old implementation plans | [`history/`](history/) |
-| Dated changelog snapshot | [`history/current_state_changelog.md`](history/current_state_changelog.md) |
+| Dated changelog snapshot (frozen; superseded by root `CHANGELOG.md`) | [`history/current_state_changelog.md`](history/current_state_changelog.md) |

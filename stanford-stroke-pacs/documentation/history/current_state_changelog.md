@@ -1,8 +1,7 @@
 # Historical changelog (from former `current_state.md`)
 
-**Purpose:** Dated record of major documentation/system changes previously maintained in a single “current state” file. **Not** a substitute for git history or live code. For current architecture see [`../reference/architecture.md`](../reference/architecture.md).
-
-When you make significant product or doc changes, prefer updating the relevant modular doc plus git commits; append here only if you want a running human-readable log.
+> **Frozen historical decision log — superseded by the root `CHANGELOG.md` as of v1.0. Not maintained.**
+> Dated record of major system/doc changes from before the release log existed. **Not** a substitute for git history or live code. For current architecture see [`../reference/architecture.md`](../reference/architecture.md); for the release log see the root `CHANGELOG.md` (created at v1.0).
 
 ---
 
