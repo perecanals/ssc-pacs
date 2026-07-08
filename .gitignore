@@ -3,10 +3,6 @@
 **/.env
 orthanc_users.json
 **/orthanc_users.json
-maintenance
-hidden
-benchmarks
-*.sql
 
 # Python
 __pycache__/
@@ -37,20 +33,21 @@ htmlcov/
 # Benchmarks / temp
 .tmp_bench/
 **/.tmp_bench/
-stanford-stroke-pacs/benchmarks/
-rsync_backup_remote_benchmark_results.json
 
 # Migration/backup dumps
 migration_backups/
 
-# Local maintenance notes (not part of shipped repo)
-maintenance/
+# Local maintenance area (audit board, archived scripts/data, local notes —
+# not part of the shipped repo)
+/maintenance/
 
 # Ingestion protocol logs
 stanford-stroke-pacs/image_ingestion_protocols/logs/
 
 # SQL data dumps (schema only — CSV/raw data stays out)
 ssc-sql-db/tables/
+# Editor SQL scratch sessions at the repo root (DDL under ssc-sql-db/ is tracked)
+/*.session.sql
 
 # OS
 .DS_Store
