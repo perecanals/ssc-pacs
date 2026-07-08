@@ -7,12 +7,11 @@ import math
 
 import psycopg2
 import psycopg2.extras
-import psycopg2.sql as psql
 from fastapi import APIRouter, Cookie, Depends, HTTPException, Query
 from pydantic import BaseModel
 
 from auth import get_current_user
-from common import LABEL_NAME_RE, PATIENT_ID_COL, VALID_LEVELS, record_label_value
+from common import LABEL_NAME_RE, VALID_LEVELS, record_label_value
 from db import get_conn
 from labelled_table_sync import (
     find_label_column_conflict,
@@ -349,111 +348,8 @@ def list_instruments(user: str = Depends(get_current_user)):
 
 
 # ---------------------------------------------------------------------------
-# Snapshot & labelled-table refresh
+# Labelled-table refresh
 # ---------------------------------------------------------------------------
-
-
-def _rebuild_snapshots(conn):
-    """Rebuild the three snapshot tables from source data + annotations."""
-    with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-        cur.execute(
-            "SELECT name, level, datatype FROM label_definitions ORDER BY level, name"
-        )
-        label_defs = cur.fetchall()
-
-    bad_names = [
-        ld["name"] for ld in label_defs
-        if not ld.get("name") or not LABEL_NAME_RE.match(ld["name"])
-    ]
-    if bad_names:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Refusing to rebuild snapshots; label name(s) violate allowlist {LABEL_NAME_RE.pattern}: {bad_names}",
-        )
-
-    counts = {}
-
-    levels = [
-        # Snapshot uses the imaging-derived patient.stroke_date directly (not the
-        # tab's COALESCE with lvo_clinical_data) — export-oriented, divergence ok.
-        ("patient", "patient", "patient_id",
-         psql.SQL("{pid} AS patient_id, stroke_date").format(
-             pid=psql.Identifier(PATIENT_ID_COL)
-         )),
-        ("study", "image_study", "studyinstanceuid",
-         psql.SQL("patient_id, acquisitiondatetime, study_type, studyinstanceuid")),
-        ("series", "image_series", "seriesinstanceuid",
-         psql.SQL("patient_id, acquisitiondatetime, modality, seriesdescription, seriesinstanceuid")),
-    ]
-
-    for level_name, source_table, id_col, base_cols in levels:
-        snapshot_table = f"snapshot_{level_name}s"
-        snapshot_id = psql.Identifier(snapshot_table)
-        source_id = psql.Identifier(source_table)
-        id_col_id = psql.Identifier(id_col)
-        level_lit = psql.Literal(level_name)
-        level_labels = [ld for ld in label_defs if ld["level"] == level_name]
-
-        pivot_col_parts = []
-        pivot_join_parts = []
-        for i, ld in enumerate(level_labels):
-            alias_id = psql.Identifier(f"a{i}")
-            col_alias_id = psql.Identifier(f"label_{ld['name'].lower()}")
-            label_lit = psql.Literal(ld["name"])
-            pivot_col_parts.append(
-                psql.SQL("{a}.value AS {c}").format(a=alias_id, c=col_alias_id)
-            )
-            pivot_join_parts.append(
-                psql.SQL(
-                    "LEFT JOIN annotations {a} ON {a}.level = {lvl} "
-                    "AND {a}.{idc} = src.{idc} "
-                    "AND {a}.label = {lbl}"
-                ).format(
-                    a=alias_id, lvl=level_lit, idc=id_col_id, lbl=label_lit,
-                )
-            )
-
-        pivot_cols = (
-            psql.SQL(", ") + psql.SQL(", ").join(pivot_col_parts)
-            if pivot_col_parts else psql.SQL("")
-        )
-        pivot_joins = (
-            psql.SQL(" ") + psql.SQL(" ").join(pivot_join_parts)
-            if pivot_join_parts else psql.SQL("")
-        )
-
-        with conn.cursor() as cur:
-            cur.execute(psql.SQL("DROP TABLE IF EXISTS {}").format(snapshot_id))
-            cur.execute(
-                psql.SQL(
-                    "CREATE TABLE {snap} AS "
-                    "SELECT DISTINCT ON (src.{idc}) src.*{pcols} "
-                    "FROM (SELECT {base} FROM {src}) src{pjoins}"
-                ).format(
-                    snap=snapshot_id,
-                    idc=id_col_id,
-                    pcols=pivot_cols,
-                    base=base_cols,
-                    src=source_id,
-                    pjoins=pivot_joins,
-                )
-            )
-            cur.execute(psql.SQL("SELECT COUNT(*) FROM {}").format(snapshot_id))
-            counts[snapshot_table] = cur.fetchone()[0]
-
-    conn.commit()
-    return counts
-
-
-@router.post("/api/snapshots/refresh")
-def refresh_snapshots(auth_token: str | None = Cookie(None)):
-    get_current_user(auth_token)
-    conn = get_conn()
-    try:
-        counts = _rebuild_snapshots(conn)
-        return {"ok": True, "counts": counts}
-    finally:
-        conn.close()
 
 
 @router.post("/api/labelled-tables/refresh")

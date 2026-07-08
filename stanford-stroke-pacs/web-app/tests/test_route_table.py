@@ -65,7 +65,6 @@ EXPECTED_ROUTES = {
     # User dataset permissions (admin page + script-facing API).
     ("GET", "/api/admin/users"),
     ("PUT", "/api/admin/users/{username}/datasets"),
-    ("POST", "/api/snapshots/refresh"),
     ("POST", "/api/labelled-tables/refresh"),
     # Reverse-proxy routes to Orthanc (added 2026-05-13).
     ("GET", "/ohif"),
