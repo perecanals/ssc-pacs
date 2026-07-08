@@ -691,6 +691,20 @@ function DataTableInner({
   );
 }
 
+DataTableInner.propTypes = {
+  level: PropTypes.oneOf(["patient", "study", "series"]).isRequired,
+  filters: PropTypes.object.isRequired,
+  onResetSidebarFilters: PropTypes.func,
+  onPreviewSelect: PropTypes.func,
+  activeRowKey: PropTypes.string,
+  toolbarPortalTarget: PropTypes.instanceOf(Element),
+  previewOpen: PropTypes.bool,
+  previewUrl: PropTypes.string,
+  onPreviewClose: PropTypes.func,
+  onLabelsMutated: PropTypes.func,
+  serverPrefs: PropTypes.object.isRequired,
+};
+
 export default function DataTable(props) {
   const { currentUser } = useAuth();
   const [serverPrefs, setServerPrefs] = useState(undefined);
