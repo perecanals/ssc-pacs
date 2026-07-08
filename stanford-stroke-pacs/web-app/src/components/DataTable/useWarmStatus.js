@@ -8,6 +8,16 @@ import {
 
 const POLL_MS = 4000;
 
+// Shallow object equality — used to keep state identity stable across polls
+// that report no change, so an idle table doesn't re-render every tick.
+function shallowEqual(a, b) {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  const ka = Object.keys(a);
+  if (ka.length !== Object.keys(b).length) return false;
+  return ka.every((k) => a[k] === b[k]);
+}
+
 // Tracks cold/queued/warming/hot/error for the study and patient rows currently
 // on screen, so raters can pre-warm a queue and see at a glance what's ready.
 // One batched cache-status request per tick covers every visible row (no
@@ -50,7 +60,7 @@ export default function useWarmStatus({ enabled, studyUids, patientIds, seriesUi
               next[uid] = st;
             }
           }
-          return next;
+          return shallowEqual(next, prev) ? prev : next;
         });
       }
       if (data.series) {
@@ -66,7 +76,7 @@ export default function useWarmStatus({ enabled, studyUids, patientIds, seriesUi
               next[uid] = st;
             }
           }
-          return next;
+          return shallowEqual(next, prev) ? prev : next;
         });
       }
       if (data.patients) {
@@ -80,13 +90,15 @@ export default function useWarmStatus({ enabled, studyUids, patientIds, seriesUi
             const active = summary.warming > 0 || summary.queued > 0
               || (total > 0 && summary.hot >= total) || summary.error > 0;
             if (active) requestedPatients.current.delete(pid);
+            let candidate = summary;
             if (!active && requestedPatients.current.has(pid)) {
-              next[pid] = { ...summary, queued: Math.max(total - (summary.hot || 0), 1) };
-            } else {
-              next[pid] = summary;
+              candidate = { ...summary, queued: Math.max(total - (summary.hot || 0), 1) };
             }
+            // Summaries are fresh objects every poll — keep the previous
+            // object when nothing changed so state identity stays stable.
+            next[pid] = shallowEqual(candidate, prev[pid]) ? prev[pid] : candidate;
           }
-          return next;
+          return shallowEqual(next, prev) ? prev : next;
         });
       }
     } catch {

@@ -24,7 +24,7 @@ function deriveState(status, summary) {
   return status || "cold";
 }
 
-export default function WarmButton({ status, summary, onWarm, baseClass }) {
+export default function WarmButton({ status, summary, onWarm, baseClass = "link-btn" }) {
   const state = deriveState(status, summary);
   const label = {
     cold: "Decompress",
@@ -66,8 +66,4 @@ WarmButton.propTypes = {
   }),
   onWarm: PropTypes.func.isRequired,
   baseClass: PropTypes.string,
-};
-
-WarmButton.defaultProps = {
-  baseClass: "link-btn",
 };
