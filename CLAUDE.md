@@ -69,13 +69,13 @@ ssc-pacs/                     # git checkout root (Makefile, CI, root scripts)
 
 ## Services and ports
 
-Production runs on **macOS via launchd** (`com.ssc.*` LaunchDaemons); the repo also ships Linux `systemd` unit templates (`systemd/*.in`) for portability.
+Production runs on **Linux via systemd** (`ssc-web-app.service` + the `systemd/*.in` unit/timer templates); the repo also ships macOS `launchd` templates (`launchd/*`, `com.ssc.*`) from the previous Mac deployment.
 
 | Service | How it runs (production) | Port |
 |---------|--------------------------|------|
 | Orthanc (`ssc-orthanc`) | Docker (`ssc-orthanc:patched-indexer`) | HTTP `8042`, DICOM `4242` |
-| Web App | launchd `com.ssc.webapp`, uvicorn (Linux: `ssc-web-app.service`) | HTTP `8043` |
-| PostgreSQL | host `com.ssc.postgres` (Homebrew) | from `.env` |
+| Web App | systemd `ssc-web-app.service`, uvicorn (macOS: `com.ssc.webapp`) | HTTP `8043` |
+| PostgreSQL | host `postgresql18.service` (macOS: `com.ssc.postgres`, Homebrew) | from `.env` |
 
 User-facing URLs (via SSH tunnel or localhost):
 - `http://localhost:8042/ui/app/` — Orthanc Explorer 2
@@ -89,16 +89,16 @@ Daily drivers below; the full day-2 sheet is `documentation/operations/commands.
 
 ### Orthanc (Docker)
 ```bash
-scripts/orthanc/dc.sh up -d       # wrapper: resolves the DICOM mount + macOS override.
+scripts/orthanc/dc.sh up -d       # wrapper: resolves the DICOM mount (+ macOS override on Mac).
 scripts/orthanc/dc.sh down        # Use instead of bare `docker compose`, which errors on
                                   # the unset DICOM_MOUNT_SOURCE guard.
 scripts/orthanc/check_status.sh   # status, API, plugins
 ```
 
-### Web App (launchd — production)
+### Web App (systemd — production)
 ```bash
-sudo launchctl kickstart -k system/com.ssc.webapp   # restart (Linux: sudo systemctl restart ssc-web-app)
-tail -f ~/Library/Logs/ssc-web-app.log              # logs (.err = stderr)
+sudo systemctl restart ssc-web-app     # restart (macOS: sudo launchctl kickstart -k system/com.ssc.webapp)
+journalctl -u ssc-web-app -f           # logs (macOS: tail -f ~/Library/Logs/ssc-web-app.log)
 ```
 
 ### Web App development (hot-reload)
