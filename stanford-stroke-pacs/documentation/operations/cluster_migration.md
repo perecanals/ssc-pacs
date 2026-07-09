@@ -165,9 +165,24 @@ something reads them (e.g. warming records each series' `cache_path` from its
 | `image_series_labelled` (labelled mirror) | `dicom_dir_path`, `nifti_path` | `dicom_archive_path` |
 | `image_study_labelled` (labelled mirror) | `study_path` | — |
 
-The `/DATA2/... → /Users/you/pacs/...` prefixes below are the **worked example
-from the 2026-06 Linux→macOS port** — substitute your own source/target roots
-(the target must equal the new `config.toml` `[storage]` roots).
+**Preferred: `scripts/migration/repoint_host_paths.py`.** It does exactly the
+rewrite below, but scripted and safer — reads the *new* roots from `config.toml`,
+auto-detects the *old* roots from the data, swaps only the leading prefix
+(`new || substring(...)`, so the tail is preserved exactly rather than
+string-replaced), runs every column in one transaction, resets
+`series_cache_state` to cold, and re-audits before committing. Dry-run by default:
+
+```bash
+python scripts/migration/repoint_host_paths.py            # dry-run: prints the plan, rolls back
+python scripts/migration/repoint_host_paths.py --apply    # commit
+# override auto-detect if needed:
+python scripts/migration/repoint_host_paths.py --old-loose <OLD_IMG> --old-archive <OLD_COMP> --apply
+```
+
+The manual SQL below is the equivalent reference (and fallback). The
+`/DATA2/... → /Users/you/pacs/...` prefixes are the **worked example from the
+2026-06 Linux→macOS port** — substitute your own source/target roots (the target
+must equal the new `config.toml` `[storage]` roots).
 
 ```sql
 -- Loose-tree prefix. The '…/pacs_imaging_data/%' guard (trailing slash) excludes
