@@ -26,8 +26,8 @@ by default and applies only with `--execute`; interactive prompts have a
 | `data_integrity/` | Cross-store audits (see matrix below) | `reconcile.py`, `dicom_path_sql_fs_audit.py`, `disk_vs_db_series_audit.py`, `detect_mixed_dirs.py` |
 | `dicom/` | DICOM conversion utilities | `dicom_to_nifti.py` |
 | `linux/` | Linux deploy path (systemd units) | `install_systemd.sh` |
-| `macos/` | macOS host tooling (Colima, launchd, disks) | `colima_start.sh`, `colima_watchdog.sh`, `install_launchd.sh`, `mount_drives.sh` |
-| `migration/` | Port the stack to a new host (e.g. Linux→Mac) | `reconcile_migration.py` |
+| `macos/` | macOS host tooling (Colima, launchd, disks) | `colima_start.sh`, `colima_watchdog.sh`, `install_launchd.sh` |
+| `migration/` | Port the stack to a new host (e.g. Linux→Mac) | `repoint_host_paths.py`, `reconcile_migration.py` |
 | `orthanc/` | Compose wrapper, enrichment, labelling, status check | `dc.sh`, `enrich_orthanc.py`, `label_studies.py`, `check_status.sh` |
 
 `_lib.sh` holds the shared shell helpers (`STACK_DIR`, `config_get`,
@@ -70,6 +70,10 @@ python scripts/admin/bulk_set_label_values.py --file x.csv --level series \
 # Two-DB reconciliation
 python scripts/data_integrity/reconcile.py
 python scripts/data_integrity/reconcile.py --json
+
+# Repoint host paths after a port (dry-run by default; --apply to commit)
+python scripts/migration/repoint_host_paths.py
+python scripts/migration/repoint_host_paths.py --apply
 
 # Post-migration reconciliation (run on the target host after a port)
 python scripts/migration/reconcile_migration.py
