@@ -72,3 +72,5 @@ deploy.env
 stanford-stroke-pacs/image_ingestion_protocols/execute_image_ingestion_protocol.yaml
 # Per-batch configs derived from the base YAML by run_all_batches.sh
 stanford-stroke-pacs/image_ingestion_protocols/batch_configs/
+# Host-specific, temporary batch-run driver (not part of the shipped pipeline)
+stanford-stroke-pacs/image_ingestion_protocols/run_all_batches.sh
