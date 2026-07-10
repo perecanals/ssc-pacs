@@ -57,7 +57,7 @@ ssc-pacs/                     # git checkout root (Makefile, CI, root scripts)
 │   │   ├── data_integrity/   # reconcile.py, dicom_path_sql_fs_audit.py, disk_vs_db_series_audit.py, detect_mixed_dirs.py
 │   │   ├── dicom/            # dicom_to_nifti.py
 │   │   ├── orthanc/          # dc.sh, enrich_orthanc.py, label_studies.py, check_status.sh
-│   │   ├── linux/ · macos/   # install_systemd.sh · install_launchd.sh, colima + mount helpers
+│   │   ├── linux/ · macos/   # install_systemd.sh · install_launchd.sh, colima helpers, stop_stack.sh/start_stack.sh
 │   │   └── migration/        # reconcile_migration.py
 │   ├── deploy/               # systemd/ + launchd/ service + timer templates (*.in), rendered by the installers
 │   ├── orthanc_users.json    # Service account + admin users only (managed by manage_users.py — never edit manually)

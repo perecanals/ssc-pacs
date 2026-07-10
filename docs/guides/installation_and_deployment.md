@@ -587,6 +587,37 @@ Backups land under `[backup].backup_root` from `config.toml`. Full mechanism, re
 [`../operations/backup_strategy.md`](../operations/backup_strategy.md) and
 [`../operations/restore_runbook.md`](../operations/restore_runbook.md).
 
+### 9.1 Stopping / restarting the whole stack
+
+To pause the stack **without destroying anything**, use the helper — it stops
+the scheduled timers, then the web app, then Orthanc (`dc.sh down`), in order:
+
+```bash
+sudo scripts/linux/stop_stack.sh            # stop; units still autostart on boot
+scripts/linux/stop_stack.sh --dry-run       # print the exact sequence, change nothing
+```
+
+The shared host services — **dockerd** and **PostgreSQL**
+(`postgresql18.service`) — are left running, since other things on the box may
+use them (the script prints the one-line opt-in to stop Postgres too if you are
+powering the whole machine down).
+
+Bring it back with the inverse helper (Orthanc first, so the web app's DICOMweb
+proxy has a target):
+
+```bash
+sudo scripts/linux/start_stack.sh
+```
+
+`stop_stack.sh --retire` additionally `systemctl disable`s the web app + timers
+so they do **not** autostart on boot; undo that with
+`sudo scripts/linux/start_stack.sh --enable`.
+
+> **Stop ≠ teardown.** These helpers only *pause* the stack. To *destroy* it
+> (remove the Orthanc container, its storage volume, and the DB) use
+> [`scripts/admin/teardown.sh`](../../stanford-stroke-pacs/scripts/admin/teardown.sh)
+> — a deliberately separate, confirmation-guarded, destructive operation.
+
 ---
 
 ## 10. What is not part of standard redeployment

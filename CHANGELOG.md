@@ -1,5 +1,16 @@
 # Changelog
 
+## v1.1 — 2026-07-10
+
+- **Ops**: added non-destructive whole-stack stop/start helpers for both
+  platforms — `scripts/{linux,macos}/stop_stack.sh` and `start_stack.sh`. They
+  pause/resume every service in dependency order (macOS handles the
+  watchdog-before-`colima stop` ordering; Linux leaves shared dockerd + host
+  Postgres running), support `--dry-run`, and a `--retire`/`--enable` pair to
+  toggle boot autostart. Distinct from the destructive `admin/teardown.sh`.
+- **Docs**: documented "Stopping / retiring the stack" in the macOS and Linux
+  deploy guides and the day-2 commands cheat sheet. No schema change.
+
 ## v1.0 — 2026-07-08
 
 First tagged release, cutting over from the pre-tag history. Consolidates a

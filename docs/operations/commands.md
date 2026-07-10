@@ -84,6 +84,30 @@ sudo scripts/macos/install_launchd.sh
 > The service units are installed from `*.in` templates by the installer
 > scripts above — not by hand-copying files into `/etc` or `/Library`.
 
+### Whole stack (non-destructive stop / start)
+
+Pause or resume every service at once (does **not** remove containers, volumes,
+or data — for the destructive path use `scripts/admin/teardown.sh`). Add
+`--dry-run` to any of these to print the sequence without touching anything.
+
+**Linux (systemd):** leaves shared dockerd + host Postgres running.
+
+```bash
+sudo scripts/linux/stop_stack.sh            # timers → web app → Orthanc (dc.sh down)
+sudo scripts/linux/start_stack.sh           # Orthanc → web app → timers
+sudo scripts/linux/stop_stack.sh --retire   # also disable autostart on boot
+sudo scripts/linux/start_stack.sh --enable  # start AND re-enable autostart
+```
+
+**macOS (launchd) — alternative:** boots out the daemons (handles the
+watchdog-before-`colima stop` ordering); Postgres stopped last.
+
+```bash
+sudo scripts/macos/stop_stack.sh            # daemons → web app → Orthanc → Colima → Postgres
+sudo scripts/macos/start_stack.sh           # bootstrap all daemons (Colima first)
+sudo scripts/macos/stop_stack.sh --retire   # also launchctl disable (permanent retirement)
+```
+
 ---
 
 ## User management

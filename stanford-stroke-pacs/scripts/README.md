@@ -25,8 +25,8 @@ by default and applies only with `--execute`; interactive prompts have a
 | `connectivity/` | Sanitized SSH tunnel templates for end users (per OS) | `tunnel/{linux,macos,windows}/tunnel.*` |
 | `data_integrity/` | Cross-store audits (see matrix below) | `reconcile.py`, `dicom_path_sql_fs_audit.py`, `disk_vs_db_series_audit.py`, `detect_mixed_dirs.py` |
 | `dicom/` | DICOM conversion utilities | `dicom_to_nifti.py` |
-| `linux/` | Linux deploy path (systemd units) | `install_systemd.sh` |
-| `macos/` | macOS host tooling (Colima, launchd, disks) | `colima_start.sh`, `colima_watchdog.sh`, `install_launchd.sh` |
+| `linux/` | Linux deploy path (systemd units) + whole-stack control | `install_systemd.sh`, `stop_stack.sh`, `start_stack.sh` |
+| `macos/` | macOS host tooling (Colima, launchd, disks) + whole-stack control | `colima_start.sh`, `colima_watchdog.sh`, `install_launchd.sh`, `stop_stack.sh`, `start_stack.sh` |
 | `migration/` | Port the stack to a new host | `repoint_host_paths.py`, `reconcile_migration.py` |
 | `orthanc/` | Compose wrapper, status check | `dc.sh`, `check_status.sh` |
 

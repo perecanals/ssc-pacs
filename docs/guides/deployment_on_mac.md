@@ -327,7 +327,48 @@ night's backup is skipped until the next 02:15 (systemd's timers use
 
 ---
 
-## 9. Validation
+## 9. Stopping / retiring the stack
+
+To pause the whole stack **without destroying anything** (containers, volumes,
+and the DB stay intact), use the helper — it stops every service in the right
+order:
+
+```bash
+sudo scripts/macos/stop_stack.sh            # stop; services return on next reboot
+scripts/macos/stop_stack.sh --dry-run       # print the exact sequence, change nothing
+```
+
+It boots out the scheduled backup/health daemons, then the web app, stops the
+Orthanc container, then Colima, and finally Postgres (last, so the DB outlives
+the app layer). One gotcha it handles for you: **`com.ssc.colima` must be booted
+out before `colima stop`** — the watchdog (§7) otherwise restarts the VM within
+~30 s.
+
+Bring it back with the inverse helper (or just reboot — every daemon is
+`RunAtLoad`):
+
+```bash
+sudo scripts/macos/start_stack.sh
+```
+
+**Permanently retiring this Mac.** `--retire` additionally
+`launchctl disable`s each daemon so the stack does **not** come back on reboot:
+
+```bash
+sudo scripts/macos/stop_stack.sh --retire
+```
+
+Undo that later with `sudo scripts/macos/start_stack.sh` (it re-enables before
+bootstrapping).
+
+> **Stop ≠ teardown.** These helpers only *pause* the stack. To *destroy* it
+> (remove the Orthanc container, its storage volume, and the DB) use
+> [`scripts/admin/teardown.sh`](../../stanford-stroke-pacs/scripts/admin/teardown.sh)
+> — a deliberately separate, confirmation-guarded, destructive operation.
+
+---
+
+## 10. Validation
 
 No SSH tunnel is needed on a local Mac — browse directly. `cookie_secure` is
 already `false` in `config.toml` (with a note that Safari rejects Secure
