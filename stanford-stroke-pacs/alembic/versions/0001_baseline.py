@@ -24,7 +24,7 @@ ALTER:
     baseline that mirrors prod satisfies that gate exactly.
   - In production this revision is applied via `alembic stamp 0001_baseline`
     (no DDL runs); on a fresh DB it runs the full block. See
-    `documentation/operations/schema_migrations.md`.
+    `docs/operations/schema_migrations.md`.
 
 Tables created here fall in three groups:
 

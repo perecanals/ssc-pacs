@@ -13,7 +13,7 @@ middleware sets this session variable at the start of each request's
 transaction via ``SET LOCAL``.
 
 See workstream 12 (annotation audit trail) and
-``documentation/operations/annotation_history.md``.
+``docs/operations/annotation_history.md``.
 """
 from collections.abc import Sequence
 

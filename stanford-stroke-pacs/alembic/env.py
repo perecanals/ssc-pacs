@@ -23,18 +23,16 @@ from sqlalchemy import engine_from_config, pool
 from alembic import context
 
 # --- Path bootstrap ----------------------------------------------------------
-# env.py runs with CWD set wherever the caller invokes alembic from. Make sure
-# we can import the repo's `config.py` (one level above `web-app/`) and pick
-# up `.env` consistently.
-_WEB_APP_DIR = Path(__file__).resolve().parent.parent
-_REPO_ROOT = _WEB_APP_DIR.parent
-for p in (_WEB_APP_DIR, _REPO_ROOT):
+# alembic/ sits at the stack root; add it + web-app/ to sys.path and load .env.
+_STACK_ROOT = Path(__file__).resolve().parent.parent
+_WEB_APP_DIR = _STACK_ROOT / "web-app"
+for p in (_WEB_APP_DIR, _STACK_ROOT):
     if str(p) not in sys.path:
         sys.path.insert(0, str(p))
 
 from dotenv import load_dotenv  # noqa: E402
 
-load_dotenv(_REPO_ROOT / ".env")
+load_dotenv(_STACK_ROOT / ".env")
 
 
 # --- Alembic config ----------------------------------------------------------

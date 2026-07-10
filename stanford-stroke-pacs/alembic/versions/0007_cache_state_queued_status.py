@@ -12,8 +12,6 @@ the executor queue itself is not observable. `warm_study()` flips
 'queued'->'warming' when a worker actually begins extraction, and
 `reap_stale_warming()` ages out orphaned 'queued' rows (e.g. if the app
 restarts and drops its in-memory queue) back to 'cold'.
-
-See workstream `maintenance/workstreams/05-cold-storage-robustness.md`.
 """
 from collections.abc import Sequence
 

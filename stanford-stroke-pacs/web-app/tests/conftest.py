@@ -84,7 +84,7 @@ def test_db():
     admin.close()
 
     # Point the Alembic env at the test DB via DATABASE_URL override
-    # (see web-app/alembic/env.py — it checks this var first).
+    # (see alembic/env.py — it checks this var first).
     from urllib.parse import quote_plus
 
     db_url = (
@@ -94,11 +94,10 @@ def test_db():
     old_url = os.environ.get("DATABASE_URL")
     os.environ["DATABASE_URL"] = db_url
 
+    from alembic import command
     from alembic.config import Config
 
-    from alembic import command
-
-    cfg = Config(str(_WEB_APP_DIR / "alembic.ini"))
+    cfg = Config(str(_REPO_ROOT / "alembic.ini"))
     command.upgrade(cfg, "head")
 
     if old_url is None:

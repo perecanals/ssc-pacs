@@ -30,14 +30,15 @@ logger = logging.getLogger(__name__)
 
 DIST_DIR = Path(__file__).parent / "dist"
 
-_ALEMBIC_INI = Path(__file__).resolve().parent / "alembic.ini"
+# Alembic lives at the stack root; the web-app runs `upgrade head` at startup.
+_ALEMBIC_INI = Path(__file__).resolve().parent.parent / "alembic.ini"
 
 
 def _init_db():
     """Bring the DB schema up to date, then sync the dynamic labelled tables."""
+    from alembic import command
     from alembic.config import Config
 
-    from alembic import command
     from labelled_table_sync import ensure_labelled_tables
 
     cfg = Config(str(_ALEMBIC_INI))

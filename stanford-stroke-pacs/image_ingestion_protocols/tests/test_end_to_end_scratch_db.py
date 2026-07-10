@@ -2,9 +2,11 @@
 
 Gated: skipped unless SSC_INGEST_AUDIT=1 (needs local Postgres with the .env
 credentials, same prerequisite as make test-backend). Creates a scratch
-database (ssc_ingest_audit_test) from the ssc-sql-db DDL mirrors, drives the
-protocol class directly against scratch dicom/cold roots — no executor, no
-Orthanc, no production paths — and drops the database afterwards.
+database (ssc_ingest_audit_test) whose schema is built from the Alembic
+migrations (`alembic upgrade head`, the single source of truth for the
+stanford-stroke DDL), drives the protocol class directly against scratch
+dicom/cold roots — no executor, no Orthanc, no production paths — and drops the
+database afterwards.
 
 Run with: SSC_INGEST_AUDIT=1 pytest tests/test_end_to_end_scratch_db.py
 """
@@ -22,7 +24,6 @@ pytestmark = pytest.mark.skipif(
 
 _PKG_DIR = Path(__file__).resolve().parents[1]
 _REPO_ROOT = _PKG_DIR.parent          # stanford-stroke-pacs/
-_DDL_DIR = _REPO_ROOT.parent / "ssc-sql-db"
 SCRATCH_DB = "ssc_ingest_audit_test"
 
 STUDY_UIDS = {"11-001": "1.9.1.1", "11-002": "1.9.2.1"}
@@ -47,6 +48,26 @@ def _env_creds():
     }
 
 
+def _alembic_upgrade(database_url):
+    """Build the full stanford-stroke schema in the scratch DB from the Alembic
+    migrations — the single source of truth for the DDL. env.py honours
+    DATABASE_URL for scratch runs, so we point it at the scratch DB and run
+    `upgrade head` exactly as a fresh install would."""
+    from alembic import command
+    from alembic.config import Config
+
+    alembic_ini = _REPO_ROOT / "alembic.ini"
+    prev = os.environ.get("DATABASE_URL")
+    os.environ["DATABASE_URL"] = database_url
+    try:
+        command.upgrade(Config(str(alembic_ini)), "head")
+    finally:
+        if prev is None:
+            os.environ.pop("DATABASE_URL", None)
+        else:
+            os.environ["DATABASE_URL"] = prev
+
+
 @pytest.fixture(scope="module")
 def scratch_engine():
     import psycopg2
@@ -60,23 +81,21 @@ def scratch_engine():
         cur.execute(f"CREATE DATABASE {SCRATCH_DB}")
     admin.close()
 
-    engine = create_engine(
+    scratch_url = (
         f"postgresql://{quote_plus(creds['user'])}:{quote_plus(creds['password'])}"
         f"@{creds['host']}:{creds['port']}/{SCRATCH_DB}"
     )
+    # Full schema (upstream image_series/image_study/patient + lvo_clinical_data
+    # + web-app tables) straight from the migrations — no hand-maintained mirror.
+    _alembic_upgrade(scratch_url)
+
+    engine = create_engine(scratch_url)
     with engine.begin() as conn:
-        for ddl in ("create_image_series.sql", "create_image_study.sql",
-                    "create_patient.sql"):
-            sql = "\n".join(
-                line for line in (_DDL_DIR / ddl).read_text().splitlines()
-                if not line.startswith("\\")  # strip psql meta-commands
-            )
-            conn.execute(text(sql))
+        # 11-001 clinically matched; 11-002 deliberately unmatched. The protocol
+        # reads only study_id + stroke_date from the (wide) lvo_clinical_data.
         conn.execute(text(
-            "CREATE TABLE lvo_clinical_data (study_id text, stroke_date date)"))
-        # 11-001 clinically matched; 11-002 deliberately unmatched.
-        conn.execute(text(
-            "INSERT INTO lvo_clinical_data VALUES ('11-001', '2026-01-01')"))
+            "INSERT INTO lvo_clinical_data (study_id, stroke_date) "
+            "VALUES ('11-001', '2026-01-01')"))
 
     yield engine
 

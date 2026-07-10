@@ -8,8 +8,6 @@ Adds `cache_state.warming_started_at TIMESTAMPTZ`. The cache manager
 sets it whenever a row transitions to `status='warming'`. The watchdog
 in `warm_study()` uses it to detect rows stuck in `warming` after a
 crash and treats them as cold once `WARMING_TIMEOUT_MINUTES` elapses.
-
-See workstream `maintenance/workstreams/05-cold-storage-robustness.md`.
 """
 from collections.abc import Sequence
 
