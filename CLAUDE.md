@@ -4,6 +4,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **Never run `sudo` commands yourself** — there is no terminal to enter the password, so they always fail. Ask the user to run them (suggest the `! <command>` prefix so the output lands in the session).
 
+**Never put a password (or other secret) on a command line** — it lands in shell history and the session transcript. Don't `grep`/`cat` secrets out of `.env` into visible output either. Source them instead so the value never appears: `set -a; . stanford-stroke-pacs/.env; set +a` then use `$DB_PASSWORD`/`$PGPASSWORD` (psql reads `PGPASSWORD` from the environment). For a one-off: `env $(grep -v '^#' stanford-stroke-pacs/.env | xargs) psql ...`.
+
 ## Versioning and commits
 
 - **Commits**: `area: imperative summary` (e.g. `web-app: fix healthz version`,
