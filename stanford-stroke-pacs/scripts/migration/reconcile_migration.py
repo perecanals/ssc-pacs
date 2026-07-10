@@ -23,7 +23,7 @@ index-vs-metadata diff (it also feeds the Prometheus gauges):
 
     python scripts/data_integrity/reconcile.py
 
-See documentation/operations/cluster_migration.md for the full runbook.
+See docs/operations/cluster_migration.md for the full runbook.
 
 Usage:
     python scripts/migration/reconcile_migration.py

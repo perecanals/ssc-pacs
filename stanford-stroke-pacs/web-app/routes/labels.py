@@ -61,7 +61,7 @@ def labels_summary(
 ):
     # Note: summary counts are global (not narrowed to the caller's dataset
     # scope) — label names and aggregate counts only, no patient identifiers
-    # or values. Documented limitation; see documentation/reference/web_app.md.
+    # or values. Documented limitation; see docs/reference/web_app.md.
     conn = get_conn()
     try:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:

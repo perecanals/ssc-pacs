@@ -9,8 +9,7 @@
 > Postgres).
 
 > **Directory terms used below.** The git checkout root (`ssc-pacs/`) holds
-> `ssc-sql-db/`, the `Makefile`, and a repo-root `requirements.txt` scoped to
-> the `ssc-sql-db/` import helpers. The **stack root** is
+> the `Makefile` and CI. The **stack root** is
 > `stanford-stroke-pacs/` inside it — `.env`, `config.toml`,
 > `docker-compose.yml`, `scripts/`, `web-app/`, and the stack
 > `requirements.txt` all live there. Commands below run from the **stack
@@ -52,7 +51,7 @@ If unsure, you are doing a fresh install.
 ## 1. Schema vs. data — what this runbook does and doesn't create
 
 For a **fresh install**, this runbook creates the databases, roles, and **table
-schema** for you (§3, from `ssc-sql-db/`) — you do **not** need a pre-existing
+schema** for you (§3, via Alembic) — you do **not** need a pre-existing
 metadata layer. What you must supply is the *content*: real rows in the upstream
 `patient` / `image_study` / `image_series` tables (loaded from your source
 metadata or the ingestion pipeline — §5 Step 3d) and the matching DICOM tree on
@@ -129,7 +128,7 @@ repo path, conda python) is auto-derived by the installers and overridable in
 
 ## 4. Expected source metadata tables
 
-The upstream table **schema** is created in §5 Step 3c (from `ssc-sql-db/`). This
+The upstream table **schema** is created in §5 Step 3c (by Alembic). This
 section documents the **columns the code actually reads**, so you can map your
 source data onto them when loading rows (§5 Step 3d). For the full web app
 workflow `image_series` and `image_study` must be populated.
@@ -171,9 +170,7 @@ python3 -m pip install -r requirements.txt
 
 This installs the dependencies needed by the stack's helper scripts, e.g.:
 
-- `scripts/admin/manage_users.py` (needs `bcrypt` — only in this file, not the
-  checkout-root `requirements.txt`, which covers just the `ssc-sql-db/` import
-  helpers)
+- `scripts/admin/manage_users.py` (needs `bcrypt`)
 - `scripts/orthanc/enrich_orthanc.py`
 - `scripts/orthanc/label_studies.py`
 
@@ -252,30 +249,27 @@ CREATE DATABASE "stanford-stroke" OWNER "<DB_USER>";
 
 Optionally tighten the runtime role afterwards: `ALTER ROLE "<DB_USER>" NOCREATEDB NOCREATEROLE;`
 
-**3c. Create the upstream table schema in `stanford-stroke`.** The DDL lives in
-`ssc-sql-db/` (table definitions only — no data, each script `\connect`s to the
-DB):
+**3c. Create the schema in `stanford-stroke`.** Alembic is the single source of
+truth for the DDL — one `upgrade head` creates the upstream `patient` /
+`image_study` / `image_series` tables, the `lvo_clinical_data` side-table, and
+the web-app-owned tables. `web-app/app.py` runs `alembic upgrade head`
+automatically at first startup (Step 8), so you can skip ahead. Run it manually
+now only if you want the upstream spine to exist before loading data in Step 3d:
 
 ```bash
-# Run from stanford-stroke-pacs/ (ssc-sql-db/ lives at the repo root, one level up):
-psql -d stanford-stroke -f ../ssc-sql-db/create_patient.sql
-psql -d stanford-stroke -f ../ssc-sql-db/create_image_study.sql
-psql -d stanford-stroke -f ../ssc-sql-db/create_image_series.sql
-# Optional, site-specific clinical side-table (load via ssc-sql-db/import_lvo_table_to_psql.sh):
-#   creates public.lvo_clinical_data
+# From the stack root stanford-stroke-pacs/, with .env present (env.py reads DB_* from it):
+conda activate ssc-pacs
+alembic upgrade head
 ```
 
-> The **web-app-owned** tables are **not** created here — `web-app/app.py` runs
-> Alembic `upgrade head` automatically at first startup (Step 8) and creates
-> them, including a `CREATE TABLE IF NOT EXISTS patient` safety net (revision
-> `0006`). Running 3c first is still recommended so the upstream spine exists
-> before you load data.
+> `alembic upgrade head` is idempotent, so the automatic run at first startup
+> (Step 8) is a no-op if you ran it here.
 
 **3d. Load the upstream data.** Creating the tables does **not** populate them.
 Load your real `patient` / `image_study` / `image_series` rows from your source
-(CSV import via `ssc-sql-db/import_csv_to_postgres.py`, a dump from an existing
-system, or the site-specific `image_ingestion_protocols/` pipeline). The web
-app browses these tables, so it will be empty until they are populated.
+(a dump from an existing system, your own CSV loader, or the site-specific
+`image_ingestion_protocols/` pipeline). The web app browses these tables, so it
+will be empty until they are populated.
 
 ### Step 4. Create the first admin user and the Orthanc service account
 
@@ -344,7 +338,7 @@ cd web-app && npm ci && npm run build
 
 ### Step 8. Install and start the web app + timers (systemd)
 
-The units ship as **templates** (`systemd/*.in`) with `__TOKENS__` for the
+The units ship as **templates** (`deploy/systemd/*.in`) with `__TOKENS__` for the
 per-host bits. The installer resolves user/repo/python automatically (override in
 `deploy.env`), renders the templates into `/etc/systemd/system/`, and enables the
 web app plus the backup/health timers (reconciliation is on-demand only — no
@@ -355,7 +349,7 @@ scripts/linux/install_systemd.sh --dry-run    # preview the rendered units
 sudo scripts/linux/install_systemd.sh         # render + install + enable
 ```
 
-This replaces the old `sudo cp systemd/ssc-web-app.service …` step (and the
+This replaces the old `sudo cp deploy/systemd/ssc-web-app.service …` step (and the
 separate backup-timer copy in §9) — one command installs everything. The dormant
 `cold-archive-mirror.timer` is left disabled by default.
 
@@ -370,7 +364,7 @@ idle and a fresh deploy indexes **nothing** until you trigger it. Pick one:
   this per case, and `scripts/cold_storage/scoped_index.py` /
   `scripts/cold_storage/reindex_missing_series.py` do it in bulk (bounded
   passes — large unbounded registrations can OOM the container; see
-  `documentation/cold_storage/`).
+  `docs/cold_storage/`).
 - **Continuous scan (upstream behavior):** set
   `"Folders": ["/dicom-data"]` in `orthanc.json` and restart Orthanc; the
   indexer then scans on startup and every `Interval` seconds. Suitable for a

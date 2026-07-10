@@ -318,4 +318,4 @@ maintained (eventually consistent) by `web-app/labelled_table_sync.py` — the
 frontend never reads them directly, so annotation edits stay immediate in the
 live table.
 
-**Table DDL, indexes, and cold-storage columns** are documented in [`data_stores.md`](data_stores.md); migrations are managed via Alembic (`web-app/alembic/`).
+**Table DDL, indexes, and cold-storage columns** are documented in [`data_stores.md`](data_stores.md); migrations are managed via Alembic (`alembic/`).

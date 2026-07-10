@@ -147,10 +147,10 @@ volume-backup timers; no `docker pause` is used.
 | `scripts/backup/backup_orthanc_storage.sh` | snapshot the storage volume via a `:ro` helper container, write sha256, rotate retention |
 | `scripts/backup/orthanc_storage_snapshot.py` | in-container helper: consistent SQLite snapshot + gzip-tar stream to stdout |
 | `scripts/backup/check_backup_freshness.sh` | exit nonzero if any latest dump/archive is older than `MAX_AGE_HOURS` (default from `config.toml` `[backup].max_age_hours`, else 36) |
-| `systemd/pg-backup-stanford-stroke.{service,timer}.in` · `launchd/com.ssc.pg-backup-stanford-stroke.plist.in` | nightly dump of `stanford-stroke` |
-| `systemd/pg-backup-orthanc.{service,timer}.in` · `launchd/com.ssc.pg-backup-orthanc.plist.in` | nightly dump of `orthanc_db` |
-| `systemd/orthanc-storage-backup.{service,timer}.in` · `launchd/com.ssc.orthanc-storage-backup.plist.in` | nightly snapshot of the Orthanc storage volume |
-| `systemd/pg-backup-freshness.{service,timer}.in` · `launchd/com.ssc.pg-backup-freshness.plist.in` | periodic freshness check |
+| `deploy/systemd/pg-backup-stanford-stroke.{service,timer}.in` · `deploy/launchd/com.ssc.pg-backup-stanford-stroke.plist.in` | nightly dump of `stanford-stroke` |
+| `deploy/systemd/pg-backup-orthanc.{service,timer}.in` · `deploy/launchd/com.ssc.pg-backup-orthanc.plist.in` | nightly dump of `orthanc_db` |
+| `deploy/systemd/orthanc-storage-backup.{service,timer}.in` · `deploy/launchd/com.ssc.orthanc-storage-backup.plist.in` | nightly snapshot of the Orthanc storage volume |
+| `deploy/systemd/pg-backup-freshness.{service,timer}.in` · `deploy/launchd/com.ssc.pg-backup-freshness.plist.in` | periodic freshness check |
 
 The `.in` templates are rendered and installed by the platform installers
 (`scripts/macos/install_launchd.sh` / `scripts/linux/install_systemd.sh`) —
@@ -227,8 +227,8 @@ enabled. No offsite destination is provisioned yet, and DICOM loss is
 currently recoverable via re-ingestion.
 
 > **Known gap:** only **systemd** templates exist for the mirror
-> (`systemd/cold-archive-mirror.{service,timer}.in`). There is **no
-> `launchd/com.ssc.cold-archive-mirror.plist.in`**, so the cutover checklist
+> (`deploy/systemd/cold-archive-mirror.{service,timer}.in`). There is **no
+> `deploy/launchd/com.ssc.cold-archive-mirror.plist.in`**, so the cutover checklist
 > below is not yet executable as-is on the macOS production host — a launchd
 > template (or a manual `launchd`/cron equivalent) must be authored first.
 
@@ -237,8 +237,8 @@ currently recoverable via re-ingestion.
 | Path | Role |
 |---|---|
 | `scripts/cold_storage/mirror_cold_archive.sh` | `rsync -a --delete` from `SOURCE_DIR` to `COLD_MIRROR_DEST` (no-op if `COLD_MIRROR_DEST` unset) |
-| `systemd/cold-archive-mirror.service.in` | reads `/etc/default/pacs-cold-mirror`, runs the script |
-| `systemd/cold-archive-mirror.timer.in` | nightly, **not enabled by default** |
+| `deploy/systemd/cold-archive-mirror.service.in` | reads `/etc/default/pacs-cold-mirror`, runs the script |
+| `deploy/systemd/cold-archive-mirror.timer.in` | nightly, **not enabled by default** |
 
 ### Production cutover checklist
 
@@ -248,7 +248,7 @@ currently recoverable via re-ingestion.
    `image_ingestion_protocol.anonymize_files` is **off**, the archives
    contain identifiable data and must not leave the host without
    encryption at rest (borg/restic both support this). See
-   `documentation/reference/image_ingestion_protocol.md`.
+   `docs/reference/image_ingestion_protocol.md`.
 3. Create `/etc/default/pacs-cold-mirror` (mode 0644, root-owned):
 
    ```ini

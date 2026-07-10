@@ -267,7 +267,7 @@ architecturally:
 
 - **Orthanc** runs the locally-built custom image `ssc-orthanc:patched-indexer`
   (a digest-pinned base plus the patched Folder Indexer — see
-  [`../../../orthanc-indexer-patched/Dockerfile`](../../../orthanc-indexer-patched/README.md)),
+  [`../../orthanc-indexer-patched/Dockerfile`](../../orthanc-indexer-patched/README.md)),
   **not** an upstream registry image. The repo provides `docker-compose.yml`
   (Orthanc only), `orthanc.json`, and the tool-managed `orthanc_users.json`.
 - **Web App** runs natively (no container): uvicorn under launchd
@@ -287,7 +287,7 @@ follow the same pattern:
 - `docker-compose.yml` (Orthanc only)
 - `orthanc.json`
 - `web-app/` (FastAPI backend + React frontend)
-- the service-unit templates (`systemd/*.in`, `launchd/*.plist.in`) rendered by
+- the service-unit templates (`deploy/systemd/*.in`, `deploy/launchd/*.plist.in`) rendered by
   the two installers
 - `scripts/admin/manage_users.py`
 - `init_orthanc_db.sh`

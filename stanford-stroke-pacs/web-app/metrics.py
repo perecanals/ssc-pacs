@@ -1,6 +1,6 @@
 """Prometheus metrics for the web-app service.
 
-Metric catalogue (see `documentation/operations/observability.md`):
+Metric catalogue (see `docs/operations/observability.md`):
 
   * `http_requests_total{method, path_template, status}`
   * `http_request_duration_seconds{method, path_template}`

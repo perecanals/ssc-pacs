@@ -68,12 +68,12 @@ skips the deleted-file cleanup pass. New files are still picked up, so
 routine ingestion works unchanged. Missing files are simply ignored.
 
 The patch is ~15 lines and lives inside `src/Sources/Plugin.cpp`. See
-[`../../../orthanc-indexer-patched/README.md`](../../../orthanc-indexer-patched/README.md)
+[`../../orthanc-indexer-patched/README.md`](../../orthanc-indexer-patched/README.md)
 for the source, build, and deploy instructions.
 
 The deployment uses a custom Docker image `ssc-orthanc:patched-indexer` built
 on a digest-pinned base with the patched `.so` layered on top (see
-[`../../../orthanc-indexer-patched/Dockerfile`](../../../orthanc-indexer-patched/Dockerfile)
+[`../../orthanc-indexer-patched/Dockerfile`](../../orthanc-indexer-patched/Dockerfile)
 for the exact pins).
 
 ---

@@ -8,11 +8,11 @@ build time.
 
 This README is a build/dev quick-start only. For architecture, deployment, and
 day-2 operations, start at
-[`../documentation/context.md`](../documentation/context.md) — in particular
-[`reference/web_app.md`](../documentation/reference/web_app.md) and
-[`reference/web_app_frontend.md`](../documentation/reference/web_app_frontend.md)
-(product + React detail), [`reference/architecture.md`](../documentation/reference/architecture.md)
-(topology + auth), and the [`guides/`](../documentation/guides/) install/deploy docs.
+[`../../docs/context.md`](../../docs/context.md) — in particular
+[`reference/web_app.md`](../../docs/reference/web_app.md) and
+[`reference/web_app_frontend.md`](../../docs/reference/web_app_frontend.md)
+(product + React detail), [`reference/architecture.md`](../../docs/reference/architecture.md)
+(topology + auth), and the [`guides/`](../../docs/guides/) install/deploy docs.
 
 ## Prerequisites
 
@@ -49,13 +49,13 @@ Open **http://localhost:5173**. In production only port 8043 is used.
 
 Database schema is managed with Alembic; pending migrations apply automatically
 at app startup (see
-[`../documentation/operations/schema_migrations.md`](../documentation/operations/schema_migrations.md)).
+[`../../docs/operations/schema_migrations.md`](../../docs/operations/schema_migrations.md)).
 
 ## Deployment
 
 The web app runs as a native-host service — macOS launchd (`com.ssc.webapp`) in
 production, systemd on Linux — installed via `scripts/macos/install_launchd.sh`
 or `scripts/linux/install_systemd.sh`. See
-[`../documentation/guides/deployment_on_mac.md`](../documentation/guides/deployment_on_mac.md)
-and [`../documentation/guides/installation_and_deployment.md`](../documentation/guides/installation_and_deployment.md)
+[`../../docs/guides/deployment_on_mac.md`](../../docs/guides/deployment_on_mac.md)
+and [`../../docs/guides/installation_and_deployment.md`](../../docs/guides/installation_and_deployment.md)
 for the full procedure and restart/log commands.

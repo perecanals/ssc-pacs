@@ -2,7 +2,7 @@
 
 Schema changes to the `stanford-stroke` PostgreSQL database are managed by
 [Alembic](https://alembic.sqlalchemy.org/). One linear chain of revisions
-lives at `stanford-stroke-pacs/web-app/alembic/versions/`.
+lives at `stanford-stroke-pacs/alembic/versions/`.
 
 > **Scope:** this Alembic project owns **only the `stanford-stroke` database**.
 > The Orthanc database (`orthanc_db`) is managed by the Orthanc container and
@@ -15,7 +15,7 @@ lives at `stanford-stroke-pacs/web-app/alembic/versions/`.
 - **App startup** — `init_db()` in `web-app/app.py` calls
   `alembic command.upgrade(cfg, "head")`. On a DB that is already at head
   this is a no-op (no DDL emitted, no transaction opened).
-- **CLI** — from `stanford-stroke-pacs/web-app/`:
+- **CLI** — from the stack root `stanford-stroke-pacs/`:
   ```bash
   conda activate ssc-pacs
   alembic current     # show the revision applied to this DB
@@ -31,8 +31,13 @@ lives at `stanford-stroke-pacs/web-app/alembic/versions/`.
 
 ## Files
 
+Alembic lives at the **stack root** (a peer of `web-app/` and
+`image_ingestion_protocols/`) because the schema is shared: the web-app applies
+`upgrade head` at startup and the ingestion tests build scratch DBs from the same
+tree. The web-app is the *runner*, not the owner.
+
 ```
-stanford-stroke-pacs/web-app/
+stanford-stroke-pacs/
 ├── alembic.ini                  # CLI config; sqlalchemy.url is blank, env.py builds it
 └── alembic/
     ├── env.py                   # builds DB URL from .env; include_object filter
@@ -96,7 +101,7 @@ applied to prod via `alembic stamp` — no DDL re-runs.
 ## Adding a new schema change
 
 ```bash
-cd stanford-stroke-pacs/web-app
+cd stanford-stroke-pacs
 conda activate ssc-pacs
 set -a; . ../.env; set +a   # DB_USER / DB_PASSWORD for the psql/pg_dump calls below
 
@@ -171,7 +176,7 @@ The first time Alembic is deployed to a live DB that already matches the
 baseline, **stamp** the DB instead of running the upgrade:
 
 ```bash
-cd /opt/ssc-pacs/ssc-pacs/stanford-stroke-pacs/web-app
+cd /opt/ssc-pacs/ssc-pacs/stanford-stroke-pacs
 conda activate ssc-pacs
 
 # 1. Backup first (see operations/backup_strategy.md).

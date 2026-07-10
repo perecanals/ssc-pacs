@@ -47,7 +47,7 @@ when you want a fresh report (typically right after an ingestion run or a
 storage migration). The fresh-deploy installers
 (`scripts/macos/install_launchd.sh`, `scripts/linux/install_systemd.sh`) do
 **not** install any reconciliation timer or LaunchDaemon, and there are no
-`systemd/reconciliation.*` / `launchd/com.ssc.reconciliation.plist.in`
+`deploy/systemd/reconciliation.*` / `deploy/launchd/com.ssc.reconciliation.plist.in`
 templates.
 
 It used to run every 6 hours, but that was removed: unattended, it provided no

@@ -19,7 +19,6 @@ scan/filter phase, before any `--execute`. Pointed at the real store, it wiped 6
 series. Lesson: never run the ingestion protocol against `dicom_data_root`; a
 backfill of already-in-place files must be done with a dedicated, write-scoped
 upsert (NOT this protocol), and only after the DRIFT rows below are understood.
-See maintenance/deleted_series_2026-06-24.md.
 
 Usage:
   python scripts/data_integrity/disk_vs_db_series_audit.py                 # default patients
@@ -141,8 +140,7 @@ def main() -> int:
         print("Read-only report. No files or DB rows were touched.")
         if n_drift:
             print("NOTE: investigate DRIFT rows before any backfill — a count mismatch is\n"
-                  "      exactly what the (now-removed) protocol path wiped. See\n"
-                  "      maintenance/deleted_series_2026-06-24.md.")
+                  "      exactly what the (now-removed) protocol path wiped.")
     finally:
         conn.close()
     return 0

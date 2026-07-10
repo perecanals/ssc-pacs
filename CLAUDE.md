@@ -28,13 +28,13 @@ work, not as an afterthought:
   add or adjust tests for new behavior (backend pytest, frontend vitest,
   ingestion pytest).
 - **Docs**: when you change behavior, config, commands, or schema, update the
-  matching doc under `stanford-stroke-pacs/documentation/`. That tree is routed
-  by `documentation/context.md` — start there to find the right doc, and keep
+  matching doc under `docs/`. That tree is routed
+  by `docs/context.md` — start there to find the right doc, and keep
   its index accurate whenever you add, move, or remove a doc.
 - **Schema**: every schema change is a **new** Alembic revision under
-  `web-app/alembic/versions/` (never edit a shipped one; they run at app
-  startup). Mirror upstream-table DDL into `ssc-sql-db/` and name the migration
-  in the changelog entry.
+  `alembic/versions/` (never edit a shipped one; they run at app
+  startup). Alembic is the single source of truth for the DDL — upstream and
+  web-app-owned tables alike. Name the migration in the changelog entry.
 - **Verify against reality**: check claims — counts, sizes, paths, versions —
   against the live system before repeating them; never hardcode a volatile
   number in a doc, point at the command that produces it.
@@ -45,7 +45,8 @@ work, not as an afterthought:
 ```
 ssc-pacs/                     # git checkout root (Makefile, CI, root scripts)
 ├── stanford-stroke-pacs/     # stack root — .env, config.toml, orthanc.json, docker-compose.yml live HERE
-│   ├── web-app/              # FastAPI backend + React frontend (port 8043); alembic/ = migrations
+│   ├── web-app/              # FastAPI backend + React frontend (port 8043)
+│   ├── alembic/              # stanford-stroke DB migrations (alembic.ini alongside); web-app runs them at startup
 │   ├── scripts/              # utility scripts (see scripts/README.md); _lib.sh = shared helpers
 │   │   ├── admin/            # manage_users.py, rename_dataset_value.py, bulk_set_label_values.*, remove_label.*, teardown.sh
 │   │   ├── backup/           # backup_pg_db.sh, backup_orthanc_storage.sh, check_backup_freshness.sh
@@ -56,20 +57,18 @@ ssc-pacs/                     # git checkout root (Makefile, CI, root scripts)
 │   │   ├── orthanc/          # dc.sh, enrich_orthanc.py, label_studies.py, check_status.sh
 │   │   ├── linux/ · macos/   # install_systemd.sh · install_launchd.sh, colima + mount helpers
 │   │   └── migration/        # reconcile_migration.py
-│   ├── systemd/ · launchd/   # service unit templates (*.in), rendered by the installers
-│   ├── documentation/        # Modular docs — start with documentation/context.md
+│   ├── deploy/               # systemd/ + launchd/ service + timer templates (*.in), rendered by the installers
 │   ├── orthanc_users.json    # Service account + admin users only (managed by manage_users.py — never edit manually)
 │   └── image_ingestion_protocols/  # Legacy SSC metadata ingestion (site-specific)
-├── ssc-sql-db/               # upstream SQL table definitions + CSV import helpers
+├── docs/                     # Modular docs — start with docs/context.md
 ├── maintenance/              # gitignored local workspace (one-off scripts, benchmarks, attic, audit)
 ├── CHANGELOG.md              # release log (created at v1.0)
-├── Makefile                  # test / lint / install-dev targets (run from here)
-└── requirements.txt          # Python deps for the ssc-sql-db import helpers
+└── Makefile                  # test / lint / install-dev targets (run from here)
 ```
 
 ## Services and ports
 
-Production runs on **Linux via systemd** (`ssc-web-app.service` + the `systemd/*.in` unit/timer templates); the repo also ships macOS `launchd` templates (`launchd/*`, `com.ssc.*`) from the previous Mac deployment.
+Production runs on **Linux via systemd** (`ssc-web-app.service` + the `deploy/systemd/*.in` unit/timer templates); the repo also ships macOS `launchd` templates (`deploy/launchd/*`, `com.ssc.*`) from the previous Mac deployment.
 
 | Service | How it runs (production) | Port |
 |---------|--------------------------|------|
@@ -85,7 +84,7 @@ User-facing URLs (via SSH tunnel or localhost):
 
 ## Common commands
 
-Daily drivers below; the full day-2 sheet is `documentation/operations/commands.md`. Script paths are relative to the **stack root** (`stanford-stroke-pacs/`); `make` runs from the **checkout root** (`ssc-pacs/`).
+Daily drivers below; the full day-2 sheet is `docs/operations/commands.md`. Script paths are relative to the **stack root** (`stanford-stroke-pacs/`); `make` runs from the **checkout root** (`ssc-pacs/`).
 
 ### Orthanc (Docker)
 ```bash
@@ -130,29 +129,29 @@ python scripts/admin/manage_users.py rotate-service-account  # + check-service-a
 ### Reconciliation & schema migrations
 ```bash
 python scripts/data_integrity/reconcile.py            # image_series vs Orthanc summary (--json writes a report)
-cd web-app && alembic current && alembic upgrade head # migrations (also run at app startup; stanford-stroke DB only)
+alembic current && alembic upgrade head              # from the stack root; also run at app startup (stanford-stroke DB only)
 ```
 
 ## Architecture
 
-Two services and two databases. Full topology + request/ingest flows: `documentation/reference/system_overview.md`; dual-DB rationale + auth model: `documentation/reference/architecture.md`.
+Two services and two databases. Full topology + request/ingest flows: `docs/reference/system_overview.md`; dual-DB rationale + auth model: `docs/reference/architecture.md`.
 
 **Orthanc** indexes the on-disk DICOM tree (read-only bind mount) into `orthanc_db` and serves Orthanc Explorer 2, OHIF, and DICOMweb. It does not own the DICOM files. The deployment runs a **custom `ssc-orthanc:patched-indexer` image** whose Folder Indexer honours `RemoveMissingFiles: false` (required for cold_path_cache; source in `orthanc-indexer-patched/`). Steady-state `orthanc.json` has `Folders: []` — indexing is per-case `POST /indexer/scan`, not a continuous tree scan.
 
 **Web App** is a FastAPI app that reads research metadata from the `stanford-stroke` PostgreSQL DB and stores multi-level annotations, serving a Vite + Tailwind React frontend. In production one uvicorn process on `:8043` serves both the API and the pre-built `web-app/dist/`; Node is build-time only.
 
-**Backend modules** (`web-app/`): `app.py` (lifespan pool+migrations, middleware, router registration); `db.py` (SSOT for `DB_CONFIG` + pool + `audit_user_var`); `auth.py` (JWT); `orthanc_client.py`; `common.py` (SQL builders, annotation helpers); `config.py` (config.toml); `cache_manager.py` (cold-storage warm/evict); `reconciliation.py`; `rate_limit.py`; `dataset_access.py`; `labelled_table_sync.py`; `metrics.py`; `routes/` (auth, preferences, studies, cold_storage, annotations, labels, admin, static, proxy). Frontend detail: `documentation/reference/web_app_frontend.md`.
+**Backend modules** (`web-app/`): `app.py` (lifespan pool+migrations, middleware, router registration); `db.py` (SSOT for `DB_CONFIG` + pool + `audit_user_var`); `auth.py` (JWT); `orthanc_client.py`; `common.py` (SQL builders, annotation helpers); `config.py` (config.toml); `cache_manager.py` (cold-storage warm/evict); `reconciliation.py`; `rate_limit.py`; `dataset_access.py`; `labelled_table_sync.py`; `metrics.py`; `routes/` (auth, preferences, studies, cold_storage, annotations, labels, admin, static, proxy). Frontend detail: `docs/reference/web_app_frontend.md`.
 
 **Two-database model:**
 - `orthanc_db` — Orthanc's internal index; do not query/mutate except explicit enrichment. (Sanctioned exception: reconciliation bulk-reads series UIDs read-only via `PG_ORTHANC_*` creds — one query instead of ~100k REST calls.)
 - `stanford-stroke` — upstream read-only tables (`patient`, `image_study`, `image_series`, clinical side-table `lvo_clinical_data`) plus web-app-owned tables (`annotations`, `annotations_history`, `label_definitions`, `label_value_options`, `users`, `user_preferences`, `series_cache_state`, `*_labelled` mirrors). Connection from `.env` (`DB_HOST/PORT/NAME/USER/PASSWORD`); web-app-owned tables are Alembic-migrated at startup.
 - `patient` is the **patient-level spine** (one row per patient, ingest-populated). `lvo_clinical_data` is retired as a roster — joined only to prefer its clinical `stroke_date` via `COALESCE(c.stroke_date, p.stroke_date)`, never otherwise queried.
 
-**Annotation model:** three levels (`patient`/`study`/`series`); annotations are shared (one value per entity+label; `created_by` = last editor); parent-level values inherit downward; cross-level filtering is supported; every write is captured in `annotations_history` by a PL/pgSQL trigger (`documentation/operations/annotation_history.md`).
+**Annotation model:** three levels (`patient`/`study`/`series`); annotations are shared (one value per entity+label; `created_by` = last editor); parent-level values inherit downward; cross-level filtering is supported; every write is captured in `annotations_history` by a PL/pgSQL trigger (`docs/operations/annotation_history.md`).
 
 **Storage modes** (`config.toml [storage].mode`):
 - `legacy` — the Folder Indexer reads loose DICOMs from `dicom_data_root`.
-- `cold_path_cache` (production) — canonical series are `*.tar.zst` archives under `cold_archive_root`. Warm extracts them back to the original `dicom_dir_path`; the patched index keeps pointing there even when files are absent, so OHIF works the moment files return. Evict deletes the extracted files; the index stays. **Requires the patched image + `"RemoveMissingFiles": false`.** See `documentation/cold_storage/`.
+- `cold_path_cache` (production) — canonical series are `*.tar.zst` archives under `cold_archive_root`. Warm extracts them back to the original `dicom_dir_path`; the patched index keeps pointing there even when files are absent, so OHIF works the moment files return. Evict deletes the extracted files; the index stays. **Requires the patched image + `"RemoveMissingFiles": false`.** See `docs/cold_storage/`.
 
 **Auth:**
 - End users live in the PostgreSQL `users` table (bcrypt, SSOT); login returns an HttpOnly JWT cookie.
@@ -169,7 +168,7 @@ cp execute_image_ingestion_protocol.example.yaml execute_image_ingestion_protoco
 conda activate ssc-pacs
 python execute_image_ingestion_protocol.py [--config path/to/config.yaml]
 ```
-YAML keys, ingestion steps, and per-mode behavior: `documentation/reference/image_ingestion_protocol.md`. `src_dir` is required; storage roots come from `config.toml` (leave `cold_archive_root` unset in the YAML). The NIfTI-conversion and study-type-prediction steps are kept but dormant by design.
+YAML keys, ingestion steps, and per-mode behavior: `docs/reference/image_ingestion_protocol.md`. `src_dir` is required; storage roots come from `config.toml` (leave `cold_archive_root` unset in the YAML). The NIfTI-conversion and study-type-prediction steps are kept but dormant by design.
 
 ## Cold storage
 
@@ -177,7 +176,7 @@ Production runs `cold_path_cache` (migration from `legacy` complete, validated i
 ```bash
 psql -d stanford-stroke -c "SELECT count(*) FILTER (WHERE dicom_archive_path IS NOT NULL) archived, count(*) total FROM image_series;"
 ```
-Depends on the `ssc-orthanc:patched-indexer` image + `"RemoveMissingFiles": false`. Design, runbook, and current status: `documentation/cold_storage/`.
+Depends on the `ssc-orthanc:patched-indexer` image + `"RemoveMissingFiles": false`. Design, runbook, and current status: `docs/cold_storage/`.
 
 ## Key caveats
 
@@ -189,7 +188,7 @@ Depends on the `ssc-orthanc:patched-indexer` image + `"RemoveMissingFiles": fals
 
 ## Documentation index
 
-All docs live under `stanford-stroke-pacs/documentation/`; start with `documentation/context.md` for the topic map. Most-used:
+All docs live under `docs/`; start with `docs/context.md` for the topic map. Most-used:
 
 - `reference/system_overview.md` — end-to-end depiction of the whole stack
 - `reference/architecture.md` — topology, dual-DB rationale, auth model

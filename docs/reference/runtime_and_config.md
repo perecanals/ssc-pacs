@@ -19,7 +19,7 @@ unless a path is called out as relative to the git checkout root
 
 `docker-compose.yml` defines **Orthanc only**. The Web App is not a Compose service.
 
-The Orthanc image is built locally from [`../../../orthanc-indexer-patched/`](../../../orthanc-indexer-patched/) —
+The Orthanc image is built locally from [`../../orthanc-indexer-patched/`](../../orthanc-indexer-patched/) —
 a fork of the upstream Folder Indexer plugin with a `RemoveMissingFiles` config
 flag required by `cold_path_cache`. See [`../cold_storage/design.md`](../cold_storage/design.md)
 for the why, and [`../cold_storage/runbook.md`](../cold_storage/runbook.md#build-the-patched-orthanc-image)
@@ -117,8 +117,8 @@ model, runtime split, and provisioning flow are canonical in
 
 1. Host prerequisites: Docker, PostgreSQL, Python, Node/npm for builds, DICOM tree
 2. Create `.env`; set storage mode + paths in `config.toml`
-3. `python3 -m pip install -r requirements.txt` (root-level script deps; the
-   `requirements.txt` lives at the git checkout root, one level above the stack root)
+3. `python3 -m pip install -r requirements.txt` (stack script deps; run from the
+   stack root, `stanford-stroke-pacs/`)
 4. `./init_orthanc_db.sh`
 5. `python scripts/admin/manage_users.py add <user> --admin` + `rotate-service-account`
 6. `scripts/orthanc/dc.sh up -d` (Orthanc — wrapper resolves the DICOM mount from
@@ -139,8 +139,8 @@ model, runtime split, and provisioning flow are canonical in
 |------|---------|
 | `scripts/admin/manage_users.py` | Manage Web App users in PostgreSQL; mirror admin entries into `orthanc_users.json`; rotate **and verify** the Orthanc service account |
 | `scripts/orthanc/dc.sh` | `docker compose` wrapper: resolves the DICOM mount from `config.toml`, selects the macOS override; use instead of bare `docker compose` |
-| `scripts/linux/install_systemd.sh` | Render `systemd/*.in` templates for this host (auto-derived identity; `deploy.env` overrides) and install/enable the units |
-| `scripts/macos/install_launchd.sh` | Same, for the macOS `launchd/*.plist.in` daemons |
+| `scripts/linux/install_systemd.sh` | Render `deploy/systemd/*.in` templates for this host (auto-derived identity; `deploy.env` overrides) and install/enable the units |
+| `scripts/macos/install_launchd.sh` | Same, for the macOS `deploy/launchd/*.plist.in` daemons |
 | `init_orthanc_db.sh` | Create the Orthanc PostgreSQL role and database; idempotent; sources `.env` |
 | `scripts/orthanc/check_status.sh` | Orthanc-focused status check for container, REST API, and plugin endpoints |
 | `scripts/connectivity/tunnel/{linux,macos,windows}/` | Per-platform SSH tunnel helpers for remote access (`tunnel.sh` / `tunnel.command` / `tunnel.cmd`) |
@@ -200,10 +200,11 @@ stanford-stroke-pacs/
 │   ├── dataset_access.py         # Per-user dataset scopes + TTL caches (proxy guard)
 │   ├── rate_limit.py             # Request rate limiter
 │   ├── config.py                 # Loads config.toml
-│   ├── alembic/                  # Schema migrations (versions/) — run at startup
 │   ├── requirements.txt
 │   ├── build.sh                  # npm run build helper
 │   └── src/                      # React frontend
+├── alembic.ini                   # Alembic config (env.py builds the URL from .env)
+├── alembic/                      # Schema migrations (versions/) — web-app runs them at startup
 ├── init_orthanc_db.sh
 ├── scripts/                      # Organized into subdirectories
 │   ├── admin/                    # manage_users, rename_dataset_value, backfill_annotation_history, teardown
@@ -212,20 +213,17 @@ stanford-stroke-pacs/
 │   ├── connectivity/             # tunnel
 │   ├── data_integrity/           # reconcile, dicom_path_sql_fs_audit, disk_vs_db_series_audit, detect_mixed_dirs
 │   ├── dicom/                    # dicom_to_nifti
-│   ├── linux/                    # install_systemd.sh (renders systemd/*.in)
-│   ├── macos/                    # colima_*, install_launchd.sh (renders launchd/*.plist.in)
+│   ├── linux/                    # install_systemd.sh (renders deploy/systemd/*.in)
+│   ├── macos/                    # colima_*, install_launchd.sh (renders deploy/launchd/*.plist.in)
 │   └── orthanc/                  # enrich_orthanc, label_studies, check_status, dc.sh
-├── systemd/                      # systemd unit TEMPLATES (*.in) — rendered by scripts/linux/install_systemd.sh
-├── launchd/                      # macOS LaunchDaemon TEMPLATES (*.plist.in) — rendered by scripts/macos/install_launchd.sh
+├── deploy/                       # service templates rendered by the installers
+│   ├── systemd/                  # systemd unit + timer TEMPLATES (*.in)
+│   └── launchd/                  # macOS LaunchDaemon TEMPLATES (*.plist.in)
 ├── image_ingestion_protocols/  # Legacy metadata pipeline
-├── documentation/
-│   ├── context.md
-│   ├── reference/
-│   ├── guides/
-│   ├── operations/
-│   ├── cold_storage/
-│   └── history/
-└── requirements.txt
+└── requirements.txt              # stack scripts + ingestion deps
 ```
+
+Modular docs live at the checkout root in `docs/` (one level above the stack
+root); start with `docs/context.md`.
 
 For a fuller file tree of the web app frontend, see [`web_app.md`](web_app.md) §8.

@@ -18,7 +18,7 @@
 #                  the unit installers use), then derived conventional conda
 #                  locations, then PATH; non-zero if none. No literal host
 #                  paths live here — per-host identity belongs in deploy.env
-#                  (see documentation/reference/configuration_sources.md).
+#                  (see docs/reference/configuration_sources.md).
 #
 # Resolution precedence the callers should use: explicit env override (if set)
 # > deploy.env / config.toml value > derived fallback.

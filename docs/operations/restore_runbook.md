@@ -217,7 +217,7 @@ Rebuilding means, per study: **warm** the series (extract archives back to
 scoped passes (`scripts/cold_storage/reindex_missing_series.py`, which drives
 the patched indexer's `POST /indexer/scan`). Across the whole corpus this is a
 multi-day operation and re-creates OE2 labels — read
-`documentation/cold_storage/` and re-run `scripts/orthanc/enrich_orthanc.py`
+`docs/cold_storage/` and re-run `scripts/orthanc/enrich_orthanc.py`
 / `scripts/orthanc/label_studies.py` afterwards. Restoring the dump (§2a/§2b)
 plus the storage volume (§2d) is dramatically preferable.
 

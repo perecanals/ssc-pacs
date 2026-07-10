@@ -8,13 +8,12 @@ now produces the same bytes. This doc covers how to bump a pin on purpose.
 
 ## What is pinned, and where
 
-Python deps are split across **three** pinned requirement sets, each scoped
+Python deps are split across **two** pinned requirement sets, each scoped
 to a distinct surface (there is no conda `environment.yml` — the env is
 provisioned straight from these files):
 
 | Layer | File | Form |
 |---|---|---|
-| ssc-sql-db CSV import helpers | `requirements.txt` (checkout root) | `pkg==X.Y.Z` |
 | Stack scripts + ingestion pipeline | `stanford-stroke-pacs/requirements.txt` | `pkg==X.Y.Z` |
 | Web App runtime | `stanford-stroke-pacs/web-app/requirements.txt` | `pkg==X.Y.Z` |
 | Web App dev/test | `stanford-stroke-pacs/web-app/requirements-dev.txt` | `pkg==X.Y.Z` (pytest, ruff, mypy, …) |
@@ -31,11 +30,10 @@ provisioned straight from these files):
    conda activate ssc-pacs
    ```
 2. Edit the pin in **every** requirement set where the package appears —
-   a shared dep like `psycopg2-binary` or `python-dotenv` is listed in more
-   than one of the three files. Keep versions in sync across them.
+   a shared dep like `psycopg2-binary` or `python-dotenv` is listed in both
+   files. Keep versions in sync across them.
 3. Apply the change (install whichever sets you touched):
    ```bash
-   pip install -r requirements.txt                                   # ssc-sql-db helpers
    pip install -r stanford-stroke-pacs/requirements.txt              # stack scripts + ingestion
    pip install -r stanford-stroke-pacs/web-app/requirements.txt      # web app runtime
    ```
@@ -67,7 +65,7 @@ provisioned straight from these files):
 Note: production builds use `npm ci` (not `npm install`) so that a
 lockfile drift fails the build instead of silently resolving.
 
-Adding a new Python dependency: pin it in whichever of the three requirement
+Adding a new Python dependency: pin it in whichever of the two requirement
 sets owns that surface (there is no conda `environment.yml`), then `pip
 install -r` that file.
 

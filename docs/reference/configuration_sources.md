@@ -38,7 +38,7 @@ required** — `web-app/config.py` fails fast if it is missing.
 | `orthanc_users.json` | Orthanc service-account + admin plaintext creds | **Yes** | No | **Derived** from `.env` + DB via `manage_users.py` | No — never hand-edit |
 | `docker-compose.yml` | Orthanc service (Linux base, host networking); DB env from `.env`; DICOM mount from `${DICOM_MOUNT_SOURCE}` | No | Yes | **Derived** — interpolates `.env` + `dc.sh` | No |
 | `docker-compose.override.macos.yml` | macOS deltas (ports, `host.docker.internal`, drop host net) | No | Yes | Static (platform delta) | No |
-| `systemd/*.in`, `launchd/*.plist.in` | service-unit **templates** with `__TOKENS__` | No | Yes | **Derived** at install time from `deploy.env` | No — never install by hand |
+| `deploy/systemd/*.in`, `deploy/launchd/*.plist.in` | service-unit **templates** with `__TOKENS__` | No | Yes | **Derived** at install time from `deploy.env` | No — never install by hand |
 | `init_orthanc_db.sh` | creates Orthanc role/DB | No | Yes | Reads `.env` (portable; resolves its own path) | No |
 
 > The deprecated auto-merged `docker-compose.override.yml` is **gitignored**.

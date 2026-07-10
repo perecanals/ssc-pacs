@@ -15,7 +15,7 @@ Intended wiring:
     inherits the JSON formatter and the contextvar fields.
 
 Rotation is handled by the systemd journal (see
-`documentation/operations/observability.md`).
+`docs/operations/observability.md`).
 """
 
 from __future__ import annotations

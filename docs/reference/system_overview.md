@@ -81,9 +81,9 @@ Orthanc Explorer 2 web apps.
 
 - Runs as a Docker container in host-network mode.
 - Uses a **custom image** `ssc-orthanc:patched-indexer` built locally from
-  [`orthanc-indexer-patched/`](../../../orthanc-indexer-patched/README.md).
+  [`orthanc-indexer-patched/`](../../orthanc-indexer-patched/README.md).
 - Image = a digest-pinned base (see
-  [`orthanc-indexer-patched/Dockerfile`](../../../orthanc-indexer-patched/README.md))
+  [`orthanc-indexer-patched/Dockerfile`](../../orthanc-indexer-patched/README.md))
   + a patched Folder Indexer `.so` that honours `RemoveMissingFiles: false`
   (required by `cold_path_cache`).
 - Storage backend is the Folder Indexer plugin itself
@@ -118,7 +118,7 @@ doesn't cover.
 
 ### 3.4 Custom Folder Indexer plugin
 
-Source at [`orthanc-indexer-patched/`](../../../orthanc-indexer-patched/README.md).
+Source at [`orthanc-indexer-patched/`](../../orthanc-indexer-patched/README.md).
 Upstream is the
 [Orthanc Folder Indexer plugin](https://orthanc.uclouvain.be/book/plugins/indexer.html);
 the fork adds the `RemoveMissingFiles` config flag. The deployed
@@ -418,7 +418,7 @@ are canonical in [`architecture.md`](architecture.md) §7.
 | Understand the UI table / inline edit / preview | [`web_app_frontend.md`](web_app_frontend.md) |
 | Query or migrate the schema | [`data_stores.md`](data_stores.md) |
 | Deploy fresh on a new host | [`../guides/installation_and_deployment.md`](../guides/installation_and_deployment.md) |
-| Build or patch the custom Orthanc image | [`../../../orthanc-indexer-patched/README.md`](../../../orthanc-indexer-patched/README.md) |
+| Build or patch the custom Orthanc image | [`../../orthanc-indexer-patched/README.md`](../../orthanc-indexer-patched/README.md) |
 | Run day-2 operator commands | [`../operations/commands.md`](../operations/commands.md) |
 | Warm / evict / clean up cold storage | [`../cold_storage/runbook.md`](../cold_storage/runbook.md) |
 | Convert DICOM → NIFTI or inspect a cold archive | [`../recipes/dicom_processing.md`](../recipes/dicom_processing.md) |

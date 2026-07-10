@@ -156,4 +156,4 @@ Alembic path if you genuinely intend to unwind to the `0002` schema.
 
 - [Data stores reference](../reference/data_stores.md) — full table schemas
 - [Schema migrations workflow](schema_migrations.md) — adding new revisions
-- Alembic revision: `web-app/alembic/versions/0003_annotations_history.py`
+- Alembic revision: `alembic/versions/0003_annotations_history.py`

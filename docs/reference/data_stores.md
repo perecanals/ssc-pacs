@@ -64,7 +64,7 @@ Notes:
 ### web-app-owned tables (app-managed)
 
 These tables are created and evolved by **Alembic migrations** under
-`web-app/alembic/versions/`. `init_db()` runs `alembic upgrade head` on
+`alembic/versions/`. `init_db()` runs `alembic upgrade head` on
 startup. See [`../operations/schema_migrations.md`](../operations/schema_migrations.md)
 for the workflow when adding a new revision.
 
@@ -110,7 +110,7 @@ table.
 
 ## Web App table DDL (logical reference)
 
-The Alembic revisions under `web-app/alembic/versions/` are authoritative (app startup only runs `alembic upgrade head`); this section mirrors the intended shape for documentation readers.
+The Alembic revisions under `alembic/versions/` are authoritative (app startup only runs `alembic upgrade head`); this section mirrors the intended shape for documentation readers.
 
 ### `annotations`
 

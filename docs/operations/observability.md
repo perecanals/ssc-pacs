@@ -246,7 +246,7 @@ The importable Grafana dashboard is kept in the repo:
 
 | File | Purpose |
 |------|---------|
-| `documentation/operations/grafana_dashboard.json` | Portable **SSC Web App** dashboard with a `${DS_PROMETHEUS}` datasource variable — import into any Grafana. Panels: request rate, p50/p95 latency, warm/evict success rate, cold-storage disk free, warming rows over time. |
+| `docs/operations/grafana_dashboard.json` | Portable **SSC Web App** dashboard with a `${DS_PROMETHEUS}` datasource variable — import into any Grafana. Panels: request rate, p50/p95 latency, warm/evict success rate, cold-storage disk free, warming rows over time. |
 
 A minimal reinstall would recreate a `~/monitoring/` (or equivalent) with:
 

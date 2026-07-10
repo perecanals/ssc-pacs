@@ -24,7 +24,7 @@ Use --json to get machine-parseable output for monitoring tools.
 Use --quiet to suppress human output.
 
 The script is read-only — it does not clear stuck rows or delete
-orphan dirs. See `documentation/cold_storage/runbook.md`.
+orphan dirs. See `docs/cold_storage/runbook.md`.
 """
 
 from __future__ import annotations

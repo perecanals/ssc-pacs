@@ -9,7 +9,7 @@ rewritten to the new roots — keeping the path *tail* byte-identical so that
 Orthanc index expects.
 
 This is the scripted, transactional form of the manual SQL in
-``documentation/operations/cluster_migration.md`` §3. It:
+``docs/operations/cluster_migration.md`` §3. It:
 
   * reads the **new** roots from ``config.toml`` (``dicom_data_root`` /
     ``cold_archive_root``) — never guessed;

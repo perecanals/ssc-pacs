@@ -4,7 +4,7 @@
 (storage mode + paths, cold-cache tuning, session/auth). It is required and ships
 in the repo — a fresh deployment edits it in place rather than relying on these
 built-in fallbacks. Secrets and docker-compose variables remain in `.env`.
-See documentation/reference/configuration_sources.md.
+See docs/reference/configuration_sources.md.
 """
 
 from __future__ import annotations
@@ -60,7 +60,7 @@ def _load_toml() -> tuple[dict, dict]:
             f"Required config file not found: {_CONFIG_PATH}. "
             "config.toml is the source of truth for non-secret settings and ships "
             "in the repo — copy/edit it for this host. "
-            "See documentation/reference/configuration_sources.md."
+            "See docs/reference/configuration_sources.md."
         )
     with _CONFIG_PATH.open("rb") as f:
         raw = tomllib.load(f)

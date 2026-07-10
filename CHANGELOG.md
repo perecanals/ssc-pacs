@@ -23,4 +23,4 @@ full repo audit across code, database, ingestion, scripts, setup, and docs.
   ingestion plus ESLint, with CI wired to match.
 - **Docs**: the fresh-deploy guide works end to end; `CLAUDE.md` trimmed to a
   180-line index; every doc re-verified against the live system and routed via
-  `documentation/context.md`.
+  `docs/context.md`.

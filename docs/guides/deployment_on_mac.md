@@ -49,7 +49,7 @@ Start the VM with the host paths the stack bind-mounts. Colima shares only `$HOM
 by default, so the repo dir (under `/opt`) and the external `/Volumes` DICOM drive
 must be added explicitly. VirtioFS (default on vz) keeps the continuous DICOM-tree
 scan fast. The exact invocation is captured in
-[`scripts/macos/colima_start.sh`](../../scripts/macos/colima_start.sh) — idempotent,
+[`scripts/macos/colima_start.sh`](../../stanford-stroke-pacs/scripts/macos/colima_start.sh) — idempotent,
 and it waits for the RAID to mount before starting:
 
 ```bash
@@ -79,9 +79,9 @@ inside the VM with `colima ssh -- ls /opt/ssc-pacs/ssc-pacs/stanford-stroke-pacs
 ## 3. Build the patched Orthanc image (Apple Silicon note)
 
 Cold storage requires the custom `ssc-orthanc:patched-indexer` image (see
-[`orthanc-indexer-patched/README.md`](../../../orthanc-indexer-patched/README.md)).
+[`orthanc-indexer-patched/README.md`](../../orthanc-indexer-patched/README.md)).
 First check whether the runtime base image (pinned by digest in
-[`orthanc-indexer-patched/Dockerfile`](../../../orthanc-indexer-patched/Dockerfile))
+[`orthanc-indexer-patched/Dockerfile`](../../orthanc-indexer-patched/Dockerfile))
 supports your architecture:
 
 ```bash
@@ -175,7 +175,7 @@ createdb stanford-stroke          # your Mac user is the PG superuser
 
 This only creates the empty `stanford-stroke` database. For the rest of the
 PostgreSQL setup — the `orthanc_db` database, and the upstream table schema
-(`patient` / `image_study` / `image_series` from `ssc-sql-db/`) — follow
+(`patient` / `image_study` / `image_series`, created by Alembic) — follow
 [`installation_and_deployment.md`](installation_and_deployment.md) §5 Step 3
 (3b–3d). On a Mac your user is the superuser, so you can skip the separate
 role-creation in 3a.
@@ -211,7 +211,7 @@ There is no systemd; `ssc-web-app.service` does not apply. **Headless servers
 LaunchAgent only loads inside a GUI login session, so over SSH
 `launchctl bootstrap gui/$UID …` (and `brew services`) fail with *"Domain does
 not support specified action"*. The repo ships daemon **templates** in
-[`launchd/`](../../launchd/) (`*.plist.in`, `__TOKENS__` for
+[`deploy/launchd/`](../../stanford-stroke-pacs/deploy/launchd/) (`*.plist.in`, `__TOKENS__` for
 user/home/Homebrew prefix/conda env/repo path) — `com.ssc.colima`,
 `com.ssc.postgres`, `com.ssc.webapp`, and the nightly `com.ssc.pg-backup-*`,
 `com.ssc.orthanc-storage-backup`, `com.ssc.cold-storage-health` jobs. The
@@ -234,7 +234,7 @@ tail -f ~/Library/Logs/ssc-web-app.log                 # logs
 
 Orthanc is **not** a daemon — its `restart: unless-stopped` container returns
 automatically once Colima's Docker engine is up. The `com.ssc.colima` daemon runs
-a **watchdog** ([`scripts/macos/colima_watchdog.sh`](../../scripts/macos/colima_watchdog.sh))
+a **watchdog** ([`scripts/macos/colima_watchdog.sh`](../../stanford-stroke-pacs/scripts/macos/colima_watchdog.sh))
 that brings the VM up at boot and **restarts it within ~30s if it ever crashes or
 stops**, so Orthanc recovers on its own from a VM crash, not just a clean reboot.
 

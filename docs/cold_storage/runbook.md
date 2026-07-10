@@ -84,10 +84,10 @@ docker run --rm --entrypoint /bin/sh ssc-orthanc:patched-indexer -c \
 
 Should print `RemoveMissingFiles` and the startup banner strings.
 
-See [`../../../orthanc-indexer-patched/README.md`](../../../orthanc-indexer-patched/README.md)
+See [`../../orthanc-indexer-patched/README.md`](../../orthanc-indexer-patched/README.md)
 for the full rationale and ABI notes (the builder base must match the runtime
 base image's OS; both are pinned in
-[`../../../orthanc-indexer-patched/Dockerfile`](../../../orthanc-indexer-patched/Dockerfile)).
+[`../../orthanc-indexer-patched/Dockerfile`](../../orthanc-indexer-patched/Dockerfile)).
 
 ---
 
@@ -380,8 +380,8 @@ Exit code is non-zero if any critical condition holds (stuck rows,
 orphan dirs, or free disk below `--min-free-bytes`, default 5 GiB).
 
 The scheduled probe is installed by the platform unit installer, not by hand —
-there is no `systemd/cold-storage-health.*` to `sudo cp`. The installers render
-it from templates (`systemd/*.in` for Linux, `launchd/*.plist.in` for macOS):
+there is no `deploy/systemd/cold-storage-health.*` to `sudo cp`. The installers render
+it from templates (`deploy/systemd/*.in` for Linux, `deploy/launchd/*.plist.in` for macOS):
 
 ```bash
 # macOS (production) — installs com.ssc.cold-storage-health (StartInterval 900s)
