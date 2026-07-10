@@ -106,10 +106,12 @@ equivalents table: [`../guides/deployment_on_mac.md`](../guides/deployment_on_ma
 
 ## User and auth provisioning
 
-`scripts/admin/manage_users.py` is the canonical tool for both user stores
-(`users` in PostgreSQL + admin/service-account mirror in `orthanc_users.json`),
-including `rotate-service-account` and `check-service-account`. The full auth
-model, runtime split, and provisioning flow are canonical in
+`scripts/admin/manage_users.py` is the canonical tool for user provisioning
+(`users` in PostgreSQL + admin mirror in `orthanc_users.json`). Credential
+rotation lives in dedicated siblings: `scripts/admin/rotate_service_account.py`
+(`rotate`/`check` the Orthanc service account) and
+`scripts/admin/rotate_db_password.py` (`rotate`/`check` `DB_PASSWORD`). The full
+auth model, runtime split, and provisioning flow are canonical in
 [`architecture.md`](architecture.md) §5.3.
 
 ---
@@ -121,7 +123,7 @@ model, runtime split, and provisioning flow are canonical in
 3. `python3 -m pip install -r requirements.txt` (stack script deps; run from the
    stack root, `stanford-stroke-pacs/`)
 4. `./init_orthanc_db.sh`
-5. `python scripts/admin/manage_users.py add <user> --admin` + `rotate-service-account`
+5. `python scripts/admin/manage_users.py add <user> --admin` + `python scripts/admin/rotate_service_account.py rotate`
 6. `scripts/orthanc/dc.sh up -d` (Orthanc — wrapper resolves the DICOM mount from
    `config.toml` and applies the macOS override automatically)
 7. `pip install -r web-app/requirements.txt`, `cd web-app && npm install && npm run build`

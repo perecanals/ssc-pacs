@@ -50,7 +50,7 @@ ssc-pacs/                     # git checkout root (Makefile, CI, root scripts)
 │   ├── web-app/              # FastAPI backend + React frontend (port 8043)
 │   ├── alembic/              # stanford-stroke DB migrations (alembic.ini alongside); web-app runs them at startup
 │   ├── scripts/              # utility scripts (see scripts/README.md); _lib.sh = shared helpers
-│   │   ├── admin/            # manage_users.py, rename_dataset_value.py, bulk_set_label_values.*, remove_label.*, teardown.sh
+│   │   ├── admin/            # manage_users.py, rotate_service_account.py, rotate_db_password.py, rename_dataset_value.py, bulk_set_label_values.*, remove_label.*, teardown.sh
 │   │   ├── backup/           # backup_pg_db.sh, backup_orthanc_storage.sh, check_backup_freshness.sh
 │   │   ├── cold_storage/     # archive, cleanup, health, scoped_index, reindex_missing_series, prune_stale_index_paths, verify_and_repair
 │   │   ├── connectivity/     # tunnel/{linux,macos,windows}/
@@ -124,8 +124,14 @@ python scripts/admin/manage_users.py list                    # incl. dataset gra
 python scripts/admin/manage_users.py add <user> [--admin] [--datasets 'PRECISE,CRISP2/LVO']
 python scripts/admin/manage_users.py passwd <user>
 python scripts/admin/manage_users.py set-datasets <user> <csv|--all|--none>
-python scripts/admin/manage_users.py rotate-service-account  # + check-service-account verifies .env ↔ JSON
 # Restart Orthanc only when orthanc_users.json changed (admin edits / rotation): docker restart ssc-orthanc
+```
+
+### Credential rotation (separate from user management)
+```bash
+python scripts/admin/rotate_service_account.py rotate  # Orthanc svc acct: .env + orthanc_users.json (check = verify sync)
+python scripts/admin/rotate_db_password.py rotate      # DB_PASSWORD: ALTER ROLE + .env (check = verify .env authenticates)
+# Both prompt for the new password (hidden); add --generate to mint + print one. Never put a secret on the CLI.
 ```
 
 ### Reconciliation & schema migrations
@@ -159,7 +165,7 @@ Two services and two databases. Full topology + request/ingest flows: `docs/refe
 - End users live in the PostgreSQL `users` table (bcrypt, SSOT); login returns an HttpOnly JWT cookie.
 - **Per-user dataset access**: `users.allowed_datasets text[]` gates the `patient.dataset` cohorts a non-admin may see (deny-by-default: empty = no data; admins bypass). Enforced on every patient-data endpoint + the DICOMweb proxy (`web-app/dataset_access.py`). See architecture.md §5.4.
 - The Web App reverse-proxies `/ohif/*` and `/dicom-web/*` to Orthanc (`routes/proxy.py`, async `httpx`) with the service-account Basic auth from `.env`; end users never present Orthanc credentials.
-- `orthanc_users.json` holds only the service account + admin users; managed by `scripts/admin/manage_users.py` (`rotate-service-account` rewrites `.env` + JSON atomically).
+- `orthanc_users.json` holds only the service account + admin users; written by `scripts/admin/manage_users.py` (admin mirroring) and `scripts/admin/rotate_service_account.py` (`rotate` rewrites `.env` + JSON atomically).
 
 ## Image ingestion protocol
 
@@ -185,7 +191,7 @@ Depends on the `ssc-orthanc:patched-indexer` image + `"RemoveMissingFiles": fals
 - `docker-compose.yml` uses `env_file: .env` (relative to the compose file); `stanford-stroke-pacs/.env` must exist.
 - The stack depends on the custom `ssc-orthanc:patched-indexer` image; build it on the host before `dc.sh up`.
 - `scripts/admin/teardown.sh` is destructive; it resolves `.env` and the compose dir from the stack root (`$SCRIPT_DIR/../..`) and is confirmation-guarded — use with care.
-- `orthanc_users.json` must never be edited manually; always use `scripts/admin/manage_users.py`.
+- `orthanc_users.json` must never be edited manually; always use `scripts/admin/manage_users.py` (admin users) or `scripts/admin/rotate_service_account.py` (service-account rotation).
 - `image_ingestion_protocols/` is the legacy SSC-specific ingestion pipeline; not part of a standard fresh deployment.
 
 ## Documentation index

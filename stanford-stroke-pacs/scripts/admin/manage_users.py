@@ -9,7 +9,7 @@ service-account credential behind the scenes.
 ``orthanc_users.json`` is no longer used for routine end users. It holds:
 
  - the Orthanc service account (the credential the web app uses to proxy to
-   Orthanc; rotated via ``rotate-service-account``)
+   Orthanc; rotated via ``rotate_service_account.py``)
  - admin users (``is_admin=True``), so admins can also reach Orthanc Explorer 2
    on :8042 directly as themselves
 
@@ -18,10 +18,6 @@ only when the affected user has ``is_admin=True``.
 """
 
 import argparse
-import getpass
-import json
-import os
-import re
 import sys
 from pathlib import Path
 
@@ -29,11 +25,16 @@ import bcrypt
 from dotenv import load_dotenv
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
-ORTHANC_USERS_FILE = REPO_ROOT / "orthanc_users.json"
 ENV_FILE = REPO_ROOT / ".env"
 load_dotenv(ENV_FILE)
 
 sys.path.insert(0, str(REPO_ROOT / "web-app"))
+from _secret_helpers import (  # noqa: E402
+    orthanc_admin_user,
+    prompt_password,
+    remove_orthanc_user,
+    upsert_orthanc_user,
+)
 from db import get_conn  # noqa: E402
 
 USERS_TABLE_SQL = """
@@ -49,10 +50,6 @@ CREATE TABLE IF NOT EXISTS users (
 """
 
 
-def _orthanc_admin_user() -> str:
-    return os.getenv("ORTHANC_ADMIN_USER", "admin")
-
-
 def ensure_table():
     conn = get_conn()
     try:
@@ -63,29 +60,16 @@ def ensure_table():
         conn.close()
 
 
-def prompt_password() -> str:
-    """Hidden password prompt with confirmation and minimum-length check."""
-    while True:
-        p1 = getpass.getpass("Password: ")
-        if len(p1) < 8:
-            print("Password must be at least 8 characters.", file=sys.stderr)
-            continue
-        p2 = getpass.getpass("Confirm password: ")
-        if p1 == p2:
-            return p1
-        print("Passwords do not match. Try again.", file=sys.stderr)
-
-
 def hash_password(password: str) -> str:
     return bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
 
 
 def _refuse_service_account(username: str) -> None:
     """Bail out if a regular command targets the Orthanc service-account user."""
-    if username == _orthanc_admin_user():
+    if username == orthanc_admin_user():
         print(
             f"'{username}' is the Orthanc service account. "
-            "Use `rotate-service-account` to rotate its password.",
+            "Use `rotate_service_account.py rotate` to rotate its password.",
             file=sys.stderr,
         )
         sys.exit(2)
@@ -137,52 +121,6 @@ def _parse_datasets_csv(raw: str) -> list[str]:
             file=sys.stderr,
         )
     return datasets
-
-
-# -- Orthanc users JSON helpers ------------------------------------------------
-
-def load_orthanc_users() -> dict[str, str]:
-    if ORTHANC_USERS_FILE.exists():
-        data = json.loads(ORTHANC_USERS_FILE.read_text())
-        return data.get("RegisteredUsers", {})
-    return {}
-
-
-def save_orthanc_users(users: dict[str, str]) -> None:
-    ORTHANC_USERS_FILE.write_text(
-        json.dumps({"RegisteredUsers": users}, indent=2) + "\n"
-    )
-    os.chmod(ORTHANC_USERS_FILE, 0o600)
-
-
-def upsert_orthanc_user(username: str, password: str) -> None:
-    users = load_orthanc_users()
-    users[username] = password
-    save_orthanc_users(users)
-
-
-def remove_orthanc_user(username: str) -> None:
-    users = load_orthanc_users()
-    if users.pop(username, None) is not None:
-        save_orthanc_users(users)
-
-
-# -- .env admin-password sync -------------------------------------------------
-
-def _write_env_admin_password(password: str) -> None:
-    """Rewrite ORTHANC_ADMIN_PASSWORD in .env (idempotent; appends if absent)."""
-    text = ENV_FILE.read_text()
-    new_text, count = re.subn(
-        r"^ORTHANC_ADMIN_PASSWORD=.*$",
-        f"ORTHANC_ADMIN_PASSWORD='{password}'",
-        text,
-        flags=re.MULTILINE,
-    )
-    if count == 0:
-        if not new_text.endswith("\n"):
-            new_text += "\n"
-        new_text += f"ORTHANC_ADMIN_PASSWORD='{password}'\n"
-    ENV_FILE.write_text(new_text)
 
 
 # -- CLI commands --------------------------------------------------------------
@@ -404,59 +342,6 @@ def cmd_set_datasets(args: argparse.Namespace) -> None:
         print("The user now sees NO data in the web app.")
 
 
-def cmd_rotate_service_account(_args: argparse.Namespace) -> None:
-    """Rotate the Orthanc service-account password.
-
-    Rewrites ORTHANC_ADMIN_PASSWORD in .env and the matching entry in
-    orthanc_users.json atomically. Does not touch the users DB table.
-    """
-    username = _orthanc_admin_user()
-    print(f"Rotating Orthanc service-account password for user '{username}'.")
-    password = prompt_password()
-
-    _write_env_admin_password(password)
-    upsert_orthanc_user(username, password)
-
-    print(f"Service-account '{username}' rotated.")
-    print("Restart both services to pick up the new password:")
-    print("  docker restart ssc-orthanc")
-    print("  sudo systemctl restart ssc-web-app")
-
-
-def cmd_check_service_account(_args: argparse.Namespace) -> None:
-    """Verify the service-account password matches across .env and the JSON.
-
-    The web-app proxy authenticates to Orthanc with ORTHANC_ADMIN_PASSWORD from
-    .env; Orthanc accepts it because orthanc_users.json holds the same value.
-    These two are the one config pair not enforced by code at runtime, so a
-    manual edit to either file can silently break OHIF/DICOMweb. This is the
-    detector. Exits non-zero on mismatch (usable from a healthcheck).
-    """
-    username = _orthanc_admin_user()
-    env_pw = os.getenv("ORTHANC_ADMIN_PASSWORD")
-    json_pw = load_orthanc_users().get(username)
-
-    problems = []
-    if not env_pw:
-        problems.append(f"ORTHANC_ADMIN_PASSWORD is unset/empty in {ENV_FILE}")
-    if json_pw is None:
-        problems.append(f"no entry for '{username}' in {ORTHANC_USERS_FILE}")
-    if env_pw and json_pw is not None and env_pw != json_pw:
-        problems.append(
-            "ORTHANC_ADMIN_PASSWORD in .env does not match orthanc_users.json "
-            f"for '{username}'"
-        )
-
-    if problems:
-        print(f"Service-account '{username}': OUT OF SYNC", file=sys.stderr)
-        for p in problems:
-            print(f"  - {p}", file=sys.stderr)
-        print("Fix with:  python scripts/admin/manage_users.py rotate-service-account",
-              file=sys.stderr)
-        sys.exit(1)
-    print(f"Service-account '{username}': .env and orthanc_users.json are in sync.")
-
-
 # -- Entrypoint ----------------------------------------------------------------
 
 def main() -> None:
@@ -510,16 +395,6 @@ def main() -> None:
         help="Revoke all dataset access",
     )
 
-    sub.add_parser(
-        "rotate-service-account",
-        help="Rotate the Orthanc service-account password (.env + orthanc_users.json)",
-    )
-
-    sub.add_parser(
-        "check-service-account",
-        help="Verify .env and orthanc_users.json agree on the service-account password",
-    )
-
     args = parser.parse_args()
     if not args.command:
         parser.print_help()
@@ -538,14 +413,9 @@ def main() -> None:
         "passwd": cmd_passwd,
         "remove": cmd_remove,
         "set-datasets": cmd_set_datasets,
-        "rotate-service-account": cmd_rotate_service_account,
-        "check-service-account": cmd_check_service_account,
     }
 
-    # File-only commands don't need (and shouldn't require) a live DB.
-    if args.command not in {"check-service-account"}:
-        ensure_table()
-
+    ensure_table()
     cmds[args.command](args)
 
 

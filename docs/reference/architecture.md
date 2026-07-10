@@ -199,14 +199,21 @@ The file is owned by `scripts/admin/manage_users.py`; do not edit by hand.
 
 ### 5.3 Shared provisioning
 
-`scripts/admin/manage_users.py` is the canonical tool for both stores:
+`scripts/admin/manage_users.py` is the canonical tool for user provisioning:
 
 - `add` / `passwd` / `remove` always touch the `users` table; they also update
   `orthanc_users.json` when `is_admin=True`
 - `add --datasets <csv>` / `set-datasets` manage per-user dataset grants
   (see 5.4)
-- `rotate-service-account` rewrites `ORTHANC_ADMIN_PASSWORD` in `.env` and the
-  matching entry in `orthanc_users.json` atomically. It does not touch the DB.
+
+Credential rotation lives in dedicated siblings:
+
+- `scripts/admin/rotate_service_account.py rotate` rewrites
+  `ORTHANC_ADMIN_PASSWORD` in `.env` and the matching entry in
+  `orthanc_users.json` atomically (does not touch the DB); `check` verifies the
+  two agree.
+- `scripts/admin/rotate_db_password.py rotate` runs `ALTER ROLE` on the live DB
+  and rewrites `DB_PASSWORD` in `.env`; `check` verifies `.env` authenticates.
 
 ### 5.4 Dataset-level authorization (per-user cohort access)
 

@@ -1,5 +1,20 @@
 # Changelog
 
+## v1.2 — 2026-07-10
+
+- **Scripts**: split credential rotation out of `manage_users.py` into two
+  dedicated, same-shaped tools — `scripts/admin/rotate_service_account.py`
+  (Orthanc service account: `.env` + `orthanc_users.json`) and the new
+  `scripts/admin/rotate_db_password.py` (`DB_PASSWORD`: `ALTER ROLE` on the live
+  DB + `.env`). Each exposes `rotate [--generate]` / `check`; the secret is only
+  ever prompted (hidden) or generated, never placed on the command line.
+  Shared secret mechanics moved to `scripts/admin/_secret_helpers.py` (also fixes
+  a latent `.env`-rewrite bug where a `\` in a secret was mis-interpreted as a
+  regex backreference). The `rotate-service-account` / `check-service-account`
+  subcommands were removed from `manage_users.py`. No schema change.
+- **Docs**: rewrote `operations/secret_rotation.md` §2–3 and updated the command
+  and reference docs to the new script invocations.
+
 ## v1.1 — 2026-07-10
 
 - **Ops**: added non-destructive whole-stack stop/start helpers for both

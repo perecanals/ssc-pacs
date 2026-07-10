@@ -282,10 +282,10 @@ internally when proxying.
 python scripts/admin/manage_users.py add <username> --admin
 
 # 2. Set the Orthanc service-account password (.env + orthanc_users.json):
-python scripts/admin/manage_users.py rotate-service-account
+python scripts/admin/rotate_service_account.py rotate
 
 # 3. (optional) confirm .env and orthanc_users.json agree:
-python scripts/admin/manage_users.py check-service-account
+python scripts/admin/rotate_service_account.py check
 ```
 
 This ensures `users` exists in the research/app DB, inserts the admin (bcrypt
@@ -560,7 +560,7 @@ docker restart ssc-orthanc
 ```
 
 If the changed credential is the Orthanc service account used by the web app
-(`rotate-service-account`), also:
+(`rotate_service_account.py rotate`), also:
 
 ```bash
 sudo systemctl restart ssc-web-app

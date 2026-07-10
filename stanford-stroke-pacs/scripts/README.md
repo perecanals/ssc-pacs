@@ -19,7 +19,7 @@ by default and applies only with `--execute`; interactive prompts have a
 
 | Directory | Purpose | Key scripts |
 |---|---|---|
-| `admin/` | User provisioning, label/dataset ops, teardown | `manage_users.py`, `bulk_set_label_values.py`, `remove_label.py`, `rename_dataset_value.py`, `teardown.sh` |
+| `admin/` | User provisioning, credential rotation, label/dataset ops, teardown | `manage_users.py`, `rotate_service_account.py`, `rotate_db_password.py`, `bulk_set_label_values.py`, `remove_label.py`, `rename_dataset_value.py`, `teardown.sh` |
 | `backup/` | PostgreSQL dump, Orthanc volume snapshot, freshness monitoring | `backup_pg_db.sh`, `backup_orthanc_storage.sh` (+ in-container `orthanc_storage_snapshot.py`), `check_backup_freshness.sh` |
 | `cold_storage/` | Archive, cleanup, health, cache state, index repair | `archive_all_series.py`, `cleanup_loose_dicoms.py`, `scoped_index.py`, `reindex_missing_series.py`, `prune_stale_index_paths.py`, `rebuild_cache_state.py`, `cold_storage_health.py`, `backfill_storage_sizes.py`, `list_unarchived_series.py`, `verify_and_repair_archives.py`, `mirror_cold_archive.sh` |
 | `connectivity/` | Sanitized SSH tunnel templates for end users (per OS) | `tunnel/{linux,macos,windows}/tunnel.*` |
@@ -59,6 +59,12 @@ hours-long tree scan into the cron/JSON-report path):
 # User management
 python scripts/admin/manage_users.py list
 python scripts/admin/manage_users.py add <user> [--admin] [--datasets 'A,B']
+
+# Credential rotation (prompts for the new secret; --generate mints + prints one)
+python scripts/admin/rotate_service_account.py rotate   # Orthanc svc acct: .env + orthanc_users.json
+python scripts/admin/rotate_service_account.py check    # verify the two agree
+python scripts/admin/rotate_db_password.py rotate       # DB_PASSWORD: ALTER ROLE + .env
+python scripts/admin/rotate_db_password.py check        # verify .env authenticates
 
 # Rename a dataset cohort tag everywhere (patient + user grants + mirror)
 python scripts/admin/rename_dataset_value.py --from-value old --to-value new [--execute]

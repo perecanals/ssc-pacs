@@ -55,7 +55,7 @@ Notes:
 - Restoring `stanford-stroke` brings Alembic's `alembic_version` along, so
   Web App will see the schema already at head and won't re-migrate on startup.
 - `users` (bcrypt logins) travel in the dump. Re-run
-  `scripts/admin/manage_users.py rotate-service-account` on the new host only if
+  `scripts/admin/rotate_service_account.py rotate` on the new host only if
   you want fresh Orthanc service-account credentials; otherwise the restored
   `.env` value still matches `orthanc_users.json`.
 

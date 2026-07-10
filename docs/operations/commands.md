@@ -141,7 +141,7 @@ python scripts/admin/manage_users.py set-datasets alice --none  # revoke all acc
 python scripts/admin/manage_users.py remove alice
 
 # Verify .env and orthanc_users.json agree on the service account
-python scripts/admin/manage_users.py check-service-account   # exits non-zero on drift
+python scripts/admin/rotate_service_account.py check   # exits non-zero on drift
 ```
 
 Rename a dataset tag across the `patient` table and every user's grants
@@ -173,22 +173,29 @@ updates `orthanc_users.json`; restart Orthanc to pick it up:
 docker restart ssc-orthanc
 ```
 
-### Rotating the Orthanc service account
+### Rotating credentials
 
-The service account is the credential Web App uses to proxy to Orthanc and
-that host-local scripts use for direct Orthanc access (`ORTHANC_ADMIN_USER`
-in `.env`). Rotate it with:
+Full runbook (when-to-rotate, verification, failure modes) is
+[`secret_rotation.md`](secret_rotation.md). Quick reference — both rotators
+prompt for the new password (hidden); add `--generate` to mint a strong random
+one and print it once. The secret never touches the command line.
 
-```bash
-python scripts/admin/manage_users.py rotate-service-account
-```
-
-This rewrites `ORTHANC_ADMIN_PASSWORD` in `.env` and the matching entry in
-`orthanc_users.json` atomically. Then restart both services:
+Orthanc service account (`ORTHANC_ADMIN_PASSWORD`, used by the Web App proxy and
+host-local scripts):
 
 ```bash
+python scripts/admin/rotate_service_account.py rotate   # rewrites .env + orthanc_users.json
 docker restart ssc-orthanc
 sudo systemctl restart ssc-web-app   # macOS: sudo launchctl kickstart -k system/com.ssc.webapp
+python scripts/admin/rotate_service_account.py check    # verify in sync
+```
+
+Database password (`DB_PASSWORD`, the `stanford-stroke` login for `DB_USER`):
+
+```bash
+python scripts/admin/rotate_db_password.py rotate       # ALTER ROLE on the DB + rewrites .env
+sudo systemctl restart ssc-web-app   # macOS: sudo launchctl kickstart -k system/com.ssc.webapp
+python scripts/admin/rotate_db_password.py check        # verify .env authenticates
 ```
 
 ---

@@ -71,16 +71,18 @@ Used by:
    in `.env`.
 2. The matching entry in `orthanc_users.json` (Orthanc's own auth, plaintext).
 
-Both must stay in sync. The `rotate-service-account` subcommand updates both
-atomically.
+Both must stay in sync. The `rotate_service_account.py rotate` command updates
+both atomically.
 
 ### Procedure
 
 ```bash
 cd /opt/ssc-pacs/ssc-pacs/stanford-stroke-pacs
 
-# 1. Rotate the password in both .env and orthanc_users.json in one go:
-python scripts/admin/manage_users.py rotate-service-account
+# 1. Rotate the password in both .env and orthanc_users.json in one go.
+#    Prompts (hidden) for the new password; add --generate to mint a strong
+#    random one and print it once instead.
+python scripts/admin/rotate_service_account.py rotate
 
 # 2. Restart both consumers:
 #    Linux (systemd):  sudo systemctl restart ssc-web-app
@@ -90,7 +92,7 @@ sudo systemctl restart ssc-web-app
 
 # 3. Verify .env and orthanc_users.json agree, the service account works
 #    against Orthanc, and Web App can still proxy:
-python scripts/admin/manage_users.py check-service-account   # exits non-zero on drift
+python scripts/admin/rotate_service_account.py check   # exits non-zero on drift
 curl -u admin:<newpass> http://localhost:8042/system | head -5
 sudo journalctl -u ssc-web-app -n 50 | grep -iE 'orthanc|401' || echo 'no auth errors'
 #    macOS: grep -iE 'orthanc|401' ~/Library/Logs/ssc-web-app.err
@@ -100,40 +102,58 @@ sudo journalctl -u ssc-web-app -n 50 | grep -iE 'orthanc|401' || echo 'no auth e
 
 - **`.env` and `orthanc_users.json` drift out of sync.** Shouldn't happen — one
   command writes both. If you suspect drift (e.g., after manual edits),
-  re-run `rotate-service-account` to bring them back into sync.
-- **Editing `orthanc_users.json` manually.** Don't. `scripts/admin/manage_users.py`
-  is the single source of truth.
+  re-run `rotate_service_account.py rotate` to bring them back into sync.
+- **Editing `orthanc_users.json` manually.** Don't.
+  `scripts/admin/rotate_service_account.py` (rotation) and
+  `scripts/admin/manage_users.py` (admin mirroring) are the only sanctioned
+  writers.
 
 ---
 
 ## 3. Database password (`DB_PASSWORD`)
 
-Used by Web App to connect to the `stanford-stroke` PostgreSQL database.
-The database is owned by the host (not managed by this repo); rotation is
-coordinated with whoever owns the Postgres role.
+Used by Web App (and the admin scripts) to connect to the `stanford-stroke`
+PostgreSQL database as `DB_USER`. `rotate_db_password.py rotate` changes the
+role password on the live database (via `ALTER ROLE`, with the new secret passed
+as a bound parameter so it never lands in argv, shell history, or a log) and
+rewrites `DB_PASSWORD` in `.env` to match.
+
+The command connects with the *current* `.env` credentials, so run it before the
+old password is invalidated elsewhere. The role changes *its own* password, so no
+superuser access is needed.
 
 ### Procedure
 
 ```bash
-# 1. Change the role password in Postgres (example; exact command is
-#    site-specific).
-#    Linux with a system PostgreSQL:
-sudo -u postgres psql -c "ALTER USER stanford_app WITH PASSWORD '<newpass>';"
-#    macOS with a user-level Homebrew PostgreSQL, connect as the instance owner
-#    rather than via `sudo -u postgres`:
-#      psql -d postgres -c "ALTER USER stanford_app WITH PASSWORD '<newpass>';"
+cd /opt/ssc-pacs/ssc-pacs/stanford-stroke-pacs
 
-# 2. Update .env.
-sudo -e /opt/ssc-pacs/ssc-pacs/stanford-stroke-pacs/.env
+# 1. Change the role password on the DB and sync .env in one go.
+#    Prompts (hidden) for the new password; add --generate to mint a strong
+#    random one and print it once instead.
+python scripts/admin/rotate_db_password.py rotate
 
-# 3. Restart Web App. Startup will now fail-fast if DB_USER/DB_PASSWORD
-#    are missing, but an *incorrect* password surfaces as connection errors
-#    on the first request — watch the logs.
+# 2. Restart Web App so it reloads .env (the running pool keeps its old
+#    connections until then). Startup fail-fasts if DB_USER/DB_PASSWORD are
+#    missing; an *incorrect* password surfaces as connection errors — watch logs.
 #    Linux (systemd):  sudo systemctl restart ssc-web-app
 #    macOS (launchd):  sudo launchctl kickstart -k system/com.ssc.webapp
 sudo systemctl restart ssc-web-app
-sudo journalctl -u ssc-web-app -f   # macOS: tail -f ~/Library/Logs/ssc-web-app.err
+
+# 3. Verify .env authenticates and the service came back clean:
+python scripts/admin/rotate_db_password.py check   # exits non-zero on failure
+sudo journalctl -u ssc-web-app -n 50   # macOS: tail -n 50 ~/Library/Logs/ssc-web-app.err
+curl -s -o /dev/null -w "%{http_code}\n" http://localhost:8043/
 ```
+
+### What can go wrong
+
+- **`.env` write fails after the DB change.** The script reports this explicitly:
+  the DB password *was* changed, so set `DB_PASSWORD` in `.env` to the value you
+  just entered (or re-run `rotate` with the new password as the current one).
+  `rotate_db_password.py check` is the drift detector.
+- **A password with a `'` or `\`.** `--generate` avoids these entirely; a
+  prompted password containing a single quote is warned about because it may not
+  round-trip through `.env` single-quoting.
 
 ---
 

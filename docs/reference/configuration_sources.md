@@ -52,7 +52,7 @@ required** — `web-app/config.py` fails fast if it is missing.
 
 | Logical value | Authoritative home | Also appears in | Kept in sync by |
 |---|---|---|---|
-| Orthanc service-account password | `.env` `ORTHANC_ADMIN_PASSWORD` | `orthanc_users.json` | `manage_users.py rotate-service-account`; verify with `manage_users.py check-service-account` |
+| Orthanc service-account password | `.env` `ORTHANC_ADMIN_PASSWORD` | `orthanc_users.json` | `rotate_service_account.py rotate`; verify with `rotate_service_account.py check` |
 | DB host/port/name/creds | `.env` | `docker-compose.yml` (`${DB_*}`/`${PG_ORTHANC_*}`), `web-app/db.py` | docker-compose `${VAR}` interpolation + `env_file: .env` (automatic) |
 | Storage mode + DICOM mount path | `config.toml` `[storage]` | the Orthanc `/dicom-data` bind mount | `scripts/orthanc/dc.sh` exports `DICOM_MOUNT_SOURCE` (automatic) |
 | Orthanc HTTP/DICOM ports | `.env` (optional) → `orthanc.json` default | `docker-compose*` | compose interpolation, default `8042`/`4242` |
@@ -60,7 +60,7 @@ required** — `web-app/config.py` fails fast if it is missing.
 | Effective non-secret config | `config.toml` | — | `web-app/config.py` fails fast if absent, WARNs on missing keys, and logs the effective values at startup (`startup: effective config`) |
 
 The first row is the only pair with no fully-automatic enforcement at runtime —
-run `python scripts/admin/manage_users.py check-service-account` after any manual
+run `python scripts/admin/rotate_service_account.py check` after any manual
 edit (it exits non-zero on mismatch, so it also works from a healthcheck).
 
 ---
