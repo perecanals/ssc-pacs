@@ -33,7 +33,7 @@ tunnel.
 ```
             ┌─────────────────────────────────────────────────────────────────┐
             │                          Single host                            │
-            │        (macOS launchd in production; Linux systemd too)         │
+            │         (Linux systemd — reference; macOS launchd too)          │
             │                                                                 │
  Browser ───┼──► :8043  web app  (FastAPI + React, native service)          │
  (via SSH   │         │                                                       │
@@ -107,8 +107,9 @@ doesn't cover.
 
 - FastAPI app (`web-app/app.py`) served by uvicorn on `:8043`.
 - Serves the pre-built React frontend (`web-app/dist/`) as static files.
-- Runs as a native service — launchd (`com.ssc.webapp`) in production on macOS,
-  or the `ssc-web-app.service` systemd unit on Linux — in the `ssc-pacs` conda env.
+- Runs as a native service — the `ssc-web-app.service` systemd unit on Linux
+  (reference deployment), or launchd (`com.ssc.webapp`) on macOS — in the
+  `ssc-pacs` conda env.
 - Reads `web-app/config.py` → stack-root `config.toml` for non-secrets
   (storage mode, paths, session length).
 - Reads secrets from stack-root `.env`.
@@ -153,8 +154,8 @@ One PostgreSQL server hosts both. Connection params and credentials are in
 ```
 ┌─ orthanc_db ─────────────────────────────────────┐
 │  owned by Orthanc PostgreSQL plugin              │
-│  (do not mutate except via                       │
-│   scripts/orthanc/enrich_orthanc.py)             │
+│  (treat as read-only; mutate only via            │
+│   sanctioned Orthanc enrichment)                 │
 │                                                  │
 │  resources, metadata, mainDicomTags,             │
 │  dicomidentifiers, attachedfiles, labels, ...    │
@@ -404,9 +405,9 @@ canonical in [`architecture.md`](architecture.md) §5.
 
 The Orthanc + OHIF + Explorer 2 + custom-indexer layer, the Web App, the
 `cold_path_cache` stack, and `manage_users.py` / `init_orthanc_db.sh` are
-portable; `image_ingestion_protocols/` and `scripts/orthanc/enrich_orthanc.py`
-are SSC-specific. The full portability breakdown and fresh-deployment guidance
-are canonical in [`architecture.md`](architecture.md) §7.
+portable; `image_ingestion_protocols/` is SSC-specific. The full portability
+breakdown and fresh-deployment guidance are canonical in
+[`architecture.md`](architecture.md) §7.
 
 ---
 

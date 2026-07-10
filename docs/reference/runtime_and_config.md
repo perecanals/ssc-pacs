@@ -9,13 +9,13 @@
 | Piece | How it runs | Ports |
 |-------|-------------|-------|
 | Orthanc | Docker (`ssc-orthanc`), host networking, custom image `ssc-orthanc:patched-indexer` | HTTP `8042`, DICOM `4242` |
-| Web App | Native service, uvicorn — **launchd (`com.ssc.webapp`) on the current macOS production host; systemd (`ssc-web-app.service`) on Linux** | HTTP `8043` |
+| Web App | Native service, uvicorn — **systemd (`ssc-web-app.service`) on Linux (reference deployment); launchd (`com.ssc.webapp`) on macOS** | HTTP `8043` |
 | PostgreSQL | Host server (not in this repo) | configured in `.env` |
 
 Paths in this doc are relative to the **stack root** (`stanford-stroke-pacs/`,
 where `config.toml`, `.env`, `orthanc.json`, and `docker-compose.yml` live)
-unless a path is called out as relative to the git checkout root
-(`/opt/ssc-pacs/ssc-pacs`, the Makefile home).
+unless a path is called out as relative to the git checkout root (one level up,
+the Makefile home).
 
 `docker-compose.yml` defines **Orthanc only**. The Web App is not a Compose service.
 
@@ -81,8 +81,9 @@ mount change is needed. See [`../cold_storage/runbook.md`](../cold_storage/runbo
 
 ## Web App runtime
 
-The web app runs natively on the host, managed by launchd (`com.ssc.webapp`)
-in production on macOS, or by the `ssc-web-app.service` systemd unit on Linux:
+The web app runs natively on the host, managed by the `ssc-web-app.service`
+systemd unit on Linux (the reference deployment), or by launchd
+(`com.ssc.webapp`) on macOS:
 
 - Python dependencies: the `ssc-pacs` conda env (or a venv); install from
   `web-app/requirements.txt`
@@ -97,8 +98,8 @@ Frontend build:
 - `cd web-app && npm install && npm run build`
 - Node.js and npm are build-time only
 
-Restart after code changes: `sudo launchctl kickstart -k system/com.ssc.webapp`
-(macOS production) or `sudo systemctl restart ssc-web-app` (Linux). Platform
+Restart after code changes: `sudo systemctl restart ssc-web-app` (Linux) or
+`sudo launchctl kickstart -k system/com.ssc.webapp` (macOS). Platform
 equivalents table: [`../guides/deployment_on_mac.md`](../guides/deployment_on_mac.md) §8.
 
 ---
@@ -126,7 +127,7 @@ model, runtime split, and provisioning flow are canonical in
 7. `pip install -r web-app/requirements.txt`, `cd web-app && npm install && npm run build`
 8. Install the service units from templates: `sudo scripts/linux/install_systemd.sh`
    (macOS: `sudo scripts/macos/install_launchd.sh`) — enables the web app + timers
-9. Wait for Orthanc indexing; optionally `scripts/orthanc/enrich_orthanc.py` / `scripts/orthanc/label_studies.py`
+9. Wait for Orthanc indexing
 10. Validate (see [`../guides/installation_and_deployment.md`](../guides/installation_and_deployment.md))
 
 ---
@@ -149,8 +150,6 @@ model, runtime split, and provisioning flow are canonical in
 
 | File | Purpose | Portability |
 |------|---------|-------------|
-| `scripts/orthanc/enrich_orthanc.py` | Mutates Orthanc's PostgreSQL index so OE2 shows identifiers from source metadata | Optional; skip if DICOM headers are already usable |
-| `scripts/orthanc/label_studies.py` | Seeds Orthanc study labels from `study_type` + `modality` | Portable if columns exist |
 | `web-app/labelled_table_sync.py` | Helpers for maintaining per-level labelled mirror tables | Imported by `web-app/routes/labels.py` and `scripts/admin/remove_label.py` |
 | `scripts/admin/remove_label.py` | Remove a label definition + annotation rows from DB | |
 | `scripts/admin/bulk_set_label_values.py` | Bulk-set annotation values from a CSV/Excel table; creates the label on demand | Requires `openpyxl` for `.xlsx` |
@@ -215,7 +214,7 @@ stanford-stroke-pacs/
 │   ├── dicom/                    # dicom_to_nifti
 │   ├── linux/                    # install_systemd.sh (renders deploy/systemd/*.in)
 │   ├── macos/                    # colima_*, install_launchd.sh (renders deploy/launchd/*.plist.in)
-│   └── orthanc/                  # enrich_orthanc, label_studies, check_status, dc.sh
+│   └── orthanc/                  # check_status, dc.sh
 ├── deploy/                       # service templates rendered by the installers
 │   ├── systemd/                  # systemd unit + timer TEMPLATES (*.in)
 │   └── launchd/                  # macOS LaunchDaemon TEMPLATES (*.plist.in)

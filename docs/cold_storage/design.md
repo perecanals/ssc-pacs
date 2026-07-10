@@ -345,9 +345,10 @@ tree scan.
 
 **OOM caveat.** The plugin's own DICOM cache plateaus (~0.35 GiB), but Orthanc
 *core*'s working set grows during sustained registration, and one uninterrupted
-scan over hundreds of thousands of instances OOMs the Colima VM. The kill is
-**VM-global**, so `docker inspect`'s `OOMKilled` reads **false** — misleading.
-Two guards, both in `scoped_index.py`:
+scan over hundreds of thousands of instances can OOM the container (measured on
+the macOS/Colima deployment's 8 GiB VM). Under Colima the kill is **VM-global**,
+so `docker inspect`'s `OOMKilled` reads **false** — misleading. Two guards, both
+in `scoped_index.py`:
 
 - **Bounded passes.** Large registrations must go through
   `scoped_index.register_in_bounded_passes` (default ≤350 series / ≤40k

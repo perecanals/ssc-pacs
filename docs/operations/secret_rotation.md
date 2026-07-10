@@ -31,13 +31,13 @@ sudo -e /opt/ssc-pacs/ssc-pacs/stanford-stroke-pacs/.env
 #    Replace the JWT_SECRET=... line with the new value.
 
 # 3. Reload Web App to pick it up. All existing cookies are now invalid.
-#    macOS (production): sudo launchctl kickstart -k system/com.ssc.webapp
-#    Linux (systemd):    sudo systemctl restart ssc-web-app
-sudo launchctl kickstart -k system/com.ssc.webapp
+#    Linux (systemd):  sudo systemctl restart ssc-web-app
+#    macOS (launchd):  sudo launchctl kickstart -k system/com.ssc.webapp
+sudo systemctl restart ssc-web-app
 
 # 4. Spot-check that the service came back up and auth still works for a
-#    fresh login (web-app logs are flat JSON files on macOS):
-tail -n 50 ~/Library/Logs/ssc-web-app.err   # Linux: sudo journalctl -u ssc-web-app -n 50
+#    fresh login:
+sudo journalctl -u ssc-web-app -n 50   # macOS: tail -n 50 ~/Library/Logs/ssc-web-app.err
 curl -s -o /dev/null -w "%{http_code}\n" http://localhost:8043/
 ```
 
@@ -54,7 +54,7 @@ longest `session_absolute_timeout_hours` interval.
 
 - **Empty secret after edit.** The service now **fails fast** at startup
   with `RuntimeError: JWT_SECRET must be set ...`. Check
-  `~/Library/Logs/ssc-web-app.err` (Linux: `journalctl -u ssc-web-app -n 50`)
+  `journalctl -u ssc-web-app -n 50` (macOS: `~/Library/Logs/ssc-web-app.err`)
   and restore the value.
 - **Cookies still show old value in the browser.** Expected — the browser
   keeps the old cookie until it expires or the user hits a protected page
@@ -83,17 +83,17 @@ cd /opt/ssc-pacs/ssc-pacs/stanford-stroke-pacs
 python scripts/admin/manage_users.py rotate-service-account
 
 # 2. Restart both consumers:
-#    macOS (production): sudo launchctl kickstart -k system/com.ssc.webapp
-#    Linux (systemd):    sudo systemctl restart ssc-web-app
+#    Linux (systemd):  sudo systemctl restart ssc-web-app
+#    macOS (launchd):  sudo launchctl kickstart -k system/com.ssc.webapp
 docker restart ssc-orthanc
-sudo launchctl kickstart -k system/com.ssc.webapp
+sudo systemctl restart ssc-web-app
 
 # 3. Verify .env and orthanc_users.json agree, the service account works
 #    against Orthanc, and Web App can still proxy:
 python scripts/admin/manage_users.py check-service-account   # exits non-zero on drift
 curl -u admin:<newpass> http://localhost:8042/system | head -5
-grep -iE 'orthanc|401' ~/Library/Logs/ssc-web-app.err || echo 'no auth errors'
-#    Linux: sudo journalctl -u ssc-web-app -n 50 | grep -iE 'orthanc|401'
+sudo journalctl -u ssc-web-app -n 50 | grep -iE 'orthanc|401' || echo 'no auth errors'
+#    macOS: grep -iE 'orthanc|401' ~/Library/Logs/ssc-web-app.err
 ```
 
 ### What can go wrong
@@ -116,10 +116,12 @@ coordinated with whoever owns the Postgres role.
 
 ```bash
 # 1. Change the role password in Postgres (example; exact command is
-#    site-specific). The production host runs a user-level Homebrew PostgreSQL,
-#    so connect as the instance owner rather than via `sudo -u postgres`:
-psql -d postgres -c "ALTER USER stanford_app WITH PASSWORD '<newpass>';"
-#    Linux with a system PostgreSQL: sudo -u postgres psql -c "ALTER USER ..."
+#    site-specific).
+#    Linux with a system PostgreSQL:
+sudo -u postgres psql -c "ALTER USER stanford_app WITH PASSWORD '<newpass>';"
+#    macOS with a user-level Homebrew PostgreSQL, connect as the instance owner
+#    rather than via `sudo -u postgres`:
+#      psql -d postgres -c "ALTER USER stanford_app WITH PASSWORD '<newpass>';"
 
 # 2. Update .env.
 sudo -e /opt/ssc-pacs/ssc-pacs/stanford-stroke-pacs/.env
@@ -127,10 +129,10 @@ sudo -e /opt/ssc-pacs/ssc-pacs/stanford-stroke-pacs/.env
 # 3. Restart Web App. Startup will now fail-fast if DB_USER/DB_PASSWORD
 #    are missing, but an *incorrect* password surfaces as connection errors
 #    on the first request — watch the logs.
-#    macOS (production): sudo launchctl kickstart -k system/com.ssc.webapp
-#    Linux (systemd):    sudo systemctl restart ssc-web-app
-sudo launchctl kickstart -k system/com.ssc.webapp
-tail -f ~/Library/Logs/ssc-web-app.err   # Linux: sudo journalctl -u ssc-web-app -f
+#    Linux (systemd):  sudo systemctl restart ssc-web-app
+#    macOS (launchd):  sudo launchctl kickstart -k system/com.ssc.webapp
+sudo systemctl restart ssc-web-app
+sudo journalctl -u ssc-web-app -f   # macOS: tail -f ~/Library/Logs/ssc-web-app.err
 ```
 
 ---

@@ -160,9 +160,10 @@ python scripts/cold_storage/cleanup_loose_dicoms.py --execute --patient 4-0551
 python scripts/cold_storage/cleanup_loose_dicoms.py --execute --no-deep-verify
 ```
 
-Suitable for scheduling. On the macOS production host this runs as a launchd
-job (see [`../guides/deployment_on_mac.md`](../guides/deployment_on_mac.md)); the
-generic form, from the stack root, is:
+Suitable for scheduling — it runs from the platform service units (a systemd
+timer on Linux; a launchd job on macOS, see
+[`../guides/deployment_on_mac.md`](../guides/deployment_on_mac.md)). The generic
+form, from the stack root, is:
 
 ```bash
 conda run -n ssc-pacs python scripts/cold_storage/cleanup_loose_dicoms.py --execute

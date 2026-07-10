@@ -397,10 +397,10 @@ prevent accidental data loss in `legacy` mode. It is safe to run repeatedly and
 is schedulable (`conda run -n ssc-pacs python scripts/cold_storage/cleanup_loose_dicoms.py --execute --no-deep-verify --quiet`);
 with `cleanup_loose_after_indexing: true` (the default) the ingestion run
 already cleans per case, so a standalone schedule is only needed when running
-with cleanup disabled. On the macOS production host scheduling is via launchd,
-not cron — see [`../operations/commands.md`](../operations/commands.md). Run a
-deep-verify pass periodically (weekly or so) to catch archive corruption the
-fast path would miss.
+with cleanup disabled. On the production host schedule it via a systemd timer on
+Linux (or launchd on macOS), not cron — see
+[`../operations/commands.md`](../operations/commands.md). Run a deep-verify pass
+periodically (weekly or so) to catch archive corruption the fast path would miss.
 
 ---
 

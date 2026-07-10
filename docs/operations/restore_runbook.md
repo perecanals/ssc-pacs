@@ -13,8 +13,7 @@ step is unclear, fix the doc, not your memory.
 ## What a complete recovery restores
 
 Throughout this runbook, **`$BR`** is the backup root — `config.toml`
-`[backup].backup_root` (production: `/Volumes/ThunderBay_RAID1/ssc-pacs-backups`).
-Set it once per session:
+`[backup].backup_root`. Set it once per session:
 
 ```bash
 cd /opt/ssc-pacs/ssc-pacs/stanford-stroke-pacs
@@ -104,8 +103,7 @@ If counts look right, go to 1b. Otherwise try an older dump.
 "backup taken" and "restore performed":
 
 ```bash
-# macOS (production): sudo launchctl bootout system/com.ssc.webapp
-sudo launchctl bootout system/com.ssc.webapp   # Linux: sudo systemctl stop ssc-web-app
+sudo systemctl stop ssc-web-app   # macOS: sudo launchctl bootout system/com.ssc.webapp
 ```
 
 Then promote the scratch DB. Two options:
@@ -136,8 +134,8 @@ analysis and you get a sub-second cutover.
 Restart Web App and validate:
 
 ```bash
-# macOS (production): sudo launchctl bootstrap system /Library/LaunchDaemons/com.ssc.webapp.plist
-sudo launchctl bootstrap system /Library/LaunchDaemons/com.ssc.webapp.plist   # Linux: sudo systemctl start ssc-web-app
+# macOS: sudo launchctl bootstrap system /Library/LaunchDaemons/com.ssc.webapp.plist
+sudo systemctl start ssc-web-app
 curl -sf http://localhost:8043/api/labels/summary | python3 -m json.tool | head
 ```
 
@@ -217,8 +215,7 @@ Rebuilding means, per study: **warm** the series (extract archives back to
 scoped passes (`scripts/cold_storage/reindex_missing_series.py`, which drives
 the patched indexer's `POST /indexer/scan`). Across the whole corpus this is a
 multi-day operation and re-creates OE2 labels — read
-`docs/cold_storage/` and re-run `scripts/orthanc/enrich_orthanc.py`
-/ `scripts/orthanc/label_studies.py` afterwards. Restoring the dump (§2a/§2b)
+`docs/cold_storage/` for the full procedure. Restoring the dump (§2a/§2b)
 plus the storage volume (§2d) is dramatically preferable.
 
 ### 2d. Restore the Orthanc storage volume (OHIF SR annotations + indexer DB)
@@ -329,6 +326,6 @@ dropdb -h "$DB_HOST" -U "$DB_USER" "$DEST"
 |---|---|---|---|
 | 2026-04-15 | `stanford-stroke`, `orthanc_db` | PASS — row counts match production for `image_series`, `annotations`, `users`, `label_definitions`, plus top-10 Orthanc tables by row count | claude (acceptance drill) |
 
-Run this drill quarterly. **A re-drill is due on the macOS production
-platform** — the last recorded run predates the migration (different service
-manager, backup root, and PostgreSQL install). Update the table after each run.
+Run this drill quarterly. **A re-drill is due** — the last recorded run
+predates the current platform migration (different service manager, backup
+root, and PostgreSQL install). Update the table after each run.

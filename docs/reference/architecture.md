@@ -165,21 +165,6 @@ DICOMs to Orthanc was removed — see [`../cold_storage/design.md`](../cold_stor
 6. Orthanc study labels are stored inside Orthanc and manipulated via Orthanc's
    UI or REST API, not through the web app tables.
 
-### 4.3 Optional enrichment layer
-
-`scripts/orthanc/enrich_orthanc.py` is an extra display-enrichment step:
-
-- it reads `patient_id` from `image_series` and `studydescription` from
-  `image_study` (via JOIN)
-- it then mutates Orthanc's PostgreSQL index tables so Orthanc Explorer 2 shows
-  more useful identifiers than the anonymized DICOM headers provide
-- Patient ID and Patient Name are set from `patient_id`
-- Study Description is set from `image_study.studydescription`
-- Series Description is set from `image_series.seriesdescription`
-
-This is important for the current dataset, but it is not fundamental to the
-architecture.
-
 ---
 
 ## 5. Authentication model
@@ -270,10 +255,10 @@ architecturally:
   [`../../orthanc-indexer-patched/Dockerfile`](../../orthanc-indexer-patched/README.md)),
   **not** an upstream registry image. The repo provides `docker-compose.yml`
   (Orthanc only), `orthanc.json`, and the tool-managed `orthanc_users.json`.
-- **Web App** runs natively (no container): uvicorn under launchd
-  (`com.ssc.webapp`, current macOS production) or systemd
-  (`ssc-web-app.service`, Linux), serving the pre-built `web-app/dist/`. Node is
-  build-time only.
+- **Web App** runs natively (no container): uvicorn under systemd
+  (`ssc-web-app.service`) on Linux — the reference deployment — or under
+  launchd (`com.ssc.webapp`) on macOS, serving the pre-built `web-app/dist/`.
+  Node is build-time only.
 
 ---
 
@@ -292,23 +277,10 @@ follow the same pattern:
 - `scripts/admin/manage_users.py`
 - `init_orthanc_db.sh`
 
-`scripts/orthanc/label_studies.py` is also fairly portable as long as the source metadata tables
-(`image_series` and `image_study`) still provide:
-
-- `studyinstanceuid`
-- `study_type` (from `image_study`)
-- `modality` (from `image_series`)
-
 ### 7.2 Site-specific parts
 
 These parts depend on the SSC metadata conventions or local filesystem
 assumptions.
-
-`scripts/orthanc/enrich_orthanc.py` is specific to deployments where:
-
-- the DICOM headers are too anonymized to be useful in Orthanc Explorer 2
-- you want OE2 columns to show values from `image_series` and `image_study`
-- you are willing to mutate Orthanc's PostgreSQL index tables directly
 
 `image_ingestion_protocols/` is strongly site-specific:
 

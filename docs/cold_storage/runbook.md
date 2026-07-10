@@ -44,9 +44,8 @@ curl -s -u "${ORTHANC_ADMIN_USER}:${ORTHANC_ADMIN_PASSWORD}" \
   http://localhost:8042/statistics | python3 -m json.tool
 ```
 
-There is no separate loose-DICOM backup on this host: the archives under
-`cold_archive_root` are canonical, and the old Linux host's loose-tree copy does
-not exist here (that safety net belonged to the pre-migration deployment).
+There is no separate loose-DICOM backup once cleanup has run: the archives under
+`cold_archive_root` are canonical (a pre-migration loose-tree copy is not retained).
 
 ---
 
@@ -169,14 +168,14 @@ Edit `config.toml` (use your host's real paths):
 mode = "cold_path_cache"
 dicom_data_root = "/path/to/imaging_data"      # warm cache (archives extract here)
 cold_archive_root = "/path/to/compressed"      # canonical *.tar.zst store
-eviction_ttl_hours = 336                        # production value (deliberate — 14 days)
+eviction_ttl_hours = 24                         # TTL before warm files are evicted (code default 24h); tune to taste
 ```
 
-Restart the web app — on the macOS production host that is a launchd kickstart;
-on a Linux/systemd host use `systemctl`:
+Restart the web app — on a Linux/systemd host use `systemctl`; on macOS use a
+launchd kickstart:
 ```bash
-sudo launchctl kickstart -k system/com.ssc.webapp   # macOS (production)
-# sudo systemctl restart ssc-web-app                # Linux/systemd
+sudo systemctl restart ssc-web-app                    # Linux/systemd
+# sudo launchctl kickstart -k system/com.ssc.webapp   # macOS
 ```
 
 ### 4. Validate warm/evict in the UI
@@ -384,20 +383,19 @@ there is no `deploy/systemd/cold-storage-health.*` to `sudo cp`. The installers 
 it from templates (`deploy/systemd/*.in` for Linux, `deploy/launchd/*.plist.in` for macOS):
 
 ```bash
-# macOS (production) — installs com.ssc.cold-storage-health (StartInterval 900s)
-sudo scripts/macos/install_launchd.sh
-
 # Linux/systemd — installs the cold-storage-health.timer
 sudo scripts/linux/install_systemd.sh
+
+# macOS — installs com.ssc.cold-storage-health (StartInterval 900s)
+sudo scripts/macos/install_launchd.sh
 ```
 
-On production (macOS) check it with:
+On Linux check it with `systemctl list-timers cold-storage-health.timer` and
+`journalctl -u cold-storage-health.service -n 50`. On macOS the equivalents are:
 ```bash
 sudo launchctl print system/com.ssc.cold-storage-health
 tail -f ~/Library/Logs/com.ssc.cold-storage-health.log
 ```
-On Linux the equivalents are `systemctl list-timers cold-storage-health.timer`
-and `journalctl -u cold-storage-health.service -n 50`.
 
 The probe exits non-zero on any critical condition; the JSON report
 (`--json`) can be wired into an alerting layer (see

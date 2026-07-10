@@ -45,7 +45,7 @@ python scripts/data_integrity/reconcile.py --json --quiet
 Reconciliation is **not scheduled** — run it by hand with the commands above
 when you want a fresh report (typically right after an ingestion run or a
 storage migration). The fresh-deploy installers
-(`scripts/macos/install_launchd.sh`, `scripts/linux/install_systemd.sh`) do
+(`scripts/linux/install_systemd.sh`, `scripts/macos/install_launchd.sh`) do
 **not** install any reconciliation timer or LaunchDaemon, and there are no
 `deploy/systemd/reconciliation.*` / `deploy/launchd/com.ssc.reconciliation.plist.in`
 templates.

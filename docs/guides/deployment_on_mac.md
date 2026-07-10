@@ -34,7 +34,7 @@ On an **Intel Mac**, difference #2 disappears.
 
 ## 2. Prerequisites (Homebrew + Colima)
 
-This server runs **headless** (no GUI), so it uses **Colima** — a CLI-only Docker
+A headless macOS host (no GUI) uses **Colima** — a CLI-only Docker
 engine on a Lima VM (Apple's Virtualization.framework) — instead of Docker Desktop.
 No GUI, no root, no Docker-Desktop licensing.
 
@@ -241,7 +241,7 @@ stops**, so Orthanc recovers on its own from a VM crash, not just a clean reboot
 ### Full Disk Access — REQUIRED when data lives on an external volume
 
 macOS blocks **background LaunchDaemons** from reading/writing **external/removable
-volumes** (e.g. the ThunderBay RAID) — a process in a login/SSH session is allowed, a
+volumes** (e.g. an external RAID) — a process in a login/SSH session is allowed, a
 daemon is **not**. Installing the daemons is not enough; without this grant the
 failures are silent and misleading:
 
@@ -284,7 +284,7 @@ Verify: warm a study in the UI (files appear under `dicom_data_root`), and
 | Component | Boot persistence on macOS |
 |---|---|
 | Orthanc (Docker) | `restart: unless-stopped` in compose **plus** the Colima VM supervised by the `com.ssc.colima` watchdog LaunchDaemon (§6). The container cannot come back without the VM, which the watchdog starts at boot and restarts within ~30s on crash/stop. (Do **not** point the daemon at `colima_start.sh` directly — it exits 0 once the VM is up, which `KeepAlive` would busy-loop.) |
-| PostgreSQL | `com.ssc.postgres` LaunchDaemon (installed by `install_launchd.sh`). On a headless box `brew services` can't load a `gui/$UID` agent, so a system daemon running `postgres -D <datadir>` as `pere` is used instead. |
+| PostgreSQL | `com.ssc.postgres` LaunchDaemon (installed by `install_launchd.sh`). On a headless box `brew services` can't load a `gui/$UID` agent, so a system daemon running `postgres -D <datadir>` as the host user is used instead. |
 | Web App | `com.ssc.webapp` LaunchDaemon (§6, `RunAtLoad` + `KeepAlive`). |
 
 After a reboot, verify all three with the day-2 commands below.

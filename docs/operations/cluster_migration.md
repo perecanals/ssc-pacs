@@ -13,7 +13,7 @@ For the general restore mechanics, see
 ## The key principle
 
 Orthanc only ever references the **container path** `/dicom-data/...`, never the
-host path. The bind mount maps host `/DATA2/...` (or the new Mac path) →
+host path. The bind mount maps host `/srv/old/...` (or the new Mac path) →
 container `/dicom-data`. So **host path changes are invisible to Orthanc** — as
 long as the container mount point stays `/dicom-data` and the relative tree
 underneath it is unchanged, the index stays valid on the new host.
@@ -68,7 +68,7 @@ In `cold_path_cache` mode the loose DICOM files are **not on disk** — they are
 patched `RemoveMissingFiles: false`. The Folder Indexer can only index files
 that are physically present, so a from-scratch scan on the new host would index
 **nothing**. Reindexing would also throw away the index you just restored
-(including OE2 labels and `enrich_orthanc` display values, which live in
+(including OE2 labels and enriched display values, which live in
 `orthanc_db`).
 
 So: **copy the index and reset the path — do not reindex.** "The index" is two
@@ -119,7 +119,7 @@ stores, both already covered above:
 
    ```bash
    rsync -a --info=progress2 \
-     user@source:/DATA2/pacs_imaging_data_compressed/  /Users/you/pacs/compressed/
+     user@source:/srv/old/compressed/  /Users/you/pacs/compressed/
    ```
 
 **The only Orthanc config change** is the storage paths in `config.toml` —
@@ -180,23 +180,23 @@ python scripts/migration/repoint_host_paths.py --old-loose <OLD_IMG> --old-archi
 ```
 
 The manual SQL below is the equivalent reference (and fallback). The
-`/DATA2/... → /Users/you/pacs/...` prefixes are the **worked example from the
+`/srv/old/... → /Users/you/pacs/...` prefixes are the **worked example from the
 2026-06 Linux→macOS port** — substitute your own source/target roots (the target
 must equal the new `config.toml` `[storage]` roots).
 
 ```sql
 -- Loose-tree prefix. The '…/pacs_imaging_data/%' guard (trailing slash) excludes
 -- '…_compressed', so replace() can never corrupt an archive path.
-UPDATE image_series          SET dicom_dir_path = replace(dicom_dir_path,'/DATA2/pacs_imaging_data','/Users/you/pacs/imaging_data') WHERE dicom_dir_path LIKE '/DATA2/pacs_imaging_data/%';
-UPDATE image_series          SET nifti_path     = replace(nifti_path,    '/DATA2/pacs_imaging_data','/Users/you/pacs/imaging_data') WHERE nifti_path     LIKE '/DATA2/pacs_imaging_data/%';
-UPDATE image_study           SET study_path     = replace(study_path,    '/DATA2/pacs_imaging_data','/Users/you/pacs/imaging_data') WHERE study_path     LIKE '/DATA2/pacs_imaging_data/%';
-UPDATE series_cache_state    SET cache_path     = replace(cache_path,    '/DATA2/pacs_imaging_data','/Users/you/pacs/imaging_data') WHERE cache_path     LIKE '/DATA2/pacs_imaging_data/%';
-UPDATE image_series_labelled SET dicom_dir_path = replace(dicom_dir_path,'/DATA2/pacs_imaging_data','/Users/you/pacs/imaging_data') WHERE dicom_dir_path LIKE '/DATA2/pacs_imaging_data/%';
-UPDATE image_series_labelled SET nifti_path     = replace(nifti_path,    '/DATA2/pacs_imaging_data','/Users/you/pacs/imaging_data') WHERE nifti_path     LIKE '/DATA2/pacs_imaging_data/%';
-UPDATE image_study_labelled  SET study_path     = replace(study_path,    '/DATA2/pacs_imaging_data','/Users/you/pacs/imaging_data') WHERE study_path     LIKE '/DATA2/pacs_imaging_data/%';
+UPDATE image_series          SET dicom_dir_path = replace(dicom_dir_path,'/srv/old/imaging_data','/Users/you/pacs/imaging_data') WHERE dicom_dir_path LIKE '/srv/old/imaging_data/%';
+UPDATE image_series          SET nifti_path     = replace(nifti_path,    '/srv/old/imaging_data','/Users/you/pacs/imaging_data') WHERE nifti_path     LIKE '/srv/old/imaging_data/%';
+UPDATE image_study           SET study_path     = replace(study_path,    '/srv/old/imaging_data','/Users/you/pacs/imaging_data') WHERE study_path     LIKE '/srv/old/imaging_data/%';
+UPDATE series_cache_state    SET cache_path     = replace(cache_path,    '/srv/old/imaging_data','/Users/you/pacs/imaging_data') WHERE cache_path     LIKE '/srv/old/imaging_data/%';
+UPDATE image_series_labelled SET dicom_dir_path = replace(dicom_dir_path,'/srv/old/imaging_data','/Users/you/pacs/imaging_data') WHERE dicom_dir_path LIKE '/srv/old/imaging_data/%';
+UPDATE image_series_labelled SET nifti_path     = replace(nifti_path,    '/srv/old/imaging_data','/Users/you/pacs/imaging_data') WHERE nifti_path     LIKE '/srv/old/imaging_data/%';
+UPDATE image_study_labelled  SET study_path     = replace(study_path,    '/srv/old/imaging_data','/Users/you/pacs/imaging_data') WHERE study_path     LIKE '/srv/old/imaging_data/%';
 -- Archive prefix.
-UPDATE image_series          SET dicom_archive_path = replace(dicom_archive_path,'/DATA2/pacs_imaging_data_compressed','/Users/you/pacs/compressed') WHERE dicom_archive_path LIKE '/DATA2/pacs_imaging_data_compressed%';
-UPDATE image_series_labelled SET dicom_archive_path = replace(dicom_archive_path,'/DATA2/pacs_imaging_data_compressed','/Users/you/pacs/compressed') WHERE dicom_archive_path LIKE '/DATA2/pacs_imaging_data_compressed%';
+UPDATE image_series          SET dicom_archive_path = replace(dicom_archive_path,'/srv/old/compressed','/Users/you/pacs/compressed') WHERE dicom_archive_path LIKE '/srv/old/compressed%';
+UPDATE image_series_labelled SET dicom_archive_path = replace(dicom_archive_path,'/srv/old/compressed','/Users/you/pacs/compressed') WHERE dicom_archive_path LIKE '/srv/old/compressed%';
 ```
 
 Then prove nothing was missed — scan **every** text column for the old prefix:
@@ -205,7 +205,7 @@ Then prove nothing was missed — scan **every** text column for the old prefix:
 DO $$ DECLARE r record; n bigint; BEGIN
   FOR r IN SELECT table_name, column_name FROM information_schema.columns
            WHERE table_schema='public' AND data_type IN ('text','character varying') LOOP
-    EXECUTE format('SELECT count(*) FROM %I WHERE %I LIKE ''/DATA2/%%''', r.table_name, r.column_name) INTO n;
+    EXECUTE format('SELECT count(*) FROM %I WHERE %I LIKE ''/srv/old/%%''', r.table_name, r.column_name) INTO n;
     IF n>0 THEN RAISE NOTICE '% . % -> % rows', r.table_name, r.column_name, n; END IF;
   END LOOP; END $$;
 ```

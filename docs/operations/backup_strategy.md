@@ -1,13 +1,13 @@
 # Backup strategy
 
-**Status:** Tier 1 is **active on the macOS production host** (all four daemons
-run via launchd — `com.ssc.pg-backup-{stanford-stroke,orthanc,freshness}` and
-`com.ssc.orthanc-storage-backup`). Tier 2 (cold-archive mirror) is implemented
-but **dormant** — activation is part of the cutover checklist below.
+**Status:** Tier 1 is **active** — all four jobs run on a nightly schedule
+(systemd timers `pg-backup-{stanford-stroke,orthanc,freshness}` and
+`orthanc-storage-backup` on Linux; the equivalent `com.ssc.*` launchd daemons
+on macOS). Tier 2 (cold-archive mirror) is implemented but **dormant** —
+activation is part of the cutover checklist below.
 
-Paths below use the production values where concrete; the single source of
-truth for the backup root is `config.toml` `[backup].backup_root`
-(production: `/Volumes/ThunderBay_RAID1/ssc-pacs-backups`).
+The single source of truth for the backup root is `config.toml`
+`[backup].backup_root`; resolve it from there rather than hardcoding a path.
 
 This document is the single source of truth for what is backed up, how, where,
 and how to recover. Restore steps live in
@@ -50,8 +50,8 @@ and how to recover. Restore steps live in
 ### Tooling
 
 `pg_dump --format=custom --compress=6 --no-owner --no-privileges` per
-database, run nightly by a scheduled job (launchd on macOS production,
-systemd timer on Linux). Custom format (`-Fc`) is chosen
+database, run nightly by a scheduled job (systemd timer on Linux, launchd
+daemon on macOS). Custom format (`-Fc`) is chosen
 over `pg_basebackup` + WAL because:
 
 - The dev RPO of 24 h does not justify WAL archiving complexity.
@@ -67,10 +67,6 @@ nightly logical dumps as a portable safety net.
 ### Tooling version requirement
 
 `pg_dump` from the client package requires `client_major >= server_major`.
-The **production** host runs a **user-level Homebrew PostgreSQL** — the
-`pg_dump` in the same Homebrew prefix already matches the server, so no
-extra client install is needed; just keep Homebrew's `postgresql@N` current
-with the server.
 
 On a **Linux** host with a system PostgreSQL, install the matching client
 from the PGDG apt repo:
@@ -84,6 +80,10 @@ echo "deb [signed-by=/etc/apt/keyrings/pgdg.gpg] https://apt.postgresql.org/pub/
 sudo apt update
 sudo apt install -y postgresql-client-16
 ```
+
+On a **macOS** host running a user-level Homebrew PostgreSQL, the `pg_dump`
+in the same Homebrew prefix already matches the server, so no extra client
+install is needed; just keep Homebrew's `postgresql@N` current with the server.
 
 When the server is upgraded, install the matching client major.
 
@@ -167,7 +167,7 @@ checkout. Settings resolve in this precedence order:
    default:
    ```toml
    [backup]
-   backup_root    = "/Volumes/ThunderBay_RAID1/ssc-pacs-backups"
+   backup_root    = "/path/to/ssc-pacs-backups"   # deployment-specific
    retention_days = 60
    max_age_hours  = 36
    ```
@@ -184,11 +184,11 @@ absolute path. Override with `BACKUP_ENV_FILE=...` for a non-standard location.
 
 The backup daemons/timers are installed by the platform installer, which
 renders the `.in` templates and enables the jobs. Run from the stack root
-(`/opt/ssc-pacs/ssc-pacs/stanford-stroke-pacs`):
+(`stanford-stroke-pacs/`):
 
 ```bash
-sudo scripts/macos/install_launchd.sh    # macOS (production): loads the com.ssc.* daemons
 sudo scripts/linux/install_systemd.sh    # Linux: installs + enables the systemd timers
+sudo scripts/macos/install_launchd.sh    # macOS: loads the com.ssc.* daemons
 ```
 
 ### Verification
@@ -215,8 +215,8 @@ scripts/backup/backup_orthanc_storage.sh
 The freshness check runs periodically. To page on failure, wire an alerting
 webhook (Linux: `OnFailure=` on `pg-backup-freshness.service`). Until then,
 nonzero exits show up in the daemon log —
-`~/Library/Logs/com.ssc.pg-backup-freshness.err` on macOS, or
-`journalctl -u pg-backup-freshness` on Linux.
+`journalctl -u pg-backup-freshness` on Linux, or
+`~/Library/Logs/com.ssc.pg-backup-freshness.err` on macOS.
 
 ---
 
@@ -228,9 +228,9 @@ currently recoverable via re-ingestion.
 
 > **Known gap:** only **systemd** templates exist for the mirror
 > (`deploy/systemd/cold-archive-mirror.{service,timer}.in`). There is **no
-> `deploy/launchd/com.ssc.cold-archive-mirror.plist.in`**, so the cutover checklist
-> below is not yet executable as-is on the macOS production host — a launchd
-> template (or a manual `launchd`/cron equivalent) must be authored first.
+> `deploy/launchd/com.ssc.cold-archive-mirror.plist.in`**, so on a macOS host the
+> cutover checklist below is not executable as-is — a launchd template (or a
+> manual `launchd`/cron equivalent) must be authored first.
 
 ### Files
 
@@ -325,4 +325,4 @@ results are in that file.
 | pg_dump version drifts behind server after PG upgrade | low | high | Keep the client major (Homebrew `postgresql@N` / `postgresql-client-N`) matching the new server major |
 | Restore tested in isolation but fails in real incident | med | high | Quarterly restore drill; keep `restore_runbook.md` current |
 | `.env` rotates and the backup script silently uses stale creds | low | high | Backup failure surfaces in the freshness check within `max_age_hours` |
-| Dump lands on the same physical disk as the live DB | med | med | Keep `backup_root` on a volume separate from the PG data directory (production writes to the ThunderBay RAID) |
+| Dump lands on the same physical disk as the live DB | med | med | Keep `backup_root` on a volume separate from the PG data directory |

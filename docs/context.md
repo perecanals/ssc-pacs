@@ -1,6 +1,6 @@
 # PACS documentation context
 
-One **Orthanc** container (`ssc-orthanc`), one native-host **Web App** service on port `8043` (macOS launchd in production, `com.ssc.webapp`; systemd templates for Linux), and **two logical PostgreSQL databases** (`orthanc_db` + `stanford-stroke`).
+One **Orthanc** container (`ssc-orthanc`), one native-host **Web App** service on port `8043` (systemd `ssc-web-app` on Linux; launchd `com.ssc.webapp` on macOS), and **two logical PostgreSQL databases** (`orthanc_db` + `stanford-stroke`).
 
 **Give an agent only what it needs:**
 

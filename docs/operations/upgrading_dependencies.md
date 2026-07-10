@@ -39,10 +39,10 @@ provisioned straight from these files):
    ```
 4. Re-run the test suite (`make test` from the checkout root), then smoke-test:
    ```bash
-   # macOS (production): sudo launchctl kickstart -k system/com.ssc.webapp
-   # Linux (systemd):    sudo systemctl restart ssc-web-app
-   sudo launchctl kickstart -k system/com.ssc.webapp
-   tail -n 50 ~/Library/Logs/ssc-web-app.err   # Linux: sudo journalctl -u ssc-web-app -n 50
+   # Linux (systemd):  sudo systemctl restart ssc-web-app
+   # macOS (launchd):  sudo launchctl kickstart -k system/com.ssc.webapp
+   sudo systemctl restart ssc-web-app
+   sudo journalctl -u ssc-web-app -n 50   # macOS: tail -n 50 ~/Library/Logs/ssc-web-app.err
    curl -sf http://localhost:8043/healthz
    ```
 5. Commit the pin change.
@@ -58,8 +58,7 @@ provisioned straight from these files):
 3. Rebuild and roll out:
    ```bash
    npm ci && npm run build
-   # macOS (production): sudo launchctl kickstart -k system/com.ssc.webapp
-   sudo launchctl kickstart -k system/com.ssc.webapp   # Linux: sudo systemctl restart ssc-web-app
+   sudo systemctl restart ssc-web-app   # macOS: sudo launchctl kickstart -k system/com.ssc.webapp
    ```
 
 Note: production builds use `npm ci` (not `npm install`) so that a

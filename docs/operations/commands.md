@@ -7,10 +7,11 @@
 `/opt/ssc-pacs/ssc-pacs/` (where the `Makefile` lives). Each block below says
 which it assumes.
 
-**Production platform.** Production runs on **macOS via launchd** (9
-`com.ssc.*` LaunchDaemons; web app = `com.ssc.webapp`). Linux/systemd
-equivalents are shown alongside where they differ. Any bare
-`sudo systemctl …` line is the Linux form only.
+**Service platform.** The reference deployment runs on **Linux via systemd**
+(`ssc-web-app.service` for the web app). Command examples lead with the
+systemd form; the macOS/launchd equivalents (the `com.ssc.*` LaunchDaemons;
+web app = `com.ssc.webapp`) are shown alongside as the alternative where they
+differ.
 
 **Destructive-flag polarity.** The mutating cold-storage/label scripts are
 **dry-run by default** and only write with `--execute`:
@@ -47,7 +48,23 @@ scripts/orthanc/dc.sh restart
 
 ### Web App (native service)
 
-**macOS (production — launchd):**
+**Linux (systemd):**
+
+```bash
+sudo systemctl start|stop|restart ssc-web-app
+sudo systemctl status ssc-web-app
+sudo journalctl -u ssc-web-app -f
+sudo scripts/linux/install_systemd.sh   # installs unit templates + enables
+
+# Rebuild frontend after code changes (either platform)
+cd web-app && npm run build
+sudo systemctl restart ssc-web-app
+
+# Run manually (development, with auto-reload)
+cd web-app && uvicorn app:app --port 8043 --reload
+```
+
+**macOS (launchd) — alternative:**
 
 ```bash
 # Restart (the common one)
@@ -62,22 +79,6 @@ tail -f ~/Library/Logs/ssc-web-app.log ~/Library/Logs/ssc-web-app.err
 
 # Install / re-render all daemons (one-time or after editing a *.plist.in)
 sudo scripts/macos/install_launchd.sh
-```
-
-**Linux (systemd):**
-
-```bash
-sudo systemctl start|stop|restart ssc-web-app
-sudo systemctl status ssc-web-app
-sudo journalctl -u ssc-web-app -f
-sudo scripts/linux/install_systemd.sh   # installs unit templates + enables
-
-# Rebuild frontend after code changes (either platform)
-cd web-app && npm run build
-sudo launchctl kickstart -k system/com.ssc.webapp   # Linux: sudo systemctl restart ssc-web-app
-
-# Run manually (development, with auto-reload)
-cd web-app && uvicorn app:app --port 8043 --reload
 ```
 
 > The service units are installed from `*.in` templates by the installer
@@ -163,7 +164,7 @@ This rewrites `ORTHANC_ADMIN_PASSWORD` in `.env` and the matching entry in
 
 ```bash
 docker restart ssc-orthanc
-sudo launchctl kickstart -k system/com.ssc.webapp   # Linux: sudo systemctl restart ssc-web-app
+sudo systemctl restart ssc-web-app   # macOS: sudo launchctl kickstart -k system/com.ssc.webapp
 ```
 
 ---
@@ -213,10 +214,10 @@ docker logs -f ssc-orthanc
 # Recent Orthanc logs only
 docker logs --since 5m ssc-orthanc
 
-# Web App logs — macOS (flat JSON files)
-tail -f ~/Library/Logs/ssc-web-app.log ~/Library/Logs/ssc-web-app.err
-# Linux (systemd journal)
+# Web App logs — Linux (systemd journal)
 sudo journalctl -u ssc-web-app -f
+# macOS (flat JSON files)
+tail -f ~/Library/Logs/ssc-web-app.log ~/Library/Logs/ssc-web-app.err
 ```
 
 For the full logging/metrics/health reference see
@@ -224,7 +225,7 @@ For the full logging/metrics/health reference see
 
 ---
 
-## Indexing and enrichment
+## Indexing
 
 ```bash
 # Check indexing progress
@@ -234,9 +235,6 @@ curl -s -u admin:<password> http://localhost:8042/statistics | python3 -m json.t
 python scripts/data_integrity/reconcile.py               # human-readable summary
 python scripts/data_integrity/reconcile.py --json        # write JSON report
 python scripts/data_integrity/reconcile.py --json --quiet # quiet mode (on-demand; not scheduled)
-
-# Enrich studies/series with patient_id, seriesdescription (re-run after new indexing)
-python scripts/orthanc/enrich_orthanc.py
 ```
 
 ---
@@ -274,9 +272,6 @@ python execute_image_ingestion_protocol.py [--config path/to/config.yaml]
 Labels can be managed through the OE2 web UI or via the REST API.
 
 ```bash
-# Pre-populate labels from source DB (study_type + modality). Idempotent, safe to re-run.
-python scripts/orthanc/label_studies.py
-
 # List all labels in use
 curl -s -u admin:<password> http://localhost:8042/tools/labels
 
@@ -295,9 +290,9 @@ curl -s -u admin:<password> 'http://localhost:8042/tools/find' \
   -d '{"Level":"Study","Query":{},"Labels":{"BASAL":"Any","CT":"Any"},"LabelsConstraint":"All"}'
 ```
 
-### Pre-seeded labels
+### Typical labels
 
-After running `scripts/orthanc/label_studies.py`, typical labels include:
+Typical labels in use include:
 
 - **Study type:** `BASAL`, `THROMBECTOMY`, `FOLLOW_UP`, `OTHER`
 - **Modality:** `CT`, `MR`, etc.
@@ -320,7 +315,7 @@ curl -s -c cookies.txt -X POST http://localhost:8043/api/login \
 ```bash
 # Rebuild frontend and restart the web app service
 cd web-app && npm run build
-sudo launchctl kickstart -k system/com.ssc.webapp   # Linux: sudo systemctl restart ssc-web-app
+sudo systemctl restart ssc-web-app   # macOS: sudo launchctl kickstart -k system/com.ssc.webapp
 
 # List all annotation labels via the API
 curl -s -b cookies.txt http://localhost:8043/api/labels | python3 -m json.tool
@@ -346,7 +341,7 @@ curl -s -b cookies.txt -X DELETE http://localhost:8043/api/annotations/42
 # Bulk-set a label's values from a CSV/Excel table (admin backdoor).
 # Creates the label if it does not exist (interactive y/n unless --yes).
 # Dry-run by default; add --execute to write. No sudo needed.
-bash scripts/admin/bulk_set_label_values.sh \
+python scripts/admin/bulk_set_label_values.py \
     --file /tmp/series_quality.csv --level series \
     --id-column seriesinstanceuid --value-column quality \
     --label series_quality --datatype select --options 'good,acceptable,poor' \
@@ -510,12 +505,12 @@ python scripts/cold_storage/scoped_index.py --series <suid1,suid2> [--granularit
 
 ## Backups
 
-PostgreSQL + Orthanc-storage backups run nightly — via launchd on macOS
-(`com.ssc.pg-backup-{stanford-stroke,orthanc,freshness}`,
-`com.ssc.orthanc-storage-backup`), via systemd timers on Linux. Strategy and
-rationale in [`backup_strategy.md`](backup_strategy.md). Recovery procedure in
-[`restore_runbook.md`](restore_runbook.md). The dump root is `config.toml`
-`[backup].backup_root` (production: `/Volumes/ThunderBay_RAID1/ssc-pacs-backups`).
+PostgreSQL + Orthanc-storage backups run nightly — via systemd timers on Linux
+(`pg-backup-{stanford-stroke,orthanc,freshness}`, `orthanc-storage-backup`), or
+via launchd on macOS (`com.ssc.pg-backup-*`, `com.ssc.orthanc-storage-backup`).
+Strategy and rationale in [`backup_strategy.md`](backup_strategy.md). Recovery
+procedure in [`restore_runbook.md`](restore_runbook.md). The dump root is
+`config.toml` `[backup].backup_root`.
 
 ```bash
 # On-demand backup (also runs nightly)
@@ -529,11 +524,11 @@ ls -lh "$BR/stanford-stroke/" "$BR/orthanc_db/"
 # Verify checksums
 ( cd "$BR/stanford-stroke" && sha256sum -c latest.dump.sha256 )
 
-# Check schedule / tail the most recent run
-sudo launchctl list | grep com.ssc.pg-backup          # macOS
-tail -n 50 ~/Library/Logs/com.ssc.pg-backup-stanford-stroke.err   # macOS
-#   Linux: systemctl list-timers 'pg-backup-*'
-#          sudo journalctl -u pg-backup-stanford-stroke.service -e
+# Check schedule / tail the most recent run — Linux (systemd)
+systemctl list-timers 'pg-backup-*'
+sudo journalctl -u pg-backup-stanford-stroke.service -e
+#   macOS: sudo launchctl list | grep com.ssc.pg-backup
+#          tail -n 50 ~/Library/Logs/com.ssc.pg-backup-stanford-stroke.err
 
 # Run the freshness monitor manually
 ./scripts/backup/check_backup_freshness.sh    # exit 0 = fresh, 2 = stale or missing

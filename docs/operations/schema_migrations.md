@@ -185,9 +185,9 @@ alembic stamp 0001_baseline
 # 3. Verify:
 alembic current   # should print: 0001_baseline (head)
 # 4. Restart web app. init_db() will see head and emit no DDL.
-#    macOS (production): sudo launchctl kickstart -k system/com.ssc.webapp
-sudo launchctl kickstart -k system/com.ssc.webapp   # Linux: sudo systemctl restart ssc-web-app
-tail -n 50 ~/Library/Logs/ssc-web-app.err           # Linux: journalctl -u ssc-web-app -n 50
+#    macOS: sudo launchctl kickstart -k system/com.ssc.webapp
+sudo systemctl restart ssc-web-app                  # macOS: launchctl kickstart -k system/com.ssc.webapp
+journalctl -u ssc-web-app -n 50                     # macOS: tail -n 50 ~/Library/Logs/ssc-web-app.err
 ```
 
 If a future deployment needs to apply outstanding revisions (the normal
@@ -202,7 +202,7 @@ no manual steps required.
   table yet. Either you forgot the `stamp` step, or this is a fresh
   scratch DB (run `alembic upgrade head`).
 - **`init_db()` fails on startup** — read the traceback from
-  `~/Library/Logs/ssc-web-app.err` (Linux: `journalctl -u ssc-web-app`).
+  `journalctl -u ssc-web-app` (macOS: `~/Library/Logs/ssc-web-app.err`).
   Common cause: a new revision references
   a table or column that doesn't exist; rerun the test from §"Adding a new
   schema change".

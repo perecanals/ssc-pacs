@@ -2,8 +2,8 @@
 
 **Purpose:** Fresh-server runbook only. For the full map of *where every config value lives and what must stay in sync* see [`../reference/configuration_sources.md`](../reference/configuration_sources.md). For packaging facts and config file roles see [`../reference/runtime_and_config.md`](../reference/runtime_and_config.md). For architecture see [`../reference/architecture.md`](../reference/architecture.md).
 
-> **Platform:** this runbook targets **Linux** (systemd, host networking).
-> Production currently runs on **macOS** — for that platform read this document
+> **Platform:** this runbook targets **Linux** (systemd, host networking) as the
+> primary/reference deployment. To deploy on **macOS** instead, read this document
 > for the sequence, then apply the deltas in
 > [`deployment_on_mac.md`](deployment_on_mac.md) (Colima, launchd, Homebrew
 > Postgres).
@@ -146,8 +146,8 @@ At minimum, the current scripts rely on these columns:
 
 **image_study** (for study-level metadata):
 
-- `study_type` (used by `scripts/orthanc/label_studies.py`)
-- `studydescription` (used by `scripts/orthanc/enrich_orthanc.py`)
+- `study_type`
+- `studydescription`
 
 Beyond the web app (which browses both tables),
 `scripts/data_integrity/reconcile.py` compares `image_series` against Orthanc's
@@ -168,11 +168,8 @@ From the stack root (`stanford-stroke-pacs/`):
 python3 -m pip install -r requirements.txt
 ```
 
-This installs the dependencies needed by the stack's helper scripts, e.g.:
-
-- `scripts/admin/manage_users.py` (needs `bcrypt`)
-- `scripts/orthanc/enrich_orthanc.py`
-- `scripts/orthanc/label_studies.py`
+This installs the dependencies needed by the stack's helper scripts, e.g.
+`scripts/admin/manage_users.py` (needs `bcrypt`).
 
 ### Step 2. Set the DICOM path in `config.toml` (not in compose)
 
@@ -377,20 +374,6 @@ Depending on dataset size, indexing may take significant time. Useful checks:
 scripts/orthanc/dc.sh logs -f orthanc      # dc.sh, not bare docker compose (mount var)
 curl -s -u <user>:<pass> http://localhost:8042/statistics | python3 -m json.tool
 ```
-
-### Step 10. Run post-index tasks as needed
-
-Two optional-but-useful post-index tasks:
-
-- **Display enrichment** — `python scripts/orthanc/enrich_orthanc.py`. Run it
-  only when the DICOM headers are anonymized or not operator-friendly: it maps
-  `patient_id`, `seriesdescription`, and `studydescription` (from `image_study`)
-  into OE2's Patient/Series/Study Description fields, mutating Orthanc's
-  PostgreSQL index tables. Skip it if the headers already display acceptably or
-  you only need indexing/OHIF/the web app.
-- **Pre-seed study labels** — `python scripts/orthanc/label_studies.py`. Turns
-  `image_study.study_type` + `image_series.modality` into Orthanc study labels
-  in OE2. Idempotent and safe to re-run after new studies are indexed.
 
 ---
 
@@ -610,12 +593,6 @@ Backups land under `[backup].backup_root` from `config.toml`. Full mechanism, re
 
 Do not treat these as mandatory steps unless the new environment truly needs
 them.
-
-`scripts/orthanc/enrich_orthanc.py`
-
-- optional display-enrichment step
-- specific to deployments where Orthanc's displayed identifiers need replacing
-- directly mutates Orthanc PostgreSQL tables
 
 `image_ingestion_protocols/`
 
