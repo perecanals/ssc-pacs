@@ -18,7 +18,7 @@
 # Idempotent: exits 0 if the VM is already running. Waits for the storage roots
 # to be mounted first — the bind-mount sources must exist before `colima start`.
 #
-# Run at boot via launchd/com.ssc.colima.plist, or manually:
+# Run at boot via deploy/launchd/com.ssc.colima.plist, or manually:
 #   scripts/macos/colima_start.sh
 # Manage: `colima status` | `colima stop` | `colima restart` | `colima ssh`
 set -euo pipefail

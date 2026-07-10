@@ -1,6 +1,6 @@
 [Unit]
 Description=PACS — nightly backup of the Orthanc storage volume
-Documentation=file:__REPO_ROOT__/documentation/operations/backup_strategy.md
+Documentation=file:__DOCS_ROOT__/operations/backup_strategy.md
 
 [Timer]
 # Daily at 02:45 local time — after the PostgreSQL dumps (02:15 / 02:30) so the

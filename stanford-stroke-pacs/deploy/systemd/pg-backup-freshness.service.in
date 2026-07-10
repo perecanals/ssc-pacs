@@ -1,6 +1,6 @@
 [Unit]
 Description=PACS — backup freshness monitor (PostgreSQL only on dev)
-Documentation=file:__REPO_ROOT__/documentation/operations/backup_strategy.md
+Documentation=file:__DOCS_ROOT__/operations/backup_strategy.md
 
 [Service]
 Type=oneshot

@@ -1,6 +1,6 @@
 [Unit]
 Description=PACS — pg_dump backup of stanford-stroke DB
-Documentation=file:__REPO_ROOT__/documentation/operations/backup_strategy.md
+Documentation=file:__DOCS_ROOT__/operations/backup_strategy.md
 Wants=network-online.target
 After=network-online.target
 

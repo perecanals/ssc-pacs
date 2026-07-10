@@ -1,6 +1,6 @@
 [Unit]
 Description=PACS — cold-storage health probe (stuck warming, orphan dirs, disk free)
-Documentation=file:__REPO_ROOT__/documentation/cold_storage/runbook.md
+Documentation=file:__DOCS_ROOT__/cold_storage/runbook.md
 Wants=network-online.target
 After=network-online.target
 

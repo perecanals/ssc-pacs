@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Render + install the SSC-PACS systemd units from templates (portable).
 #
-# The repo ships only templates (systemd/*.in) with __TOKENS__ for the per-host
+# The repo ships only templates (deploy/systemd/*.in) with __TOKENS__ for the per-host
 # bits (user, repo path, conda python). This script resolves those automatically
 # — override any value in `deploy.env` at the stack root — fills the templates,
 # and installs the concrete units into /etc/systemd/system. Run with sudo:
@@ -9,8 +9,8 @@
 #     sudo scripts/linux/install_systemd.sh            # render + install + enable
 #     scripts/linux/install_systemd.sh --dry-run       # render to a temp dir only
 #
-# See documentation/reference/configuration_sources.md and
-# documentation/guides/installation_and_deployment.md.
+# See docs/reference/configuration_sources.md and
+# docs/guides/installation_and_deployment.md.
 set -euo pipefail
 
 DRY_RUN=no
@@ -18,7 +18,7 @@ DRY_RUN=no
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 STACK_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
-SRC="$STACK_DIR/systemd"
+SRC="$STACK_DIR/deploy/systemd"
 DST=/etc/systemd/system
 
 if [[ "$DRY_RUN" == no && $EUID -ne 0 ]]; then
@@ -32,6 +32,7 @@ DEPLOY_USER="${SUDO_USER:-$(id -un)}"
 [[ -f "$STACK_DIR/deploy.env" ]] && source "$STACK_DIR/deploy.env"
 
 REPO_ROOT="${REPO_ROOT:-$STACK_DIR}"
+DOCS_ROOT="${DOCS_ROOT:-$(cd "$STACK_DIR/.." && pwd)/docs}"
 DEPLOY_GROUP="${DEPLOY_GROUP:-$(id -gn "$DEPLOY_USER" 2>/dev/null || echo "$DEPLOY_USER")}"
 
 if [[ -z "${PYTHON_BIN:-}" ]]; then
@@ -63,6 +64,7 @@ printf '  %-13s %s\n' REPO_ROOT "$REPO_ROOT" DEPLOY_USER "$DEPLOY_USER" \
 
 render() {
   sed -e "s|__REPO_ROOT__|$REPO_ROOT|g" \
+      -e "s|__DOCS_ROOT__|$DOCS_ROOT|g" \
       -e "s|__DEPLOY_USER__|$DEPLOY_USER|g" \
       -e "s|__DEPLOY_GROUP__|$DEPLOY_GROUP|g" \
       -e "s|__PYTHON_BIN__|$PYTHON_BIN|g" \

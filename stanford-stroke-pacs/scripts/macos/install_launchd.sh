@@ -4,7 +4,7 @@
 #
 # This box has no console/GUI session, so per-user LaunchAgents won't load. We
 # install everything as system LaunchDaemons (run as DEPLOY_USER) in
-# /Library/LaunchDaemons. The repo ships only templates (launchd/*.plist.in) with
+# /Library/LaunchDaemons. The repo ships only templates (deploy/launchd/*.plist.in) with
 # __TOKENS__ for the per-host bits (user, home, Homebrew prefix, conda env, repo
 # path). This script resolves those automatically — override any value in
 # `deploy.env` at the stack root — fills the templates, and bootstraps the
@@ -21,7 +21,7 @@
 #
 # IMPORTANT: if your data is on an EXTERNAL volume, the daemons ALSO need Full Disk
 # Access granted once in the GUI (this script cannot do it) or warm/backups fail with
-# "Operation not permitted". See documentation/guides/deployment_on_mac.md §6,
+# "Operation not permitted". See docs/guides/deployment_on_mac.md §6,
 # "Full Disk Access". Restart the daemons after granting.
 set -euo pipefail
 
@@ -30,7 +30,7 @@ DRY_RUN=no
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 STACK_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
-SRC="$STACK_DIR/launchd"
+SRC="$STACK_DIR/deploy/launchd"
 DST=/Library/LaunchDaemons
 
 if [[ "$DRY_RUN" == no && $EUID -ne 0 ]]; then
