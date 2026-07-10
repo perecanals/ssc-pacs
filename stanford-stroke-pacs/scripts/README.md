@@ -10,8 +10,8 @@ file at the stack root (`stanford-stroke-pacs/.env`).
 by default and applies only with `--execute`; interactive prompts have a
 `--yes` bypass; report-only tools take no polarity flag. Deliberately exempt
 (idempotent/additive by design, stated in each docstring):
-`backfill_storage_sizes.py`, `enrich_orthanc.py`, `label_studies.py`,
-`manage_users.py` (interactive), `dicom_to_nifti.py` (writes only its output).
+`backfill_storage_sizes.py`, `manage_users.py` (interactive),
+`dicom_to_nifti.py` (writes only its output).
 
 ---
 
@@ -19,7 +19,7 @@ by default and applies only with `--execute`; interactive prompts have a
 
 | Directory | Purpose | Key scripts |
 |---|---|---|
-| `admin/` | User provisioning, label/dataset ops, teardown | `manage_users.py`, `bulk_set_label_values.py`(`.sh`), `remove_label.py`(`.sh`), `rename_dataset_value.py`, `teardown.sh` |
+| `admin/` | User provisioning, label/dataset ops, teardown | `manage_users.py`, `bulk_set_label_values.py`, `remove_label.py`, `rename_dataset_value.py`, `teardown.sh` |
 | `backup/` | PostgreSQL dump, Orthanc volume snapshot, freshness monitoring | `backup_pg_db.sh`, `backup_orthanc_storage.sh` (+ in-container `orthanc_storage_snapshot.py`), `check_backup_freshness.sh` |
 | `cold_storage/` | Archive, cleanup, health, cache state, index repair | `archive_all_series.py`, `cleanup_loose_dicoms.py`, `scoped_index.py`, `reindex_missing_series.py`, `prune_stale_index_paths.py`, `rebuild_cache_state.py`, `cold_storage_health.py`, `backfill_storage_sizes.py`, `list_unarchived_series.py`, `verify_and_repair_archives.py`, `mirror_cold_archive.sh` |
 | `connectivity/` | Sanitized SSH tunnel templates for end users (per OS) | `tunnel/{linux,macos,windows}/tunnel.*` |
@@ -27,8 +27,8 @@ by default and applies only with `--execute`; interactive prompts have a
 | `dicom/` | DICOM conversion utilities | `dicom_to_nifti.py` |
 | `linux/` | Linux deploy path (systemd units) | `install_systemd.sh` |
 | `macos/` | macOS host tooling (Colima, launchd, disks) | `colima_start.sh`, `colima_watchdog.sh`, `install_launchd.sh` |
-| `migration/` | Port the stack to a new host (e.g. Linux→Mac) | `repoint_host_paths.py`, `reconcile_migration.py` |
-| `orthanc/` | Compose wrapper, enrichment, labelling, status check | `dc.sh`, `enrich_orthanc.py`, `label_studies.py`, `check_status.sh` |
+| `migration/` | Port the stack to a new host | `repoint_host_paths.py`, `reconcile_migration.py` |
+| `orthanc/` | Compose wrapper, status check | `dc.sh`, `check_status.sh` |
 
 `_lib.sh` holds the shared shell helpers (`STACK_DIR`, `config_get`,
 `deploy_env_get`, `resolve_python`) sourced by the shell scripts.
@@ -86,10 +86,6 @@ python scripts/cold_storage/cold_storage_health.py --json     # read-only probe
 
 # DICOM processing
 python scripts/dicom/dicom_to_nifti.py --series-uid <uid> --warm-if-cold
-
-# Orthanc enrichment
-python scripts/orthanc/enrich_orthanc.py
-python scripts/orthanc/label_studies.py
 
 # Backup
 ./scripts/backup/backup_pg_db.sh stanford-stroke
