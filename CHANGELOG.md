@@ -1,5 +1,15 @@
 # Changelog
 
+## v1.3 — 2026-07-10
+
+- **Fix**: `rotate_db_password.py` now handles the case where the `DB_USER`
+  role is also Orthanc's PostgreSQL index user (`PG_ORTHANC_USER` — the default
+  here). A Postgres role has one password, so `ALTER ROLE` changes it for both;
+  `rotate` now rewrites `PG_ORTHANC_PASSWORD` alongside `DB_PASSWORD` and prints
+  a `docker restart ssc-orthanc` reminder, and `check` verifies the `orthanc_db`
+  connection too. Without this, rotating would have silently broken Orthanc's
+  index connection. No schema change.
+
 ## v1.2 — 2026-07-10
 
 - **Scripts**: split credential rotation out of `manage_users.py` into two

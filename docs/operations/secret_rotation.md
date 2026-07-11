@@ -116,7 +116,16 @@ Used by Web App (and the admin scripts) to connect to the `stanford-stroke`
 PostgreSQL database as `DB_USER`. `rotate_db_password.py rotate` changes the
 role password on the live database (via `ALTER ROLE`, with the new secret passed
 as a bound parameter so it never lands in argv, shell history, or a log) and
-rewrites `DB_PASSWORD` in `.env` to match.
+rewrites every `.env` variable that mirrors that role's password.
+
+**One role, possibly two `.env` vars.** A Postgres role has exactly one password,
+but this deployment references the `DB_USER` role a second time as
+`PG_ORTHANC_USER` — the credential Orthanc's PostgreSQL **index** connection uses
+for `orthanc_db` (`docker-compose.yml` `ORTHANC__POSTGRESQL__*`). When those two
+are the same role (the default), a single `ALTER ROLE` changes the password for
+both, so `PG_ORTHANC_PASSWORD` must be rewritten too **and Orthanc restarted** or
+its index connection breaks. `rotate` detects this and updates both vars; `check`
+verifies both connections.
 
 The command connects with the *current* `.env` credentials, so run it before the
 old password is invalidated elsewhere. The role changes *its own* password, so no
@@ -129,17 +138,20 @@ cd /opt/ssc-pacs/ssc-pacs/stanford-stroke-pacs
 
 # 1. Change the role password on the DB and sync .env in one go.
 #    Prompts (hidden) for the new password; add --generate to mint a strong
-#    random one and print it once instead.
+#    random one and print it once instead. The script prints which .env vars it
+#    rewrote and which services to restart.
 python scripts/admin/rotate_db_password.py rotate
 
-# 2. Restart Web App so it reloads .env (the running pool keeps its old
-#    connections until then). Startup fail-fasts if DB_USER/DB_PASSWORD are
-#    missing; an *incorrect* password surfaces as connection errors — watch logs.
+# 2. Restart the consumers the script named. Web App always; Orthanc too if it
+#    shares the role (PG_ORTHANC_PASSWORD was rewritten). Startup fail-fasts if
+#    DB_USER/DB_PASSWORD are missing; an *incorrect* password surfaces as
+#    connection errors — watch logs.
 #    Linux (systemd):  sudo systemctl restart ssc-web-app
 #    macOS (launchd):  sudo launchctl kickstart -k system/com.ssc.webapp
 sudo systemctl restart ssc-web-app
+docker restart ssc-orthanc   # only if the script listed it
 
-# 3. Verify .env authenticates and the service came back clean:
+# 3. Verify both connections authenticate and the services came back clean:
 python scripts/admin/rotate_db_password.py check   # exits non-zero on failure
 sudo journalctl -u ssc-web-app -n 50   # macOS: tail -n 50 ~/Library/Logs/ssc-web-app.err
 curl -s -o /dev/null -w "%{http_code}\n" http://localhost:8043/
@@ -147,8 +159,12 @@ curl -s -o /dev/null -w "%{http_code}\n" http://localhost:8043/
 
 ### What can go wrong
 
+- **Forgetting the Orthanc restart when the role is shared.** Orthanc keeps its
+  old index connection until restarted; after `.env` is updated it will fail to
+  reconnect on the new password. `rotate` prints the `docker restart ssc-orthanc`
+  line when it applies — don't skip it. `check` catches the drift.
 - **`.env` write fails after the DB change.** The script reports this explicitly:
-  the DB password *was* changed, so set `DB_PASSWORD` in `.env` to the value you
+  the DB password *was* changed, so set the named vars in `.env` to the value you
   just entered (or re-run `rotate` with the new password as the current one).
   `rotate_db_password.py check` is the drift detector.
 - **A password with a `'` or `\`.** `--generate` avoids these entirely; a
