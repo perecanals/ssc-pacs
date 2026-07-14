@@ -19,11 +19,11 @@ by default and applies only with `--execute`; interactive prompts have a
 
 | Directory | Purpose | Key scripts |
 |---|---|---|
-| `admin/` | User provisioning, credential rotation, label/dataset ops, teardown | `manage_users.py`, `rotate_service_account.py`, `rotate_db_password.py`, `bulk_set_label_values.py`, `remove_label.py`, `rename_dataset_value.py`, `teardown.sh` |
+| `admin/` | User provisioning, credential rotation, label/dataset ops, series classification, teardown | `manage_users.py`, `rotate_service_account.py`, `rotate_db_password.py`, `bulk_set_label_values.py`, `remove_label.py`, `rename_dataset_value.py`, `reclassify_series_types.py`, `teardown.sh` |
 | `backup/` | PostgreSQL dump, Orthanc volume snapshot, freshness monitoring | `backup_pg_db.sh`, `backup_orthanc_storage.sh` (+ in-container `orthanc_storage_snapshot.py`), `check_backup_freshness.sh` |
 | `cold_storage/` | Archive, cleanup, health, cache state, index repair | `archive_all_series.py`, `cleanup_loose_dicoms.py`, `scoped_index.py`, `reindex_missing_series.py`, `prune_stale_index_paths.py`, `rebuild_cache_state.py`, `cold_storage_health.py`, `backfill_storage_sizes.py`, `list_unarchived_series.py`, `verify_and_repair_archives.py`, `mirror_cold_archive.sh` |
 | `connectivity/` | Sanitized SSH tunnel templates for end users (per OS) | `tunnel/{linux,macos,windows}/tunnel.*` |
-| `data_integrity/` | Cross-store audits (see matrix below) | `reconcile.py`, `dicom_path_sql_fs_audit.py`, `disk_vs_db_series_audit.py`, `detect_mixed_dirs.py` |
+| `data_integrity/` | Cross-store audits + repairs (see matrix below) | `reconcile.py`, `dicom_path_sql_fs_audit.py`, `disk_vs_db_series_audit.py`, `detect_mixed_dirs.py`, `repair_dicomweb_metadata_cache.py` |
 | `dicom/` | DICOM conversion utilities | `dicom_to_nifti.py` |
 | `linux/` | Linux deploy path (systemd units) + whole-stack control | `install_systemd.sh`, `stop_stack.sh`, `start_stack.sh` |
 | `macos/` | macOS host tooling (Colima, launchd, disks) + whole-stack control | `colima_start.sh`, `colima_watchdog.sh`, `install_launchd.sh`, `stop_stack.sh`, `start_stack.sh` |
@@ -50,6 +50,7 @@ hours-long tree scan into the cron/JSON-report path):
 | `data_integrity/dicom_path_sql_fs_audit.py` | SQL → FS (sampled) | cheap | Do the paths recorded in SQL exist / look right on disk? |
 | `data_integrity/disk_vs_db_series_audit.py` | FS → DB (full walk, first file per dir) | expensive (hours) | Is there imaging on disk that `image_series` doesn't know about, or with drifted slice counts? |
 | `data_integrity/detect_mixed_dirs.py` | FS deep (every file header) | very expensive, targeted | Does one physical DICOM dir hold more than one true series? |
+| `data_integrity/repair_dicomweb_metadata_cache.py` | Orthanc index → Orthanc (repairs, not just reports) | cheap to report; `--execute` re-extracts each affected series | Which series did Orthanc cache empty WADO-RS metadata for (OHIF spins forever, HTTP 400)? Rebuilds them: warm → rebuild → evict. See `docs/cold_storage/runbook.md`. |
 
 ---
 
@@ -72,6 +73,11 @@ python scripts/admin/rename_dataset_value.py --from-value old --to-value new [--
 # Bulk-set label values from CSV/Excel (dry-run by default)
 python scripts/admin/bulk_set_label_values.py --file x.csv --level series \
     --id-column seriesinstanceuid --value-column v --label mylabel [--execute]
+
+# Recompute machine series_type / study_type from series_dicom_tags (dry-run by
+# default; prints a confusion report + the unresolved residue). Reads the tag
+# table, not the archives — safe to re-run whenever the lexicons change.
+python scripts/admin/reclassify_series_types.py [--label sir_batch1] [--execute]
 
 # Two-DB reconciliation
 python scripts/data_integrity/reconcile.py

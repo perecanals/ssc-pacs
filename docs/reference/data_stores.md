@@ -41,18 +41,28 @@ These tables drive browsing in the Navigator UI:
     batch, preserved on conflict), `dataset` (`text[]`, union-accumulated),
     `created_at`, `updated_at`
 - **`lvo_clinical_data`** (clinical side-table — *not* the patient spine)
-  - clinical variables (demographics, outcomes, etc.). The patient tab joins it
-    only to prefer its `stroke_date` when a patient is clinically matched.
+  - clinical variables (demographics, outcomes, etc.). Retired as a roster: the
+    patient tab joins it only to prefer its `stroke_date` when a patient is
+    clinically matched.
+  - **Scoped exception (Alembic `0015`)**: the timepoint classifier reads three
+    time columns — `femoral_sheath_time`, `receiving_arrival_time`,
+    `time_recognized` — to anchor `image_study.timepoint` on the thrombectomy
+    puncture. That is the *only* other sanctioned read; do not widen it.
   - key fields: `study_id` (the patient id; joined as `c.study_id = patient.patient_id`), `stroke_date` (TEXT)
+  - Contains identifiable clinical data. Treat as sensitive: query it in the
+    aggregate, and don't page through row values without a reason.
 - **`image_study`** (study-level imaging metadata)
   - typical fields: `patient_id`, `studyinstanceuid`, `studydescription`, `study_type`, `study_path`, `acquisitiondatetime`, `import_id`, `import_label`
   - storage-size rollups (Alembic `0012`, `double precision`, decimal MB): `compressed_size_mb`, `decompressed_size_mb` — stay NULL until every child series has that size
+  - classification: **`study_type`** — machine-derived from `StudyDescription` at ingest, plus `study_type_version` (Alembic `0015`). See [`image_ingestion_protocol.md`](image_ingestion_protocol.md) §How `series_type` and `study_type` are detected
+  - temporal (Alembic `0015`): **`timepoint`** (`BL` / `THROMBECTOMY` / `FU` / NULL), `timepoint_anchor_source`, `hours_to_event` (signed), `timepoint_version`. Anchored on the **femoral-sheath puncture** from `lvo_clinical_data` — *not* stroke onset, so `BL` means pre-thrombectomy. Only 59% of clinical rows carry a recorded puncture; the rest are `+5h`/`+10h` estimates, which is why `timepoint_anchor_source` exists — filter on it before trusting a timepoint. See [`image_ingestion_protocol.md`](image_ingestion_protocol.md) §How `timepoint` is detected
 - **`image_series`** (series-level imaging metadata)
   - typical fields: `patient_id`, `studyinstanceuid`, `seriesinstanceuid`, `seriesdescription`, `modality`, `acquisitiondatetime`
   - file pointers: `dicom_dir_path`, `nifti_path`
   - optional cold storage: **`dicom_archive_path`** — path to per-series `*.tar.zst` when using `cold_path_cache` mode
   - storage sizes (Alembic `0012`, `double precision`, decimal MB): `compressed_size_mb`, `decompressed_size_mb`
-  - classification: **`series_type`** — geometry-first CTP/PWI/DWI/NULL tag (see [`image_ingestion_protocol.md`](image_ingestion_protocol.md) §How `series_type` is detected)
+  - classification: **`series_type`** — one of `NCCT` / `CTA` / `CTP` / `PWI` / `DWI` (the reference implementation's five) plus `ADC` / `MRA_TOF` / `MRA_CE`, or NULL. Everything else in that taxonomy (bone, dual-energy, topogram, test bolus, RAPID output, projections, CT reformats, DSA) is an **exclusion, not a type** — `series_type` is NULL and **`series_type_rule`** records which exclusion fired, so a NULL is a decision, not a failure. ~84% of the corpus is NULL; read the rule before concluding a series is unclassified. Plus `series_type_version` (Alembic `0015`). See [`image_ingestion_protocol.md`](image_ingestion_protocol.md) §How `series_type` and `study_type` are detected
+  - preference rank (Alembic `0015`): **`series_type_rank`** (integer, 1 = the series of that type to use for this patient) and **`series_label`** = `series_type || '_' || series_type_rank`, e.g. `NCCT_1` — the value to *display* and to filter on. NULL exactly when `series_type` is NULL. A window function over the patient's other series, so it is a plain column, not GENERATED; recomputed wholesale by `scripts/admin/reclassify_series_types.py`
   - ingestion bookkeeping: `import_id`, `import_label`
   - geometry-derived: `imageshape`, **`number_of_slices`**, `slicethickness`, `scanaxialcoverage_mm`
 
@@ -60,6 +70,7 @@ Notes:
 
 - The legacy Stanford ingestion pipeline (`image_ingestion_protocols/`) upserts into `image_study` and `image_series`.
 - `number_of_slices` is populated during ingest and can be backfilled for existing rows.
+- **`image_series.series_type` / `image_study.study_type` are machine-owned** and are a *different axis* from the human annotation labels that happen to share those names (mirrored as `label_series_type_*` / `label_study_type_*`, sourced from `annotations`). Neither may be derived from the other, in either direction — a reclassify run must never overwrite a rater's judgement, and a rater's judgement must never be fed back into the rules.
 
 ### web-app-owned tables (app-managed)
 
@@ -73,6 +84,7 @@ for the workflow when adding a new revision.
 - **`label_definitions`**: label registry (level-aware; supports bool/int/text/select).
 - **`label_value_options`**: known values (controlled vocabulary) per select-type label. Indexed `(label, value)` lookup kept in sync on annotation writes and label-definition creation; the live source feeding the inline-edit dropdown and the column filter (replaces a `SELECT DISTINCT` scan of `annotations`). Global (not dataset-scoped); values persist once created.
 - **`user_preferences`**: per-user persisted table layout/state and Navigator session state (JSONB).
+- **`series_dicom_tags`** (Alembic `0015`): one row per series holding the full DICOM tag set of a representative instance as `jsonb` (keyed by pydicom *keyword*; private tags under a `_private` sub-key), plus the cross-instance aggregates no single header carries — `same_position_count` (the CTP/PWI/DWI discriminator, previously computed at ingest and discarded), `n_positions`, `n_instances_scanned`, `distinct_kernels`, `distinct_image_types`. GIN-indexed on `tags`, so `tags ? 'ConvolutionKernel'` / `tags @> '{...}'` are cheap. This is what makes classification *iterable*: re-deriving `series_type` for the whole corpus becomes a table scan (seconds) instead of a re-read of every cold archive (~45 min). Written by ingestion in the same transaction as `image_series`; backfilled by `maintenance/scripts/backfill_series_dicom_tags.py`. Keyed `seriesinstanceuid text PRIMARY KEY` with **no FK** to `image_series` — same pattern as `series_cache_state`, because `image_series` is upstream-owned (`alembic/env.py:UPSTREAM_TABLES`).
 - **`patient_labelled` / `image_study_labelled` / `image_series_labelled`**: per-level mirror tables that join each source table with its level's annotations pivoted into label columns. Maintained (eventually consistent) by `web-app/labelled_table_sync.py` — refreshed in the background after each annotation write and once per batch at the end of an ingestion run. Used for labelled-pivot / export views; the live table read path never depends on them. (These replaced the former `snapshot_*` tables, dropped by Alembic `0013_drop_snapshot_tables`.)
 
 Audit:

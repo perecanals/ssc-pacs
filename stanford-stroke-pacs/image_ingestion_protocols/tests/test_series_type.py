@@ -15,6 +15,7 @@ from pydicom.sequence import Sequence
 from pydicom.uid import ExplicitVRLittleEndian, generate_uid
 
 from image_ingestion_protocol import ImageIngestionProtocol
+from series_classification import RULES_VERSION
 from utils import (
     identify_series_type,
     is_ctp_series,
@@ -66,7 +67,8 @@ def _multiframe_header(z_positions, modality="MR", series_desc="TEST"):
 def test_is_ctp_requires_ct_and_many_frames():
     assert is_ctp_series("CT", 20)
     assert is_ctp_series("CT", 15)
-    assert not is_ctp_series("CT", 14)        # below floor
+    assert is_ctp_series("CT", 14)            # his floor is 14, not 15
+    assert not is_ctp_series("CT", 13)        # below floor
     assert not is_ctp_series("MR", 20)        # wrong modality
     assert not is_ctp_series("CT", None)      # undetermined
 
@@ -171,7 +173,10 @@ def test_create_series_table_assigns_geometric_types(tmp_path):
         _write(str(case / "dwi" / f"d{i}.dcm"),
                _header(modality="MR", series_desc="DIFFUSION", z=0.0,
                        instance=i + 1, series_uid=dwi_uid))
-    # Static CTA-like: CT, one frame per position -> None.
+    # Static CT, one frame per position: geometry cannot type it, so the
+    # description/kernel stage does. This used to assert None — CTA detection was
+    # retired as untuned, and identify_series_type could not emit it. It now
+    # resolves via series_classification, and the ingest path must reflect that.
     for i in range(5):
         _write(str(case / "cta" / f"a{i}.dcm"),
                _header(modality="CT", series_desc="CTA", z=float(i * 5),
@@ -183,7 +188,20 @@ def test_create_series_table_assigns_geometric_types(tmp_path):
 
     assert t.loc[ctp_uid, "series_type"] == "CTP"
     assert t.loc[dwi_uid, "series_type"] == "DWI"
+
+    # Only 5 instances — below his CTA minimum of 80, so it is excluded, and the
+    # rule says exactly why.
     assert t.loc[static_uid, "series_type"] is None
+    assert t.loc[static_uid, "series_type_rule"] == "description-cta-below-min-instances"
+
+    assert t.loc[ctp_uid, "series_type_rule"] == "geometry-same-position-count"
+    assert t.loc[ctp_uid, "series_type_version"] == RULES_VERSION
+
+    # The tag rows are captured in the same pass, keyed by series UID.
+    tags = p.case_series_tags_table.set_index("seriesinstanceuid")
+    assert set(tags.index) == {ctp_uid, dwi_uid, static_uid}
+    assert tags.loc[ctp_uid, "same_position_count"] == 20
+    assert tags.loc[ctp_uid, "tags"]["Modality"] == "CT"
 
 
 def test_series_geometry_uses_true_z_extent(tmp_path):

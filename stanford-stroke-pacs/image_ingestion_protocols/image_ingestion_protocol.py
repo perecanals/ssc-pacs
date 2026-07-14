@@ -15,15 +15,36 @@ import zstandard as zstd
 from sqlalchemy import MetaData, Table, func, inspect, select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
+from dicom_tags import extract_series_tags
+from series_classification import (
+    ASSIGN_RANKS_SQL,
+    CLEAR_RANKS_SQL,
+    RULES_VERSION,
+    classify_series,
+    classify_study,
+    classify_timepoint,
+    resolve_event_anchor,
+)
 from utils import (
     anonymize_dicom_slice,
     convert_dicom_to_nifti,
-    identify_series_type,
-    identify_study_type,
-    max_same_position_count,
     name_sanity_check,
     should_create_nifti,
 )
+
+# Columns of the `series_dicom_tags` row that extract_series_tags() produces,
+# plus the key. Used to build an empty frame when a case has no readable series.
+SERIES_DICOM_TAGS_COLUMNS = [
+    "seriesinstanceuid",
+    "tags",
+    "same_position_count",
+    "n_positions",
+    "n_instances_scanned",
+    "distinct_kernels",
+    "distinct_image_types",
+    "source_instance",
+    "extractor_version",
+]
 
 # Pull canonical paths from repo-root config.toml (same source of truth the
 # web app uses). Avoids hardcoding /DATA2/pacs_imaging_data here.
@@ -71,6 +92,12 @@ class ImageIngestionProtocol:
         self.case_series_table = None
         self.case_study_table = None
         self.case_series_verification_table = None
+        # Rows for `series_dicom_tags`, captured in create_series_table() while
+        # the instance headers are still in scope (they are discarded when that
+        # method returns). Kept off case_series_table on purpose:
+        # format_column_names() hard-reprojects that frame onto a fixed column
+        # list and would silently drop anything extra.
+        self.case_series_tags_table = None
 
         self.image_study = None
         self.image_series = None
@@ -131,6 +158,12 @@ class ImageIngestionProtocol:
         step_started = time.perf_counter()
         self.validate_studies_against_clinical_data()
         print(f"Validated clinical matches in {time.perf_counter() - step_started:.2f}s")
+
+        # Must run after load_clinical_data_table: the timepoint anchor comes from
+        # lvo_clinical_data, which create_study_table cannot see (it runs first).
+        step_started = time.perf_counter()
+        self.assign_study_timepoints()
+        print(f"Assigned study timepoints in {time.perf_counter() - step_started:.2f}s")
 
         step_started = time.perf_counter()
         self.assign_import_id()
@@ -294,6 +327,8 @@ class ImageIngestionProtocol:
                 "scanaxialcoverage_mm",
                 "seriesdescription_",
                 "series_type",
+                "series_type_rule",
+                "series_type_version",
                 "modality",
                 "import_id",
                 "import_label",
@@ -307,12 +342,16 @@ class ImageIngestionProtocol:
                 "patient_id",
                 "acquisitiondatetime",
                 "study_type",
+                "study_type_version",
+                "timepoint",
+                "timepoint_anchor_source",
+                "hours_to_event",
+                "timepoint_version",
                 "studydescription",
                 "studyinstanceuid",
                 "study_path",
                 "protocolname",
                 "manufacturer",
-                "predicted_study_type",
                 "stroke_date",
                 "clinical_match_found",
                 "import_id",
@@ -502,6 +541,7 @@ class ImageIngestionProtocol:
                 bucket["dirs"].add(root)
 
         data_series_list = []
+        series_tag_rows = []
         for series_instance_uid, bucket in buckets.items():
             # Order instances deterministically (InstanceNumber, then path) so the
             # representative header and the computed geometry are stable run-to-run.
@@ -554,9 +594,19 @@ class ImageIngestionProtocol:
             series_description = self._safe_text(
                 self._dicom_value(dcm, "SeriesDescription")
             )
-            # Geometry-first series-type detection: how many frames share a slice
-            # location distinguishes dynamic (CTP/PWI/DWI) from static scans.
-            same_position_count = max_same_position_count(headers)
+            # Free: every header here was already read with stop_before_pixels,
+            # and they go out of scope when this method returns. Persisting the
+            # tags is what lets a reclassify run off series_dicom_tags instead of
+            # re-reading 130k cold archives.
+            tag_row = extract_series_tags(headers, source_instance=paths[0])
+            same_position_count = tag_row["same_position_count"]
+
+            # Same classifier the reclassify CLI uses — one source of truth.
+            series_type, series_type_rule = classify_series(
+                tag_row["tags"], same_position_count, tag_row["n_instances_scanned"]
+            )
+
+            series_tag_rows.append({"seriesinstanceuid": series_instance_uid, **tag_row})
 
             data_series_list.append(
                 pd.DataFrame(
@@ -593,9 +643,9 @@ class ImageIngestionProtocol:
                             "seriesdescription_": name_sanity_check(
                                 series_description or "UNNAMED_SERIES"
                             ),
-                            "series_type": identify_series_type(
-                                modality, same_position_count, series_description
-                            ),
+                            "series_type": series_type,
+                            "series_type_rule": series_type_rule,
+                            "series_type_version": RULES_VERSION,
                             "modality": modality,
                         }
                     ]
@@ -605,8 +655,10 @@ class ImageIngestionProtocol:
         if not data_series_list:
             self.case_series_table = self._empty_series_table()
             self.case_study_table = self._empty_study_table()
+            self.case_series_tags_table = pd.DataFrame(columns=SERIES_DICOM_TAGS_COLUMNS)
             return
 
+        self.case_series_tags_table = pd.DataFrame(series_tag_rows)
         self.case_series_table = pd.concat(data_series_list, ignore_index=True)
         self.case_series_table = self.case_series_table.sort_values(
             by=["patient_id", "acquisitiondatetime", "studyinstanceuid", "seriesinstanceuid"],
@@ -626,29 +678,31 @@ class ImageIngestionProtocol:
             ).reset_index(drop=True)
             first_row = study_series.iloc[0]
             stroke_date = self._lookup_stroke_date(first_row["patient_id"])
-            predicted_study_type = self._predict_study_type(study_series, stroke_date)
+            study_description = first_row["studydescription"]
+
+            # Machine-owned study type, derived from StudyDescription alone. This
+            # is independent of the human annotation label of the same name
+            # (mirrored as `label_study_type_*`) — neither may be derived from
+            # the other, in either direction.
+            study_type, _study_rule = classify_study(study_description)
 
             study_rows.append(
                 {
                     "patient_id": first_row["patient_id"],
                     "acquisitiondatetime": first_row["acquisitiondatetime"],
-                    "study_type": "",
-                    "studydescription": first_row["studydescription"],
+                    "study_type": study_type,
+                    "study_type_version": RULES_VERSION,
+                    "studydescription": study_description,
                     "studyinstanceuid": study_instance_uid,
                     "study_path": "",
                     "protocolname": first_row["protocolname"],
                     "manufacturer": first_row["manufacturer"],
-                    "predicted_study_type": predicted_study_type,
                     "stroke_date": stroke_date,
                     "clinical_match_found": False,
                 }
             )
 
         self.case_study_table = pd.DataFrame(study_rows)
-
-        # Study-type detection is intentionally kept for future activation, but the
-        # active Stanford pipeline must currently leave `study_type` empty.
-        self.case_series_table["study_type"] = ""
 
     def _lookup_stroke_date(self, patient_id):
         if self.clinical_data is None or self.clinical_data.empty:
@@ -658,22 +712,48 @@ class ImageIngestionProtocol:
             return pd.NaT
         return matches["stroke_date"].dropna().iloc[0] if matches["stroke_date"].notna().any() else pd.NaT
 
-    def _predict_study_type(self, study_series, stroke_date):
-        predicted_study_type = identify_study_type(study_series)
-
-        # Future hook: if study_type activation is re-enabled, stroke_date should be
-        # the clinical anchor for BASELINE / THROMBECTOMY / FOLLOW_UP assignment.
-        if pd.isna(stroke_date):
-            return predicted_study_type
-
-        acquisition_datetime = study_series["acquisitiondatetime"].dropna()
-        if acquisition_datetime.empty:
-            return predicted_study_type
-
-        acquisition_date = acquisition_datetime.iloc[0].normalize()
-        if acquisition_date < stroke_date - pd.Timedelta(days=1):
+    def _clinical_row(self, patient_id):
+        """The patient's lvo_clinical_data row as a plain dict, or None."""
+        if self.clinical_data is None or self.clinical_data.empty:
             return None
-        return predicted_study_type
+        matches = self.clinical_data[self.clinical_data["study_id"] == str(patient_id)]
+        if matches.empty:
+            return None
+        return matches.iloc[0].to_dict()
+
+    def assign_study_timepoints(self):
+        """Label each study BL / THROMBECTOMY / FU relative to the puncture anchor.
+
+        A separate step (not part of create_study_table) because the anchor lives
+        in lvo_clinical_data, which is only loaded later in the sequence.
+
+        Machine-owned, and independent of the human `timepoint` annotation label
+        (mirrored as `label_timepoint_*`) — neither is derived from the other.
+        """
+        if self.case_study_table is None or self.case_study_table.empty:
+            return
+
+        timepoints, sources, hours, versions = [], [], [], []
+        anchors = {}  # patient_id -> (anchor, source); one clinical lookup per patient
+
+        for _, row in self.case_study_table.iterrows():
+            patient_id = row["patient_id"]
+            if patient_id not in anchors:
+                anchors[patient_id] = resolve_event_anchor(self._clinical_row(patient_id))
+            anchor, source = anchors[patient_id]
+
+            timepoint, hours_to_event, _rule = classify_timepoint(
+                row["acquisitiondatetime"], anchor, row.get("study_type")
+            )
+            timepoints.append(timepoint)
+            sources.append(source)
+            hours.append(hours_to_event)
+            versions.append(RULES_VERSION)
+
+        self.case_study_table["timepoint"] = timepoints
+        self.case_study_table["timepoint_anchor_source"] = sources
+        self.case_study_table["hours_to_event"] = hours
+        self.case_study_table["timepoint_version"] = versions
 
     def filter_existing_studies(self, overwrite_if_exists=False):
         # Series found on disk but skipped because they are already in
@@ -1247,6 +1327,8 @@ class ImageIngestionProtocol:
                 "studydescription",
                 "seriesdescription",
                 "series_type",
+                "series_type_rule",
+                "series_type_version",
                 "modality",
                 "studyinstanceuid",
                 "seriesinstanceuid",
@@ -1269,11 +1351,23 @@ class ImageIngestionProtocol:
             ]
         ].copy()
 
+        # NOTE: this projection is authoritative — any column not listed here is
+        # silently dropped before the upsert, however carefully it was computed
+        # upstream. Add new study columns HERE as well as at their source.
+        for column in ("timepoint", "timepoint_anchor_source", "hours_to_event", "timepoint_version"):
+            if column not in self.case_study_table.columns:
+                self.case_study_table[column] = None
+
         self.case_study_table = self.case_study_table[
             [
                 "patient_id",
                 "acquisitiondatetime",
                 "study_type",
+                "study_type_version",
+                "timepoint",
+                "timepoint_anchor_source",
+                "hours_to_event",
+                "timepoint_version",
                 "studydescription",
                 "studyinstanceuid",
                 "study_path",
@@ -1325,10 +1419,24 @@ class ImageIngestionProtocol:
         ]
 
         insert_stmt = pg_insert(table).values(records)
+
+        # Update only the columns this dataframe actually carries. Two reasons,
+        # both load-bearing:
+        #
+        #  1. GENERATED columns (series_dicom_tags projects modality, kernel, ...
+        #     out of the tags jsonb — Alembic 0017) cannot be assigned. Feeding
+        #     one into SET raises "column can only be updated to DEFAULT" and
+        #     fails the whole case.
+        #  2. A column absent from the dataframe would otherwise be SET to
+        #     EXCLUDED.<col> — i.e. reset to its INSERT default — silently wiping
+        #     an existing value on a partial upsert.
+        dataframe_columns = set(dataframe.columns)
         update_columns = {
             column.name: insert_stmt.excluded[column.name]
             for column in table.columns
             if column.name != key_column
+            and column.name in dataframe_columns
+            and column.computed is None
         }
         upsert_stmt = insert_stmt.on_conflict_do_update(
             index_elements=[key_column],
@@ -1392,11 +1500,26 @@ class ImageIngestionProtocol:
             self._upsert_dataframe(
                 "image_series", "seriesinstanceuid", self.case_series_table, connection
             )
+            # Same transaction as image_series: a series row and its tag row must
+            # never diverge. Written after, so a future FK (if the upstream-table
+            # policy ever changes) would still be satisfied.
+            if self.case_series_tags_table is not None:
+                self._upsert_dataframe(
+                    "series_dicom_tags",
+                    "seriesinstanceuid",
+                    self.case_series_tags_table,
+                    connection,
+                )
             self._upsert_dataframe(
                 "image_study", "studyinstanceuid", self.case_study_table, connection
             )
             self._upsert_patient(connection)
             self._rollup_study_storage_sizes(connection)
+
+            # Ranks are a window over each patient's series, so this must run
+            # after the image_series upsert — the new rows have to be visible.
+            connection.execute(text(ASSIGN_RANKS_SQL))
+            connection.execute(text(CLEAR_RANKS_SQL))
 
     # GUARDS ONLY, not schema management: Alembic is the canonical home of
     # these columns (rev 0001 baseline has dicom_archive_path, rev 0012 the

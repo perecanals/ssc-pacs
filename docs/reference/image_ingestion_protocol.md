@@ -213,38 +213,177 @@ collision warning, copy-collision rename), plus `test_series_type.py`,
 (`test_end_to_end_scratch_db.py`) runs only with `SSC_INGEST_AUDIT=1` and a
 local Postgres. Run them via `make test-ingestion` from the checkout root.
 
-### How `series_type` is detected
+### How `series_type` and `study_type` are detected
 
-During `create_series_table`, each series is classified geometry-first into
-`CTP`, `PWI`, `DWI`, or `NULL` (`utils.identify_series_type`). The discriminating
-signal is **`same_position_count`** — the largest number of frames in the series
-that share one `ImagePositionPatient` (`utils.max_same_position_count`, computed
-from the headers already in memory). Static scans visit each slice location once
-(~1); dynamic acquisitions cycle through time/b-values at each location, so the
-count equals the number of timepoints. Combined with `Modality` and a small
-`SeriesDescription` exclusion list:
+`series_classification.py` is the single source of truth, applied both at ingest
+(`create_series_table`) and by `scripts/admin/reclassify_series_types.py`. Every
+call returns `(type, rule)`; the rule is persisted to `series_type_rule` alongside
+`series_type_version`, so a classification can always be explained and recomputed.
 
-| series_type | Modality | same-position count | excluded descriptions |
-|-------------|----------|---------------------|-----------------------|
-| `CTP` | CT | ≥ 15 | — |
-| `PWI` | MR | ≥ 15 | asl, fmri, qsm, swi |
-| `DWI` | MR | 2–14 | asl, fmri, qsm, swi |
+**Emitted types — and only these** (`EMITTED_TYPES`):
 
-Anything else resolves to `NULL`. The legacy keyword `CTA`/`NCCT` detection is
-**no longer** wired into `series_type` (those lists were never tuned for this
-dataset); `is_cta_series`/`is_ncct_series` remain only for `identify_study_type`'s
-BASELINE/FOLLOW_UP study classification. Enhanced-multiframe series whose
-per-frame geometry can't be decoded degrade to `NULL` rather than misclassifying.
+| | |
+|---|---|
+| **His five** | `NCCT`, `CTA`, `CTP`, `PWI`, `DWI` — one per output column of the reference implementation (`likely_ncct` … `likely_dwi`) |
+| **Sanctioned additions** | `ADC`, `MRA_TOF`, `MRA_CE` |
 
-Thresholds live as constants in `utils.py` (`PERFUSION_MIN_FRAMES`,
-`DWI_FRAME_RANGE`, `MR_DYNAMIC_EXCLUDE`). `series_type` is **kept-dormant-by-design**:
-it is computed and stored at ingest, but nothing downstream consumes it yet
-(the value is retained for planned future use). A maintenance helper to
-recompute `series_type` for existing rows from their on-disk or archived headers
-lives at `maintenance/scripts/backfill_series_type.py` (checkout-root
-`maintenance/`, gitignored; dry-run by default, `--execute` to write, with
-`--patient` / `--import-label` / `--only-missing` filters). Its unit tests are
-tracked under `image_ingestion_protocols/tests/test_series_type.py`.
+Everything else in his taxonomy — bone kernels, dual-energy, topograms, test
+bolus, RAPID output, projections, CT reformats, DSA — is an **exclusion, not a
+type**. He sets those to `False` on all five columns; we return `NULL`. The
+exclusion logic is retained in full (it is heavily tuned and does real work, e.g.
+bone-before-NCCT keeps bone windows out of the NCCT cohort), but it mints no
+labels.
+
+> **A NULL is usually a decision, not a failure.** `series_type_rule` records
+> which exclusion fired (`kernel-bone`, `imagetype-projection`,
+> `ct-reformat-non-axial`, `modality-xa`, `description-derived`…). Read the rule
+> before concluding a series is unclassified — ~84% of the corpus is NULL, and
+> almost all of it is deliberately excluded.
+
+His criteria, reproduced:
+
+| Rule | Value |
+|---|---|
+| CTA minimum instances | **80** (`cta_identifier` `min_files`) |
+| NCCT minimum instances | **10** (`ncct_identifier` `min_files`) |
+| CTP floor | **14** frames/position |
+| DWI range | **2–14** frames/position |
+| Bone kernels matched **before** NCCT kernels | keeps bone windows out of NCCT |
+
+PWI uses 15, not 14: his DWI (2–14) and perfusion (≥14) ranges *overlap*, which is
+fine for five independent columns but not for one mutually-exclusive
+`series_type`. The tie breaks to DWI.
+
+**Rank and display label.** His output was never flat — each column holds
+`NCCT_1`, `NCCT_2`, `CTA_1`… a preference ranking *within a patient*, so rank 1 is
+*the* NCCT to use. Reproduced as `series_type_rank` plus the combined
+`series_label` (`NCCT_1`), **which is the column to display**. Ordering: CTA
+thinnest-slice first, NCCT thickest first, the rest chronological; tie-broken by
+`ImageType` (original > secondary > derived) then time.
+
+**Stages**, in order: non-acquisition filter (`ImageType` localizer / projection /
+derived) → geometry (`same_position_count` → CTP/PWI/DWI) → CT static (plane,
+kernel lexicons, description) → MR static (`DiffusionBValue` → ADC/DWI;
+description or `SequenceVariant` → MRA) → modality.
+
+Three invariants hold it together, each learned by breaking it:
+
+1. **`ORIGINAL/PRIMARY` outranks every description keyword** — the scanner
+   asserting "I acquired this". Without it, 438 human-confirmed DWI named
+   `Ax DWI (SEND TO RAPID-3)` were discarded as derived; they are *sent to* RAPID,
+   not produced by it.
+2. **A carried `DiffusionBValue` outranks `ImageType`** — trace DWI and ADC maps
+   are computed from the raw directions, so scanners legitimately mark them
+   `DERIVED\SECONDARY`.
+3. **Prefer the vendor's explicit tag over a description substring.** The plane of
+   a CT comes from `ImageOrientationPatient`, not the name: `CTA 2.0 MPR Cor` is a
+   coronal reformat whose `ImageType` reads `AXIAL`. Bare `cor`/`sag` substrings
+   match inside `RECON` — the bug in his `EXCLUSION_description`.
+
+`study_type` is derived from `StudyDescription` alone (`CT_HEAD`, `MR_BRAIN`,
+`CT_STROKE_PROTOCOL`, `CTA`, `THROMBECTOMY`) — no clinical join, and deliberately
+not a function of the study's series types.
+
+> **Machine-owned.** `series_type` / `study_type` / `timepoint` are a different
+> axis from the human annotation labels sharing those names (`label_series_type_*`
+> etc.). Neither may be derived from the other.
+
+### Validating against human annotations
+
+~5,500 independent human `series_type` annotations serve as ground truth:
+
+| Human label | n | Machine agrees |
+|---|---|---|
+| PWI | 71 | 100% |
+| MRA (`TOF` + `MRA`) | 372 | 99.5% |
+| CTP | 243 | 99.2% |
+| DWI | 884 | 96.0% |
+| ADC | 100 | 89.0% |
+| CTA | 950 | 79.9% |
+| NCCT | 1,370 | 77.4% |
+
+Re-run this whenever a lexicon changes — a rule that shrinks the residue but drops
+agreement is a regression, and the residue alone will not tell you.
+
+**Recomputing.** Classification reads `series_dicom_tags`, not the archives, so a
+full-corpus pass is a table scan (~30s):
+
+```bash
+python scripts/admin/reclassify_series_types.py             # dry-run + report
+python scripts/admin/reclassify_series_types.py --execute   # apply
+```
+
+### How `timepoint` is detected
+
+`image_study.timepoint` answers *when* a study happened relative to the
+intervention: `BL` (before), `THROMBECTOMY` (the procedure study itself), `FU`
+(after), or `NULL`. Assigned by `assign_study_timepoints()`, which must run after
+`load_clinical_data_table()` — the anchor lives in `lvo_clinical_data`, which
+`create_study_table()` (earlier in the sequence) cannot see.
+
+> **The anchor is femoral-sheath puncture, NOT stroke onset.** `BL` means
+> *pre-thrombectomy*, not *post-onset*. `patient.stroke_date` is a different clock
+> and is deliberately not used — mixing them would silently change what `BL` means.
+
+Anchor precedence (ported verbatim from the reference implementation, so our
+labels reproduce its numbers):
+
+| Priority | Column (`lvo_clinical_data`) | Offset | Coverage |
+|---|---|---|---|
+| 1 | `femoral_sheath_time` | none — the recorded puncture | 59% of clinical rows |
+| 2 | `receiving_arrival_time` | **+5 h** (estimate) | 94% |
+| 3 | `time_recognized` | **+10 h** (estimate) | 84% |
+
+`timepoint_anchor_source` records which column supplied the anchor. This is
+load-bearing, not bookkeeping: only priority 1 is a *recorded* puncture time, so
+a `BL`/`FU` resting on a `+10h` estimate is materially weaker evidence — and
+without this column the two are indistinguishable. Always filter on it before
+treating a timepoint as ground truth.
+
+`hours_to_event` is the signed offset from the anchor (negative before, positive
+after). A bare BL/FU flag cannot *select* a scan; this is what lets you pick, say,
+the follow-up nearest 24 h.
+
+Studies typed `THROMBECTOMY` are labelled `THROMBECTOMY` regardless of anchor
+availability — the procedure study identifies itself. Everyone else with no anchor
+(26% of patients) gets `NULL` rather than a guess.
+
+> **Re-opens `lvo_clinical_data`.** That table was previously retired as a roster
+> ("joined only to prefer its clinical `stroke_date` via COALESCE, never otherwise
+> queried"). Reading these three time columns is a deliberate reversal, scoped to
+> exactly them.
+>
+> **Machine-owned**, and independent of the human `timepoint` annotation label
+> (mirrored as `label_timepoint_*`). Neither may be derived from the other.
+
+> **Machine-owned, and independent of annotations.** `series_type` / `study_type`
+> are a different axis from the human annotation labels that share those names
+> (`label_series_type_*` / `label_study_type_*`). Neither may be derived from the
+> other, in either direction.
+
+**Recomputing.** Classification reads `series_dicom_tags`, not the archives, so a
+full-corpus re-derivation is a table scan:
+
+```bash
+python scripts/admin/reclassify_series_types.py             # dry-run + confusion report
+python scripts/admin/reclassify_series_types.py --execute   # apply
+```
+
+The dry-run report (current → proposed, counts per rule, and the unresolved
+residue with example descriptions) is the artifact you iterate the lexicons
+against. Series with no `series_dicom_tags` row are skipped — populate them first
+with `maintenance/scripts/backfill_series_dicom_tags.py` (gitignored
+`maintenance/`; idempotent and additive, ~45 min for the full corpus at
+`--workers 12`).
+
+Note that the existing data is **not** self-consistent and cannot be repaired by
+filling gaps — `series_type` is NULL on the `sir_batch*` imports and `''` on the
+older ones, 768 rows carry a `CTA` label emitted by a since-retired code path, and
+67 MR series are labelled `CTP` from a pre-modality-guard bug. Recompute-everything
+is the intended operation.
+
+Unit tests: `image_ingestion_protocols/tests/test_series_classification.py` and
+`tests/test_dicom_tags.py`.
 
 ---
 
@@ -347,10 +486,25 @@ By default (`cleanup_loose_after_indexing: true`) the protocol reclaims the
 space during the run itself: after each case's indexing verifies, its series'
 loose `DICOM/` dirs are deleted with the same safety checks as
 `cleanup_loose_dicoms.py` below (archive present + file-count match + series
-verified in the index; NIFTI siblings preserved; series that fail a check are
-skipped and logged, and nothing is deleted for a case whose indexing failed).
-Freshly ingested studies then read as *cold* and warm on demand like the rest
-of the corpus.
+verified in the index + **Orthanc's DICOMweb metadata cache built**; NIFTI
+siblings preserved; series that fail a check are skipped and logged, and nothing
+is deleted for a case whose indexing failed). Freshly ingested studies then read
+as *cold* and warm on demand like the rest of the corpus.
+
+That metadata-cache check is what makes the deletion safe, and it costs a short
+wait per series. Orthanc's DICOMweb plugin builds each series' WADO-RS metadata
+cache by *reading the DICOM files*, in a background worker that fires when the
+series goes stable (`"StableAge": 10` in `orthanc.json`). Delete the files
+before that worker runs and the plugin caches an empty array **permanently** —
+the series then 400s on every metadata request and hangs OHIF on the loading
+spinner forever, even after it is warmed again. Cleanup therefore waits (up to
+`--metadata-cache-timeout`, default 120s) for the cache to appear, and keeps the
+loose files if it does not. See the invariant in `docs/cold_storage/design.md`.
+
+> This is not hypothetical: ingestion originally deleted the loose files with no
+> grace period, which stranded 19,658 series across 342 patients in the July 2026
+> CRISP2/LVO batch. Repair tool:
+> `scripts/data_integrity/repair_dicomweb_metadata_cache.py`.
 
 Set `cleanup_loose_after_indexing: false` in the YAML to keep loose files on
 disk ("hot", instantly viewable) until a manual `cleanup_loose_dicoms.py` pass.

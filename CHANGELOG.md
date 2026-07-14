@@ -1,5 +1,94 @@
 # Changelog
 
+## v1.6 — 2026-07-13
+
+- **Feature**: the classifier's verdicts are now visible in the web app, as
+  read-only **Auto Series Type** (series) and **Auto Timepoint** (study, and on
+  the series table too) columns. Both are filterable and sortable. No migration —
+  the columns landed in `0015_series_classification`; this only surfaces them.
+- They render as *muted, outlined, non-clickable* pills, deliberately unlike the
+  filled editable pills of the human `series_type` / `timepoint` annotation
+  labels sitting in adjacent columns. The two remain independent axes; the web
+  app selects and filters the machine columns but never writes them.
+- **Auto Series Type** carries the per-patient preference rank as a superscript
+  badge (rank 1 bolded = the series of that type to use). The column filter
+  matches `series_label`, so `NCCT` finds all 3,714 NCCTs and `NCCT_1` isolates
+  the 1,450 preferred ones — one per patient. Sorting keys on `series_label`
+  (type, then rank).
+- An **excluded** series (NULL `series_type` + a `series_type_rule` — most of the
+  corpus) shows a faint `—` whose tooltip names the exclusion that fired, rather
+  than an empty cell. A blank cell now means genuinely unclassified. Hovering any
+  Auto pill gives its provenance (rule + version, or anchor + signed hours).
+- An **estimated** timepoint (anchor `receiving_arrival_time` / `time_recognized`
+  rather than a recorded puncture) is drawn with a dashed border and a `~`, so
+  the estimate is visible without hovering.
+- Both columns are on **by default, including for users who already have saved
+  column preferences** — `utils/table.js` gains `COLUMN_DEFAULTS_VERSION` and
+  per-column `introducedIn`; `useColumnPrefs` merges newly-introduced columns into
+  saved prefs exactly once and stamps `prefs.defaultsVersion`, so hiding one
+  sticks. Reuse this for any future default-on built-in column.
+- Auto Timepoint on the *series* table is the exception: hidden by default there
+  (every series of a study repeats the study's value), on by default where series
+  render as sub-rows. A column's `defaultVisible` may now be a predicate on the
+  active level, not just a boolean.
+- Internal: the built-in cell renderer, previously duplicated across `index.jsx`
+  and both tables in `ChildRows.jsx`, is extracted to `DataTable/BuiltinCell.jsx`.
+
+## v1.4 — 2026-07-13
+
+- **Schema** (Alembic `0015_series_classification`, one revision): new `series_dicom_tags` table — one row per
+  series holding the full DICOM tag set of a representative instance as
+  GIN-indexed `jsonb`, plus the cross-instance aggregates no single header carries
+  (`same_position_count`, `distinct_kernels`, …) and 21 `GENERATED` columns
+  projected out of the blob (modality, convolution_kernel, slice_thickness, …), so
+  it is queryable as a table without a 794-column schema. PHI tags are deliberately
+  not promoted. Adds classification provenance (`series_type_rule`,
+  `series_type_version`), the study `timepoint` axis, and `series_type_rank` +
+  `series_label`. **The GENERATED columns rewrite `series_dicom_tags` (~6.5 min on 131k rows) —
+  run `alembic upgrade head` before restarting the web app on a populated DB.**
+  Backfill: `maintenance/scripts/backfill_series_dicom_tags.py` (~48 min, idempotent).
+- **Feature**: rule-based series/study classification
+  (`image_ingestion_protocols/series_classification.py`), applied at ingest and
+  re-runnable via `scripts/admin/reclassify_series_types.py` (dry-run by default).
+  Because it reads `series_dicom_tags` rather than the archives, recomputing the
+  whole corpus is a ~30s table scan, not a 48-minute disk sweep.
+  - **Emitted types** are the reference implementation's five (`NCCT`, `CTA`,
+    `CTP`, `PWI`, `DWI`) plus `ADC`, `MRA_TOF`, `MRA_CE`. Everything else in his
+    taxonomy — bone, dual-energy, topogram, test bolus, RAPID output, projections,
+    CT reformats, DSA — stays an **exclusion**, not a type: `series_type` is NULL
+    and `series_type_rule` records which exclusion fired. His criteria are used
+    verbatim, including the ≥80-instance CTA and ≥10-instance NCCT minimums and
+    the 14-frame CTP floor.
+  - **Rank + display label**: `series_type_rank` and the combined `series_label`
+    (`NCCT_1`, `CTA_2`) reproduce his per-patient preference ordering — CTA
+    thinnest-slice first, NCCT thickest first, the rest chronological. `series_label`
+    is the column to display.
+  - **MR angiography**: 2,140 `MRA_TOF` + 183 `MRA_CE`. Contrast state comes from
+    the description (`+C`, `Gad`), not `ContrastBolusAgent` — that tag is empty on
+    the gado carotid studies.
+- **Data fix**: the existing `series_type` values were substantially wrong, not
+  merely sparse. The old geometry-only classifier could not distinguish a
+  perfusion/diffusion *map* from an *acquisition*: of the 5,315 rows labelled
+  `DWI`, ~3,800 were RAPID post-processing summaries or MRA MIPs; 829 `CTP` rows
+  likewise. Also fixed: ~2,900 coronal/sagittal CT reformats typed as acquisitions
+  (the plane now comes from `ImageOrientationPatient`, because `ImageType` and the
+  series name both lie), and 1,221 MRA projections typed as `LOCALIZER`. All
+  130,921 rows recomputed under `rules-v2`. Validated against the ~5,500 independent
+  human `series_type` annotations: PWI 100%, MRA 99.5%, CTP 99.2%, DWI 96%, ADC 89%,
+  CTA 80%, NCCT 77%.
+- **Behavior change**: `image_study.study_type` is now populated (from
+  `StudyDescription`) instead of `''`, activating the `study_type` filter and sort
+  on `/api/studies` and `/api/series`. Adds `image_study.timepoint`
+  (`BL` / `THROMBECTOMY` / `FU`), anchored on the **femoral-sheath puncture** from
+  `lvo_clinical_data` — not stroke onset. Only 59% of clinical rows carry a recorded
+  puncture, so `timepoint_anchor_source` records whether the anchor was real or a
+  `+5h`/`+10h` estimate; filter on it before trusting a timepoint. This deliberately
+  re-opens `lvo_clinical_data`, previously retired as a roster.
+- All machine columns stay strictly independent of the human annotation labels of
+  the same names (`label_series_type_*`, `label_study_type_*`, `label_timepoint_*`).
+- **Removed**: the dead Spanish study classifier. Auto-NIfTI's dormancy is now
+  explicit (`utils.NIFTI_SERIES_TYPES`, empty) rather than an accident.
+
 ## v1.3 — 2026-07-10
 
 - **Fix**: `rotate_db_password.py` now handles the case where the `DB_USER`
