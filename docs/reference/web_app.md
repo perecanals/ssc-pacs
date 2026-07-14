@@ -113,6 +113,10 @@ Key behaviors:
 - nested rows support inherited annotations
 - columns can include both source metadata and annotation-driven fields
 - inline editors allow direct annotation changes in the table
+- the machine classifier's verdicts appear as read-only **Auto Series Type** and
+  **Auto Timepoint** columns, rendered as muted outlined pills next to — and
+  deliberately distinct from — the editable human labels of the same name; they
+  are an independent axis, never derived from each other (see §5.7)
 - the selected study or series row remains highlighted
 - column headers are sticky during vertical scroll
 - the first column can be pinned (frozen) during horizontal scroll via a
@@ -248,6 +252,38 @@ gates what they see:
 
 The exact enforcement points, TTL caches, and the `/api/labels*` known
 limitation are canonical in [`architecture.md`](architecture.md) §5.4.
+
+### 5.7 Machine classification ("Auto" columns)
+
+The ingestion pipeline classifies every series (`image_series.series_type`) and
+every study (`image_study.timepoint`). The web app shows those verdicts read-only
+as **Auto Series Type** and **Auto Timepoint**, and lets users filter and sort on
+them — but never writes them.
+
+The point of the "Auto" prefix and the muted, outlined, non-clickable pill is
+that annotation labels named `series_type` and `timepoint` also exist and sit in
+adjacent columns. The two are **independent axes**: a reclassify run must not
+overwrite a rater's judgement, and a rater's judgement must not feed back into
+the rules ([`data_stores.md`](data_stores.md)).
+
+- **Auto Series Type** also shows the per-patient preference rank as a
+  superscript: `NCCT` with a bold `1` is *the* NCCT to open for that patient.
+  Type the label into the column filter (`NCCT_1`) to isolate every patient's
+  preferred NCCT in one query.
+- Most series are **excluded** rather than typed (bone, topogram, RAPID output,
+  …), which the classifier records as a rule. Those cells show a faint `—`;
+  hover it for the exclusion that fired. An empty cell means not-yet-classified.
+- **Auto Timepoint** (`BL` / `THROMBECTOMY` / `FU`) is anchored on the
+  femoral-sheath puncture. Where no puncture time was recorded the classifier
+  falls back to a fixed offset, and those pills are drawn with a dashed border
+  and a `~` — an estimate, not a measurement. Hover any Auto pill for its
+  provenance (the rule that fired, or the anchor and signed hours from it).
+- Both are on by default, including for users with existing saved column
+  preferences; hiding one is remembered. The exception: when series appear as
+  **sub-rows** under a study or patient, Auto Timepoint is hidden by default —
+  the parent study row already shows it, so repeating it per child series adds
+  nothing. It defaults on in the flat series table, where there is no parent row
+  to carry it, and stays available in the column selector everywhere.
 
 ---
 

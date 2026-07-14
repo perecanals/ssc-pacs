@@ -164,16 +164,24 @@ def seeded_db(test_db):
                 "INSERT INTO lvo_clinical_data (study_id, stroke_date) "
                 "VALUES ('P-0001', '2025-01-01') ON CONFLICT DO NOTHING"
             )
+            # The machine-derived columns (series_type / timepoint and their
+            # provenance) are what the "Auto ..." API fields expose. P-0001's
+            # timepoint is anchored on a recorded puncture time; P-0002's below
+            # is anchored on an offset, i.e. ESTIMATED.
             cur.execute(
                 "INSERT INTO image_study "
-                "(patient_id, studyinstanceuid, study_type, acquisitiondatetime) "
-                "VALUES ('P-0001', '1.2.3.4.5', 'CTA', '2025-02-02') "
+                "(patient_id, studyinstanceuid, study_type, acquisitiondatetime, "
+                " timepoint, timepoint_anchor_source, hours_to_event, timepoint_version) "
+                "VALUES ('P-0001', '1.2.3.4.5', 'CTA', '2025-02-02', "
+                " 'BL', 'femoral_sheath_time', -3.5, 'rules-v1') "
                 "ON CONFLICT DO NOTHING"
             )
             cur.execute(
                 "INSERT INTO image_series "
-                "(patient_id, studyinstanceuid, seriesinstanceuid, modality, seriesdescription) "
-                "VALUES ('P-0001', '1.2.3.4.5', '1.2.3.4.5.6', 'CT', 'Axial') "
+                "(patient_id, studyinstanceuid, seriesinstanceuid, modality, seriesdescription, "
+                " series_type, series_type_rank, series_label, series_type_rule, series_type_version) "
+                "VALUES ('P-0001', '1.2.3.4.5', '1.2.3.4.5.6', 'CT', 'Axial', "
+                " 'NCCT', 1, 'NCCT_1', 'kernel-soft', 'rules-v1') "
                 "ON CONFLICT DO NOTHING"
             )
             # P-0002: imaging ingested but NO lvo_clinical_data row — the
@@ -181,8 +189,10 @@ def seeded_db(test_db):
             # stroke_date falling back to the earliest study date.
             cur.execute(
                 "INSERT INTO image_study "
-                "(patient_id, studyinstanceuid, study_type, acquisitiondatetime) "
-                "VALUES ('P-0002', '2.2.2.2.2', 'CTA', '2024-03-03') "
+                "(patient_id, studyinstanceuid, study_type, acquisitiondatetime, "
+                " timepoint, timepoint_anchor_source, hours_to_event, timepoint_version) "
+                "VALUES ('P-0002', '2.2.2.2.2', 'CTA', '2024-03-03', "
+                " 'FU', 'time_recognized', 26.0, 'rules-v1') "
                 "ON CONFLICT DO NOTHING"
             )
             # Patient registry (the patient-level spine). Mirrors what the ingest

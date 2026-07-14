@@ -30,7 +30,9 @@ export default function TableHeader({
     <thead className="dt__head">
       <tr>
         {config.expandable && (
-          <th className={`dt__th--expand${frozenFirstCol ? " dt__th--expand-frozen" : ""}`} />
+          <th
+            className={`dt__th--expand${frozenFirstCol ? " dt__th--expand-frozen" : ""}`}
+          />
         )}
         {mainTableCols.map((c, idx) => (
           <th
@@ -41,13 +43,20 @@ export default function TableHeader({
             onDragLeave={onDragLeave}
             onDrop={(e) => onDrop(c.key, e)}
             onDragEnd={onDragEnd}
-            onClick={() => c.builtin && c.sortable !== false && onSort(c.sourceKey)}
+            onClick={() =>
+              c.builtin && c.sortable !== false && onSort(c.sourceKey)
+            }
+            title={c.builtin ? c.description : undefined}
             className={`dt__th ${c.builtin && c.sortable !== false ? "dt__th--sortable" : ""}${
               frozenFirstCol && idx === 0
-                ? config.expandable ? " dt__th--frozen-first-offset" : " dt__th--frozen-first"
+                ? config.expandable
+                  ? " dt__th--frozen-first-offset"
+                  : " dt__th--frozen-first"
                 : ""
             }${dragColKeyRef.current === c.key ? " dt__th--dragging" : ""}${
-              dragOverKey === c.key && dropSide === "before" ? " dt__th--drop-before" : ""
+              dragOverKey === c.key && dropSide === "before"
+                ? " dt__th--drop-before"
+                : ""
             }${dragOverKey === c.key && dropSide === "after" ? " dt__th--drop-after" : ""}${
               isNarrowCol(c) ? " dt__th--narrow" : ""
             }`}
@@ -57,7 +66,10 @@ export default function TableHeader({
               <button
                 type="button"
                 className={`dt__pin-btn${frozenFirstCol ? " dt__pin-btn--active" : ""}`}
-                onClick={(e) => { e.stopPropagation(); setFrozenFirstCol((v) => !v); }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setFrozenFirstCol((v) => !v);
+                }}
                 title={frozenFirstCol ? "Unfreeze column" : "Freeze column"}
               >
                 {"\uD83D\uDCCC"}
@@ -100,14 +112,18 @@ export default function TableHeader({
       </tr>
       <tr>
         {config.expandable && (
-          <th className={`dt__filter-th${frozenFirstCol ? " dt__filter-th--expand-frozen" : ""}`} />
+          <th
+            className={`dt__filter-th${frozenFirstCol ? " dt__filter-th--expand-frozen" : ""}`}
+          />
         )}
         {mainTableCols.map((c, idx) => (
           <th
             key={`f-${c.key}`}
             className={`dt__filter-th${
               frozenFirstCol && idx === 0
-                ? config.expandable ? " dt__filter-th--frozen-first-offset" : " dt__filter-th--frozen-first"
+                ? config.expandable
+                  ? " dt__filter-th--frozen-first-offset"
+                  : " dt__filter-th--frozen-first"
                 : ""
             }${isNarrowCol(c) ? " dt__filter-th--narrow" : ""}`}
           >
@@ -125,14 +141,18 @@ export default function TableHeader({
                 className={`dt__bool-filter${columnFilters[c.key] ? " dt__bool-filter--active" : ""}`}
                 onClick={() => onBoolFilter(c.key)}
                 title={
-                  columnFilters[c.key] === "true" ? "Showing: true \u2014 click for false"
-                    : columnFilters[c.key] === "false" ? "Showing: false \u2014 click to clear"
-                    : "Filter by bool value"
+                  columnFilters[c.key] === "true"
+                    ? "Showing: true \u2014 click for false"
+                    : columnFilters[c.key] === "false"
+                      ? "Showing: false \u2014 click to clear"
+                      : "Filter by bool value"
                 }
               >
-                {columnFilters[c.key] === "true" ? "\u2713"
-                  : columnFilters[c.key] === "false" ? "\u2717"
-                  : "\u2298"}
+                {columnFilters[c.key] === "true"
+                  ? "\u2713"
+                  : columnFilters[c.key] === "false"
+                    ? "\u2717"
+                    : "\u2298"}
               </button>
             ) : !c.builtin && c.datatype === "select" ? (
               <SelectFilterControl

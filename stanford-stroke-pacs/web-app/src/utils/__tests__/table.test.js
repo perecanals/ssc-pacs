@@ -48,7 +48,10 @@ describe("normalizeSelectFilterValues", () => {
   });
 
   it("filters empty values from arrays", () => {
-    expect(normalizeSelectFilterValues(["a", "", "  ", "b"])).toEqual(["a", "b"]);
+    expect(normalizeSelectFilterValues(["a", "", "  ", "b"])).toEqual([
+      "a",
+      "b",
+    ]);
   });
 });
 
@@ -134,7 +137,9 @@ describe("buildBuiltinColumnCatalog", () => {
 
 describe("buildPatientStudiesUrl", () => {
   it("returns base URL without label", () => {
-    expect(buildPatientStudiesUrl({ patient_id: "P1" })).toBe("/api/patients/P1/studies");
+    expect(buildPatientStudiesUrl({ patient_id: "P1" })).toBe(
+      "/api/patients/P1/studies",
+    );
   });
 
   it("appends label parameter", () => {
@@ -144,7 +149,9 @@ describe("buildPatientStudiesUrl", () => {
   });
 
   it("ignores blank label", () => {
-    expect(buildPatientStudiesUrl({ patient_id: "P1" }, "  ")).toBe("/api/patients/P1/studies");
+    expect(buildPatientStudiesUrl({ patient_id: "P1" }, "  ")).toBe(
+      "/api/patients/P1/studies",
+    );
   });
 });
 
@@ -186,5 +193,54 @@ describe("constants", () => {
 
   it("PER_PAGE is 50", () => {
     expect(PER_PAGE).toBe(50);
+  });
+});
+
+describe("machine-derived Auto columns", () => {
+  const keys = (level) => buildBuiltinColumnCatalog(level).map((c) => c.key);
+
+  const col = (level, key) =>
+    buildBuiltinColumnCatalog(level).find((c) => c.key === key);
+
+  it("exposes Auto Series Type and Auto Timepoint at the series level", () => {
+    expect(keys("series")).toContain("builtin:series:series_type");
+    expect(keys("series")).toContain("builtin:series:timepoint");
+  });
+
+  // As sub-rows, series sit under a study row that already shows its own Auto
+  // Timepoint — repeating it per child is redundant. On the flat series table
+  // there is no parent row, so that is the one place it must default on.
+  it("defaults series-level Auto Timepoint on only in the flat series table", () => {
+    expect(col("series", "builtin:series:timepoint").defaultVisible).toBe(true);
+    expect(col("study", "builtin:series:timepoint").defaultVisible).toBe(false);
+    expect(col("patient", "builtin:series:timepoint").defaultVisible).toBe(
+      false,
+    );
+  });
+
+  it("still defaults Auto Series Type on at the series level", () => {
+    expect(col("series", "builtin:series:series_type").defaultVisible).toBe(
+      true,
+    );
+    expect(col("study", "builtin:study:timepoint").defaultVisible).toBe(true);
+  });
+
+  it("exposes Auto Timepoint, but not a series type, at the study level", () => {
+    expect(keys("study")).toContain("builtin:study:timepoint");
+    expect(keys("study")).not.toContain("builtin:study:series_type");
+  });
+
+  it("marks them read-only so BuiltinCell renders a pill, not editable text", () => {
+    const col = buildBuiltinColumnCatalog("series").find(
+      (c) => c.key === "builtin:series:series_type",
+    );
+    expect(col.readOnlyAuto).toBe(true);
+    expect(col.introducedIn).toBe(1);
+  });
+
+  it("maps them to their API filter params", () => {
+    expect(LEVEL_CONFIG.series.filterParamMap.series_type).toBe("series_type");
+    expect(LEVEL_CONFIG.series.filterParamMap.timepoint).toBe("timepoint");
+    expect(LEVEL_CONFIG.study.filterParamMap.timepoint).toBe("timepoint");
   });
 });

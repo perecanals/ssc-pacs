@@ -1,8 +1,19 @@
-import { useState, useEffect, useCallback, useMemo, useRef, Fragment } from "react";
+import {
+  useState,
+  useEffect,
+  useCallback,
+  useMemo,
+  useRef,
+  Fragment,
+} from "react";
 import { createPortal } from "react-dom";
 import PropTypes from "prop-types";
 import { apiGet } from "../../api/client";
-import { downloadDicomZip, resolveOhifLink, refreshLabelledTables } from "./actions";
+import {
+  downloadDicomZip,
+  resolveOhifLink,
+  refreshLabelledTables,
+} from "./actions";
 import ColumnSelector from "../ColumnSelector";
 import useColumnPrefs from "./useColumnPrefs";
 import InlineEdit from "../InlineEdit";
@@ -13,10 +24,10 @@ import {
   LEVEL_CONFIG,
   buildBuiltinColumnCatalog,
   buildPatientStudiesUrl,
-  formatBuiltinValue,
   isNarrowCol,
   normalizeSelectFilterValues,
 } from "../../utils/table";
+import BuiltinCell from "./BuiltinCell";
 import useTableData from "./useTableData";
 import usePreferencePersistence from "./usePreferencePersistence";
 import useDragColumns from "./useDragColumns";
@@ -46,9 +57,12 @@ function DataTableInner({
 
   const [showDefModal, setShowDefModal] = useState(false);
   const [editingLabel, setEditingLabel] = useState(null);
-  const [refreshingLabelledTables, setRefreshingLabelledTables] = useState(false);
+  const [refreshingLabelledTables, setRefreshingLabelledTables] =
+    useState(false);
 
-  const [sortBy, setSortBy] = useState(serverPrefs.sortBy || config.sortDefault);
+  const [sortBy, setSortBy] = useState(
+    serverPrefs.sortBy || config.sortDefault,
+  );
   const [sortDir, setSortDir] = useState(serverPrefs.sortDir || "asc");
   const [columnFilters, setColumnFilters] = useState(
     serverPrefs.columnFilters && typeof serverPrefs.columnFilters === "object"
@@ -56,10 +70,14 @@ function DataTableInner({
       : {},
   );
   const filterTimeout = useRef(null);
-  const [frozenFirstCol, setFrozenFirstCol] = useState(!!serverPrefs.freezeFirstCol);
+  const [frozenFirstCol, setFrozenFirstCol] = useState(
+    !!serverPrefs.freezeFirstCol,
+  );
   // Patient-level Status (warm) column visibility — defaults on (incl. for
   // users with existing saved prefs), hideable via the Displayed Columns menu.
-  const [statusColVisible, setStatusColVisible] = useState(serverPrefs.statusColVisible !== false);
+  const [statusColVisible, setStatusColVisible] = useState(
+    serverPrefs.statusColVisible !== false,
+  );
   const [fontScale, setFontScale] = useState(() => {
     const v = Number(serverPrefs.fontScale);
     return Number.isFinite(v) && v >= 0.85 && v <= 1.25 ? v : 1;
@@ -80,14 +98,26 @@ function DataTableInner({
 
   const [labelDefs, setLabelDefs] = useState([]);
   const fetchLabelDefs = useCallback(async () => {
-    try { setLabelDefs(await apiGet("/api/label-definitions")); }
-    catch { setLabelDefs([]); }
+    try {
+      setLabelDefs(await apiGet("/api/label-definitions"));
+    } catch {
+      setLabelDefs([]);
+    }
   }, []);
-  useEffect(() => { fetchLabelDefs(); }, [fetchLabelDefs]);
+  useEffect(() => {
+    fetchLabelDefs();
+  }, [fetchLabelDefs]);
 
   const {
-    allCols, visibleCols, visibleKeys, columnOrder,
-    toggle, setKeysVisible, reorder, resetColumns,
+    allCols,
+    visibleCols,
+    visibleKeys,
+    columnOrder,
+    prefsUpgraded,
+    toggle,
+    setKeysVisible,
+    reorder,
+    resetColumns,
   } = useColumnPrefs(labelDefs, builtinCols, level, serverPrefs);
 
   // A sidebar label quick-filter enables that label's column the same way a
@@ -103,9 +133,16 @@ function DataTableInner({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [labelFilterKey]);
 
-  const { items, total, loading, hasMore, loadMore, reload, resetNonce } = useTableData({
-    level, config, filters, sortBy, sortDir, columnFilters, allCols,
-  });
+  const { items, total, loading, hasMore, loadMore, reload, resetNonce } =
+    useTableData({
+      level,
+      config,
+      filters,
+      sortBy,
+      sortDir,
+      columnFilters,
+      allCols,
+    });
 
   const scrollRef = useRef(null);
   const sentinelRef = useRef(null);
@@ -125,7 +162,9 @@ function DataTableInner({
     const target = sentinelRef.current;
     if (!root || !target) return undefined;
     const io = new IntersectionObserver(
-      (entries) => { if (entries[0].isIntersecting) loadMore(); },
+      (entries) => {
+        if (entries[0].isIntersecting) loadMore();
+      },
       { root, rootMargin: "200px", threshold: 0 },
     );
     io.observe(target);
@@ -133,13 +172,28 @@ function DataTableInner({
   }, [loadMore, listEmpty, level]);
 
   const {
-    dragColKey, dragOverKey, dropSide,
-    handleDragStart, handleDragOver, handleDragLeave, handleDrop, handleDragEnd,
+    dragColKey,
+    dragOverKey,
+    dropSide,
+    handleDragStart,
+    handleDragOver,
+    handleDragLeave,
+    handleDrop,
+    handleDragEnd,
   } = useDragColumns(reorder);
 
   usePreferencePersistence({
-    currentUser, level, visibleKeys, columnOrder, sortBy, sortDir, columnFilters, frozenFirstCol, fontScale,
+    currentUser,
+    level,
+    visibleKeys,
+    columnOrder,
+    sortBy,
+    sortDir,
+    columnFilters,
+    frozenFirstCol,
+    fontScale,
     statusColVisible,
+    prefsUpgraded,
   });
 
   const [downloadingSeries, setDownloadingSeries] = useState(null);
@@ -149,8 +203,12 @@ function DataTableInner({
   const [storageMode, setStorageMode] = useState(null);
   useEffect(() => {
     let cancelled = false;
-    getStorageMode().then((m) => { if (!cancelled) setStorageMode(m); });
-    return () => { cancelled = true; };
+    getStorageMode().then((m) => {
+      if (!cancelled) setStorageMode(m);
+    });
+    return () => {
+      cancelled = true;
+    };
   }, []);
   const canWarm = storageMode === "cold_path_cache" && !!currentUser;
 
@@ -160,8 +218,12 @@ function DataTableInner({
     setExpanded({});
   }, [level, filters.studyImportLabel]);
 
-  const childConfig = config.expandable ? LEVEL_CONFIG[config.childLevel] : null;
-  const grandChildConfig = childConfig?.expandable ? LEVEL_CONFIG[childConfig.childLevel] : null;
+  const childConfig = config.expandable
+    ? LEVEL_CONFIG[config.childLevel]
+    : null;
+  const grandChildConfig = childConfig?.expandable
+    ? LEVEL_CONFIG[childConfig.childLevel]
+    : null;
 
   // Rows currently on screen that carry a decompress control. Each level/UID is
   // warmed at its own granularity: patient main rows (aggregate over studies),
@@ -169,21 +231,26 @@ function DataTableInner({
   // series rows (series main rows + expanded series children/grandchildren) —
   // series rows are series-backed: they show and trigger their *own* warm state.
   const visiblePatientIds = useMemo(
-    () => (level === "patient" ? items.map((r) => r.patient_id).filter(Boolean) : []),
+    () =>
+      level === "patient" ? items.map((r) => r.patient_id).filter(Boolean) : [],
     [level, items],
   );
   const visibleStudyUids = useMemo(() => {
-    if (level === "study") return items.map((r) => r.studyinstanceuid).filter(Boolean);
+    if (level === "study")
+      return items.map((r) => r.studyinstanceuid).filter(Boolean);
     if (level === "patient") {
       return Object.entries(childRowsData)
         .filter(([pid]) => expanded[pid])
-        .flatMap(([, studies]) => (studies || []).map((s) => s.studyinstanceuid))
+        .flatMap(([, studies]) =>
+          (studies || []).map((s) => s.studyinstanceuid),
+        )
         .filter(Boolean);
     }
     return [];
   }, [level, items, childRowsData, expanded]);
   const visibleSeriesUids = useMemo(() => {
-    if (level === "series") return items.map((r) => r.seriesinstanceuid).filter(Boolean);
+    if (level === "series")
+      return items.map((r) => r.seriesinstanceuid).filter(Boolean);
     // Study level: expanded study rows reveal their series children.
     if (level === "study") {
       return Object.entries(childRowsData)
@@ -202,7 +269,12 @@ function DataTableInner({
   }, [level, items, childRowsData, expanded, grandChildRows, grandExpanded]);
 
   const {
-    studyStatus, patientStatus, seriesStatus, warmStudy, warmPatient, warmSeries,
+    studyStatus,
+    patientStatus,
+    seriesStatus,
+    warmStudy,
+    warmPatient,
+    warmSeries,
   } = useWarmStatus({
     enabled: canWarm,
     studyUids: visibleStudyUids,
@@ -220,11 +292,14 @@ function DataTableInner({
       if (!isExp) continue;
       const row = items.find((r) => r[config.idCol] === rowId);
       if (row && config.expandEndpoint) {
-        const url = level === "patient"
-          ? buildPatientStudiesUrl(row, filters.studyImportLabel)
-          : config.expandEndpoint(row);
+        const url =
+          level === "patient"
+            ? buildPatientStudiesUrl(row, filters.studyImportLabel)
+            : config.expandEndpoint(row);
         apiGet(url)
-          .then((data) => setChildRowsData((prev) => ({ ...prev, [rowId]: data })))
+          .then((data) =>
+            setChildRowsData((prev) => ({ ...prev, [rowId]: data })),
+          )
           .catch(() => {});
       }
     }
@@ -233,10 +308,14 @@ function DataTableInner({
         if (!isExp) continue;
         const [parentId, childId] = gcKey.split("::");
         const parentChildren = childRowsData[parentId];
-        const child = parentChildren?.find((c) => c[childConfig.idCol] === childId);
+        const child = parentChildren?.find(
+          (c) => c[childConfig.idCol] === childId,
+        );
         if (child) {
           apiGet(childConfig.expandEndpoint(child))
-            .then((data) => setGrandChildRows((prev) => ({ ...prev, [gcKey]: data })))
+            .then((data) =>
+              setGrandChildRows((prev) => ({ ...prev, [gcKey]: data })),
+            )
             .catch(() => {});
         }
       }
@@ -286,63 +365,101 @@ function DataTableInner({
   };
 
   const handleOhifLink = async (studyinstanceuid, seriesinstanceuid = null) => {
-    try { await resolveOhifLink(studyinstanceuid, seriesinstanceuid); }
-    catch (e) { alert(e?.message || "Could not resolve OHIF link"); }
+    try {
+      await resolveOhifLink(studyinstanceuid, seriesinstanceuid);
+    } catch (e) {
+      alert(e?.message || "Could not resolve OHIF link");
+    }
   };
 
   const handleRefreshLabelledTables = async () => {
     setRefreshingLabelledTables(true);
     try {
       const data = await refreshLabelledTables();
-      alert(`Labelled tables refreshed.\n${Object.entries(data.counts).map(([k, v]) => `${k}: ${v} rows`).join("\n")}`);
-    } catch { alert("Failed to refresh labelled tables"); }
-    finally { setRefreshingLabelledTables(false); }
+      alert(
+        `Labelled tables refreshed.\n${Object.entries(data.counts)
+          .map(([k, v]) => `${k}: ${v} rows`)
+          .join("\n")}`,
+      );
+    } catch {
+      alert("Failed to refresh labelled tables");
+    } finally {
+      setRefreshingLabelledTables(false);
+    }
   };
 
   const toggleExpand = async (rowId, row) => {
-    if (expanded[rowId]) { setExpanded((p) => ({ ...p, [rowId]: false })); return; }
+    if (expanded[rowId]) {
+      setExpanded((p) => ({ ...p, [rowId]: false }));
+      return;
+    }
     setExpanded((p) => ({ ...p, [rowId]: true }));
     if (!childRowsData[rowId]) {
-      const url = level === "patient" ? buildPatientStudiesUrl(row, filters.studyImportLabel) : config.expandEndpoint(row);
-      try { const d = await apiGet(url); setChildRowsData((p) => ({ ...p, [rowId]: d })); }
-      catch { setChildRowsData((p) => ({ ...p, [rowId]: [] })); }
+      const url =
+        level === "patient"
+          ? buildPatientStudiesUrl(row, filters.studyImportLabel)
+          : config.expandEndpoint(row);
+      try {
+        const d = await apiGet(url);
+        setChildRowsData((p) => ({ ...p, [rowId]: d }));
+      } catch {
+        setChildRowsData((p) => ({ ...p, [rowId]: [] }));
+      }
     }
   };
 
   const toggleGrandExpand = async (key, childRow) => {
-    if (grandExpanded[key]) { setGrandExpanded((p) => ({ ...p, [key]: false })); return; }
+    if (grandExpanded[key]) {
+      setGrandExpanded((p) => ({ ...p, [key]: false }));
+      return;
+    }
     setGrandExpanded((p) => ({ ...p, [key]: true }));
     if (!grandChildRows[key]) {
-      try { const d = await apiGet(childConfig.expandEndpoint(childRow)); setGrandChildRows((p) => ({ ...p, [key]: d })); }
-      catch { setGrandChildRows((p) => ({ ...p, [key]: [] })); }
+      try {
+        const d = await apiGet(childConfig.expandEndpoint(childRow));
+        setGrandChildRows((p) => ({ ...p, [key]: d }));
+      } catch {
+        setGrandChildRows((p) => ({ ...p, [key]: [] }));
+      }
     }
   };
 
   const handleDicomDownload = async (seriesinstanceuid) => {
     setDownloadingSeries(seriesinstanceuid);
-    try { await downloadDicomZip(seriesinstanceuid); }
-    catch (err) { alert(`Download failed: ${err.message}`); }
-    finally { setDownloadingSeries(null); }
+    try {
+      await downloadDicomZip(seriesinstanceuid);
+    } catch (err) {
+      alert(`Download failed: ${err.message}`);
+    } finally {
+      setDownloadingSeries(null);
+    }
   };
 
-  const allAnnotations = (row) => [...(row.annotations || []), ...(row.inherited_annotations || [])];
+  const allAnnotations = (row) => [
+    ...(row.annotations || []),
+    ...(row.inherited_annotations || []),
+  ];
 
   const selectPreview = (row, srcLvl) => {
     if (!onPreviewSelect || !row?.studyinstanceuid) return;
     const isSeries = srcLvl === "series";
     onPreviewSelect({
-      rowKey: isSeries ? `series:${row.seriesinstanceuid}` : `study:${row.studyinstanceuid}`,
+      rowKey: isSeries
+        ? `series:${row.seriesinstanceuid}`
+        : `study:${row.studyinstanceuid}`,
       studyinstanceuid: row.studyinstanceuid,
       seriesinstanceuid: isSeries ? row.seriesinstanceuid || null : null,
       sourceLevel: srcLvl,
       patientId: row.patient_id || null,
-      description: isSeries ? row.seriesdescription || null : row.studydescription || null,
+      description: isSeries
+        ? row.seriesdescription || null
+        : row.studydescription || null,
     });
   };
 
   const renderCellValue = (row, col) => {
     if (col.builtin) {
-      return formatBuiltinValue(col.sourceKey, row[col.sourceKey] ?? "");
+      return <BuiltinCell col={col} row={row} />;
     }
     const labelName = col.key.replace("label:", "");
     return (
@@ -362,7 +479,10 @@ function DataTableInner({
     if (rowLevel === "patient") {
       if (!canWarm || !row.patient_id) return null;
       return (
-        <WarmButton summary={patientStatus[row.patient_id]} onWarm={() => warmPatient(row.patient_id)} />
+        <WarmButton
+          summary={patientStatus[row.patient_id]}
+          onWarm={() => warmPatient(row.patient_id)}
+        />
       );
     }
     const uid = row.studyinstanceuid;
@@ -370,22 +490,41 @@ function DataTableInner({
       const isSeries = rowLevel === "series";
       return (
         <>
-          <button onClick={() => handleOhifLink(uid, isSeries ? row.seriesinstanceuid : null)} className="link-btn">OHIF</button>
-          {canWarm && (
-            isSeries
-              ? row.seriesinstanceuid && (
-                  <WarmButton
-                    status={seriesStatus[row.seriesinstanceuid]}
-                    onWarm={() => warmSeries(row.seriesinstanceuid)}
-                  />
-                )
-              : <WarmButton status={studyStatus[uid]} onWarm={() => warmStudy(uid)} />
-          )}
+          <button
+            onClick={() =>
+              handleOhifLink(uid, isSeries ? row.seriesinstanceuid : null)
+            }
+            className="link-btn"
+          >
+            OHIF
+          </button>
+          {canWarm &&
+            (isSeries ? (
+              row.seriesinstanceuid && (
+                <WarmButton
+                  status={seriesStatus[row.seriesinstanceuid]}
+                  onWarm={() => warmSeries(row.seriesinstanceuid)}
+                />
+              )
+            ) : (
+              <WarmButton
+                status={studyStatus[uid]}
+                onWarm={() => warmStudy(uid)}
+              />
+            ))}
           {rowLevel === "series" && row.seriesinstanceuid && isAdmin && (
             <>
-              <button onClick={() => handleDicomDownload(row.seriesinstanceuid)} className="link-btn"
-                title="Download DICOM as zip" disabled={downloadingSeries === row.seriesinstanceuid}>
-                {downloadingSeries === row.seriesinstanceuid ? "\u2026" : <DownloadIcon />}
+              <button
+                onClick={() => handleDicomDownload(row.seriesinstanceuid)}
+                className="link-btn"
+                title="Download DICOM as zip"
+                disabled={downloadingSeries === row.seriesinstanceuid}
+              >
+                {downloadingSeries === row.seriesinstanceuid ? (
+                  "\u2026"
+                ) : (
+                  <DownloadIcon />
+                )}
               </button>
               <CopyPathButtons seriesUid={row.seriesinstanceuid} />
             </>
@@ -397,21 +536,29 @@ function DataTableInner({
   };
 
   const colsForLevel = (targetLevel) => {
-    const builtins = allCols.filter((c) => c.builtin && visibleKeys.includes(c.key) && c.level === targetLevel);
-    const labels = visibleCols.filter((c) => !c.builtin && c.level === targetLevel);
+    const builtins = allCols.filter(
+      (c) =>
+        c.builtin && visibleKeys.includes(c.key) && c.level === targetLevel,
+    );
+    const labels = visibleCols.filter(
+      (c) => !c.builtin && c.level === targetLevel,
+    );
     return [...builtins, ...labels];
   };
   const childCols = childConfig ? colsForLevel(config.childLevel) : [];
-  const grandChildCols = grandChildConfig ? colsForLevel(childConfig.childLevel) : [];
-  const mainTableCols = visibleCols.filter(
-    (c) => (c.builtin ? c.level === level : LEVEL_RANK[c.level] <= LEVEL_RANK[level]),
+  const grandChildCols = grandChildConfig
+    ? colsForLevel(childConfig.childLevel)
+    : [];
+  const mainTableCols = visibleCols.filter((c) =>
+    c.builtin ? c.level === level : LEVEL_RANK[c.level] <= LEVEL_RANK[level],
   );
   // Patient rows normally have no Actions column; cold-storage decompress is
   // the one patient-level action (labelled "Status"), shown only when warmable
   // and not hidden via the Displayed Columns menu. Studies/series keep the
   // always-on "Actions" column.
-  const showActions = level === "patient" ? (canWarm && statusColVisible) : true;
-  const parentColSpan = mainTableCols.length + (config.expandable ? 1 : 0) + (showActions ? 1 : 0);
+  const showActions = level === "patient" ? canWarm && statusColVisible : true;
+  const parentColSpan =
+    mainTableCols.length + (config.expandable ? 1 : 0) + (showActions ? 1 : 0);
   const childIsExpandable = !!grandChildConfig;
   // +1 for the child table's trailing spacer column so the grandchild
   // wrapper/empty cell spans the full child-table width (not cut short).
@@ -419,7 +566,10 @@ function DataTableInner({
 
   const handleMainRowClick = (rowId, row) => {
     if (level === "study") {
-      if (expanded[rowId]) { toggleExpand(rowId, row); return; }
+      if (expanded[rowId]) {
+        toggleExpand(rowId, row);
+        return;
+      }
       selectPreview(row, "study");
     } else if (level === "series") {
       selectPreview(row, "series");
@@ -429,7 +579,10 @@ function DataTableInner({
 
   const handleChildRowClick = (gcKey, child) => {
     if (config.childLevel === "study") {
-      if (grandExpanded[gcKey]) { toggleGrandExpand(gcKey, child); return; }
+      if (grandExpanded[gcKey]) {
+        toggleGrandExpand(gcKey, child);
+        return;
+      }
       selectPreview(child, "study");
     } else if (config.childLevel === "series") {
       selectPreview(child, "series");
@@ -437,7 +590,9 @@ function DataTableInner({
     if (childIsExpandable) toggleGrandExpand(gcKey, child);
   };
 
-  const handleGrandChildRowClick = (row) => { selectPreview(row, "series"); };
+  const handleGrandChildRowClick = (row) => {
+    selectPreview(row, "series");
+  };
 
   const handleResetDefaults = () => {
     resetColumns();
@@ -458,7 +613,10 @@ function DataTableInner({
   };
 
   const handleEditLabel = (labelDef) => {
-    if (!currentUser) { alert("Please log in to edit label types"); return; }
+    if (!currentUser) {
+      alert("Please log in to edit label types");
+      return;
+    }
     setEditingLabel(labelDef);
   };
 
@@ -474,23 +632,38 @@ function DataTableInner({
         statusColumnVisible={statusColVisible}
         onToggleStatusColumn={() => setStatusColVisible((v) => !v)}
       />
-      <button onClick={handleResetFilters} className="pill-btn">Reset Filters</button>
-      <button onClick={handleResetDefaults} className="pill-btn">Reset View</button>
-      <button onClick={() => {
-        if (!currentUser) { alert("Please log in to create label types"); return; }
-        setShowDefModal(true);
-      }} className="pill-btn">+ New label</button>
+      <button onClick={handleResetFilters} className="pill-btn">
+        Reset Filters
+      </button>
+      <button onClick={handleResetDefaults} className="pill-btn">
+        Reset View
+      </button>
+      <button
+        onClick={() => {
+          if (!currentUser) {
+            alert("Please log in to create label types");
+            return;
+          }
+          setShowDefModal(true);
+        }}
+        className="pill-btn"
+      >
+        + New label
+      </button>
     </>
   );
 
-  const countLabel = total === 0
-    ? `0 ${config.entityLabel}`
-    : `${total.toLocaleString()} ${config.entityLabel}`;
+  const countLabel =
+    total === 0
+      ? `0 ${config.entityLabel}`
+      : `${total.toLocaleString()} ${config.entityLabel}`;
   const fontScalePct = Math.round(fontScale * 100);
 
   return (
     <div className="dt__panel" style={{ "--dt-font-scale": fontScale }}>
-      {toolbarPortalTarget ? createPortal(topBarControls, toolbarPortalTarget) : null}
+      {toolbarPortalTarget
+        ? createPortal(topBarControls, toolbarPortalTarget)
+        : null}
 
       <div className="dt__scroll" ref={scrollRef}>
         <table className="dt">
@@ -529,37 +702,64 @@ function DataTableInner({
               items.map((row) => {
                 const rowId = row[config.idCol];
                 const isExpanded = expanded[rowId];
-                const mainPreviewKey = level === "series"
-                  ? `series:${row.seriesinstanceuid}`
-                  : level === "study" ? `study:${row.studyinstanceuid}` : null;
-                const isActivePreview = mainPreviewKey && activeRowKey === mainPreviewKey;
+                const mainPreviewKey =
+                  level === "series"
+                    ? `series:${row.seriesinstanceuid}`
+                    : level === "study"
+                      ? `study:${row.studyinstanceuid}`
+                      : null;
+                const isActivePreview =
+                  mainPreviewKey && activeRowKey === mainPreviewKey;
                 return (
                   <Fragment key={rowId}>
                     <tr
                       className={`dt__row dt__row--level-${level}${config.expandable ? " dt__row--expandable" : ""}${
-                        level === "study" || level === "series" ? " dt__row--previewable" : ""
+                        level === "study" || level === "series"
+                          ? " dt__row--previewable"
+                          : ""
                       }${isActivePreview ? " dt__row--active" : ""}`}
                       onClick={() => handleMainRowClick(rowId, row)}
                     >
                       {config.expandable && (
-                        <td className={`dt__expand-cell${frozenFirstCol ? " dt__expand-cell--frozen" : ""}`}>
-                          <span className={`dt__expand-arrow${isExpanded ? " dt__expand-arrow--open" : ""}`}>{"\u25B6"}</span>
+                        <td
+                          className={`dt__expand-cell${frozenFirstCol ? " dt__expand-cell--frozen" : ""}`}
+                        >
+                          <span
+                            className={`dt__expand-arrow${isExpanded ? " dt__expand-arrow--open" : ""}`}
+                          >
+                            {"\u25B6"}
+                          </span>
                         </td>
                       )}
                       {mainTableCols.map((c, idx) => {
                         return (
-                          <td key={c.key}
-                            className={`dt__td${frozenFirstCol && idx === 0
-                              ? config.expandable ? " dt__td--frozen-first-offset" : " dt__td--frozen-first" : ""}${
-                              isNarrowCol(c) ? " dt__td--narrow" : ""}${!c.builtin ? " dt__td--label" : ""}`}
-                            onClick={!c.builtin && (config.expandable || level === "series") ? (e) => e.stopPropagation() : undefined}
+                          <td
+                            key={c.key}
+                            className={`dt__td${
+                              frozenFirstCol && idx === 0
+                                ? config.expandable
+                                  ? " dt__td--frozen-first-offset"
+                                  : " dt__td--frozen-first"
+                                : ""
+                            }${
+                              isNarrowCol(c) ? " dt__td--narrow" : ""
+                            }${!c.builtin ? " dt__td--label" : ""}`}
+                            onClick={
+                              !c.builtin &&
+                              (config.expandable || level === "series")
+                                ? (e) => e.stopPropagation()
+                                : undefined
+                            }
                           >
                             {renderCellValue(row, c)}
                           </td>
                         );
                       })}
                       {showActions && (
-                        <td className="dt__td--actions" onClick={(e) => e.stopPropagation()}>
+                        <td
+                          className="dt__td--actions"
+                          onClick={(e) => e.stopPropagation()}
+                        >
                           {renderActions(row, level)}
                         </td>
                       )}
@@ -615,7 +815,9 @@ function DataTableInner({
               disabled={refreshingLabelledTables}
               className="pill-btn"
             >
-              {refreshingLabelledTables ? "Refreshing…" : "Refresh Labelled Tables"}
+              {refreshingLabelledTables
+                ? "Refreshing…"
+                : "Refresh Labelled Tables"}
             </button>
           )}
         </div>
@@ -650,7 +852,10 @@ function DataTableInner({
         </div>
         <div className="dt__footer-slot" aria-hidden="true" />
         <div className="dt__footer-right">
-          <div className="dt__font-controls" title={`Table font size: ${fontScalePct}%`}>
+          <div
+            className="dt__font-controls"
+            title={`Table font size: ${fontScalePct}%`}
+          >
             <button
               type="button"
               onClick={() => adjustFontScale(-0.05)}
@@ -677,7 +882,10 @@ function DataTableInner({
         <LabelDefModal
           defaultLevel={level}
           onClose={() => setShowDefModal(false)}
-          onSaved={() => { setShowDefModal(false); fetchLabelDefs(); }}
+          onSaved={() => {
+            setShowDefModal(false);
+            fetchLabelDefs();
+          }}
         />
       )}
 
@@ -685,7 +893,10 @@ function DataTableInner({
         <LabelDefModal
           existingLabel={editingLabel}
           onClose={() => setEditingLabel(null)}
-          onSaved={() => { setEditingLabel(null); fetchLabelDefs(); }}
+          onSaved={() => {
+            setEditingLabel(null);
+            fetchLabelDefs();
+          }}
         />
       )}
     </div>
@@ -714,13 +925,23 @@ export default function DataTable(props) {
     let cancelled = false;
     setServerPrefs(undefined);
     apiGet(`/api/preferences/${props.level}`)
-      .then((data) => { if (!cancelled) setServerPrefs(data.prefs || {}); })
-      .catch(() => { if (!cancelled) setServerPrefs({}); });
-    return () => { cancelled = true; };
+      .then((data) => {
+        if (!cancelled) setServerPrefs(data.prefs || {});
+      })
+      .catch(() => {
+        if (!cancelled) setServerPrefs({});
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [props.level, currentUser]);
 
   if (serverPrefs === undefined) {
-    return <div className="dt__panel" style={{ padding: "2rem", opacity: 0.5 }}>Loading preferences\u2026</div>;
+    return (
+      <div className="dt__panel" style={{ padding: "2rem", opacity: 0.5 }}>
+        Loading preferences\u2026
+      </div>
+    );
   }
 
   return <DataTableInner {...props} serverPrefs={serverPrefs} />;

@@ -24,8 +24,11 @@ from cache_manager import (
     untar_zst,
 )
 from common import (
+    SERIES_AUTO_COLS,
     SERIES_FROM_CLAUSE,
+    SERIES_SORT_OVERRIDES,
     SERIES_SORT_WHITELIST,
+    STUDY_AUTO_COLS,
     apply_label_filters,
     attach_annotations,
     attach_inherited_annotations,
@@ -224,6 +227,7 @@ def patient_studies(
             cur.execute(
                 "SELECT st.patient_id, st.import_id, st.import_label, st.acquisitiondatetime, st.studyinstanceuid, "
                 "st.studydescription, st.study_type, "
+                f"{STUDY_AUTO_COLS}, "
                 "COALESCE(("
                 "  SELECT string_agg(DISTINCT s.modality, ', ' ORDER BY s.modality) "
                 "  FROM image_series s WHERE s.studyinstanceuid = st.studyinstanceuid"
@@ -316,6 +320,10 @@ def list_studies(
     ),
     modality: str | None = Query(None),
     study_type: str | None = Query(None),
+    timepoint: str | None = Query(
+        None,
+        description="Substring match on the machine-derived timepoint (BL / THROMBECTOMY / FU).",
+    ),
     studydescription: str | None = Query(None),
     acquisitiondatetime: str | None = Query(None),
     label: str | None = Query(None),
@@ -353,6 +361,9 @@ def list_studies(
             if study_type:
                 conditions.append("UPPER(st.study_type) = UPPER(%s)")
                 params.append(study_type)
+            if timepoint:
+                conditions.append("UPPER(COALESCE(st.timepoint, '')) LIKE UPPER(%s)")
+                params.append(f"%{timepoint}%")
             if studydescription:
                 conditions.append("LOWER(st.studydescription) LIKE LOWER(%s)")
                 params.append(f"%{studydescription}%")
@@ -391,6 +402,7 @@ def list_studies(
                 "acquisitiondatetime": "acquisitiondatetime",
                 "studydescription": "studydescription",
                 "study_type": "study_type",
+                "timepoint": "timepoint",
             }
             col = col_map.get(sort_by, "patient_id")
             direction = "DESC" if sort_dir.lower() == "desc" else "ASC"
@@ -398,6 +410,7 @@ def list_studies(
             cur.execute(
                 f"SELECT st.patient_id, st.import_id, st.import_label, st.acquisitiondatetime, "
                 f"st.studyinstanceuid, st.studydescription, st.study_type, "
+                f"{STUDY_AUTO_COLS}, "
                 f"COALESCE(("
                 f"  SELECT string_agg(DISTINCT s.modality, ', ' ORDER BY s.modality) "
                 f"  FROM image_series s WHERE s.studyinstanceuid = st.studyinstanceuid"
@@ -435,8 +448,9 @@ def study_series(
                 "SELECT s.seriesinstanceuid, s.studyinstanceuid, s.patient_id, s.import_id, s.import_label, "
                 "s.modality, s.seriesdescription, s.acquisitiondatetime, s.number_of_slices, "
                 "s.slicethickness, s.scanaxialcoverage_mm, "
+                f"{SERIES_AUTO_COLS}, {STUDY_AUTO_COLS}, "
                 f"{_dataset_display_sql('s.patient_id')} "
-                "FROM image_series s WHERE s.studyinstanceuid = %s "
+                f"FROM {SERIES_FROM_CLAUSE} WHERE s.studyinstanceuid = %s "
                 "ORDER BY s.acquisitiondatetime, s.seriesdescription",
                 (studyinstanceuid,),
             )
@@ -476,6 +490,17 @@ def list_series(
     modality: str | None = Query(None),
     description: str | None = Query(None),
     study_type: str | None = Query(None),
+    series_type: str | None = Query(
+        None,
+        description="Substring match on the machine-derived series type (CTA, NCCT, NCCT_BONE, ...).",
+    ),
+    timepoint: str | None = Query(
+        None,
+        description=(
+            "Substring match on the owning study's machine-derived timepoint "
+            "(BL / THROMBECTOMY / FU)."
+        ),
+    ),
     acquisitiondatetime: str | None = Query(None),
     slicethickness: str | None = Query(None),
     scanaxialcoverage: str | None = Query(None),
@@ -523,6 +548,16 @@ def list_series(
             if study_type:
                 conditions.append("UPPER(st.study_type) = UPPER(%s)")
                 params.append(study_type)
+            if series_type:
+                # Matches the label, so "NCCT" finds every NCCT and "NCCT_1"
+                # narrows to each patient's preferred one.
+                conditions.append(
+                    "UPPER(COALESCE(s.series_label, s.series_type, '')) LIKE UPPER(%s)"
+                )
+                params.append(f"%{series_type}%")
+            if timepoint:
+                conditions.append("UPPER(COALESCE(st.timepoint, '')) LIKE UPPER(%s)")
+                params.append(f"%{timepoint}%")
             if acquisitiondatetime:
                 conditions.append("s.acquisitiondatetime::text LIKE %s")
                 params.append(f"%{acquisitiondatetime}%")
@@ -548,6 +583,7 @@ def list_series(
             total = cur.fetchone()["count"]
 
             col = sort_by if sort_by in SERIES_SORT_WHITELIST else "patient_id"
+            col = SERIES_SORT_OVERRIDES.get(col, col)
             direction = "DESC" if sort_dir.lower() == "desc" else "ASC"
 
             cur.execute(
@@ -566,6 +602,8 @@ def list_series(
                         s.number_of_slices,
                         s.slicethickness,
                         s.scanaxialcoverage_mm,
+                        {SERIES_AUTO_COLS},
+                        {STUDY_AUTO_COLS},
                         {_dataset_display_sql('s.patient_id')}
                     FROM {SERIES_FROM_CLAUSE}
                     {where}

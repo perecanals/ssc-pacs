@@ -11,13 +11,25 @@ const LEVEL_CONFIG = {
     builtinCols: [
       { key: "patient_id", label: "Patient ID", filterable: true },
       { key: "stroke_date", label: "Stroke Date", filterable: true },
-      { key: "study_import_labels", label: "Study import labels", filterable: true, sortable: false, defaultVisible: false },
+      {
+        key: "study_import_labels",
+        label: "Study import labels",
+        filterable: true,
+        sortable: false,
+        defaultVisible: false,
+      },
       { key: "dataset", label: "Dataset", filterable: true, sortable: false },
     ],
     sortDefault: "patient_id",
-    filterParamMap: { patient_id: "patient_id", stroke_date: "stroke_date", study_import_labels: "study_import_label", dataset: "dataset" },
+    filterParamMap: {
+      patient_id: "patient_id",
+      stroke_date: "stroke_date",
+      study_import_labels: "study_import_label",
+      dataset: "dataset",
+    },
     expandable: true,
-    expandEndpoint: (row) => `/api/patients/${encodeURIComponent(row.patient_id)}/studies`,
+    expandEndpoint: (row) =>
+      `/api/patients/${encodeURIComponent(row.patient_id)}/studies`,
     childLevel: "study",
   },
   study: {
@@ -28,11 +40,34 @@ const LEVEL_CONFIG = {
     builtinCols: [
       { key: "patient_id", label: "Patient ID", filterable: true },
       { key: "dataset", label: "Dataset", filterable: true, sortable: false },
-      { key: "import_id", label: "Import ID", filterable: true, defaultVisible: false },
-      { key: "import_label", label: "Import Label", filterable: true, defaultVisible: false },
-      { key: "acquisitiondatetime", label: "Acquisition Date", filterable: true },
+      {
+        key: "import_id",
+        label: "Import ID",
+        filterable: true,
+        defaultVisible: false,
+      },
+      {
+        key: "import_label",
+        label: "Import Label",
+        filterable: true,
+        defaultVisible: false,
+      },
+      {
+        key: "acquisitiondatetime",
+        label: "Acquisition Date",
+        filterable: true,
+      },
       { key: "modality", label: "Modality", filterable: true },
       { key: "studydescription", label: "Study Description", filterable: true },
+      {
+        key: "timepoint",
+        label: "Auto Timepoint",
+        filterable: true,
+        introducedIn: 1,
+        readOnlyAuto: true,
+        description:
+          "Machine-derived timepoint (BL / THROMBECTOMY / FU). Read-only; separate from the `timepoint` label.",
+      },
     ],
     sortDefault: "patient_id",
     filterParamMap: {
@@ -43,9 +78,11 @@ const LEVEL_CONFIG = {
       acquisitiondatetime: "acquisitiondatetime",
       modality: "modality",
       studydescription: "studydescription",
+      timepoint: "timepoint",
     },
     expandable: true,
-    expandEndpoint: (row) => `/api/studies/${encodeURIComponent(row.studyinstanceuid)}/series`,
+    expandEndpoint: (row) =>
+      `/api/studies/${encodeURIComponent(row.studyinstanceuid)}/series`,
     childLevel: "series",
   },
   series: {
@@ -56,14 +93,65 @@ const LEVEL_CONFIG = {
     builtinCols: [
       { key: "patient_id", label: "Patient ID", filterable: true },
       { key: "dataset", label: "Dataset", filterable: true, sortable: false },
-      { key: "import_id", label: "Import ID", filterable: true, defaultVisible: false },
-      { key: "import_label", label: "Import Label", filterable: true, defaultVisible: false },
-      { key: "acquisitiondatetime", label: "Acquisition Date", filterable: true },
+      {
+        key: "import_id",
+        label: "Import ID",
+        filterable: true,
+        defaultVisible: false,
+      },
+      {
+        key: "import_label",
+        label: "Import Label",
+        filterable: true,
+        defaultVisible: false,
+      },
+      {
+        key: "acquisitiondatetime",
+        label: "Acquisition Date",
+        filterable: true,
+      },
       { key: "modality", label: "Modality", filterable: true },
-      { key: "seriesdescription", label: "Series Description", filterable: true },
+      {
+        key: "seriesdescription",
+        label: "Series Description",
+        filterable: true,
+      },
       { key: "number_of_slices", label: "Slices", filterable: false },
-      { key: "slicethickness", label: "Slice Thickness (mm)", filterable: true },
-      { key: "scanaxialcoverage_mm", label: "Axial Coverage (mm)", filterable: true },
+      {
+        key: "slicethickness",
+        label: "Slice Thickness (mm)",
+        filterable: true,
+      },
+      {
+        key: "scanaxialcoverage_mm",
+        label: "Axial Coverage (mm)",
+        filterable: true,
+      },
+      {
+        key: "series_type",
+        label: "Auto Series Type",
+        filterable: true,
+        introducedIn: 1,
+        readOnlyAuto: true,
+        description:
+          "Machine-derived series type (CTA, NCCT, CTP, DWI, ...) with its per-patient preference rank — " +
+          "rank 1 is the one to use. Filter on e.g. NCCT_1. Read-only; separate from the `series_type` label.",
+      },
+      // Declared at study level too (like patient_id): the value is the owning
+      // study's. Default-on only on the flat series table, where no parent row
+      // carries it. As sub-rows the series sit under their study, which already
+      // shows its own Auto Timepoint, so it ships hidden there — still available
+      // in the column selector.
+      {
+        key: "timepoint",
+        label: "Auto Timepoint",
+        filterable: true,
+        introducedIn: 1,
+        readOnlyAuto: true,
+        defaultVisible: (activeLevel) => activeLevel === "series",
+        description:
+          "Machine-derived timepoint (BL / THROMBECTOMY / FU) of the owning study. Read-only; separate from the `timepoint` label.",
+      },
     ],
     sortDefault: "patient_id",
     filterParamMap: {
@@ -76,6 +164,8 @@ const LEVEL_CONFIG = {
       seriesdescription: "description",
       slicethickness: "slicethickness",
       scanaxialcoverage_mm: "scanaxialcoverage",
+      series_type: "series_type",
+      timepoint: "timepoint",
     },
     expandable: false,
   },
@@ -84,6 +174,12 @@ const LEVEL_CONFIG = {
 export { LEVEL_RANK, LEVEL_ORDER, LEVEL_LABELS, LEVEL_CONFIG };
 
 export const PER_PAGE = 50;
+
+// Bump when a new builtin column should be force-enabled for users who already
+// have saved column prefs. Columns carry the version that introduced them
+// (`introducedIn`); useColumnPrefs merges anything newer than the user's saved
+// `defaultsVersion`, once, then stamps the marker.
+export const COLUMN_DEFAULTS_VERSION = 1;
 
 // Annotation labels shown as columns by default (when the user has no saved
 // column preferences). Matched by label name; a label only defaults on at
@@ -105,10 +201,22 @@ export function compareLabelDefsDefault(a, b) {
     if (bi === null) return -1;
     return ai.localeCompare(bi);
   }
-  const at = Number.isNaN(Date.parse(a.created_at)) ? 0 : Date.parse(a.created_at);
-  const bt = Number.isNaN(Date.parse(b.created_at)) ? 0 : Date.parse(b.created_at);
+  const at = Number.isNaN(Date.parse(a.created_at))
+    ? 0
+    : Date.parse(a.created_at);
+  const bt = Number.isNaN(Date.parse(b.created_at))
+    ? 0
+    : Date.parse(b.created_at);
   if (at !== bt) return at - bt;
   return (a.name || a.label || "").localeCompare(b.name || b.label || "");
+}
+
+// `defaultVisible` may be a predicate on the active level, for columns whose
+// worth depends on where the row is rendered (see Auto Timepoint on series).
+function resolvesDefaultVisible(col, activeLevel) {
+  if (typeof col.defaultVisible === "function")
+    return col.defaultVisible(activeLevel);
+  return col.defaultVisible !== false;
 }
 
 export function buildBuiltinColumnCatalog(activeLevel) {
@@ -119,7 +227,8 @@ export function buildBuiltinColumnCatalog(activeLevel) {
       sourceKey: col.key,
       level: builtinLevel,
       defaultVisible:
-        LEVEL_RANK[builtinLevel] >= LEVEL_RANK[activeLevel] && col.defaultVisible !== false,
+        LEVEL_RANK[builtinLevel] >= LEVEL_RANK[activeLevel] &&
+        resolvesDefaultVisible(col, activeLevel),
     })),
   );
 }
@@ -128,14 +237,18 @@ export function buildBuiltinColumnCatalog(activeLevel) {
 // series columns rounded to 2dp, everything else passed through.
 export function formatBuiltinValue(sourceKey, raw) {
   if (sourceKey === "acquisitiondatetime") return formatDatetime(raw);
-  if (sourceKey === "slicethickness" || sourceKey === "scanaxialcoverage_mm") return formatNumber(raw);
+  if (sourceKey === "slicethickness" || sourceKey === "scanaxialcoverage_mm")
+    return formatNumber(raw);
   return raw;
 }
 
 // Narrow columns (Patient ID, Stroke Date) get trimmed padding + 1% width
 // (see the --narrow CSS modifiers).
 export function isNarrowCol(col) {
-  return !!col.builtin && (col.sourceKey === "patient_id" || col.sourceKey === "stroke_date");
+  return (
+    !!col.builtin &&
+    (col.sourceKey === "patient_id" || col.sourceKey === "stroke_date")
+  );
 }
 
 const UNASSIGNED_INSTRUMENT = "__unassigned__";
@@ -168,7 +281,11 @@ export function formatDatetime(iso) {
   if (!iso) return "";
   const d = new Date(iso);
   if (isNaN(d)) return iso;
-  return d.toLocaleDateString("en-CA") + " " + d.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
+  return (
+    d.toLocaleDateString("en-CA") +
+    " " +
+    d.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })
+  );
 }
 
 // Round a numeric value to at most 2 decimals without forcing trailing zeros

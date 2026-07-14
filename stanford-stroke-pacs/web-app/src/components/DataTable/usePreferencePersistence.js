@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 import useDebouncedServerSave from "../../hooks/useDebouncedServerSave";
-import { hasFilterValue } from "../../utils/table";
+import { COLUMN_DEFAULTS_VERSION, hasFilterValue } from "../../utils/table";
 
 export default function usePreferencePersistence({
   currentUser,
@@ -13,6 +13,7 @@ export default function usePreferencePersistence({
   frozenFirstCol,
   fontScale,
   statusColVisible,
+  prefsUpgraded = false,
 }) {
   const latestPrefs = useRef({});
   const initialRender = useRef(true);
@@ -28,6 +29,7 @@ export default function usePreferencePersistence({
     freezeFirstCol: frozenFirstCol,
     fontScale,
     statusColVisible,
+    defaultsVersion: COLUMN_DEFAULTS_VERSION,
   };
 
   const scheduleSave = useDebouncedServerSave({
@@ -37,12 +39,27 @@ export default function usePreferencePersistence({
   });
 
   useEffect(() => {
-    // The mount render carries the restored prefs — saving them back would
-    // be a wasted PUT.
+    // The mount render carries the restored prefs — saving them back would be a
+    // wasted PUT, unless useColumnPrefs just merged newly-introduced columns:
+    // the bumped marker has to land now, or the merge repeats on every load and
+    // resurrects a column the user hid.
     if (initialRender.current) {
       initialRender.current = false;
-      return;
+      if (!prefsUpgraded) return;
     }
     scheduleSave();
-  }, [scheduleSave, currentUser, level, visibleKeys, columnOrder, sortBy, sortDir, columnFilters, frozenFirstCol, fontScale, statusColVisible]);
+  }, [
+    scheduleSave,
+    prefsUpgraded,
+    currentUser,
+    level,
+    visibleKeys,
+    columnOrder,
+    sortBy,
+    sortDir,
+    columnFilters,
+    frozenFirstCol,
+    fontScale,
+    statusColVisible,
+  ]);
 }

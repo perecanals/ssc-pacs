@@ -130,6 +130,7 @@ The Navigator page is decomposed into focused React components:
   levels. Split into focused modules: `index.jsx` (orchestrator), `ChildRows.jsx`
   (child/grandchild rendering), `TableHeader.jsx` (column headers + filter row),
   `SelectFilterControl.jsx` (dropdown filter), `useTableData.js` (data fetch),
+  `BuiltinCell.jsx` (built-in cell renderer, incl. the read-only `AutoPill`),
   `usePreferencePersistence.js` (debounced pref save), `useColumnPrefs.js`
   (column visibility/order/frozen state), `useDragColumns.js` (drag-reorder),
   `useWarmStatus.js` (poll per-series/study cache status), `WarmButton.jsx`
@@ -278,8 +279,8 @@ The Navigator page is decomposed into focused React components:
 | Level   | Columns                                              |
 |---------|------------------------------------------------------|
 | Patient | Patient ID, Stroke Date, Dataset, Study Import Labels |
-| Study   | Patient ID, Acquisition Date, Modality, Study Description, Dataset, Import ID, Import Label |
-| Series  | Patient ID, Acquisition Date, Modality, Series Description, Slices, Slice Thickness (mm), Axial Coverage (mm), Dataset, Import ID, Import Label |
+| Study   | Patient ID, Acquisition Date, Modality, Study Description, Dataset, Import ID, Import Label, **Auto Timepoint** |
+| Series  | Patient ID, Acquisition Date, Modality, Series Description, Slices, Slice Thickness (mm), Axial Coverage (mm), Dataset, Import ID, Import Label, **Auto Series Type**, **Auto Timepoint** (flat series table only by default) |
 
 `Dataset` is a built-in column at all three levels (default-visible). The
 `Study Import Labels` column (Patient) and the `Import ID` / `Import Label`
@@ -287,6 +288,66 @@ columns (Study and Series) ship **hidden by default** — available in the colum
 selector. Study- and series-level rows include an OHIF action button; the
 Actions column is hidden entirely at the patient level since patients have no
 direct OHIF action.
+
+### The "Auto" columns (machine-derived classification)
+
+`Auto Series Type` (`image_series.series_type`) and `Auto Timepoint`
+(`image_study.timepoint`) surface what the ingestion classifier decided. They are
+a **separate axis** from the human annotation labels that happen to share those
+names (`series_type`, `timepoint`, both default-visible) — neither is derived
+from the other in either direction, so the two sit side by side and must not be
+confused. See `docs/reference/data_stores.md`.
+
+- **Rendered by `AutoPill`** (`BuiltinCell.jsx`): an *outlined, muted,
+  non-interactive* pill, deliberately unlike the filled, clickable `SelectPill`
+  that `InlineEdit` uses for the human label next to it. The hash colour comes
+  from the same `valueColor()`, so equal values still group by eye.
+- **Preference rank**: `Auto Series Type` carries the per-patient rank
+  (`series_type_rank`) as a superscript badge rather than folding it into the
+  value — that keeps the colour keyed on the *type*, so every NCCT looks like an
+  NCCT. Rank 1 (bolded) is *the* series of that type to open for the patient.
+  The header filter matches `series_label`, so `NCCT` finds every NCCT and
+  `NCCT_1` isolates each patient's preferred one; sorting keys on `series_label`
+  too (type first, then rank).
+- **Exclusions are not gaps**: most series have a NULL `series_type` because the
+  classifier *excluded* them (bone, topogram, RAPID output, …), and
+  `series_type_rule` records which exclusion fired. Those cells render a faint
+  `—` whose tooltip names the rule, rather than an empty cell that would read as
+  "the classifier had nothing to say". A row with neither a type nor a rule (not
+  yet classified) is genuinely blank.
+- **Estimated timepoints**: an `Auto Timepoint` whose `timepoint_anchor_source`
+  is `receiving_arrival_time` or `time_recognized` was derived from a fixed
+  offset, not a recorded puncture time. Those pills get a dashed border and a
+  `~`, so the estimate is visible without hovering.
+- **Provenance on hover** (`utils/autoClassification.js` → native `title`): the
+  rule that fired and the rules version for a series type; the anchor, signed
+  hours from it, and the version for a timepoint.
+- `Auto Timepoint` is declared at the *series* level as well as the study level
+  (the `patient_id` pattern), but defaults **on only in the flat series table**.
+  As sub-rows, series sit beneath a study row that already shows its own Auto
+  Timepoint, so repeating it on every child is redundant — it ships hidden there
+  and stays one click away in the column selector. That is why a column's
+  `defaultVisible` may be a **predicate on the active level**
+  (`(activeLevel) => activeLevel === "series"`) rather than a plain boolean;
+  `buildBuiltinColumnCatalog` resolves it per level.
+
+Declared with `introducedIn: COLUMN_DEFAULTS_VERSION` — see below.
+
+### Default column visibility for existing users
+
+New built-in columns would otherwise be invisible to anyone with saved
+`visibleKeys` until they hit "Reset View". `utils/table.js` exports
+`COLUMN_DEFAULTS_VERSION`; each column can carry an `introducedIn` version.
+`useColumnPrefs.js` merges every column whose `introducedIn` exceeds the user's
+saved `prefs.defaultsVersion` into their restored `visibleKeys`, and
+`usePreferencePersistence.js` persists the bumped marker **on the mount render**
+(its one exception to skipping the mount PUT). The merge therefore runs exactly
+once per user: a column they then hide stays hidden across reloads, and a future
+column added at version N+1 does not resurrect it.
+
+**To force-enable a new built-in column**: bump `COLUMN_DEFAULTS_VERSION` and tag
+the column with the matching `introducedIn`. Adding a column *without*
+`introducedIn` leaves it opt-in for existing users.
 
 ### Embedded OHIF behavior
 

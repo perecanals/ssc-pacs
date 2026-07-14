@@ -71,6 +71,7 @@ Notes:
 - The legacy Stanford ingestion pipeline (`image_ingestion_protocols/`) upserts into `image_study` and `image_series`.
 - `number_of_slices` is populated during ingest and can be backfilled for existing rows.
 - **`image_series.series_type` / `image_study.study_type` are machine-owned** and are a *different axis* from the human annotation labels that happen to share those names (mirrored as `label_series_type_*` / `label_study_type_*`, sourced from `annotations`). Neither may be derived from the other, in either direction — a reclassify run must never overwrite a rater's judgement, and a rater's judgement must never be fed back into the rules.
+- The web app **surfaces `series_type` (with its rank) and `timepoint` read-only**, as the `Auto Series Type` / `Auto Timepoint` columns — muted outlined pills, deliberately distinct from the editable pills of the same-named human labels beside them. It selects and filters these columns but **never writes them**; the only writers are ingestion and `reclassify_series_types.py`. See [`web_app_frontend.md`](web_app_frontend.md) §The "Auto" columns.
 
 ### web-app-owned tables (app-managed)
 

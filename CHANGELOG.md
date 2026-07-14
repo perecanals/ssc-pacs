@@ -27,10 +27,10 @@
   per-column `introducedIn`; `useColumnPrefs` merges newly-introduced columns into
   saved prefs exactly once and stamps `prefs.defaultsVersion`, so hiding one
   sticks. Reuse this for any future default-on built-in column.
-- Auto Timepoint on the *series* table is the exception: hidden by default there
-  (every series of a study repeats the study's value), on by default where series
-  render as sub-rows. A column's `defaultVisible` may now be a predicate on the
-  active level, not just a boolean.
+- Auto Timepoint is the exception: hidden by default on series **sub-rows** (the
+  parent study row already shows it), on by default in the flat series table,
+  where no parent row carries it. A column's `defaultVisible` may now be a
+  predicate on the active level, not just a boolean.
 - Internal: the built-in cell renderer, previously duplicated across `index.jsx`
   and both tables in `ChildRows.jsx`, is extracted to `DataTable/BuiltinCell.jsx`.
 

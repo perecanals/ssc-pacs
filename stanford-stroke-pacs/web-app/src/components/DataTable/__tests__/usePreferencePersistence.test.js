@@ -7,6 +7,7 @@ vi.mock("../../../api/client", () => ({
 }));
 
 import usePreferencePersistence from "../usePreferencePersistence";
+import { COLUMN_DEFAULTS_VERSION } from "../../../utils/table";
 
 const BASE = {
   currentUser: "tester",
@@ -22,9 +23,12 @@ const BASE = {
 };
 
 function renderPersistence(overrides = {}) {
-  return renderHook((props) => usePreferencePersistence({ ...BASE, ...props }), {
-    initialProps: overrides,
-  });
+  return renderHook(
+    (props) => usePreferencePersistence({ ...BASE, ...props }),
+    {
+      initialProps: overrides,
+    },
+  );
 }
 
 describe("usePreferencePersistence", () => {
@@ -38,7 +42,9 @@ describe("usePreferencePersistence", () => {
     rerender({ sortBy: "stroke_date" });
     rerender({ sortBy: "stroke_date", sortDir: "desc" });
 
-    await waitFor(() => expect(apiFetch).toHaveBeenCalledTimes(1), { timeout: 3000 });
+    await waitFor(() => expect(apiFetch).toHaveBeenCalledTimes(1), {
+      timeout: 3000,
+    });
     const [path, opts] = apiFetch.mock.calls[0];
     expect(path).toBe("/api/preferences/patient");
     expect(opts.method).toBe("PUT");
@@ -49,7 +55,9 @@ describe("usePreferencePersistence", () => {
 
   it("drops empty column filters from the saved prefs", async () => {
     const { rerender } = renderPersistence();
-    rerender({ columnFilters: { modality: "CT", studydescription: null, dataset: "" } });
+    rerender({
+      columnFilters: { modality: "CT", studydescription: null, dataset: "" },
+    });
 
     await waitFor(() => expect(apiFetch).toHaveBeenCalled(), { timeout: 3000 });
     const body = JSON.parse(apiFetch.mock.calls.at(-1)[1].body);
@@ -74,5 +82,26 @@ describe("usePreferencePersistence", () => {
     unmount();
     await new Promise((r) => setTimeout(r, 1000));
     expect(apiFetch).not.toHaveBeenCalled();
+  });
+
+  // Without this, useColumnPrefs re-merges the new columns on every load and a
+  // user who hid one can never make it stay hidden.
+  it("saves on mount when useColumnPrefs merged newly-introduced columns", async () => {
+    renderPersistence({ prefsUpgraded: true });
+
+    await waitFor(() => expect(apiFetch).toHaveBeenCalledTimes(1), {
+      timeout: 3000,
+    });
+    const body = JSON.parse(apiFetch.mock.calls[0][1].body);
+    expect(body.prefs.defaultsVersion).toBe(COLUMN_DEFAULTS_VERSION);
+  });
+
+  it("stamps the current defaultsVersion on every save", async () => {
+    const { rerender } = renderPersistence();
+    rerender({ sortDir: "desc" });
+
+    await waitFor(() => expect(apiFetch).toHaveBeenCalled(), { timeout: 3000 });
+    const body = JSON.parse(apiFetch.mock.calls.at(-1)[1].body);
+    expect(body.prefs.defaultsVersion).toBe(COLUMN_DEFAULTS_VERSION);
   });
 });

@@ -26,7 +26,24 @@ SERIES_SORT_WHITELIST = {
     "patient_id", "import_id", "import_label", "acquisitiondatetime",
     "modality", "seriesdescription", "number_of_slices",
     "slicethickness", "scanaxialcoverage_mm",
+    "series_type", "timepoint",
 }
+
+# Machine-derived classification, read-only. A separate axis from the human
+# `series_type` / `timepoint` annotation labels; neither derives from the other.
+# series_label is series_type + the per-patient preference rank (NCCT_1 = the
+# NCCT to open for that patient), so filtering and sorting key on it.
+SERIES_AUTO_COLS = (
+    "s.series_type, s.series_type_rank, s.series_label, "
+    "s.series_type_rule, s.series_type_version"
+)
+STUDY_AUTO_COLS = (
+    "st.timepoint, st.timepoint_anchor_source, st.hours_to_event, st.timepoint_version"
+)
+
+# The frontend column's key is `series_type`, but its useful ordering is by
+# label: series_label sorts by type first, then rank within the type.
+SERIES_SORT_OVERRIDES = {"series_type": "series_label"}
 
 # ---------------------------------------------------------------------------
 # Dataset (cohort) scoping

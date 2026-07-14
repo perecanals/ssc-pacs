@@ -1,0 +1,39 @@
+@reference "../../app.css";
+
+/* AutoPill — machine-derived value. Same geometry and hash colour as
+   .select-pill, but outlined instead of filled and never clickable, so a
+   read-only Auto column cannot be mistaken for the editable label next to it. */
+.auto-pill {
+  @apply inline-block px-2 py-0 rounded-full font-medium whitespace-nowrap align-middle;
+  @apply bg-transparent border cursor-default;
+  font-size: 0.85em;
+  line-height: 1.4;
+  opacity: 0.8;
+}
+
+/* Timepoint derived from an offset anchor rather than a recorded puncture time. */
+.auto-pill--estimated {
+  border-style: dashed;
+}
+
+.auto-pill__est {
+  @apply ml-0.5 opacity-70;
+}
+
+/* Per-patient preference rank, superscripted so it reads as an annotation on
+   the type rather than part of its name. Rank 1 (the series to open) is the
+   one worth spotting, so the others recede. */
+.auto-pill__rank {
+  @apply ml-1 align-super opacity-50;
+  font-size: 0.75em;
+}
+
+.auto-pill__rank--primary {
+  @apply font-bold opacity-100;
+}
+
+/* Deliberately excluded by the classifier (NULL series_type + a rule). Faint,
+   so it doesn't compete with real values, but hoverable for the reason. */
+.auto-pill__excluded {
+  @apply text-gray-400 cursor-help select-none;
+}
