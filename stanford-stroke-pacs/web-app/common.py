@@ -45,6 +45,25 @@ STUDY_AUTO_COLS = (
 # label: series_label sorts by type first, then rank within the type.
 SERIES_SORT_OVERRIDES = {"series_type": "series_label"}
 
+# Match the *label* so "NCCT" finds every NCCT and "NCCT_1" narrows to each
+# patient's preferred one.
+SERIES_TYPE_MATCH_EXPR = "COALESCE(s.series_label, s.series_type, '')"
+TIMEPOINT_MATCH_EXPR = "COALESCE(st.timepoint, '')"
+
+
+def auto_match_sql(expr: str, values: list[str] | None) -> tuple[str, list[str]]:
+    """OR-group of case-insensitive substring matches for an Auto column filter.
+
+    One value is the column-header text filter; several are the sidebar
+    multi-select, which ORs them (NCCT *or* CTA). Returns ("", []) for no
+    usable value, so callers can skip the condition.
+    """
+    vals = [v.strip() for v in (values or []) if v and v.strip()]
+    if not vals:
+        return "", []
+    ors = " OR ".join(f"UPPER({expr}) LIKE UPPER(%s)" for _ in vals)
+    return f"({ors})", [f"%{v}%" for v in vals]
+
 # ---------------------------------------------------------------------------
 # Dataset (cohort) scoping
 #

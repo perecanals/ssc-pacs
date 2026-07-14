@@ -9,11 +9,20 @@ vi.mock("../../../api/client", () => ({ apiGet: (...a) => apiGet(...a) }));
 import useTableData from "../useTableData";
 
 const ROWS = ["a", "b", "c", "d", "e"].map((id) => ({ id }));
-const config = { endpoint: "/api/things", itemsKey: "items", filterParamMap: {} };
+const config = {
+  endpoint: "/api/things",
+  itemsKey: "items",
+  filterParamMap: {},
+};
 
 function pageResponse(page) {
   const start = (page - 1) * 2;
-  return { total: ROWS.length, page, per_page: 50, items: ROWS.slice(start, start + 2) };
+  return {
+    total: ROWS.length,
+    page,
+    per_page: 50,
+    items: ROWS.slice(start, start + 2),
+  };
 }
 
 const baseArgs = {
@@ -86,7 +95,9 @@ describe("useTableData (infinite scroll)", () => {
       ...baseArgs,
       filters: { labelValues: {} },
       columnFilters: {},
-      allCols: [{ key: "label:timepoint", level: "series", datatype: "select" }],
+      allCols: [
+        { key: "label:timepoint", level: "series", datatype: "select" },
+      ],
     });
     const { result, rerender } = renderHook((args) => useTableData(args), {
       initialProps: makeArgs(),
@@ -106,7 +117,9 @@ describe("useTableData (infinite scroll)", () => {
   });
 
   it("merges filters.labelValues into the label_filters param (union with column filter)", async () => {
-    const allCols = [{ key: "label:timepoint", level: "series", datatype: "select" }];
+    const allCols = [
+      { key: "label:timepoint", level: "series", datatype: "select" },
+    ];
     const args = {
       ...baseArgs,
       level: "patient",
@@ -185,5 +198,37 @@ describe("useTableData (infinite scroll)", () => {
       .sort();
     expect(pages).toEqual([1, 2]);
     expect(result.current.items.map((r) => r.id)).toEqual(["a", "b", "c", "d"]);
+  });
+
+  it("sends filters.autoValues as repeated params the API ORs", async () => {
+    const args = {
+      ...baseArgs,
+      filters: {
+        autoValues: { series_type: ["NCCT", "CTA"], timepoint: ["BL"] },
+      },
+    };
+    renderHook(() => useTableData(args));
+    await waitFor(() => expect(apiGet).toHaveBeenCalled());
+
+    const url = new URL(apiGet.mock.calls[0][0], "http://x");
+    expect(url.searchParams.getAll("series_type")).toEqual(["NCCT", "CTA"]);
+    expect(url.searchParams.getAll("timepoint")).toEqual(["BL"]);
+  });
+
+  // The sidebar quick filter must widen, not clobber, a column-header filter on
+  // the same field: both land as repeated values and the API ORs them.
+  it("unions autoValues with a column-header filter on the same field", async () => {
+    const args = {
+      ...baseArgs,
+      level: "series",
+      config: { ...config, filterParamMap: { series_type: "series_type" } },
+      columnFilters: { series_type: "NCCT_1" },
+      filters: { autoValues: { series_type: ["CTA"] } },
+    };
+    renderHook(() => useTableData(args));
+    await waitFor(() => expect(apiGet).toHaveBeenCalled());
+
+    const url = new URL(apiGet.mock.calls[0][0], "http://x");
+    expect(url.searchParams.getAll("series_type")).toEqual(["NCCT_1", "CTA"]);
   });
 });

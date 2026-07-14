@@ -14,7 +14,15 @@ import {
 // currently loaded page (1..pageRef) in place — the deterministic backend
 // ORDER BY tiebreaker guarantees the re-fetched window is identical, and
 // expanded/child state (keyed by id, not by items index) survives the replace.
-export default function useTableData({ level, config, filters, sortBy, sortDir, columnFilters, allCols }) {
+export default function useTableData({
+  level,
+  config,
+  filters,
+  sortBy,
+  sortDir,
+  columnFilters,
+  allCols,
+}) {
   const [items, setItems] = useState([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
@@ -28,130 +36,154 @@ export default function useTableData({ level, config, filters, sortBy, sortDir, 
   const itemsLenRef = useRef(0);
   const totalRef = useRef(0);
 
-  const buildParams = useCallback((page) => {
-    const params = new URLSearchParams({
-      page: String(page),
-      per_page: String(PER_PAGE),
-      sort_by: sortBy,
-      sort_dir: sortDir,
-    });
+  const buildParams = useCallback(
+    (page) => {
+      const params = new URLSearchParams({
+        page: String(page),
+        per_page: String(PER_PAGE),
+        sort_by: sortBy,
+        sort_dir: sortDir,
+      });
 
-    if (filters.label) {
-      params.set("label", filters.label);
-      if (filters.labelLevel) params.set("label_level", filters.labelLevel);
-    }
-    if (filters.patientId) params.set("patient_id", filters.patientId);
-    if (filters.modality) params.set("modality", filters.modality);
-    if (filters.description) params.set("description", filters.description);
-    // Dataset + import-label sidebar quick filters apply at every level. The
-    // import-label param name differs: patients use `study_import_label`
-    // (matches across studies+series); studies/series use `import_label`.
-    if (filters.dataset?.trim()) {
-      params.set("dataset", filters.dataset.trim());
-    }
-    if (filters.studyImportLabel?.trim()) {
-      const v = filters.studyImportLabel.trim();
-      params.set(level === "patient" ? "study_import_label" : "import_label", v);
-    }
-
-    const labelFilters = [];
-    for (const [key, val] of Object.entries(columnFilters)) {
-      if (!hasFilterValue(val)) continue;
-      if (key.startsWith("label:")) {
-        const col = allCols.find((c) => c.key === key);
-        const datatype = col?.datatype || "text";
-        if (datatype === "select") {
-          const values = normalizeSelectFilterValues(val);
-          if (values.length === 0) continue;
-          labelFilters.push({
-            label: key.replace("label:", ""),
-            level: col?.level || level,
-            values,
-            datatype,
-          });
-        } else {
-          labelFilters.push({
-            label: key.replace("label:", ""),
-            level: col?.level || level,
-            value: getTextFilterValue(val),
-            datatype,
-          });
-        }
-      } else {
-        const param = config.filterParamMap[key];
-        if (param && typeof val === "string") params.set(param, val);
+      if (filters.label) {
+        params.set("label", filters.label);
+        if (filters.labelLevel) params.set("label_level", filters.labelLevel);
       }
-    }
-    // Sidebar select-value quick filters live in filters.labelValues, keyed by
-    // "<level>:<label>". Merge them into the same label_filters channel; union
-    // with any column-header filter already set for the same label+level.
-    if (filters.labelValues && typeof filters.labelValues === "object") {
-      for (const [key, raw] of Object.entries(filters.labelValues)) {
-        const values = normalizeSelectFilterValues(raw);
-        if (values.length === 0) continue;
-        const sep = key.indexOf(":");
-        if (sep < 1) continue;
-        const lvl = key.slice(0, sep);
-        const label = key.slice(sep + 1);
-        const existing = labelFilters.find(
-          (f) => f.datatype === "select" && f.label === label && f.level === lvl,
+      if (filters.patientId) params.set("patient_id", filters.patientId);
+      if (filters.modality) params.set("modality", filters.modality);
+      if (filters.description) params.set("description", filters.description);
+      // Dataset + import-label sidebar quick filters apply at every level. The
+      // import-label param name differs: patients use `study_import_label`
+      // (matches across studies+series); studies/series use `import_label`.
+      if (filters.dataset?.trim()) {
+        params.set("dataset", filters.dataset.trim());
+      }
+      if (filters.studyImportLabel?.trim()) {
+        const v = filters.studyImportLabel.trim();
+        params.set(
+          level === "patient" ? "study_import_label" : "import_label",
+          v,
         );
-        if (existing) {
-          existing.values = [...new Set([...existing.values, ...values])];
+      }
+
+      const labelFilters = [];
+      for (const [key, val] of Object.entries(columnFilters)) {
+        if (!hasFilterValue(val)) continue;
+        if (key.startsWith("label:")) {
+          const col = allCols.find((c) => c.key === key);
+          const datatype = col?.datatype || "text";
+          if (datatype === "select") {
+            const values = normalizeSelectFilterValues(val);
+            if (values.length === 0) continue;
+            labelFilters.push({
+              label: key.replace("label:", ""),
+              level: col?.level || level,
+              values,
+              datatype,
+            });
+          } else {
+            labelFilters.push({
+              label: key.replace("label:", ""),
+              level: col?.level || level,
+              value: getTextFilterValue(val),
+              datatype,
+            });
+          }
         } else {
-          labelFilters.push({ label, level: lvl, values, datatype: "select" });
+          const param = config.filterParamMap[key];
+          if (param && typeof val === "string") params.set(param, val);
         }
       }
-    }
-    if (labelFilters.length > 0) {
-      params.set("label_filters", JSON.stringify(labelFilters));
-    }
-    return params;
-  }, [level, config, filters, sortBy, sortDir, columnFilters, allCols]);
+      // Sidebar select-value quick filters live in filters.labelValues, keyed by
+      // "<level>:<label>". Merge them into the same label_filters channel; union
+      // with any column-header filter already set for the same label+level.
+      if (filters.labelValues && typeof filters.labelValues === "object") {
+        for (const [key, raw] of Object.entries(filters.labelValues)) {
+          const values = normalizeSelectFilterValues(raw);
+          if (values.length === 0) continue;
+          const sep = key.indexOf(":");
+          if (sep < 1) continue;
+          const lvl = key.slice(0, sep);
+          const label = key.slice(sep + 1);
+          const existing = labelFilters.find(
+            (f) =>
+              f.datatype === "select" && f.label === label && f.level === lvl,
+          );
+          if (existing) {
+            existing.values = [...new Set([...existing.values, ...values])];
+          } else {
+            labelFilters.push({
+              label,
+              level: lvl,
+              values,
+              datatype: "select",
+            });
+          }
+        }
+      }
+      if (labelFilters.length > 0) {
+        params.set("label_filters", JSON.stringify(labelFilters));
+      }
+      // Auto-column sidebar quick filters, as repeated params the API ORs
+      // (?series_type=NCCT&series_type=CTA). Appended, not set, so they union
+      // with any column-header filter already set on the same field.
+      if (filters.autoValues && typeof filters.autoValues === "object") {
+        for (const [field, raw] of Object.entries(filters.autoValues)) {
+          for (const v of normalizeSelectFilterValues(raw))
+            params.append(field, v);
+        }
+      }
+      return params;
+    },
+    [level, config, filters, sortBy, sortDir, columnFilters, allCols],
+  );
 
   // Fetch pages [from..to] sequentially. mode "replace" swaps the list,
   // "append" concatenates onto it. A monotonic seq token discards any response
   // whose request was superseded by a newer reset/loadMore.
-  const fetchPages = useCallback(async (from, to, mode) => {
-    const seq = ++seqRef.current;
-    loadingRef.current = true;
-    setLoading(true);
-    try {
-      const collected = [];
-      let lastTotal = 0;
-      for (let p = from; p <= to; p++) {
-        const data = await apiGet(`${config.endpoint}?${buildParams(p)}`);
+  const fetchPages = useCallback(
+    async (from, to, mode) => {
+      const seq = ++seqRef.current;
+      loadingRef.current = true;
+      setLoading(true);
+      try {
+        const collected = [];
+        let lastTotal = 0;
+        for (let p = from; p <= to; p++) {
+          const data = await apiGet(`${config.endpoint}?${buildParams(p)}`);
+          if (seqRef.current !== seq) return;
+          collected.push(...(data[config.itemsKey] || []));
+          lastTotal = data.total ?? 0;
+        }
+        if (mode === "append") {
+          setItems((prev) => {
+            const next = prev.concat(collected);
+            itemsLenRef.current = next.length;
+            return next;
+          });
+        } else {
+          setItems(collected);
+          itemsLenRef.current = collected.length;
+        }
+        setTotal(lastTotal);
+        totalRef.current = lastTotal;
+      } catch {
         if (seqRef.current !== seq) return;
-        collected.push(...(data[config.itemsKey] || []));
-        lastTotal = data.total ?? 0;
+        if (mode !== "append") {
+          setItems([]);
+          itemsLenRef.current = 0;
+          setTotal(0);
+          totalRef.current = 0;
+        }
+      } finally {
+        if (seqRef.current === seq) {
+          loadingRef.current = false;
+          setLoading(false);
+        }
       }
-      if (mode === "append") {
-        setItems((prev) => {
-          const next = prev.concat(collected);
-          itemsLenRef.current = next.length;
-          return next;
-        });
-      } else {
-        setItems(collected);
-        itemsLenRef.current = collected.length;
-      }
-      setTotal(lastTotal);
-      totalRef.current = lastTotal;
-    } catch {
-      if (seqRef.current !== seq) return;
-      if (mode !== "append") {
-        setItems([]);
-        itemsLenRef.current = 0;
-        setTotal(0);
-        totalRef.current = 0;
-      }
-    } finally {
-      if (seqRef.current === seq) {
-        loadingRef.current = false;
-        setLoading(false);
-      }
-    }
-  }, [buildParams, config]);
+    },
+    [buildParams, config],
+  );
 
   const reset = useCallback(() => {
     pageRef.current = 1;
@@ -179,7 +211,9 @@ export default function useTableData({ level, config, filters, sortBy, sortDir, 
   // resets; everything else goes through reload(), which replaces in place.
   const querySig = `${config.endpoint}?${buildParams(1)}`;
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => { reset(); }, [querySig]);
+  useEffect(() => {
+    reset();
+  }, [querySig]);
 
   return {
     items,

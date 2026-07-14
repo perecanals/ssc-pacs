@@ -4,20 +4,28 @@ import useDebouncedServerSave from "./useDebouncedServerSave";
 
 const VALID_LEVELS = ["patient", "study", "series"];
 
-// Rebuild a clean { "<level>:<label>": string[] } map from stored session data,
-// dropping anything malformed. Backs the sidebar select-value quick filters.
-function sanitizeLabelValues(stored) {
+// Rebuild a clean { key: string[] } map from stored session data, dropping
+// anything malformed. Backs both multi-value sidebar quick filters: annotation
+// select labels (keyed "<level>:<label>") and the Auto columns (keyed by field).
+function sanitizeValueMap(stored, keyIsValid) {
   const out = {};
   if (!stored || typeof stored !== "object") return out;
   for (const [key, vals] of Object.entries(stored)) {
-    if (typeof key !== "string" || !key.includes(":") || !Array.isArray(vals)) continue;
+    if (typeof key !== "string" || !keyIsValid(key) || !Array.isArray(vals))
+      continue;
     const clean = [
-      ...new Set(vals.filter((v) => typeof v === "string" && v.trim()).map((v) => v.trim())),
+      ...new Set(
+        vals
+          .filter((v) => typeof v === "string" && v.trim())
+          .map((v) => v.trim()),
+      ),
     ];
     if (clean.length) out[key] = clean;
   }
   return out;
 }
+
+const AUTO_FILTER_FIELDS = ["series_type", "timepoint"];
 
 // Validates a stored session blob against the live filter shape. Only the
 // keys present in `defaultFilters` are kept, only string values are
@@ -25,13 +33,21 @@ function sanitizeLabelValues(stored) {
 // the Sidebar cannot render at the restored level are dropped (an invisible
 // filter would still constrain the table).
 function sanitizeSession(session, defaultFilters) {
-  const level = VALID_LEVELS.includes(session?.level) ? session.level : "patient";
+  const level = VALID_LEVELS.includes(session?.level)
+    ? session.level
+    : "patient";
   const filters = { ...defaultFilters };
   const stored = session?.filters;
   if (stored && typeof stored === "object") {
     for (const key of Object.keys(defaultFilters)) {
       if (key === "labelValues") {
-        filters.labelValues = sanitizeLabelValues(stored.labelValues);
+        filters.labelValues = sanitizeValueMap(stored.labelValues, (k) =>
+          k.includes(":"),
+        );
+      } else if (key === "autoValues") {
+        filters.autoValues = sanitizeValueMap(stored.autoValues, (k) =>
+          AUTO_FILTER_FIELDS.includes(k),
+        );
       } else if (typeof stored[key] === "string") {
         filters[key] = stored[key];
       }
@@ -60,7 +76,15 @@ function sanitizeSession(session, defaultFilters) {
 // `_global` preferences level, and restores it on mount. The PUT owns the
 // entire `_global` prefs row — if another consumer ever stores state there,
 // this must merge, not replace.
-export default function useSessionStatePersistence({ ready, currentUser, level, filters, previewHeight, sidebarOpen, defaultFilters }) {
+export default function useSessionStatePersistence({
+  ready,
+  currentUser,
+  level,
+  filters,
+  previewHeight,
+  sidebarOpen,
+  defaultFilters,
+}) {
   const [restored, setRestored] = useState(null);
   const latestSession = useRef(null);
   const hydrated = useRef(false);
@@ -85,7 +109,9 @@ export default function useSessionStatePersistence({ ready, currentUser, level, 
         restoredJson.current = JSON.stringify(sanitized);
         hydrated.current = true;
       });
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
     // defaultFilters is a module-level constant in the caller.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ready, currentUser]);
@@ -102,7 +128,10 @@ export default function useSessionStatePersistence({ ready, currentUser, level, 
     if (!hydrated.current || !currentUser) return;
     // The caller seeding its state from the restored values re-triggers this
     // effect once; writing the data we just read back would be a wasted PUT.
-    if (restoredJson.current !== null && JSON.stringify(latestSession.current) === restoredJson.current) {
+    if (
+      restoredJson.current !== null &&
+      JSON.stringify(latestSession.current) === restoredJson.current
+    ) {
       restoredJson.current = null;
       return;
     }

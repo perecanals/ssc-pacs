@@ -285,6 +285,15 @@ the rules ([`data_stores.md`](data_stores.md)).
   nothing. It defaults on in the flat series table, where there is no parent row
   to carry it, and stays available in the column selector everywhere.
 
+**Sidebar quick filters.** An *Auto Classification* section offers both as
+multi-select value pickers (the same popup the select-type annotation labels
+use), with the vocabulary and counts read live from the data. Ticking several
+values ORs them — NCCT *or* CTA. The two filters AND together, and both apply at
+**every** level: at study and patient level they become "has one", so you can ask
+for *patients who have an NCCT_1 series and a THROMBECTOMY study* and get the
+patient list back. A sidebar pick widens (rather than replaces) any column-header
+filter already set on the same field.
+
 ---
 
 ## 6. OHIF Integration Behavior

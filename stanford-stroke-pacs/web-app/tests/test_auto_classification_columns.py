@@ -135,6 +135,57 @@ class TestStudyEndpoints:
         assert row["timepoint"] == "BL"
 
 
+class TestSidebarQuickFilters:
+    """The sidebar multi-select: repeated params, ORed, at every level."""
+
+    def test_classification_values_vocabulary(self, logged_in_client):
+        resp = logged_in_client.get("/api/classification-values")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert {"value": "NCCT", "count": 1} in body["series_types"]
+        tps = [t["value"] for t in body["timepoints"]]
+        assert "BL" in tps and "FU" in tps
+        # Clinical order (pre / during / post puncture), not alphabetical.
+        assert tps.index("BL") < tps.index("FU")
+
+    def test_repeated_values_are_ored(self, logged_in_client):
+        # The NCCT series matches even though CTA does not.
+        resp = logged_in_client.get("/api/series?series_type=NCCT&series_type=CTA")
+        assert _find(resp.json()["series"], "seriesinstanceuid", "1.2.3.4.5.6")
+
+        none = logged_in_client.get("/api/series?series_type=CTA&series_type=CTP")
+        assert none.json()["series"] == []
+
+    def test_patients_filtered_by_the_series_they_have(self, logged_in_client):
+        hit = logged_in_client.get("/api/patients", params={"series_type": "NCCT_1"})
+        ids = {r["patient_id"] for r in hit.json()["items"]}
+        assert ids == {"P-0001"}, "only P-0001 has a classified series"
+
+    def test_patients_filtered_by_the_timepoint_they_have(self, logged_in_client):
+        bl = logged_in_client.get("/api/patients", params={"timepoint": "BL"})
+        assert {r["patient_id"] for r in bl.json()["items"]} == {"P-0001"}
+
+        fu = logged_in_client.get("/api/patients", params={"timepoint": "FU"})
+        assert {r["patient_id"] for r in fu.json()["items"]} == {"P-0002"}
+
+    def test_studies_filtered_by_the_series_they_contain(self, logged_in_client):
+        hit = logged_in_client.get("/api/studies", params={"series_type": "NCCT"})
+        uids = {r["studyinstanceuid"] for r in hit.json()["items"]}
+        assert uids == {"1.2.3.4.5"}, "P-0002's study has no series"
+
+    def test_auto_filters_combine_as_and(self, logged_in_client):
+        both = logged_in_client.get(
+            "/api/patients", params={"series_type": "NCCT", "timepoint": "BL"}
+        )
+        assert {r["patient_id"] for r in both.json()["items"]} == {"P-0001"}
+
+        # P-0002 has the FU study but no NCCT series -> the AND excludes it.
+        neither = logged_in_client.get(
+            "/api/patients", params={"series_type": "NCCT", "timepoint": "FU"}
+        )
+        assert neither.json()["items"] == []
+
+
 class TestDatasetScoping:
     def test_auto_filters_still_respect_dataset_scope(self, client):
         """user_crisp sees only P-0001; the new filter must not widen that."""

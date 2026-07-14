@@ -25,6 +25,10 @@ export const DEFAULT_FILTERS = {
   // Sidebar select-value quick filters: { "<level>:<label>": ["v1", "v2"] }.
   // Merged into the `label_filters` request param by useTableData.
   labelValues: {},
+  // Sidebar quick filters for the machine-derived columns:
+  // { series_type: ["NCCT"], timepoint: ["BL", "FU"] }. Sent as repeated query
+  // params, which the API ORs. Applies at every level.
+  autoValues: {},
 };
 
 export default function Navigator() {
@@ -62,12 +66,21 @@ export default function Navigator() {
     setPreviewHeight(restoredPreviewHeight);
     setSidebarOpen(restoredSidebarOpen);
     setSessionLoaded(true);
-  }, [restoreLoaded, restoredLevel, restoredFilters, restoredPreviewHeight, restoredSidebarOpen]);
+  }, [
+    restoreLoaded,
+    restoredLevel,
+    restoredFilters,
+    restoredPreviewHeight,
+    restoredSidebarOpen,
+  ]);
 
   // Bumped when the DataTable mutates annotations so the Sidebar refetches
   // its label summary/definitions (counts + new select values).
   const [labelsNonce, setLabelsNonce] = useState(0);
-  const handleLabelsMutated = useCallback(() => setLabelsNonce((n) => n + 1), []);
+  const handleLabelsMutated = useCallback(
+    () => setLabelsNonce((n) => n + 1),
+    [],
+  );
 
   const [previewSelection, setPreviewSelection] = useState(null);
   const [previewUrl, setPreviewUrl] = useState("");
@@ -100,74 +113,82 @@ export default function Navigator() {
     setFilters(DEFAULT_FILTERS);
   }, []);
 
-  const handleLevelChange = useCallback((newLevel) => {
-    setLevel(newLevel);
-    setFilters(DEFAULT_FILTERS);
-    clearPreview();
-  }, [clearPreview]);
+  const handleLevelChange = useCallback(
+    (newLevel) => {
+      setLevel(newLevel);
+      setFilters(DEFAULT_FILTERS);
+      clearPreview();
+    },
+    [clearPreview],
+  );
 
-  const handlePreviewSelect = useCallback(async (selection) => {
-    if (!selection?.studyinstanceuid) return;
+  const handlePreviewSelect = useCallback(
+    async (selection) => {
+      if (!selection?.studyinstanceuid) return;
 
-    if (previewSelection?.rowKey === selection.rowKey) {
-      if (selection.sourceLevel === "study") {
+      if (previewSelection?.rowKey === selection.rowKey) {
+        if (selection.sourceLevel === "study") {
+          setPreviewSelection(selection);
+          return;
+        }
+
         setPreviewSelection(selection);
-        return;
+        if (previewOpen) {
+          previewRequestRef.current += 1;
+          setPreviewLoading(false);
+          setPreviewError("");
+          setPreviewOpen(false);
+          return;
+        }
+        if (previewUrl || previewError) {
+          setPreviewOpen(true);
+          return;
+        }
       }
+
+      const requestId = previewRequestRef.current + 1;
+      previewRequestRef.current = requestId;
 
       setPreviewSelection(selection);
-      if (previewOpen) {
-        previewRequestRef.current += 1;
-        setPreviewLoading(false);
-        setPreviewError("");
-        setPreviewOpen(false);
-        return;
-      }
-      if (previewUrl || previewError) {
-        setPreviewOpen(true);
-        return;
-      }
-    }
+      setPreviewOpen(true);
+      setPreviewLoading(true);
+      setPreviewError("");
+      setPreviewLoadingLabel("Checking storage…");
 
-    const requestId = previewRequestRef.current + 1;
-    previewRequestRef.current = requestId;
-
-    setPreviewSelection(selection);
-    setPreviewOpen(true);
-    setPreviewLoading(true);
-    setPreviewError("");
-    setPreviewLoadingLabel("Checking storage…");
-
-    const params = new URLSearchParams();
-    if (selection.seriesinstanceuid) {
-      params.set("seriesinstanceuid", selection.seriesinstanceuid);
-    }
-
-    try {
-      const mode = await getStorageMode();
-      if (previewRequestRef.current !== requestId) return;
-      if (mode === "cold_path_cache") {
-        setPreviewLoadingLabel("Warming imaging cache…");
-      } else {
-        setPreviewLoadingLabel("Resolving OHIF preview…");
+      const params = new URLSearchParams();
+      if (selection.seriesinstanceuid) {
+        params.set("seriesinstanceuid", selection.seriesinstanceuid);
       }
-      const url = await resolveOhifViewerUrl(
-        selection.studyinstanceuid,
-        selection.seriesinstanceuid || null,
-      );
-      if (previewRequestRef.current !== requestId) return;
-      setPreviewUrl(url || "");
-    } catch (e) {
-      if (previewRequestRef.current !== requestId) return;
-      setPreviewUrl("");
-      setPreviewError(e?.message || "Could not resolve the OHIF preview for this row.");
-    } finally {
-      if (previewRequestRef.current === requestId) {
-        setPreviewLoading(false);
-        setPreviewLoadingLabel("");
+
+      try {
+        const mode = await getStorageMode();
+        if (previewRequestRef.current !== requestId) return;
+        if (mode === "cold_path_cache") {
+          setPreviewLoadingLabel("Warming imaging cache…");
+        } else {
+          setPreviewLoadingLabel("Resolving OHIF preview…");
+        }
+        const url = await resolveOhifViewerUrl(
+          selection.studyinstanceuid,
+          selection.seriesinstanceuid || null,
+        );
+        if (previewRequestRef.current !== requestId) return;
+        setPreviewUrl(url || "");
+      } catch (e) {
+        if (previewRequestRef.current !== requestId) return;
+        setPreviewUrl("");
+        setPreviewError(
+          e?.message || "Could not resolve the OHIF preview for this row.",
+        );
+      } finally {
+        if (previewRequestRef.current === requestId) {
+          setPreviewLoading(false);
+          setPreviewLoadingLabel("");
+        }
       }
-    }
-  }, [previewError, previewOpen, previewSelection, previewUrl]);
+    },
+    [previewError, previewOpen, previewSelection, previewUrl],
+  );
 
   // Gate rendering until the session restore resolves so the DataTable
   // (keyed by level) mounts exactly once, at the restored level with the
@@ -182,7 +203,9 @@ export default function Navigator() {
         onLevelChange={handleLevelChange}
         toolbarHostRef={setToolbarHostEl}
       />
-      <div className={`navigator__layout${sidebarOpen ? "" : " navigator__layout--sidebar-closed"}`}>
+      <div
+        className={`navigator__layout${sidebarOpen ? "" : " navigator__layout--sidebar-closed"}`}
+      >
         <Sidebar
           level={level}
           filters={filters}

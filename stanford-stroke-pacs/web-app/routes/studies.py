@@ -28,10 +28,13 @@ from common import (
     SERIES_FROM_CLAUSE,
     SERIES_SORT_OVERRIDES,
     SERIES_SORT_WHITELIST,
+    SERIES_TYPE_MATCH_EXPR,
     STUDY_AUTO_COLS,
+    TIMEPOINT_MATCH_EXPR,
     apply_label_filters,
     attach_annotations,
     attach_inherited_annotations,
+    auto_match_sql,
     build_label_filter_sql,
     dataset_filter_sql,
     ensure_patient_access,
@@ -86,6 +89,14 @@ def list_patients(
             "patient included if this tag is a member of its dataset array."
         ),
     ),
+    series_type: list[str] | None = Query(
+        None,
+        description="Only patients having a series with this machine-derived label.",
+    ),
+    timepoint: list[str] | None = Query(
+        None,
+        description="Only patients having a study at this machine-derived timepoint.",
+    ),
     label: str | None = Query(None),
     label_level: str | None = Query(None),
     label_filters: str | None = Query(None),
@@ -104,6 +115,24 @@ def list_patients(
             if scope is not None:
                 conditions.append("p.dataset && %s::text[]")
                 params.append(scope)
+
+            # The Auto filters are series-/study-level, so at the patient level
+            # they ask "has one": a patient matches if any of their series (or
+            # studies) does.
+            st_sql, st_params = auto_match_sql(SERIES_TYPE_MATCH_EXPR, series_type)
+            if st_sql:
+                conditions.append(
+                    "EXISTS (SELECT 1 FROM image_series s "
+                    f"WHERE s.patient_id = p.patient_id AND {st_sql})"
+                )
+                params.extend(st_params)
+            tp_sql, tp_params = auto_match_sql(TIMEPOINT_MATCH_EXPR, timepoint)
+            if tp_sql:
+                conditions.append(
+                    "EXISTS (SELECT 1 FROM image_study st "
+                    f"WHERE st.patient_id = p.patient_id AND {tp_sql})"
+                )
+                params.extend(tp_params)
 
             # Patient level is sourced from the `patient` registry (one row per
             # patient, comprehensive). lvo_clinical_data is joined only to prefer
@@ -301,6 +330,48 @@ def list_datasets(scope: list[str] | None = Depends(get_dataset_scope)):
     return all_datasets
 
 
+@router.get("/api/classification-values")
+def list_classification_values(scope: list[str] | None = Depends(get_dataset_scope)):
+    """Vocabularies + counts for the sidebar's Auto quick filters.
+
+    Read from the data rather than hardcoded, so a reclassify run under new
+    rules changes the filter options without a frontend release.
+    """
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            params: list = []
+            scope_s = scope_t = ""
+            if scope is not None:
+                scope_s = f" AND {dataset_filter_sql('s.patient_id')}"
+                scope_t = f" AND {dataset_filter_sql('st.patient_id')}"
+
+            cur.execute(
+                "SELECT s.series_type, COUNT(*) FROM image_series s "
+                f"WHERE s.series_type IS NOT NULL AND s.series_type <> ''{scope_s} "
+                "GROUP BY 1 ORDER BY 2 DESC",
+                params + ([scope] if scope is not None else []),
+            )
+            series_types = [{"value": r[0], "count": r[1]} for r in cur.fetchall()]
+
+            # Clinical order (pre / during / post puncture), not alphabetical —
+            # BL, FU, THROMBECTOMY would read as nonsense.
+            cur.execute(
+                "SELECT st.timepoint, COUNT(*) FROM image_study st "
+                f"WHERE st.timepoint IS NOT NULL AND st.timepoint <> ''{scope_t} "
+                "GROUP BY 1 "
+                "ORDER BY CASE st.timepoint "
+                "  WHEN 'BL' THEN 1 WHEN 'THROMBECTOMY' THEN 2 WHEN 'FU' THEN 3 "
+                "  ELSE 4 END, 1",
+                params + ([scope] if scope is not None else []),
+            )
+            timepoints = [{"value": r[0], "count": r[1]} for r in cur.fetchall()]
+
+        return {"series_types": series_types, "timepoints": timepoints}
+    finally:
+        conn.close()
+
+
 # ---------------------------------------------------------------------------
 # Study browsing
 # ---------------------------------------------------------------------------
@@ -320,9 +391,16 @@ def list_studies(
     ),
     modality: str | None = Query(None),
     study_type: str | None = Query(None),
-    timepoint: str | None = Query(
+    timepoint: list[str] | None = Query(
         None,
-        description="Substring match on the machine-derived timepoint (BL / THROMBECTOMY / FU).",
+        description=(
+            "Machine-derived timepoint (BL / THROMBECTOMY / FU). Substring "
+            "match, repeatable (ORed)."
+        ),
+    ),
+    series_type: list[str] | None = Query(
+        None,
+        description="Only studies containing a series with this machine-derived label.",
     ),
     studydescription: str | None = Query(None),
     acquisitiondatetime: str | None = Query(None),
@@ -361,9 +439,17 @@ def list_studies(
             if study_type:
                 conditions.append("UPPER(st.study_type) = UPPER(%s)")
                 params.append(study_type)
-            if timepoint:
-                conditions.append("UPPER(COALESCE(st.timepoint, '')) LIKE UPPER(%s)")
-                params.append(f"%{timepoint}%")
+            tp_sql, tp_params = auto_match_sql(TIMEPOINT_MATCH_EXPR, timepoint)
+            if tp_sql:
+                conditions.append(tp_sql)
+                params.extend(tp_params)
+            st_sql, st_params = auto_match_sql(SERIES_TYPE_MATCH_EXPR, series_type)
+            if st_sql:
+                conditions.append(
+                    "EXISTS (SELECT 1 FROM image_series s "
+                    f"WHERE s.studyinstanceuid = st.studyinstanceuid AND {st_sql})"
+                )
+                params.extend(st_params)
             if studydescription:
                 conditions.append("LOWER(st.studydescription) LIKE LOWER(%s)")
                 params.append(f"%{studydescription}%")
@@ -490,15 +576,19 @@ def list_series(
     modality: str | None = Query(None),
     description: str | None = Query(None),
     study_type: str | None = Query(None),
-    series_type: str | None = Query(
-        None,
-        description="Substring match on the machine-derived series type (CTA, NCCT, NCCT_BONE, ...).",
-    ),
-    timepoint: str | None = Query(
+    series_type: list[str] | None = Query(
         None,
         description=(
-            "Substring match on the owning study's machine-derived timepoint "
-            "(BL / THROMBECTOMY / FU)."
+            "Machine-derived series label. Substring match, repeatable: "
+            "?series_type=NCCT&series_type=CTA ORs them. 'NCCT_1' narrows to "
+            "each patient's preferred NCCT."
+        ),
+    ),
+    timepoint: list[str] | None = Query(
+        None,
+        description=(
+            "The owning study's machine-derived timepoint (BL / THROMBECTOMY / "
+            "FU). Substring match, repeatable (ORed)."
         ),
     ),
     acquisitiondatetime: str | None = Query(None),
@@ -548,16 +638,14 @@ def list_series(
             if study_type:
                 conditions.append("UPPER(st.study_type) = UPPER(%s)")
                 params.append(study_type)
-            if series_type:
-                # Matches the label, so "NCCT" finds every NCCT and "NCCT_1"
-                # narrows to each patient's preferred one.
-                conditions.append(
-                    "UPPER(COALESCE(s.series_label, s.series_type, '')) LIKE UPPER(%s)"
-                )
-                params.append(f"%{series_type}%")
-            if timepoint:
-                conditions.append("UPPER(COALESCE(st.timepoint, '')) LIKE UPPER(%s)")
-                params.append(f"%{timepoint}%")
+            for expr, vals in (
+                (SERIES_TYPE_MATCH_EXPR, series_type),
+                (TIMEPOINT_MATCH_EXPR, timepoint),
+            ):
+                sql, ps = auto_match_sql(expr, vals)
+                if sql:
+                    conditions.append(sql)
+                    params.extend(ps)
             if acquisitiondatetime:
                 conditions.append("s.acquisitiondatetime::text LIKE %s")
                 params.append(f"%{acquisitiondatetime}%")

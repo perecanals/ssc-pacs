@@ -31,6 +31,18 @@
   parent study row already shows it), on by default in the flat series table,
   where no parent row carries it. A column's `defaultVisible` may now be a
   predicate on the active level, not just a boolean.
+- **Sidebar quick filters** for both Auto columns, as multi-select value pickers
+  (the popup the select-type labels already use). Vocabulary + counts come from a
+  new `GET /api/classification-values`, read from the data — a reclassify run
+  under new rules changes the options with no frontend release. Ticked values are
+  sent as repeated query params (`?series_type=NCCT&series_type=CTA`) which the
+  API ORs, and they *widen* rather than clobber a column-header filter on the
+  same field.
+- The Auto filters now work at **every** level: `/api/patients` and `/api/studies`
+  gained `series_type` / `timepoint` filters that resolve to EXISTS subqueries, so
+  "patients having an NCCT_1 series and a THROMBECTOMY study" is one request.
+  `/api/series` and `/api/studies` `timepoint` params became repeatable (a single
+  value behaves exactly as before).
 - Internal: the built-in cell renderer, previously duplicated across `index.jsx`
   and both tables in `ChildRows.jsx`, is extracted to `DataTable/BuiltinCell.jsx`.
 

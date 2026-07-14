@@ -126,6 +126,17 @@ The Navigator page is decomposed into focused React components:
   `labelValues` into the same `label_filters` query param the column-header
   select filter uses (so no backend change), and the values round-trip through
   the `_global` session prefs (`sanitizeSession` keeps this one structured key).
+  An **Auto Classification** section reuses the same `LabelValueFilter` popup for
+  the machine-derived columns: its vocabulary + counts come from
+  `/api/classification-values` (read from the data, so a reclassify run under new
+  rules changes the options without a frontend release), and ticked values live in
+  `filters.autoValues` keyed by **API field** (`series_type`, `timepoint`) rather
+  than `"<level>:<label>"`. `useTableData` sends them as **repeated query params**
+  (`?series_type=NCCT&series_type=CTA`), which the API ORs; it *appends* rather
+  than sets, so a sidebar pick widens a column-header filter on the same field
+  instead of clobbering it. The section hides itself when nothing is classified.
+  Both filters apply at **every** level — see the cross-level note in `web_app.md`
+  §5.7.
 - `DataTable` (`components/DataTable/`) — generic data table supporting all three
   levels. Split into focused modules: `index.jsx` (orchestrator), `ChildRows.jsx`
   (child/grandchild rendering), `TableHeader.jsx` (column headers + filter row),

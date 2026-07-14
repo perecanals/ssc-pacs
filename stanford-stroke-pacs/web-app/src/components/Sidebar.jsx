@@ -5,11 +5,22 @@ import { groupByInstrument, LEVEL_ORDER, LEVEL_LABELS } from "../utils/table";
 import LabelValueFilter from "./Sidebar/LabelValueFilter";
 import "./Sidebar.css";
 
-export default function Sidebar({ level, filters, onFilterChange, open, onToggle, labelsRefreshNonce = 0 }) {
+export default function Sidebar({
+  level,
+  filters,
+  onFilterChange,
+  open,
+  onToggle,
+  labelsRefreshNonce = 0,
+}) {
   const [labelSummary, setLabelSummary] = useState([]);
   const [labelDefs, setLabelDefs] = useState([]);
   const [studyImportLabels, setStudyImportLabels] = useState([]);
   const [datasets, setDatasets] = useState([]);
+  const [autoVocab, setAutoVocab] = useState({
+    series_types: [],
+    timepoints: [],
+  });
   // Which select-label popup is pinned open (one at a time). Keyed "<level>:<label>".
   const [pinnedKey, setPinnedKey] = useState(null);
 
@@ -78,7 +89,8 @@ export default function Sidebar({ level, filters, onFilterChange, open, onToggle
     const onDown = (e) => {
       // The popup is portaled to <body>, so it is outside .sidebar__lvf — match
       // it explicitly so clicking inside a pinned popup doesn't dismiss it.
-      if (!e.target.closest?.(".sidebar__lvf, .sidebar__lvf-popup")) setPinnedKey(null);
+      if (!e.target.closest?.(".sidebar__lvf, .sidebar__lvf-popup"))
+        setPinnedKey(null);
     };
     const onKey = (e) => {
       if (e.key === "Escape") setPinnedKey(null);
@@ -109,8 +121,67 @@ export default function Sidebar({ level, filters, onFilterChange, open, onToggle
       .catch(() => {
         if (!cancelled) setDatasets([]);
       });
-    return () => { cancelled = true; };
+    apiGet("/api/classification-values")
+      .then((data) => {
+        if (!cancelled && data) {
+          setAutoVocab({
+            series_types: data.series_types || [],
+            timepoints: data.timepoints || [],
+          });
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setAutoVocab({ series_types: [], timepoints: [] });
+      });
+    return () => {
+      cancelled = true;
+    };
   }, []);
+
+  // The two Auto quick filters, in the order they read clinically. Each applies
+  // at every level: at patient/study level the API turns it into "has one".
+  const autoFilters = useMemo(
+    () => [
+      {
+        field: "series_type",
+        label: "Auto Series Type",
+        level: "series",
+        vocab: autoVocab.series_types,
+      },
+      {
+        field: "timepoint",
+        label: "Auto Timepoint",
+        level: "study",
+        vocab: autoVocab.timepoints,
+      },
+    ],
+    [autoVocab],
+  );
+
+  const autoValues = filters.autoValues || {};
+
+  const toggleAutoValue = useCallback(
+    (field, value) => {
+      const cur = filters.autoValues?.[field] || [];
+      const next = cur.includes(value)
+        ? cur.filter((v) => v !== value)
+        : [...cur, value];
+      const map = { ...(filters.autoValues || {}) };
+      if (next.length) map[field] = next;
+      else delete map[field];
+      onFilterChange({ autoValues: map });
+    },
+    [filters.autoValues, onFilterChange],
+  );
+
+  const clearAutoValue = useCallback(
+    (field) => {
+      const map = { ...(filters.autoValues || {}) };
+      delete map[field];
+      onFilterChange({ autoValues: map });
+    },
+    [filters.autoValues, onFilterChange],
+  );
 
   const handleLabelClick = (label, labelLevel) => {
     if (filters.label === label && filters.labelLevel === labelLevel) {
@@ -134,12 +205,15 @@ export default function Sidebar({ level, filters, onFilterChange, open, onToggle
   }, [labelSummary]);
 
   const [collapsedLevels, setCollapsedLevels] = useState(() => new Set());
-  const [collapsedInstruments, setCollapsedInstruments] = useState(() => new Set());
+  const [collapsedInstruments, setCollapsedInstruments] = useState(
+    () => new Set(),
+  );
 
   const toggleLevel = (lvl) => {
     setCollapsedLevels((prev) => {
       const next = new Set(prev);
-      if (next.has(lvl)) next.delete(lvl); else next.add(lvl);
+      if (next.has(lvl)) next.delete(lvl);
+      else next.add(lvl);
       return next;
     });
   };
@@ -148,14 +222,18 @@ export default function Sidebar({ level, filters, onFilterChange, open, onToggle
     const k = `${lvl}:${key}`;
     setCollapsedInstruments((prev) => {
       const next = new Set(prev);
-      if (next.has(k)) next.delete(k); else next.add(k);
+      if (next.has(k)) next.delete(k);
+      else next.add(k);
       return next;
     });
   };
 
   return (
     <>
-      <aside className={`sidebar${open ? "" : " sidebar--closed"}`} aria-hidden={!open}>
+      <aside
+        className={`sidebar${open ? "" : " sidebar--closed"}`}
+        aria-hidden={!open}
+      >
         <div className="sidebar__inner">
           <h1 className="sidebar__group-title">Quick Filters</h1>
 
@@ -205,13 +283,60 @@ export default function Sidebar({ level, filters, onFilterChange, open, onToggle
             </div>
           </div>
 
+          {/* Auto classification (machine-derived; read-only in the table) */}
+          {autoFilters.some((f) => f.vocab.length > 0) && (
+            <div className="sidebar__section">
+              <h2 className="sidebar__section-title">Auto Classification</h2>
+              {Object.keys(autoValues).length > 0 && (
+                <button
+                  onClick={() => onFilterChange({ autoValues: {} })}
+                  className="sidebar__clear-filter"
+                >
+                  Clear filter
+                </button>
+              )}
+              <ul className="sidebar__label-list">
+                {autoFilters
+                  .filter((f) => f.vocab.length > 0)
+                  .map((f) => {
+                    const pinKey = `auto:${f.field}`;
+                    const total = f.vocab.reduce(
+                      (n, v) => n + (v.count || 0),
+                      0,
+                    );
+                    return (
+                      <LabelValueFilter
+                        key={pinKey}
+                        label={f.label}
+                        caseCount={total}
+                        options={f.vocab.map((v) => v.value)}
+                        selected={autoValues[f.field] || []}
+                        pinned={pinnedKey === pinKey}
+                        onToggleValue={(v) => toggleAutoValue(f.field, v)}
+                        onClear={() => clearAutoValue(f.field)}
+                        onTogglePin={() =>
+                          setPinnedKey((cur) =>
+                            cur === pinKey ? null : pinKey,
+                          )
+                        }
+                      />
+                    );
+                  })}
+              </ul>
+            </div>
+          )}
+
           {/* Annotation Labels */}
           <div className="sidebar__section">
             <h2 className="sidebar__section-title">Annotation Labels</h2>
             {(filters.label || Object.keys(labelValues).length > 0) && (
               <button
                 onClick={() =>
-                  onFilterChange({ label: null, labelLevel: null, labelValues: {} })
+                  onFilterChange({
+                    label: null,
+                    labelLevel: null,
+                    labelValues: {},
+                  })
                 }
                 className="sidebar__clear-filter"
               >
@@ -234,66 +359,90 @@ export default function Sidebar({ level, filters, onFilterChange, open, onToggle
                     >
                       {LEVEL_LABELS[lvl]}
                     </div>
-                    {!isLevelCollapsed && groupedByLevel[lvl].map(({ key, name, items: labels }) => {
-                      const instrumentKey = `${lvl}:${key}`;
-                      const isInstrumentCollapsed = collapsedInstruments.has(instrumentKey);
-                      return (
-                        <div key={instrumentKey} className="sidebar__instrument-group">
-                          <div
-                            className="sidebar__instrument-heading"
-                            onClick={() => toggleInstrument(lvl, key)}
-                            role="button"
-                            tabIndex={0}
-                            aria-expanded={!isInstrumentCollapsed}
-                          >
-                            {name}
-                          </div>
-                          {!isInstrumentCollapsed && (
-                            <ul className="sidebar__label-list">
-                              {labels.map((l) => {
-                                const labelKey = `${lvl}:${l.label}`;
-                                const def = defByKey[labelKey];
-                                if (def?.datatype === "select") {
-                                  const selected = labelValues[labelKey] || [];
-                                  return (
-                                    <LabelValueFilter
-                                      key={labelKey}
-                                      label={l.label}
-                                      caseCount={l.count}
-                                      options={def.options}
-                                      selected={selected}
-                                      pinned={pinnedKey === labelKey}
-                                      onToggleValue={(v) => toggleLabelValue(labelKey, v)}
-                                      onClear={() => clearLabelValue(labelKey)}
-                                      onTogglePin={() =>
-                                        setPinnedKey((cur) => (cur === labelKey ? null : labelKey))
-                                      }
-                                    />
-                                  );
-                                }
-                                const isActive = filters.label === l.label && filters.labelLevel === lvl;
-                                return (
-                                  <li
-                                    key={labelKey}
-                                    onClick={() => handleLabelClick(l.label, lvl)}
-                                    data-full-label={l.label}
-                                    aria-label={l.label}
-                                    className={`sidebar__label-item ${
-                                      isActive
-                                        ? "sidebar__label-item--active"
-                                        : "sidebar__label-item--inactive"
-                                    }`}
-                                  >
-                                    <span className="sidebar__label-text">{l.label}</span>
-                                    <span className="sidebar__label-count">{l.count}</span>
-                                  </li>
-                                );
-                              })}
-                            </ul>
-                          )}
-                        </div>
-                      );
-                    })}
+                    {!isLevelCollapsed &&
+                      groupedByLevel[lvl].map(
+                        ({ key, name, items: labels }) => {
+                          const instrumentKey = `${lvl}:${key}`;
+                          const isInstrumentCollapsed =
+                            collapsedInstruments.has(instrumentKey);
+                          return (
+                            <div
+                              key={instrumentKey}
+                              className="sidebar__instrument-group"
+                            >
+                              <div
+                                className="sidebar__instrument-heading"
+                                onClick={() => toggleInstrument(lvl, key)}
+                                role="button"
+                                tabIndex={0}
+                                aria-expanded={!isInstrumentCollapsed}
+                              >
+                                {name}
+                              </div>
+                              {!isInstrumentCollapsed && (
+                                <ul className="sidebar__label-list">
+                                  {labels.map((l) => {
+                                    const labelKey = `${lvl}:${l.label}`;
+                                    const def = defByKey[labelKey];
+                                    if (def?.datatype === "select") {
+                                      const selected =
+                                        labelValues[labelKey] || [];
+                                      return (
+                                        <LabelValueFilter
+                                          key={labelKey}
+                                          label={l.label}
+                                          caseCount={l.count}
+                                          options={def.options}
+                                          selected={selected}
+                                          pinned={pinnedKey === labelKey}
+                                          onToggleValue={(v) =>
+                                            toggleLabelValue(labelKey, v)
+                                          }
+                                          onClear={() =>
+                                            clearLabelValue(labelKey)
+                                          }
+                                          onTogglePin={() =>
+                                            setPinnedKey((cur) =>
+                                              cur === labelKey
+                                                ? null
+                                                : labelKey,
+                                            )
+                                          }
+                                        />
+                                      );
+                                    }
+                                    const isActive =
+                                      filters.label === l.label &&
+                                      filters.labelLevel === lvl;
+                                    return (
+                                      <li
+                                        key={labelKey}
+                                        onClick={() =>
+                                          handleLabelClick(l.label, lvl)
+                                        }
+                                        data-full-label={l.label}
+                                        aria-label={l.label}
+                                        className={`sidebar__label-item ${
+                                          isActive
+                                            ? "sidebar__label-item--active"
+                                            : "sidebar__label-item--inactive"
+                                        }`}
+                                      >
+                                        <span className="sidebar__label-text">
+                                          {l.label}
+                                        </span>
+                                        <span className="sidebar__label-count">
+                                          {l.count}
+                                        </span>
+                                      </li>
+                                    );
+                                  })}
+                                </ul>
+                              )}
+                            </div>
+                          );
+                        },
+                      )}
                   </div>
                 );
               })
