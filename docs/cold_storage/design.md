@@ -94,14 +94,61 @@ reads them directly. No cache manager involvement. Baseline pre-migration.
   archive is extracted back to its original `dicom_dir_path`. When evicted,
   the extracted files are removed.
 - Orthanc index: always full. Never modified by warming or eviction.
-- Warming does not involve any Orthanc API calls — the index already knows
-  about the files.
+- Warming does not touch the index — it already knows about the files. It does
+  make one Orthanc API call, to repair the DICOMweb metadata cache if needed
+  (see below).
 
 **Prerequisites:**
 - `ssc-orthanc:patched-indexer` image deployed
 - `orthanc.json` has `"Indexer": { "RemoveMissingFiles": false }`
 - Orthanc has indexed the complete tree at least once (so every legitimate
   `dicom_dir_path` exists in the main DB)
+
+---
+
+## The DICOMweb metadata cache invariant
+
+> **Never let Orthanc compute a series' DICOMweb metadata cache while that
+> series' files are off disk.**
+
+Orthanc's DICOMweb plugin caches each series' WADO-RS metadata as an Orthanc
+attachment (content type `4301`), and it builds that cache by **reading the
+DICOM files** — in a background worker that fires when the series goes stable
+(`StableAge`, set to 10s in `orthanc.json`).
+
+That collides with cold storage. Here the files are absent whenever a series is
+evicted, and the index deliberately keeps pointing at them
+(`RemoveMissingFiles: false`). So a cache computed while a series is cold is
+stored as an **empty array** — and it never expires, because nothing about the
+index changes when the files come back. From then on every metadata request
+returns HTTP 400 (`The series metadata json does not contain an array`) and
+OHIF hangs forever on the loading spinner. Warming the series does *not* fix
+it.
+
+Two asymmetries make this behave the way it does:
+
+- A **healthy** cache keeps serving fine after eviction — metadata comes from
+  the cache, only pixels need the files. This is why cold series open instantly
+  in the study list.
+- A **poisoned** cache is permanent, and *deleting it is not a repair on its
+  own*: the next metadata request, if the series is still cold, re-poisons it
+  on the spot. The delete and the rebuild must both happen while the series is
+  warm.
+
+Three places uphold the invariant (helpers in `web-app/orthanc_client.py`):
+
+| Where | What it does |
+|---|---|
+| `scripts/cold_storage/cleanup_loose_dicoms.py` (check 5) | Will not delete a series' loose DICOMs until Orthanc has built a non-empty cache for it. This is the *prevention*. |
+| `cache_manager._warm_one_series` | Rebuilds a poisoned/absent cache whenever a series is warmed — the one moment it can be built correctly. Best-effort; never fails the warm. |
+| `scripts/data_integrity/repair_dicomweb_metadata_cache.py` | Repairs an existing backlog: warm → rebuild → evict. |
+
+**History.** Ingestion originally deleted a case's loose DICOMs as soon as the
+indexer had registered them, with no grace period — so newly ingested series
+raced the stable-series worker and roughly half of them lost, caching empty.
+This stranded 19,658 series (342 patients) in the July 2026 CRISP2/LVO batch.
+The legacy→cold migration cohort was unaffected: its files were on disk for
+months, so every cache was built from readable files before archiving.
 
 ---
 

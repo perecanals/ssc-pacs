@@ -5,6 +5,13 @@ Delete loose DICOM directories that are safe to remove because:
   2. The archive file exists on disk and is non-empty
   3. The archive's file count matches the loose dir's file count
   4. The series is present in Orthanc's index (queried via orthanc_db PostgreSQL)
+  5. Orthanc has built a non-empty DICOMweb metadata cache for the series
+
+Check 5 is what keeps the series openable in OHIF. Orthanc's DICOMweb plugin
+builds each series' metadata cache by reading the DICOM files, in a background
+worker that runs once the series goes stable. Delete the files first and it
+caches an empty array instead — permanently, since the index still points at
+the absent files by design — and every later metadata request 400s.
 
 Without `--execute` the script is dry-run only and prints what it would do.
 
@@ -51,6 +58,10 @@ load_dotenv(REPO_ROOT / ".env")
 # Read paths from web-app/config.py so cleanup matches the running stack.
 sys.path.insert(0, str(REPO_ROOT / "web-app"))
 from db import DB_CONFIG  # noqa: E402
+from orthanc_client import (  # noqa: E402
+    orthanc_series_id,
+    wait_for_series_metadata_cache,
+)
 
 from config import DICOM_DATA_ROOT, STORAGE_MODE  # noqa: E402
 
@@ -135,6 +146,7 @@ def clean_series_loose_dir(
     series_in_orthanc: bool,
     deep_verify: bool = True,
     execute: bool = True,
+    metadata_cache_timeout_s: float = 120.0,
 ) -> tuple[str, int, str | None]:
     """Verify one series' loose DICOM dir is redundant and (optionally) delete it.
 
@@ -142,12 +154,23 @@ def clean_series_loose_dir(
       1. archive exists and is non-empty
       2. the series is present in Orthanc's index (caller-established fact)
       3. deep_verify: archive regular-file count == loose dir file count
+      4. Orthanc's DICOMweb metadata cache for the series is built and non-empty
+
+    Check 4 is not about the files being recoverable — it is about Orthanc.
+    The DICOMweb plugin builds each series' WADO-RS metadata cache by reading
+    the DICOM files, in a background worker that fires when the series goes
+    stable. Delete the loose files before that worker runs and it caches an
+    empty array instead, which never expires (the index still points at the
+    now-absent files by design) — every later metadata request 400s and OHIF
+    hangs on the loading spinner. Deleting is therefore only safe once the
+    cache exists. See orthanc_client for the full invariant.
 
     The NIFTI sibling ({seriesUID}/NIFTI/) is untouched — only `dicom_dir` itself
     (the .../DICOM dir recorded in image_series.dicom_dir_path) is removed.
 
     Returns (status, bytes_freed, detail) with status one of:
-    'cleaned', 'already_clean', 'no_archive', 'not_in_orthanc', 'count_mismatch'.
+    'cleaned', 'already_clean', 'no_archive', 'not_in_orthanc', 'count_mismatch',
+    'metadata_cache_not_ready'.
     Shared by the CLI below and the ingestion pipeline's
     cleanup_loose_after_indexing knob.
     """
@@ -182,6 +205,26 @@ def clean_series_loose_dir(
                 f"loose dir has {loose_count} files at {dicom_dir}"
             )
 
+    # Orthanc must have built its DICOMweb metadata cache from these files
+    # before we remove them — otherwise the series is permanently unopenable
+    # in OHIF. Wait for Orthanc's own write rather than forcing one, so the
+    # stable-series worker has provably already run against present files.
+    # timeout 0 == check once without waiting (dry-run); negative == skip entirely.
+    if metadata_cache_timeout_s >= 0:
+        oid = orthanc_series_id(series_uid)
+        if oid is None:
+            return "not_in_orthanc", 0, (
+                f"{series_uid}: could not resolve Orthanc series ID"
+            )
+        if not wait_for_series_metadata_cache(
+            oid, timeout_s=metadata_cache_timeout_s
+        ):
+            return "metadata_cache_not_ready", 0, (
+                f"{series_uid}: Orthanc has not built a non-empty DICOMweb "
+                f"metadata cache after {metadata_cache_timeout_s:.0f}s — keeping "
+                f"loose files (deleting now would strand the series in OHIF)"
+            )
+
     size = sum(p.stat().st_size for p in dicom_dir.rglob("*") if p.is_file())
     if execute:
         shutil.rmtree(dicom_dir, ignore_errors=False)
@@ -201,6 +244,18 @@ def main() -> int:
     ap.add_argument("--no-deep-verify", action="store_true",
                     help="Skip per-archive file count comparison (faster)")
     ap.add_argument("--quiet", action="store_true", help="Only print summary")
+    ap.add_argument(
+        "--metadata-cache-timeout", type=float, default=120.0, metavar="SECONDS",
+        help="How long to wait (per series) for Orthanc to build its DICOMweb "
+             "metadata cache before deleting the loose files (default: 120). "
+             "Series whose cache is not ready in time are kept for a later run.",
+    )
+    ap.add_argument(
+        "--no-metadata-cache-check", action="store_true",
+        help="Skip the DICOMweb metadata-cache check. UNSAFE in cold_path_cache "
+             "mode: deleting loose files before Orthanc has cached the series' "
+             "metadata strands it in OHIF (permanent HTTP 400).",
+    )
     args = ap.parse_args()
 
     if STORAGE_MODE != "cold_path_cache":
@@ -229,6 +284,7 @@ def main() -> int:
     skipped_not_in_orthanc = 0
     skipped_no_archive = 0
     skipped_count_mismatch = 0
+    skipped_metadata_cache = 0
     bytes_freed = 0
     errors: list[str] = []
 
@@ -250,6 +306,11 @@ def main() -> int:
             series_in_orthanc=series_uid in orthanc_uids,
             deep_verify=not args.no_deep_verify,
             execute=args.execute,
+            # Dry-run only reports (single check, no blocking wait).
+            metadata_cache_timeout_s=(
+                -1.0 if args.no_metadata_cache_check
+                else (args.metadata_cache_timeout if args.execute else 0.0)
+            ),
         )
         if detail:
             errors.append(detail)
@@ -261,6 +322,8 @@ def main() -> int:
             skipped_not_in_orthanc += 1
         elif status == "count_mismatch":
             skipped_count_mismatch += 1
+        elif status == "metadata_cache_not_ready":
+            skipped_metadata_cache += 1
         elif status == "cleaned":
             if not args.quiet:
                 verb = "Would delete" if not args.execute else "Deleting"
@@ -296,6 +359,7 @@ def main() -> int:
     print(f"Pending Orthanc index: {skipped_not_in_orthanc}")
     print(f"Archive missing/unreadable: {skipped_no_archive}")
     print(f"Archive/loose count mismatch: {skipped_count_mismatch}")
+    print(f"Awaiting Orthanc metadata cache: {skipped_metadata_cache}")
     print(f"Bytes that would be freed: {bytes_freed/1e9:.2f} GB")
     print(f"Elapsed: {elapsed:.1f}s")
     if errors:

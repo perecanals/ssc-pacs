@@ -44,10 +44,50 @@ from config import (
     WARMING_TIMEOUT_MINUTES,
 )
 from db import get_conn
+from orthanc_client import (
+    orthanc_series_id,
+    rebuild_series_metadata_cache,
+    series_metadata_cache_is_healthy,
+)
 
 logger = logging.getLogger(__name__)
 
 ADV_LOCK_KEY = 8741002
+
+
+def _repair_metadata_cache(seriesinstanceuid: str, studyinstanceuid: str | None,
+                           log_extra: dict[str, str]) -> None:
+    """Rebuild the series' DICOMweb metadata cache if it is missing or poisoned.
+
+    Called only once a series is warm (files on disk), which is the one moment
+    the cache can be built correctly — see the invariant in orthanc_client. A
+    cache first computed while the series was cold holds an empty array and
+    400s forever, hanging OHIF; warming is what gives us the chance to fix it.
+
+    Best-effort: a failure here must never fail the warm (the pixels are on
+    disk regardless), so everything is swallowed and logged.
+    """
+    if not studyinstanceuid:
+        return
+    try:
+        oid = orthanc_series_id(seriesinstanceuid)
+        if not oid:
+            return
+        if series_metadata_cache_is_healthy(oid):
+            return
+        ok = rebuild_series_metadata_cache(studyinstanceuid, seriesinstanceuid, oid)
+        if ok:
+            logger.info("warm_series: rebuilt DICOMweb metadata cache", extra=log_extra)
+        else:
+            logger.warning(
+                "warm_series: DICOMweb metadata cache rebuild did not yield a "
+                "non-empty result — OHIF may still fail on this series",
+                extra=log_extra,
+            )
+    except Exception:  # pragma: no cover - defensive
+        logger.exception(
+            "warm_series: DICOMweb metadata cache repair raised", extra=log_extra
+        )
 
 
 def effective_status_sql(alias: str = "cs.") -> str:
@@ -746,6 +786,11 @@ def _warm_one_series(cur, conn, seriesinstanceuid: str, row: dict[str, Any] | No
             (seriesinstanceuid,),
         )
         conn.commit()
+        # Files are on disk: repair a cache poisoned before this series was
+        # ever warmed (already-hot series can carry one just as cold ones do).
+        _repair_metadata_cache(
+            seriesinstanceuid, (row or {}).get("studyinstanceuid"), log_extra
+        )
         return {"ok": True, "already_hot": True, "extract_seconds": 0.0}
 
     if not archive or not archive.is_file():
@@ -811,6 +856,12 @@ def _warm_one_series(cur, conn, seriesinstanceuid: str, row: dict[str, Any] | No
         (dir_path, seriesinstanceuid),
     )
     conn.commit()
+    # The series is hot and its files are on disk — the only moment the
+    # DICOMweb metadata cache can be built correctly. Repair it if it was
+    # poisoned (empty array) by an eviction-time computation.
+    _repair_metadata_cache(
+        seriesinstanceuid, (row or {}).get("studyinstanceuid"), log_extra
+    )
     logger.info("warm_series: hot (extract_seconds=%.2f)", secs, extra=log_extra)
     return {"ok": True, "extract_seconds": secs}
 
@@ -834,7 +885,8 @@ def warm_series(series_uids: list[str]) -> dict[str, Any]:
     cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
     try:
         cur.execute(
-            "SELECT seriesinstanceuid, dicom_dir_path, dicom_archive_path "
+            "SELECT seriesinstanceuid, studyinstanceuid, dicom_dir_path, "
+            "dicom_archive_path "
             "FROM image_series WHERE seriesinstanceuid = ANY(%s)",
             (list(series_uids),),
         )
@@ -953,21 +1005,44 @@ def evict_series(series_uids: list[str]) -> dict[str, Any]:
         # Phase 1: filesystem deletion. Don't touch the DB until every path is
         # gone — a partial filesystem with deleted cache rows is the orphan state
         # we are preventing.
-        for row in rows:
-            dp = row.get("dicom_dir_path")
-            if not dp:
-                continue
-            p = Path(dp)
-            if not p.exists():
-                continue
-            try:
-                shutil.rmtree(p)
-            except Exception as rm_err:
-                logger.exception(
-                    "evict_series: rmtree failed for %s: %s — leaving cache rows intact",
-                    p, rm_err, extra=_log_extra_series(row["seriesinstanceuid"]),
-                )
-                raise
+        #
+        # Each rmtree runs under the same per-series advisory lock warm_series
+        # takes, so an evict cannot race a concurrent warm of the same series
+        # (both rmtree the series dir; whoever loses the final rmdir() sees
+        # ENOENT). One lock at a time, released immediately — same discipline as
+        # warm_series, so the two can never deadlock against each other.
+        lock_cur = conn.cursor()
+        try:
+            for row in rows:
+                dp = row.get("dicom_dir_path")
+                if not dp:
+                    continue
+                suid = row["seriesinstanceuid"]
+                _advisory_lock(lock_cur, suid)
+                try:
+                    p = Path(dp)
+                    if not p.exists():
+                        continue
+                    try:
+                        shutil.rmtree(p)
+                    except FileNotFoundError:
+                        # The tree vanished under us. Eviction's goal state is
+                        # "files are gone", and they are — this is a no-op, not a
+                        # failure. Aborting here would strand the cache rows.
+                        logger.info(
+                            "evict_series: %s already gone — treating as evicted",
+                            p, extra=_log_extra_series(suid),
+                        )
+                    except Exception as rm_err:
+                        logger.exception(
+                            "evict_series: rmtree failed for %s: %s — leaving cache rows intact",
+                            p, rm_err, extra=_log_extra_series(suid),
+                        )
+                        raise
+                finally:
+                    _advisory_unlock(lock_cur, suid)
+        finally:
+            lock_cur.close()
 
         # Phase 2: DB delete. Single transaction.
         with conn.cursor() as cur:

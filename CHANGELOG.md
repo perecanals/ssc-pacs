@@ -34,6 +34,32 @@
 - Internal: the built-in cell renderer, previously duplicated across `index.jsx`
   and both tables in `ChildRows.jsx`, is extracted to `DataTable/BuiltinCell.jsx`.
 
+## v1.5 — 2026-07-13
+
+- **Fix**: series ingested directly into `cold_path_cache` could become
+  permanently unopenable in OHIF (endless loading spinner). Orthanc's DICOMweb
+  plugin builds each series' WADO-RS metadata cache by *reading the DICOM
+  files*, in a background worker that fires when the series goes stable —
+  but ingestion deleted the loose files as soon as the indexer had registered
+  them, with no grace period. Series that lost that race got an empty metadata
+  cache, which never expires (the index still points at the absent files by
+  design, `RemoveMissingFiles: false`), so every later metadata request
+  returned HTTP 400. It hit ~55% of the July CRISP2/LVO batch (19,658 series /
+  342 patients); the legacy→cold migration cohort was unaffected because its
+  files sat on disk while the cache was built.
+- `scripts/cold_storage/cleanup_loose_dicoms.py` gains safety check 5: loose
+  DICOMs are not deleted until Orthanc has built a non-empty metadata cache for
+  the series (`--metadata-cache-timeout`, default 120s). Guards both the
+  ingestion pipeline and the manual CLI. `orthanc.json` sets `"StableAge": 10`
+  (was Orthanc's 60s default) so that wait is short — **requires an Orthanc
+  restart**.
+- `cache_manager.warm_series` now rebuilds a poisoned metadata cache whenever a
+  series is warmed, so any affected series self-heals the first time it is
+  opened.
+- **New**: `scripts/data_integrity/repair_dicomweb_metadata_cache.py` — repairs
+  the existing backlog (warm → rebuild → evict, batched; dry-run by default,
+  `--hot-only` repairs already-warm series at no extraction cost).
+
 ## v1.4 — 2026-07-13
 
 - **Schema** (Alembic `0015_series_classification`, one revision): new `series_dicom_tags` table — one row per

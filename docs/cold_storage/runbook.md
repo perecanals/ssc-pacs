@@ -423,6 +423,49 @@ the DataTable never see a raw cold error.
 
 ---
 
+## Repairing a poisoned DICOMweb metadata cache (OHIF spins forever)
+
+**Symptom:** OHIF hangs on the loading logo for a series, and
+`GET /dicom-web/studies/{s}/series/{s}/metadata` returns **HTTP 400**
+(`The series metadata json does not contain an array`). The series is fine on
+disk and warms normally — only the metadata is broken.
+
+**Cause:** Orthanc cached that series' metadata while its files were evicted, so
+it cached an empty array, permanently. See the metadata-cache invariant in
+`design.md`. Prevention is in place (cleanup won't delete loose files before the
+cache exists), but pre-existing damage needs repairing.
+
+Find and repair it:
+
+```bash
+# How many series are affected? (report only — no warming, no writes)
+python scripts/data_integrity/repair_dicomweb_metadata_cache.py
+
+# Repair series that are already warm — no extraction, effectively free
+python scripts/data_integrity/repair_dicomweb_metadata_cache.py --execute --hot-only
+
+# Repair everything (warm -> rebuild -> evict, batched; slow, do it when idle)
+python scripts/data_integrity/repair_dicomweb_metadata_cache.py --execute
+
+# Scope it
+python scripts/data_integrity/repair_dicomweb_metadata_cache.py --execute --patient 4-0743
+```
+
+Safe to interrupt and re-run — it re-discovers what is still broken each time.
+Series that were already warm are left warm; only ones the script warmed itself
+are evicted again. A single affected series also self-heals the next time a user
+warms it (`cache_manager` rebuilds the cache on warm).
+
+Spot-check one series by hand:
+
+```bash
+# 57 bytes == the poisoned empty-array form; a healthy cache is >1 KB
+curl -su "$ORTHANC_ADMIN_USER:$ORTHANC_ADMIN_PASSWORD" \
+  "http://localhost:8042/series/<orthanc-series-id>/attachments/4301/info"
+```
+
+---
+
 ## Repairing stale index entries (duplicate-path rot)
 
 Because the patched indexer runs with `"RemoveMissingFiles": false`, it never

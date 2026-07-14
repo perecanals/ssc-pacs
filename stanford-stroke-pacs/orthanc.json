@@ -10,6 +10,8 @@
   "DicomServerEnabled": true,
   "DicomPort": 4242,
   "DicomAet": "SSC",
+  "_comment_StableAge": "Seconds of inactivity before a series is 'stable'. The DICOMweb plugin builds its series metadata cache on that event, by reading the DICOM files - and ingestion must not delete a series' loose files until it has. Lowered from Orthanc's 60s default so that wait is short.",
+  "StableAge": 10,
   "Indexer": {
     "Enable": true,
     "Folders": [],
