@@ -210,9 +210,12 @@ export default function useTableData({
   // top. Only a change in the effective query (filter/sort/level/columnFilter)
   // resets; everything else goes through reload(), which replaces in place.
   const querySig = `${config.endpoint}?${buildParams(1)}`;
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
     reset();
+    // Deliberately keyed on querySig only (see note above); reset's identity
+    // must not re-trigger. Disable sits on the deps line so prettier's
+    // multi-line formatting keeps it aligned with the reported warning.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [querySig]);
 
   return {
