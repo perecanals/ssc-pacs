@@ -50,7 +50,7 @@ Usage:
   python scripts/data_integrity/repair_dicomweb_metadata_cache.py --execute --hot-only
 
   # Scope it
-  python scripts/data_integrity/repair_dicomweb_metadata_cache.py --execute --patient 4-0743
+  python scripts/data_integrity/repair_dicomweb_metadata_cache.py --execute --patient <patient-id>
   python scripts/data_integrity/repair_dicomweb_metadata_cache.py --execute --limit 500
 """
 

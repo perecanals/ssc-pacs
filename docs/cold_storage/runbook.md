@@ -222,7 +222,7 @@ conda activate ssc-pacs
 python scripts/cold_storage/cleanup_loose_dicoms.py
 
 # Limit to one patient for an initial test
-python scripts/cold_storage/cleanup_loose_dicoms.py --patient 4-0551
+python scripts/cold_storage/cleanup_loose_dicoms.py --patient <patient-id>
 
 # Actually delete
 python scripts/cold_storage/cleanup_loose_dicoms.py --execute
@@ -448,7 +448,7 @@ python scripts/data_integrity/repair_dicomweb_metadata_cache.py --execute --hot-
 python scripts/data_integrity/repair_dicomweb_metadata_cache.py --execute
 
 # Scope it
-python scripts/data_integrity/repair_dicomweb_metadata_cache.py --execute --patient 4-0743
+python scripts/data_integrity/repair_dicomweb_metadata_cache.py --execute --patient <patient-id>
 ```
 
 Safe to interrupt and re-run — it re-discovers what is still broken each time.
@@ -491,11 +491,11 @@ stale rows for studies that are currently cold, while leaving their *valid*
 conda activate ssc-pacs
 
 # Report only (default). One patient, or all.
-python scripts/cold_storage/prune_stale_index_paths.py --patient 24-012
+python scripts/cold_storage/prune_stale_index_paths.py --patient <patient-id>
 python scripts/cold_storage/prune_stale_index_paths.py --json   # all patients + JSON report
 
 # Apply. Briefly STOPS Orthanc, backs up the index DB, deletes stale rows, restarts.
-python scripts/cold_storage/prune_stale_index_paths.py --patient 24-012 --execute --yes
+python scripts/cold_storage/prune_stale_index_paths.py --patient <patient-id> --execute --yes
 python scripts/cold_storage/prune_stale_index_paths.py --execute            # global
 ```
 

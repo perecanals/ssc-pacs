@@ -30,7 +30,7 @@ series before cleanup, or a sandbox copy):
 
 ```bash
 python scripts/dicom/dicom_to_nifti.py \
-    --dir <dicom_data_root>/4-0551/1.2.../AX_T2_FLAIR/1.2.../DICOM \
+    --dir <dicom_data_root>/<patient-id>/1.2.../AX_T2_FLAIR/1.2.../DICOM \
     --out /tmp/ax_t2_flair.nii.gz
 ```
 
@@ -44,7 +44,7 @@ a backup host with no PostgreSQL or Orthanc available:
 
 ```bash
 python scripts/dicom/dicom_to_nifti.py \
-    --archive <cold_archive_root>/4-0551/1.2.../AX_T2_FLAIR/1.2.../DICOM.tar.zst \
+    --archive <cold_archive_root>/<patient-id>/1.2.../AX_T2_FLAIR/1.2.../DICOM.tar.zst \
     --out /tmp/ax_t2_flair.nii.gz
 ```
 
@@ -58,11 +58,11 @@ The most common case. Gives the series UID, lets the script find the files:
 
 ```bash
 # Error if the study is currently cold
-python scripts/dicom/dicom_to_nifti.py --series-uid 1.2.826.0.1.3680043.8.498.28617545145905959508444948339234956099
+python scripts/dicom/dicom_to_nifti.py --series-uid <series-uid>
 
 # Warm the study first (study-scoped; sibling series come along for the ride)
 python scripts/dicom/dicom_to_nifti.py \
-    --series-uid 1.2.826.0.1.3680043.8.498.28617545145905959508444948339234956099 \
+    --series-uid <series-uid> \
     --warm-if-cold
 ```
 
@@ -117,7 +117,7 @@ python scripts/cold_storage/list_unarchived_series.py
 python scripts/cold_storage/list_unarchived_series.py --count
 
 # Filter by patient
-python scripts/cold_storage/list_unarchived_series.py --patient 4-0551
+python scripts/cold_storage/list_unarchived_series.py --patient <patient-id>
 
 # Filter by import label (the batch tag from execute_image_ingestion_protocol.yaml)
 python scripts/cold_storage/list_unarchived_series.py --import-label "2026-04-batch"
@@ -127,7 +127,7 @@ Fix: rerun the idempotent archiver against the affected patient(s) (dry-run is
 the default — add `--execute` to actually compress):
 
 ```bash
-python scripts/cold_storage/archive_all_series.py --execute --patient 4-0551
+python scripts/cold_storage/archive_all_series.py --execute --patient <patient-id>
 ```
 
 `scripts/cold_storage/archive_all_series.py` filters by `dicom_dir_path IS NOT NULL` (not by
@@ -154,7 +154,7 @@ python scripts/cold_storage/cleanup_loose_dicoms.py
 python scripts/cold_storage/cleanup_loose_dicoms.py --execute
 
 # Scope to one patient
-python scripts/cold_storage/cleanup_loose_dicoms.py --execute --patient 4-0551
+python scripts/cold_storage/cleanup_loose_dicoms.py --execute --patient <patient-id>
 
 # Skip the per-archive file-count check (faster; relies on Orthanc presence alone)
 python scripts/cold_storage/cleanup_loose_dicoms.py --execute --no-deep-verify

@@ -39,10 +39,10 @@ Usage
   python scripts/cold_storage/prune_stale_index_paths.py
 
   # Report a single patient
-  python scripts/cold_storage/prune_stale_index_paths.py --patient 24-012
+  python scripts/cold_storage/prune_stale_index_paths.py --patient <patient-id>
 
   # Apply for one patient (brief Orthanc restart)
-  python scripts/cold_storage/prune_stale_index_paths.py --patient 24-012 --execute --yes
+  python scripts/cold_storage/prune_stale_index_paths.py --patient <patient-id> --execute --yes
 
   # Apply globally
   python scripts/cold_storage/prune_stale_index_paths.py --execute

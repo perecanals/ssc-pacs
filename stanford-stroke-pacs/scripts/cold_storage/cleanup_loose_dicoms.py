@@ -25,7 +25,7 @@ Usage:
   python scripts/cleanup_loose_dicoms.py --execute
 
   # Limit to one patient
-  python scripts/cleanup_loose_dicoms.py --execute --patient 4-0551
+  python scripts/cleanup_loose_dicoms.py --execute --patient <patient-id>
 
   # Limit to specific ingestion runs (image_series.import_label)
   python scripts/cleanup_loose_dicoms.py --execute --import-label sir_batch1 --import-label sir_batch2

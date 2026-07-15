@@ -22,8 +22,7 @@ This is strictly **read-only**: it opens the DB and Orthanc for SELECT/lookup
 only and never writes disk, Postgres, or the Orthanc index.
 
 Usage:
-  python scripts/data_integrity/detect_mixed_dirs.py                 # default suspect patients
-  python scripts/data_integrity/detect_mixed_dirs.py --patients 2-541,2-506
+  python scripts/data_integrity/detect_mixed_dirs.py --patients <id1>,<id2>
   python scripts/data_integrity/detect_mixed_dirs.py --all           # every patient on disk (slow)
   python scripts/data_integrity/detect_mixed_dirs.py --show-clean    # also list clean dirs
 """
@@ -49,8 +48,6 @@ from db import DB_CONFIG  # noqa: E402
 from orthanc_client import ORTHANC_PASS, ORTHANC_URL, ORTHANC_USER  # noqa: E402
 
 from config import DICOM_DATA_ROOT  # noqa: E402
-
-DEFAULT_PATIENTS = ["2-541", "2-516", "2-506", "2-502", "2-528", "2-488"]
 
 
 def _dir_files(dicom_dir: str) -> list[str]:
@@ -129,8 +126,8 @@ def main() -> int:
     ap = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     g = ap.add_mutually_exclusive_group()
-    g.add_argument("--patients", default=",".join(DEFAULT_PATIENTS),
-                   help="Comma-separated patient_ids to scan")
+    g.add_argument("--patients",
+                   help="Comma-separated patient_ids to scan (required unless --all)")
     g.add_argument("--all", action="store_true",
                    help="Scan every patient dir present under dicom_data_root (slow)")
     ap.add_argument("--show-clean", action="store_true",
@@ -142,8 +139,10 @@ def main() -> int:
     root = str(DICOM_DATA_ROOT)
     if args.all:
         patients = sorted(e.name for e in os.scandir(root) if e.is_dir())
-    else:
+    elif args.patients:
         patients = [p.strip() for p in args.patients.split(",") if p.strip()]
+    else:
+        ap.error("provide --patients <id,...> or --all")
 
     session = None if args.no_orthanc else requests.Session()
     if session is not None:

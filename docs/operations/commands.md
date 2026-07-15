@@ -475,7 +475,7 @@ python scripts/cold_storage/backfill_storage_sizes.py --label my_batch --workers
 
 # Triage series with loose files but no archive (compression failures)
 python scripts/cold_storage/list_unarchived_series.py --count
-python scripts/cold_storage/list_unarchived_series.py --patient 4-0551
+python scripts/cold_storage/list_unarchived_series.py --patient <patient-id>
 
 # Delete loose DICOMs that are safe to remove (archive exists + Orthanc indexed)
 python scripts/cold_storage/cleanup_loose_dicoms.py                  # dry-run
@@ -502,11 +502,11 @@ Repair stale Orthanc index entries (duplicate-path rot that makes OHIF panes bla
 
 ```bash
 # Report only (default)
-python scripts/cold_storage/prune_stale_index_paths.py --patient 24-012
+python scripts/cold_storage/prune_stale_index_paths.py --patient <patient-id>
 python scripts/cold_storage/prune_stale_index_paths.py --json        # all patients
 
 # Apply (briefly stops Orthanc, backs up the index DB, restarts)
-python scripts/cold_storage/prune_stale_index_paths.py --patient 24-012 --execute --yes
+python scripts/cold_storage/prune_stale_index_paths.py --patient <patient-id> --execute --yes
 python scripts/cold_storage/prune_stale_index_paths.py --execute      # global
 ```
 

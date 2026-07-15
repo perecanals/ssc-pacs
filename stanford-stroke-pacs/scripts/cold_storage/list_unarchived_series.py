@@ -9,7 +9,7 @@ Use to triage compression failures. Retry with:
 
 Usage:
     python scripts/list_unarchived_series.py
-    python scripts/list_unarchived_series.py --patient 4-0551
+    python scripts/list_unarchived_series.py --patient <patient-id>
     python scripts/list_unarchived_series.py --import-label "2026-04-batch"
     python scripts/list_unarchived_series.py --count        # just print the total
 """
