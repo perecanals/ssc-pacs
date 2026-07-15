@@ -1,5 +1,24 @@
 # Changelog
 
+## v1.9 — 2026-07-15
+
+- Sidebar quick filters now cascade into the expanded subtables. Picking an Auto
+  Classification value (e.g. Auto Series Type `CTA`, Auto Timepoint `BL`) or a
+  select-value annotation label narrows the study/series sub-rows too, not just
+  the top-level list: a series-level pick keeps only the studies that have a
+  matching series and, within them, only the matching series; a study-level pick
+  keeps only the matching studies. The sub-row endpoints
+  (`/api/patients/{id}/studies`, `/api/studies/{uid}/series`) gained the same
+  `series_type` / `timepoint` / `label_filters` params as the flat list endpoints
+  and reuse their match logic. No migration.
+- Forced first-login password change no longer asks for the temporary password.
+  The user has just signed in with it, so `/change-password` only requires the
+  new password (which must still differ from the temp one); a later *voluntary*
+  change still requires the current password. No migration.
+- Fixed the Status/Action column's row-separator line not aligning with the other
+  columns (the action cells were flex containers, dropping out of the table's
+  row-height sync).
+
 ## v1.8 — 2026-07-15
 
 - **Feature**: episode-aware study timepoints (`rules-v3`). A patient's studies
