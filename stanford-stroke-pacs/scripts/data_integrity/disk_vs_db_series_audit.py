@@ -21,8 +21,7 @@ backfill of already-in-place files must be done with a dedicated, write-scoped
 upsert (NOT this protocol), and only after the DRIFT rows below are understood.
 
 Usage:
-  python scripts/data_integrity/disk_vs_db_series_audit.py                 # default patients
-  python scripts/data_integrity/disk_vs_db_series_audit.py --patients 2-541,2-506
+  python scripts/data_integrity/disk_vs_db_series_audit.py --patients <id1>,<id2>
   python scripts/data_integrity/disk_vs_db_series_audit.py --all           # every patient with on-disk files
 """
 
@@ -44,8 +43,6 @@ sys.path.insert(0, str(REPO_ROOT / "web-app"))
 from db import DB_CONFIG  # noqa: E402
 
 from config import DICOM_DATA_ROOT  # noqa: E402
-
-DEFAULT_PATIENTS = ["2-541", "2-516", "2-506", "2-502", "2-528", "2-488"]
 
 
 def scan_patient_series(patient_root: str) -> dict[str, dict]:
@@ -95,8 +92,8 @@ def main() -> int:
     ap = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     g = ap.add_mutually_exclusive_group()
-    g.add_argument("--patients", default=",".join(DEFAULT_PATIENTS),
-                   help="Comma-separated patient_ids to scan")
+    g.add_argument("--patients",
+                   help="Comma-separated patient_ids to scan (required unless --all)")
     g.add_argument("--all", action="store_true",
                    help="Scan every patient dir present under dicom_data_root")
     args = ap.parse_args()
@@ -104,8 +101,10 @@ def main() -> int:
     root = str(DICOM_DATA_ROOT)
     if args.all:
         patients = sorted(e.name for e in os.scandir(root) if e.is_dir())
-    else:
+    elif args.patients:
         patients = [p.strip() for p in args.patients.split(",") if p.strip()]
+    else:
+        ap.error("provide --patients <id,...> or --all")
 
     conn = psycopg2.connect(**DB_CONFIG)
     print(f"READ-ONLY scan  dicom_data_root={root}  patients={len(patients)}")

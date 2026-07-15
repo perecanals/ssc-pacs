@@ -537,7 +537,7 @@ conda activate ssc-pacs
 python scripts/cold_storage/cleanup_loose_dicoms.py
 
 # Limit to one patient
-python scripts/cold_storage/cleanup_loose_dicoms.py --patient 4-0551
+python scripts/cold_storage/cleanup_loose_dicoms.py --patient <patient-id>
 
 # Actually delete
 python scripts/cold_storage/cleanup_loose_dicoms.py --execute
