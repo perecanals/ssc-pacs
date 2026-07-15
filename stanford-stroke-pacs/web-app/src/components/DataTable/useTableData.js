@@ -5,6 +5,8 @@ import {
   normalizeSelectFilterValues,
   hasFilterValue,
   getTextFilterValue,
+  appendAutoValueParams,
+  buildLabelFiltersFromValues,
 } from "../../utils/table";
 
 // Infinite-scroll data hook. Rows accumulate across offset pages as the caller
@@ -97,42 +99,14 @@ export default function useTableData({
       // Sidebar select-value quick filters live in filters.labelValues, keyed by
       // "<level>:<label>". Merge them into the same label_filters channel; union
       // with any column-header filter already set for the same label+level.
-      if (filters.labelValues && typeof filters.labelValues === "object") {
-        for (const [key, raw] of Object.entries(filters.labelValues)) {
-          const values = normalizeSelectFilterValues(raw);
-          if (values.length === 0) continue;
-          const sep = key.indexOf(":");
-          if (sep < 1) continue;
-          const lvl = key.slice(0, sep);
-          const label = key.slice(sep + 1);
-          const existing = labelFilters.find(
-            (f) =>
-              f.datatype === "select" && f.label === label && f.level === lvl,
-          );
-          if (existing) {
-            existing.values = [...new Set([...existing.values, ...values])];
-          } else {
-            labelFilters.push({
-              label,
-              level: lvl,
-              values,
-              datatype: "select",
-            });
-          }
-        }
-      }
+      buildLabelFiltersFromValues(filters.labelValues, labelFilters);
       if (labelFilters.length > 0) {
         params.set("label_filters", JSON.stringify(labelFilters));
       }
       // Auto-column sidebar quick filters, as repeated params the API ORs
       // (?series_type=NCCT&series_type=CTA). Appended, not set, so they union
       // with any column-header filter already set on the same field.
-      if (filters.autoValues && typeof filters.autoValues === "object") {
-        for (const [field, raw] of Object.entries(filters.autoValues)) {
-          for (const v of normalizeSelectFilterValues(raw))
-            params.append(field, v);
-        }
-      }
+      appendAutoValueParams(params, filters.autoValues);
       return params;
     },
     [level, config, filters, sortBy, sortDir, columnFilters, allCols],

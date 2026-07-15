@@ -25,6 +25,7 @@ import {
   LEVEL_CONFIG,
   buildBuiltinColumnCatalog,
   buildPatientStudiesUrl,
+  appendCascadeFilters,
   isNarrowCol,
   normalizeSelectFilterValues,
 } from "../../utils/table";
@@ -215,11 +216,21 @@ function DataTableInner({
   }, []);
   const canWarm = storageMode === "cold_path_cache" && !!currentUser;
 
+  // Cascadable sidebar filters (import label + Auto columns + select-value
+  // labels) now flow into the subtable fetches, so cached expansion state goes
+  // stale when they change — drop it so the next expand refetches. Serialized
+  // because autoValues/labelValues are objects and can't be effect deps directly.
+  const cascadeSig = JSON.stringify({
+    sil: filters.studyImportLabel || "",
+    auto: filters.autoValues || {},
+    labels: filters.labelValues || {},
+  });
   useEffect(() => {
-    if (level !== "patient") return;
     setChildRowsData({});
     setExpanded({});
-  }, [level, filters.studyImportLabel]);
+    setGrandChildRows({});
+    setGrandExpanded({});
+  }, [level, cascadeSig]);
 
   const childConfig = config.expandable
     ? LEVEL_CONFIG[config.childLevel]
@@ -297,8 +308,8 @@ function DataTableInner({
       if (row && config.expandEndpoint) {
         const url =
           level === "patient"
-            ? buildPatientStudiesUrl(row, filters.studyImportLabel)
-            : config.expandEndpoint(row);
+            ? buildPatientStudiesUrl(row, filters)
+            : appendCascadeFilters(config.expandEndpoint(row), filters);
         apiGet(url)
           .then((data) =>
             setChildRowsData((prev) => ({ ...prev, [rowId]: data })),
@@ -315,7 +326,9 @@ function DataTableInner({
           (c) => c[childConfig.idCol] === childId,
         );
         if (child) {
-          apiGet(childConfig.expandEndpoint(child))
+          apiGet(
+            appendCascadeFilters(childConfig.expandEndpoint(child), filters),
+          )
             .then((data) =>
               setGrandChildRows((prev) => ({ ...prev, [gcKey]: data })),
             )
@@ -400,8 +413,8 @@ function DataTableInner({
     if (!childRowsData[rowId]) {
       const url =
         level === "patient"
-          ? buildPatientStudiesUrl(row, filters.studyImportLabel)
-          : config.expandEndpoint(row);
+          ? buildPatientStudiesUrl(row, filters)
+          : appendCascadeFilters(config.expandEndpoint(row), filters);
       try {
         const d = await apiGet(url);
         setChildRowsData((p) => ({ ...p, [rowId]: d }));
@@ -419,7 +432,9 @@ function DataTableInner({
     setGrandExpanded((p) => ({ ...p, [key]: true }));
     if (!grandChildRows[key]) {
       try {
-        const d = await apiGet(childConfig.expandEndpoint(childRow));
+        const d = await apiGet(
+          appendCascadeFilters(childConfig.expandEndpoint(childRow), filters),
+        );
         setGrandChildRows((p) => ({ ...p, [key]: d }));
       } catch {
         setGrandChildRows((p) => ({ ...p, [key]: [] }));

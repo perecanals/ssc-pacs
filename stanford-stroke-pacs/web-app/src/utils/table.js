@@ -296,11 +296,61 @@ export function formatNumber(v) {
   return Number.isNaN(n) ? v : Math.round(n * 100) / 100;
 }
 
-export function buildPatientStudiesUrl(row, studyImportLabel) {
-  const base = `/api/patients/${encodeURIComponent(row.patient_id)}/studies`;
-  const v = typeof studyImportLabel === "string" ? studyImportLabel.trim() : "";
-  if (!v) return base;
-  return `${base}?study_import_label=${encodeURIComponent(v)}`;
+// Auto-column sidebar quick filters (filters.autoValues, keyed by API field
+// e.g. series_type / timepoint) as repeated params the API ORs. Mutates params.
+export function appendAutoValueParams(params, autoValues) {
+  if (!autoValues || typeof autoValues !== "object") return;
+  for (const [field, raw] of Object.entries(autoValues)) {
+    for (const v of normalizeSelectFilterValues(raw)) params.append(field, v);
+  }
+}
+
+// Sidebar select-value quick filters (filters.labelValues, keyed by
+// "<level>:<label>") merged into the label_filters channel. Unions into
+// `existing` so callers can combine with column-header filters already built.
+// Returns the (mutated) array.
+export function buildLabelFiltersFromValues(labelValues, existing = []) {
+  if (!labelValues || typeof labelValues !== "object") return existing;
+  for (const [key, raw] of Object.entries(labelValues)) {
+    const values = normalizeSelectFilterValues(raw);
+    if (values.length === 0) continue;
+    const sep = key.indexOf(":");
+    if (sep < 1) continue;
+    const lvl = key.slice(0, sep);
+    const label = key.slice(sep + 1);
+    const match = existing.find(
+      (f) => f.datatype === "select" && f.label === label && f.level === lvl,
+    );
+    if (match) {
+      match.values = [...new Set([...match.values, ...values])];
+    } else {
+      existing.push({ label, level: lvl, values, datatype: "select" });
+    }
+  }
+  return existing;
+}
+
+// Append the cascadable sidebar quick filters (autoValues + labelValues) to an
+// expand-endpoint URL, so subtable fetches mirror the top-level filter. Coexists
+// with any query string already on baseUrl (e.g. study_import_label).
+export function appendCascadeFilters(baseUrl, filters) {
+  const params = new URLSearchParams();
+  appendAutoValueParams(params, filters?.autoValues);
+  const lf = buildLabelFiltersFromValues(filters?.labelValues);
+  if (lf.length > 0) params.set("label_filters", JSON.stringify(lf));
+  const qs = params.toString();
+  if (!qs) return baseUrl;
+  return baseUrl + (baseUrl.includes("?") ? "&" : "?") + qs;
+}
+
+export function buildPatientStudiesUrl(row, filters) {
+  let base = `/api/patients/${encodeURIComponent(row.patient_id)}/studies`;
+  const v =
+    typeof filters?.studyImportLabel === "string"
+      ? filters.studyImportLabel.trim()
+      : "";
+  if (v) base += `?study_import_label=${encodeURIComponent(v)}`;
+  return appendCascadeFilters(base, filters);
 }
 
 export function normalizeSelectFilterValues(value) {

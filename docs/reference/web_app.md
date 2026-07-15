@@ -294,6 +294,17 @@ for *patients who have an NCCT_1 series and a THROMBECTOMY study* and get the
 patient list back. A sidebar pick widens (rather than replaces) any column-header
 filter already set on the same field.
 
+These Auto filters — and the select-value annotation-label sidebar filters —
+also **cascade into the expanded subtables**, so a drilled-in row shows only the
+children that match. Picking a study-level value (e.g. Auto Timepoint *BL*) shows
+only the BL studies under an expanded patient; picking a series-level value (e.g.
+Auto Series Type *CTA*) shows only the studies that **have** a CTA series and,
+within each, only the CTA series. The subtable fetches (`/api/patients/{id}/studies`,
+`/api/studies/{uid}/series`) carry the same `series_type` / `timepoint` /
+`label_filters` params as the flat browsing endpoints and reuse the same match
+logic, so a subtable stays consistent with the top-level list. Changing a
+cascading filter drops cached expansion state so the next expand refetches.
+
 ---
 
 ## 6. OHIF Integration Behavior

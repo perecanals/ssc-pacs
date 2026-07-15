@@ -156,6 +156,12 @@ The Navigator page is decomposed into focused React components:
     to show series. Expansion is triggered by clicking anywhere in the row.
   - **Nested expansion**: When viewing patients, expanded study sub-rows can
     further expand to reveal series (three-level nesting).
+  - **Filter cascade into subtables**: expand fetches carry the cascadable
+    sidebar quick filters (import label, the Auto `series_type` / `timepoint`
+    columns, and select-value annotation labels) via `appendCascadeFilters`
+    (`utils/table.js`), so subtables show only matching children. Changing any
+    of these filters clears cached expansion state (`childRowsData` / `expanded`
+    / `grandChildRows` / `grandExpanded`) so the next expand refetches.
   - **Embedded preview coordination**: Study and series row clicks can drive an
     embedded OHIF preview pane. The most recently selected study/series row is
     visually highlighted.
