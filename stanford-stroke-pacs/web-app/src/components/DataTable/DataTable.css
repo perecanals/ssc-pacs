@@ -285,10 +285,17 @@
 }
 
 .dt__td--actions {
-  @apply px-3 border-b border-border whitespace-nowrap align-middle flex items-center gap-2;
+  @apply px-3 border-b border-border whitespace-nowrap align-middle;
   font-size: calc(0.875rem * var(--dt-font-scale, 1));
   line-height: 1.4;
   padding-block: 0.32em;
+}
+
+/* Lay the action buttons out in a row without turning the <td> itself into a
+   flex container — a flex cell drops out of the table's row-height sync and
+   its bottom border no longer lines up with the sibling columns. */
+.dt__actions-inner {
+  @apply flex items-center gap-2;
 }
 
 /* Narrow columns (Patient ID, Stroke Date): trim padding and let the cell
@@ -409,7 +416,7 @@
 }
 
 .dt__child-td--actions {
-  @apply px-3 border-b border-border/60 whitespace-nowrap align-middle flex items-center gap-2;
+  @apply px-3 border-b border-border/60 whitespace-nowrap align-middle;
   font-size: calc(0.75rem * var(--dt-font-scale, 1));
   line-height: 1.4;
   padding-block: 0.32em;
@@ -483,10 +490,15 @@
 }
 
 .dt__gc-td--actions {
-  @apply px-3 border-b border-border/30 whitespace-nowrap align-middle flex items-center gap-1.5;
+  @apply px-3 border-b border-border/30 whitespace-nowrap align-middle;
   font-size: calc(0.6875rem * var(--dt-font-scale, 1));
   line-height: 1.4;
   padding-block: 0.32em;
+}
+
+/* Tighter gap for the denser grandchild action row (was gap-1.5). */
+.dt__actions-inner--tight {
+  @apply gap-1.5;
 }
 
 .dt__gc-link-btn {

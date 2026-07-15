@@ -782,7 +782,9 @@ function DataTableInner({
                           className="dt__td--actions"
                           onClick={(e) => e.stopPropagation()}
                         >
-                          {renderActions(row, level)}
+                          <div className="dt__actions-inner">
+                            {renderActions(row, level)}
+                          </div>
                         </td>
                       )}
                     </tr>
