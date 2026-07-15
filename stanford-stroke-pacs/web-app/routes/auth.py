@@ -27,7 +27,10 @@ class LoginRequest(BaseModel):
 
 
 class ChangePasswordRequest(BaseModel):
-    current_password: str
+    # Optional: not required on the forced first-login change (the user just
+    # authenticated with the admin-issued temp password). A voluntary change
+    # still supplies and verifies it — see change_password.
+    current_password: str = ""
     new_password: str
 
 
@@ -107,31 +110,49 @@ def change_password(
 ):
     """Set a new password for the current user.
 
-    Verifies ``current_password`` against the stored bcrypt hash so a stolen
-    cookie alone cannot rotate the credential. Clears ``must_change_password``
-    on success.
+    On the forced first-login change (``must_change_password`` TRUE) the current
+    password is not required — the user has just authenticated with the
+    admin-issued temp password, so re-typing it adds nothing. A voluntary change
+    still verifies ``current_password`` against the stored bcrypt hash so a
+    stolen cookie alone cannot rotate an established credential. Clears
+    ``must_change_password`` on success.
     """
     if len(body.new_password) < MIN_PASSWORD_LENGTH:
         raise HTTPException(
             status_code=422,
             detail=f"New password must be at least {MIN_PASSWORD_LENGTH} characters",
         )
-    if body.new_password == body.current_password:
-        raise HTTPException(
-            status_code=422,
-            detail="New password must differ from the current password",
-        )
 
     conn = get_conn()
     try:
         with conn.cursor() as cur:
             cur.execute(
-                "SELECT password_hash FROM users WHERE username = %s",
+                "SELECT password_hash, must_change_password FROM users WHERE username = %s",
                 (user,),
             )
             row = cur.fetchone()
-        if not row or not bcrypt.checkpw(body.current_password.encode(), row[0].encode()):
+        if not row:
             raise HTTPException(status_code=401, detail="Current password is incorrect")
+        stored_hash, must_change = row[0], bool(row[1])
+
+        if must_change:
+            # No current-password check; still forbid re-setting the same
+            # (temp) password so the forced change is meaningful.
+            if bcrypt.checkpw(body.new_password.encode(), stored_hash.encode()):
+                raise HTTPException(
+                    status_code=422,
+                    detail="New password must differ from the current password",
+                )
+        else:
+            if not bcrypt.checkpw(body.current_password.encode(), stored_hash.encode()):
+                raise HTTPException(
+                    status_code=401, detail="Current password is incorrect"
+                )
+            if body.new_password == body.current_password:
+                raise HTTPException(
+                    status_code=422,
+                    detail="New password must differ from the current password",
+                )
 
         new_hash = bcrypt.hashpw(body.new_password.encode(), bcrypt.gensalt()).decode()
         with conn.cursor() as cur:
