@@ -1,5 +1,29 @@
 # Changelog
 
+## v1.8 — 2026-07-15
+
+- **Feature**: episode-aware study timepoints (`rules-v3`). A patient's studies
+  are split into episodes (a >45-day inter-study gap starts a new one) and each
+  episode is anchored independently. Fixes the `11-*` multi-episode cohort, whose
+  two distinct stroke episodes were previously scored against a single clinical
+  anchor — a whole episode mislabelled `BL` with `hours_to_event` in the tens of
+  thousands. New `image_study.episode` column.
+- Episodes with no clinical anchor (non-LVO patients, and the second episode of a
+  multi-episode patient) now fall back to the episode's own `THROMBECTOMY` study
+  acquisition time (`timepoint_anchor_source = 'thrombectomy_study'`), giving
+  ~1,478 previously-`NULL` studies a real BL/FU label.
+- `acquisitiondatetime` construction (`Acquisition → Study`) factored into the
+  shared `construct_acquisition_datetime()`, with a new `acquisitiondatetime_source`
+  column (`acquisition` | `study`) on `image_study`/`image_series`. `Content`/`Series`
+  dates are deliberately not used — for derived series they are the post-processing
+  day, which mis-dates the study.
+- **Migration `0016_study_episode`**: adds `image_study.episode`,
+  `acquisitiondatetime_source` (both tables), and `idx_image_study_episode`. All
+  nullable ADDs (metadata-only). Recompute both scripts share the logic:
+  `scripts/admin/recompute_timepoints.py` (new, standalone) and
+  `scripts/admin/reclassify_series_types.py` (now episode-aware). Backfill ran
+  over the full corpus.
+
 ## v1.7 — 2026-07-14
 
 - **Feature**: clean deletion of a study or series across all three layers it

@@ -20,10 +20,10 @@ from series_classification import (
     ASSIGN_RANKS_SQL,
     CLEAR_RANKS_SQL,
     RULES_VERSION,
+    assign_patient_timepoints,
     classify_series,
     classify_study,
-    classify_timepoint,
-    resolve_event_anchor,
+    construct_acquisition_datetime,
 )
 from utils import (
     anonymize_dicom_slice,
@@ -311,6 +311,7 @@ class ImageIngestionProtocol:
             columns=[
                 "patient_id",
                 "acquisitiondatetime",
+                "acquisitiondatetime_source",
                 "studydescription",
                 "seriesdescription",
                 "studyinstanceuid",
@@ -341,8 +342,10 @@ class ImageIngestionProtocol:
             columns=[
                 "patient_id",
                 "acquisitiondatetime",
+                "acquisitiondatetime_source",
                 "study_type",
                 "study_type_version",
+                "episode",
                 "timepoint",
                 "timepoint_anchor_source",
                 "hours_to_event",
@@ -408,35 +411,26 @@ class ImageIngestionProtocol:
             value = value.decode(errors="ignore")
         return value
 
+    # DICOM keywords the acquisition-datetime constructor reads, in one place so
+    # the extraction here stays in step with series_classification's precedence.
+    _ACQ_DATETIME_KEYWORDS = (
+        "AcquisitionDateTime", "AcquisitionDate", "AcquisitionTime",
+        "StudyDate", "StudyTime",
+    )
+
     @classmethod
     def _parse_datetime(cls, dataset):
-        candidates = [
-            ("AcquisitionDateTime", None),
-            ("AcquisitionDate", "AcquisitionTime"),
-            ("StudyDate", "StudyTime"),
-        ]
-        for date_tag, time_tag in candidates:
-            if time_tag is None:
-                value = cls._safe_text(cls._dicom_value(dataset, date_tag))
-                if value:
-                    parsed = pd.to_datetime(value.split(".")[0], errors="coerce")
-                    if pd.notna(parsed):
-                        return parsed
-                continue
+        """Return `(pd.Timestamp | pd.NaT, source_token | None)` for a series.
 
-            date_value = cls._safe_text(cls._dicom_value(dataset, date_tag))
-            time_value = cls._safe_text(cls._dicom_value(dataset, time_tag))
-            if date_value:
-                if time_value is None:
-                    time_value = "000000"
-                parsed = pd.to_datetime(
-                    f"{date_value}{time_value.split('.')[0]}",
-                    format="%Y%m%d%H%M%S",
-                    errors="coerce",
-                )
-                if pd.notna(parsed):
-                    return parsed
-        return pd.NaT
+        Construction order (Acquisition -> Content -> Series -> Study) lives in
+        `series_classification.construct_acquisition_datetime` so ingestion and the
+        recompute backfill can never diverge."""
+        tags = {
+            keyword: cls._safe_text(cls._dicom_value(dataset, keyword))
+            for keyword in cls._ACQ_DATETIME_KEYWORDS
+        }
+        parsed, source = construct_acquisition_datetime(tags)
+        return (pd.Timestamp(parsed) if parsed is not None else pd.NaT), source
 
     @classmethod
     def _series_geometry(cls, headers):
@@ -608,12 +602,15 @@ class ImageIngestionProtocol:
 
             series_tag_rows.append({"seriesinstanceuid": series_instance_uid, **tag_row})
 
+            acquisition_datetime, acquisition_datetime_source = self._parse_datetime(dcm)
+
             data_series_list.append(
                 pd.DataFrame(
                     [
                         {
                             "patient_id": patient_id,
-                            "acquisitiondatetime": self._parse_datetime(dcm),
+                            "acquisitiondatetime": acquisition_datetime,
+                            "acquisitiondatetime_source": acquisition_datetime_source,
                             "studydescription": self._safe_text(
                                 self._dicom_value(dcm, "StudyDescription")
                             ),
@@ -690,6 +687,7 @@ class ImageIngestionProtocol:
                 {
                     "patient_id": first_row["patient_id"],
                     "acquisitiondatetime": first_row["acquisitiondatetime"],
+                    "acquisitiondatetime_source": first_row.get("acquisitiondatetime_source"),
                     "study_type": study_type,
                     "study_type_version": RULES_VERSION,
                     "studydescription": study_description,
@@ -722,10 +720,13 @@ class ImageIngestionProtocol:
         return matches.iloc[0].to_dict()
 
     def assign_study_timepoints(self):
-        """Label each study BL / THROMBECTOMY / FU relative to the puncture anchor.
+        """Label each study BL / THROMBECTOMY / FU, split by episode.
 
         A separate step (not part of create_study_table) because the anchor lives
-        in lvo_clinical_data, which is only loaded later in the sequence.
+        in lvo_clinical_data, which is only loaded later in the sequence. Studies
+        are grouped per patient and split into episodes; each episode is anchored
+        on its own clinical puncture or, failing that, its own thrombectomy study
+        (see series_classification.assign_patient_timepoints).
 
         Machine-owned, and independent of the human `timepoint` annotation label
         (mirrored as `label_timepoint_*`) — neither is derived from the other.
@@ -733,27 +734,30 @@ class ImageIngestionProtocol:
         if self.case_study_table is None or self.case_study_table.empty:
             return
 
-        timepoints, sources, hours, versions = [], [], [], []
-        anchors = {}  # patient_id -> (anchor, source); one clinical lookup per patient
-
-        for _, row in self.case_study_table.iterrows():
-            patient_id = row["patient_id"]
-            if patient_id not in anchors:
-                anchors[patient_id] = resolve_event_anchor(self._clinical_row(patient_id))
-            anchor, source = anchors[patient_id]
-
-            timepoint, hours_to_event, _rule = classify_timepoint(
-                row["acquisitiondatetime"], anchor, row.get("study_type")
+        resolved = {}  # studyinstanceuid -> assign_patient_timepoints() result
+        for patient_id, group in self.case_study_table.groupby("patient_id"):
+            studies = [
+                {
+                    "studyinstanceuid": row["studyinstanceuid"],
+                    "acquisition_datetime": row["acquisitiondatetime"],
+                    "study_type": row.get("study_type"),
+                }
+                for _, row in group.iterrows()
+            ]
+            resolved.update(
+                assign_patient_timepoints(studies, self._clinical_row(patient_id))
             )
-            timepoints.append(timepoint)
-            sources.append(source)
-            hours.append(hours_to_event)
-            versions.append(RULES_VERSION)
 
-        self.case_study_table["timepoint"] = timepoints
-        self.case_study_table["timepoint_anchor_source"] = sources
-        self.case_study_table["hours_to_event"] = hours
-        self.case_study_table["timepoint_version"] = versions
+        suids = self.case_study_table["studyinstanceuid"]
+        self.case_study_table["episode"] = suids.map(lambda s: resolved[s]["episode"])
+        self.case_study_table["timepoint"] = suids.map(lambda s: resolved[s]["timepoint"])
+        self.case_study_table["timepoint_anchor_source"] = suids.map(
+            lambda s: resolved[s]["timepoint_anchor_source"]
+        )
+        self.case_study_table["hours_to_event"] = suids.map(
+            lambda s: resolved[s]["hours_to_event"]
+        )
+        self.case_study_table["timepoint_version"] = RULES_VERSION
 
     def filter_existing_studies(self, overwrite_if_exists=False):
         # Series found on disk but skipped because they are already in
@@ -1320,10 +1324,14 @@ class ImageIngestionProtocol:
             if size_column not in self.case_series_table.columns:
                 self.case_series_table[size_column] = None
 
+        if "acquisitiondatetime_source" not in self.case_series_table.columns:
+            self.case_series_table["acquisitiondatetime_source"] = None
+
         self.case_series_table = self.case_series_table[
             [
                 "patient_id",
                 "acquisitiondatetime",
+                "acquisitiondatetime_source",
                 "studydescription",
                 "seriesdescription",
                 "series_type",
@@ -1354,7 +1362,10 @@ class ImageIngestionProtocol:
         # NOTE: this projection is authoritative — any column not listed here is
         # silently dropped before the upsert, however carefully it was computed
         # upstream. Add new study columns HERE as well as at their source.
-        for column in ("timepoint", "timepoint_anchor_source", "hours_to_event", "timepoint_version"):
+        for column in (
+            "acquisitiondatetime_source", "episode", "timepoint",
+            "timepoint_anchor_source", "hours_to_event", "timepoint_version",
+        ):
             if column not in self.case_study_table.columns:
                 self.case_study_table[column] = None
 
@@ -1362,8 +1373,10 @@ class ImageIngestionProtocol:
             [
                 "patient_id",
                 "acquisitiondatetime",
+                "acquisitiondatetime_source",
                 "study_type",
                 "study_type_version",
+                "episode",
                 "timepoint",
                 "timepoint_anchor_source",
                 "hours_to_event",
