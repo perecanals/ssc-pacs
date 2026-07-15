@@ -66,6 +66,11 @@ EXPECTED_ROUTES = {
     # User dataset permissions (admin page + script-facing API).
     ("GET", "/api/admin/users"),
     ("PUT", "/api/admin/users/{username}/datasets"),
+    # Admin study/series deletion (Orthanc + DB; files via sudo CLI sweep).
+    ("GET", "/api/admin/studies/{studyinstanceuid}/deletion-plan"),
+    ("DELETE", "/api/admin/studies/{studyinstanceuid}"),
+    ("GET", "/api/admin/series/{seriesinstanceuid}/deletion-plan"),
+    ("DELETE", "/api/admin/series/{seriesinstanceuid}"),
     ("POST", "/api/labelled-tables/refresh"),
     # Reverse-proxy routes to Orthanc (added 2026-05-13).
     ("GET", "/ohif"),

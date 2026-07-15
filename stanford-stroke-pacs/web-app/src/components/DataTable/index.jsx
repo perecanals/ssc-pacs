@@ -18,6 +18,7 @@ import ColumnSelector from "../ColumnSelector";
 import useColumnPrefs from "./useColumnPrefs";
 import InlineEdit from "../InlineEdit";
 import LabelDefModal from "../LabelDefModal";
+import DeleteEntityModal from "../DeleteEntityModal";
 import { useAuth } from "../../context/AuthContext";
 import {
   LEVEL_RANK,
@@ -33,7 +34,7 @@ import usePreferencePersistence from "./usePreferencePersistence";
 import useDragColumns from "./useDragColumns";
 import useWarmStatus from "./useWarmStatus";
 import TableHeader from "./TableHeader";
-import ChildRows, { DownloadIcon } from "./ChildRows";
+import ChildRows, { DownloadIcon, TrashIcon } from "./ChildRows";
 import WarmButton from "./WarmButton";
 import CopyPathButtons from "./CopyPathButtons";
 import { getStorageMode } from "../../api/warmOhif";
@@ -57,6 +58,8 @@ function DataTableInner({
 
   const [showDefModal, setShowDefModal] = useState(false);
   const [editingLabel, setEditingLabel] = useState(null);
+  // Admin-only destructive delete: { level, uid, label } or null.
+  const [deleteTarget, setDeleteTarget] = useState(null);
   const [refreshingLabelledTables, setRefreshingLabelledTables] =
     useState(false);
 
@@ -435,6 +438,9 @@ function DataTableInner({
     }
   };
 
+  const requestDelete = (targetLevel, uid, label) =>
+    setDeleteTarget({ level: targetLevel, uid, label: label || null });
+
   const allAnnotations = (row) => [
     ...(row.annotations || []),
     ...(row.inherited_annotations || []),
@@ -528,6 +534,22 @@ function DataTableInner({
               </button>
               <CopyPathButtons seriesUid={row.seriesinstanceuid} />
             </>
+          )}
+          {isAdmin && (
+            <button
+              onClick={() =>
+                requestDelete(
+                  isSeries ? "series" : "study",
+                  isSeries ? row.seriesinstanceuid : uid,
+                  isSeries ? row.seriesdescription : row.studydescription,
+                )
+              }
+              className="link-btn link-btn--danger"
+              title={`Delete this ${isSeries ? "series" : "study"}`}
+              aria-label={`Delete this ${isSeries ? "series" : "study"}`}
+            >
+              <TrashIcon />
+            </button>
           )}
         </>
       );
@@ -789,6 +811,7 @@ function DataTableInner({
                         onGrandChildRowClick={handleGrandChildRowClick}
                         onResolveOhifLink={handleOhifLink}
                         onDicomDownload={handleDicomDownload}
+                        onRequestDelete={requestDelete}
                         onMutated={handleMutated}
                       />
                     )}
@@ -896,6 +919,19 @@ function DataTableInner({
           onSaved={() => {
             setEditingLabel(null);
             fetchLabelDefs();
+          }}
+        />
+      )}
+
+      {deleteTarget && (
+        <DeleteEntityModal
+          level={deleteTarget.level}
+          uid={deleteTarget.uid}
+          label={deleteTarget.label}
+          onClose={() => setDeleteTarget(null)}
+          onDeleted={() => {
+            setDeleteTarget(null);
+            handleMutated();
           }}
         />
       )}

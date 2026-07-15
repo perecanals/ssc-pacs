@@ -20,7 +20,17 @@ from db import audit_user_var, close_pool, get_conn, init_pool
 from logging_config import configure_logging, request_id_ctx, user_ctx
 from metrics import http_request_duration_seconds, http_requests_total
 from rate_limit import limiter
-from routes import admin, annotations, cold_storage, labels, preferences, proxy, static, studies
+from routes import (
+    admin,
+    annotations,
+    cold_storage,
+    data_admin,
+    labels,
+    preferences,
+    proxy,
+    static,
+    studies,
+)
 from routes import auth as auth_routes
 
 # Configure JSON logging before any module-level log lines fire.
@@ -315,5 +325,6 @@ app.include_router(cold_storage.router)
 app.include_router(annotations.router)
 app.include_router(labels.router)
 app.include_router(admin.router)
+app.include_router(data_admin.router)
 app.include_router(proxy.router)
 app.include_router(static.router)

@@ -19,7 +19,7 @@ by default and applies only with `--execute`; interactive prompts have a
 
 | Directory | Purpose | Key scripts |
 |---|---|---|
-| `admin/` | User provisioning, credential rotation, label/dataset ops, series classification, teardown | `manage_users.py`, `rotate_service_account.py`, `rotate_db_password.py`, `bulk_set_label_values.py`, `remove_label.py`, `rename_dataset_value.py`, `reclassify_series_types.py`, `teardown.sh` |
+| `admin/` | User provisioning, credential rotation, label/dataset ops, series classification, study/series deletion, teardown | `manage_users.py`, `rotate_service_account.py`, `rotate_db_password.py`, `bulk_set_label_values.py`, `remove_label.py`, `rename_dataset_value.py`, `reclassify_series_types.py`, `delete_study.py`, `teardown.sh` |
 | `backup/` | PostgreSQL dump, Orthanc volume snapshot, freshness monitoring | `backup_pg_db.sh`, `backup_orthanc_storage.sh` (+ in-container `orthanc_storage_snapshot.py`), `check_backup_freshness.sh` |
 | `cold_storage/` | Archive, cleanup, health, cache state, index repair | `archive_all_series.py`, `cleanup_loose_dicoms.py`, `scoped_index.py`, `reindex_missing_series.py`, `prune_stale_index_paths.py`, `rebuild_cache_state.py`, `cold_storage_health.py`, `backfill_storage_sizes.py`, `list_unarchived_series.py`, `verify_and_repair_archives.py`, `mirror_cold_archive.sh` |
 | `connectivity/` | Sanitized SSH tunnel templates for end users (per OS) | `tunnel/{linux,macos,windows}/tunnel.*` |
@@ -78,6 +78,13 @@ python scripts/admin/bulk_set_label_values.py --file x.csv --level series \
 # default; prints a confusion report + the unresolved residue). Reads the tag
 # table, not the archives — safe to re-run whenever the lexicons change.
 python scripts/admin/reclassify_series_types.py [--label sir_batch1] [--execute]
+
+# Delete a study/series — complete removal (Orthanc + DB + files + indexer purge).
+# Dry-run by default; --execute needs a typed 'yes' (no sudo — service user owns
+# the roots). Annotations discarded to history. See docs/operations/deleting_studies.md
+python scripts/admin/delete_study.py --patient <patient-id> --null-description   # review
+python scripts/admin/delete_study.py --study <UID> --execute
+python scripts/admin/delete_study.py --purge-orphan-files --execute        # orphan sweep
 
 # Two-DB reconciliation
 python scripts/data_integrity/reconcile.py

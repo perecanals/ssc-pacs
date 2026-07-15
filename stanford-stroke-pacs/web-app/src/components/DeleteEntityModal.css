@@ -1,0 +1,53 @@
+@reference "../app.css";
+
+.del-modal__overlay {
+  @apply fixed inset-0 bg-black/35 z-[100] flex justify-center items-center;
+}
+
+.del-modal {
+  @apply bg-surface rounded-lg p-6 w-[460px] max-w-[90vw] shadow-xl;
+}
+
+.del-modal__title {
+  @apply text-[15px] font-semibold mb-3 capitalize;
+}
+
+.del-modal__uid {
+  @apply font-mono text-xs text-text-muted break-all normal-case;
+}
+
+.del-modal__body {
+  @apply text-sm mb-4;
+}
+
+.del-modal__list {
+  @apply list-disc pl-5 space-y-1.5;
+}
+
+.del-modal__warn {
+  @apply text-danger;
+}
+
+.del-modal__note {
+  @apply text-text-muted text-xs;
+}
+
+.del-modal__code {
+  @apply block mt-1 px-2 py-1 rounded bg-black/10 font-mono text-[11px] break-all;
+}
+
+.del-modal__error {
+  @apply text-xs text-danger mb-2;
+}
+
+.del-modal__actions {
+  @apply flex gap-2 justify-end;
+}
+
+.del-modal__btn {
+  @apply px-3 py-1.5 border border-border rounded-md text-sm font-medium cursor-pointer bg-surface hover:bg-black/5 disabled:opacity-50 disabled:cursor-not-allowed;
+}
+
+.del-modal__btn--danger {
+  @apply bg-danger text-white border-danger hover:bg-danger/90;
+}

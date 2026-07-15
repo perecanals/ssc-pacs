@@ -24,6 +24,25 @@ const DownloadIcon = () => (
   </svg>
 );
 
+const TrashIcon = () => (
+  <svg
+    width="14"
+    height="14"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    style={{ display: "inline-block", verticalAlign: "middle" }}
+  >
+    <polyline points="3 6 5 6 21 6" />
+    <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+    <line x1="10" y1="11" x2="10" y2="17" />
+    <line x1="14" y1="11" x2="14" y2="17" />
+  </svg>
+);
+
 function GrandChildTable({
   grandChildren,
   grandChildCols,
@@ -38,6 +57,7 @@ function GrandChildTable({
   onGrandChildRowClick,
   onResolveOhifLink,
   onDicomDownload,
+  onRequestDelete,
   onMutated,
 }) {
   if (!grandChildren || grandChildren.length === 0) {
@@ -169,6 +189,22 @@ function GrandChildTable({
                           />
                         </>
                       )}
+                      {gc.seriesinstanceuid && isAdmin && onRequestDelete && (
+                        <button
+                          onClick={() =>
+                            onRequestDelete(
+                              "series",
+                              gc.seriesinstanceuid,
+                              gc.seriesdescription,
+                            )
+                          }
+                          className="dt__gc-link-btn dt__gc-link-btn--danger"
+                          title="Delete this series"
+                          aria-label="Delete this series"
+                        >
+                          <TrashIcon />
+                        </button>
+                      )}
                     </td>
                     <td
                       className="dt__gc-td dt__gc-td--spacer"
@@ -199,6 +235,7 @@ GrandChildTable.propTypes = {
   onGrandChildRowClick: PropTypes.func.isRequired,
   onResolveOhifLink: PropTypes.func.isRequired,
   onDicomDownload: PropTypes.func.isRequired,
+  onRequestDelete: PropTypes.func,
   onMutated: PropTypes.func.isRequired,
 };
 
@@ -226,6 +263,7 @@ export default function ChildRows({
   onGrandChildRowClick,
   onResolveOhifLink,
   onDicomDownload,
+  onRequestDelete,
   onMutated,
 }) {
   const children = childRows[parentRowId];
@@ -384,6 +422,32 @@ export default function ChildRows({
                         />
                       </>
                     )}
+                  {isAdmin &&
+                    onRequestDelete &&
+                    (childConfig.idCol === "studyinstanceuid"
+                      ? child.studyinstanceuid
+                      : child.seriesinstanceuid) && (
+                      <button
+                        onClick={() =>
+                          childConfig.idCol === "studyinstanceuid"
+                            ? onRequestDelete(
+                                "study",
+                                child.studyinstanceuid,
+                                child.studydescription,
+                              )
+                            : onRequestDelete(
+                                "series",
+                                child.seriesinstanceuid,
+                                child.seriesdescription,
+                              )
+                        }
+                        className="link-btn link-btn--danger"
+                        title={`Delete this ${childLevel}`}
+                        aria-label={`Delete this ${childLevel}`}
+                      >
+                        <TrashIcon />
+                      </button>
+                    )}
                 </td>
                 <td
                   className="dt__child-td dt__child-td--spacer"
@@ -405,6 +469,7 @@ export default function ChildRows({
                   onGrandChildRowClick={onGrandChildRowClick}
                   onResolveOhifLink={onResolveOhifLink}
                   onDicomDownload={onDicomDownload}
+                  onRequestDelete={onRequestDelete}
                   onMutated={onMutated}
                 />
               )}
@@ -455,7 +520,8 @@ ChildRows.propTypes = {
   onGrandChildRowClick: PropTypes.func.isRequired,
   onResolveOhifLink: PropTypes.func.isRequired,
   onDicomDownload: PropTypes.func.isRequired,
+  onRequestDelete: PropTypes.func,
   onMutated: PropTypes.func.isRequired,
 };
 
-export { DownloadIcon };
+export { DownloadIcon, TrashIcon };
