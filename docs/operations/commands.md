@@ -534,6 +534,30 @@ python scripts/cold_storage/scoped_index.py --series <suid1,suid2> [--granularit
 
 ---
 
+## Deleting studies / series
+
+Complete removal across all three layers (Orthanc index + DB + on-disk files +
+indexer purge). Full runbook: [`deleting_studies.md`](deleting_studies.md).
+Dry-run by default; `--execute` needs a typed `yes` (no sudo — the service user
+owns the storage roots). Annotations are discarded to history, not migrated.
+
+```bash
+# Review a patient's null/empty-description studies (a common faulty-upload sign)
+python scripts/admin/delete_study.py --patient <patient-id> --null-description
+
+# Dry-run, then execute (complete removal) for one or more studies
+python scripts/admin/delete_study.py --study <UID>
+python scripts/admin/delete_study.py --study <UID> --execute
+
+# Maintenance sweep: on-disk study dirs with no image_study row
+python scripts/admin/delete_study.py --purge-orphan-files --execute
+```
+
+Admins can also delete from the Studies/Series tables via the **trash-icon**
+button — same complete removal, behind a confirmation modal.
+
+---
+
 ## Backups
 
 PostgreSQL + Orthanc-storage backups run nightly — via systemd timers on Linux

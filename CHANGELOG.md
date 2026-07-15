@@ -1,5 +1,27 @@
 # Changelog
 
+## v1.7 — 2026-07-14
+
+- **Feature**: clean deletion of a study or series across all three layers it
+  lives in — Orthanc (`orthanc_db` + DICOMweb caches via REST delete, **and** the
+  Folder-Indexer's `indexer-plugin.db` Files rows, which a REST delete leaves
+  behind — purged by a post-removal Force `POST /indexer/scan`), the
+  `stanford-stroke` DB rows (+ side tables, annotations, `*_labelled` mirrors),
+  and the on-disk loose/archive trees. Shared core in `web-app/deletion.py`. No
+  migration.
+- New admin CLI `scripts/admin/delete_study.py` (dry-run by default; `--execute`
+  needs a typed `yes`; `--null-description` review; `--purge-orphan-files` sweep)
+  and admin-only endpoints `DELETE /api/admin/{studies,series}/{uid}` (+ their
+  `deletion-plan` GETs). Admins also get a **trash-icon** button on the
+  Studies/Series tables with a confirmation modal — same complete removal.
+- **No sudo needed**: the web-app service user owns the storage roots (it already
+  evicts files there), so both the UI and CLI perform the full removal — files
+  included. The safety gate is the path-safety guard (never deletes above
+  `<patient>/<studyUID>`) + admin-only auth, not OS permissions.
+- Annotations on a deleted entity are **discarded**, captured in
+  `annotations_history` (auditable/recoverable), never migrated. Runbook:
+  `docs/operations/deleting_studies.md`.
+
 ## v1.6 — 2026-07-13
 
 - **Feature**: the classifier's verdicts are now visible in the web app, as

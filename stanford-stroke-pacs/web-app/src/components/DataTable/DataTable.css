@@ -234,12 +234,18 @@
 }
 
 .dt__row--level-patient,
-.dt__child-row--level-patient { --row-accent: var(--color-level-patient); }
+.dt__child-row--level-patient {
+  --row-accent: var(--color-level-patient);
+}
 .dt__row--level-study,
-.dt__child-row--level-study   { --row-accent: var(--color-level-study); }
+.dt__child-row--level-study {
+  --row-accent: var(--color-level-study);
+}
 .dt__row--level-series,
 .dt__child-row--level-series,
-.dt__gc-row--level-series     { --row-accent: var(--color-level-series); }
+.dt__gc-row--level-series {
+  --row-accent: var(--color-level-series);
+}
 
 /* Parent rows */
 .dt__row {
@@ -325,8 +331,12 @@
   pointer-events: none;
 }
 
-.dt__child-wrapper--level-study  { --wrapper-accent: var(--color-level-study); }
-.dt__child-wrapper--level-series { --wrapper-accent: var(--color-level-series); }
+.dt__child-wrapper--level-study {
+  --wrapper-accent: var(--color-level-study);
+}
+.dt__child-wrapper--level-series {
+  --wrapper-accent: var(--color-level-series);
+}
 
 .dt__child-scroll {
   @apply max-h-[280px] overflow-auto;
@@ -425,7 +435,9 @@
   pointer-events: none;
 }
 
-.dt__gc-wrapper--level-series { --wrapper-accent: var(--color-level-series); }
+.dt__gc-wrapper--level-series {
+  --wrapper-accent: var(--color-level-series);
+}
 
 .dt__gc-scroll {
   @apply max-h-[280px] overflow-auto;
@@ -481,6 +493,10 @@
   @apply text-primary text-[11px] font-medium bg-transparent border-none cursor-pointer hover:underline;
 }
 
+.dt__gc-link-btn--danger {
+  @apply text-danger;
+}
+
 /* Frozen expand column */
 .dt__th--expand-frozen {
   @apply sticky left-0 z-10 bg-table-header-bg;
@@ -507,17 +523,23 @@
 .dt__th--frozen-first-offset {
   @apply sticky z-10 bg-table-header-bg;
   left: 2rem;
-  box-shadow: -6px 0 0 0 var(--color-table-header-bg), 2px 0 4px -2px rgba(0,0,0,0.08);
+  box-shadow:
+    -6px 0 0 0 var(--color-table-header-bg),
+    2px 0 4px -2px rgba(0, 0, 0, 0.08);
 }
 .dt__td--frozen-first-offset {
   @apply sticky z-10 bg-surface;
   left: 2rem;
-  box-shadow: -6px 0 0 0 var(--color-surface), 2px 0 4px -2px rgba(0,0,0,0.08);
+  box-shadow:
+    -6px 0 0 0 var(--color-surface),
+    2px 0 4px -2px rgba(0, 0, 0, 0.08);
 }
 .dt__filter-th--frozen-first-offset {
   @apply sticky z-10 bg-table-header-bg;
   left: 2rem;
-  box-shadow: -6px 0 0 0 var(--color-table-header-bg), 2px 0 4px -2px rgba(0,0,0,0.08);
+  box-shadow:
+    -6px 0 0 0 var(--color-table-header-bg),
+    2px 0 4px -2px rgba(0, 0, 0, 0.08);
 }
 
 /* Hover overrides for frozen cells */
@@ -527,7 +549,9 @@
 }
 .dt__row:hover .dt__td--frozen-first-offset {
   @apply bg-table-row-hover;
-  box-shadow: -6px 0 0 0 var(--color-table-row-hover), 2px 0 4px -2px rgba(0,0,0,0.08);
+  box-shadow:
+    -6px 0 0 0 var(--color-table-row-hover),
+    2px 0 4px -2px rgba(0, 0, 0, 0.08);
 }
 .dt__row--active .dt__td--frozen-first,
 .dt__row--active .dt__expand-cell--frozen {
@@ -535,7 +559,9 @@
 }
 .dt__row--active .dt__td--frozen-first-offset {
   @apply bg-primary/20;
-  box-shadow: -6px 0 0 0 color-mix(in srgb, var(--color-primary) 20%, transparent), 2px 0 4px -2px rgba(0,0,0,0.08);
+  box-shadow:
+    -6px 0 0 0 color-mix(in srgb, var(--color-primary) 20%, transparent),
+    2px 0 4px -2px rgba(0, 0, 0, 0.08);
 }
 
 /* Pin toggle button */

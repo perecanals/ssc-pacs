@@ -192,6 +192,80 @@ def orthanc_series_id(
     return None
 
 
+def orthanc_study_id(
+    studyinstanceuid: str,
+    *,
+    session: requests.Session | None = None,
+    timeout: int = 10,
+) -> str | None:
+    """Resolve a StudyInstanceUID to Orthanc's internal study ID (or None)."""
+    http, kw = _http(session)
+    try:
+        resp = http.post(
+            f"{ORTHANC_URL}/tools/lookup", data=studyinstanceuid, timeout=timeout, **kw
+        )
+    except requests.RequestException:
+        return None
+    if resp.status_code != 200:
+        return None
+    for entry in resp.json():
+        if entry.get("Type") == "Study":
+            return entry.get("ID")
+    return None
+
+
+def _orthanc_delete_resource(
+    kind: str,
+    orthanc_id: str,
+    *,
+    session: requests.Session | None = None,
+    timeout: int = 60,
+) -> bool:
+    """DELETE a Study/Series resource from Orthanc by internal ID.
+
+    Orthanc's REST delete removes the resource from the ``orthanc_db`` index,
+    the Folder-Indexer ``indexer-plugin.db`` Files rows, and any DICOMweb
+    metadata caches — all online, no container restart. Idempotent: a 404
+    (already gone) counts as success. Returns False only on a real error.
+    """
+    http, kw = _http(session)
+    try:
+        resp = http.delete(f"{ORTHANC_URL}/{kind}/{orthanc_id}", timeout=timeout, **kw)
+    except requests.RequestException as exc:
+        logger.warning("orthanc DELETE /%s/%s failed: %s", kind, orthanc_id, exc)
+        return False
+    if resp.status_code in (200, 404):
+        return True
+    logger.warning(
+        "orthanc DELETE /%s/%s -> HTTP %s", kind, orthanc_id, resp.status_code
+    )
+    return False
+
+
+def delete_orthanc_study(
+    orthanc_id: str,
+    *,
+    session: requests.Session | None = None,
+    timeout: int = 60,
+) -> bool:
+    """DELETE a study from Orthanc by internal ID (idempotent — 404 ⇒ True)."""
+    return _orthanc_delete_resource(
+        "studies", orthanc_id, session=session, timeout=timeout
+    )
+
+
+def delete_orthanc_series(
+    orthanc_id: str,
+    *,
+    session: requests.Session | None = None,
+    timeout: int = 60,
+) -> bool:
+    """DELETE a series from Orthanc by internal ID (idempotent — 404 ⇒ True)."""
+    return _orthanc_delete_resource(
+        "series", orthanc_id, session=session, timeout=timeout
+    )
+
+
 def orthanc_lookup(studyinstanceuid: str, *, timeout: int = 5) -> list[dict[str, Any]]:
     """POST /tools/lookup — resolve a DICOM UID to Orthanc internal IDs."""
     resp = requests.post(
