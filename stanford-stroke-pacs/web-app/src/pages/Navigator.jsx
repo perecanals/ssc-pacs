@@ -39,6 +39,9 @@ export default function Navigator() {
   const [filters, setFilters] = useState(DEFAULT_FILTERS);
   // null = the CSS default height; a number once the user drag-resizes.
   const [previewHeight, setPreviewHeight] = useState(null);
+  // Owned here, not inside PreviewPane, so the DataTable footer's Fullscreen
+  // button can reach the pane's DOM node.
+  const previewPaneRef = useRef(null);
 
   // Restore last session's level + sidebar filters/visibility + preview-pane
   // height from the `_global` preferences bucket; saves them back (debounced)
@@ -90,6 +93,19 @@ export default function Navigator() {
   const [previewLoadingLabel, setPreviewLoadingLabel] = useState("");
   const [toolbarHostEl, setToolbarHostEl] = useState(null);
   const previewRequestRef = useRef(0);
+
+  const handlePreviewFullscreen = useCallback(() => {
+    previewPaneRef.current?.requestFullscreen?.()?.catch(() => {});
+  }, []);
+
+  // Never leave the browser fullscreen on a pane that has been collapsed or
+  // whose selection is gone — the user would be staring at a blank screen with
+  // no visible way back.
+  useEffect(() => {
+    if ((!previewOpen || !previewSelection) && document.fullscreenElement) {
+      document.exitFullscreen?.()?.catch(() => {});
+    }
+  }, [previewOpen, previewSelection]);
 
   const clearPreview = useCallback(() => {
     previewRequestRef.current += 1;
@@ -227,6 +243,7 @@ export default function Navigator() {
               previewOpen={previewOpen}
               previewUrl={previewUrl}
               onPreviewClose={() => setPreviewOpen(false)}
+              onPreviewFullscreen={handlePreviewFullscreen}
               onLabelsMutated={handleLabelsMutated}
             />
             <PreviewPane
@@ -238,6 +255,7 @@ export default function Navigator() {
               isOpen={previewOpen}
               height={previewHeight}
               onHeightChange={setPreviewHeight}
+              paneRef={previewPaneRef}
             />
           </div>
         </main>

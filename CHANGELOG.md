@@ -1,5 +1,20 @@
 # Changelog
 
+## v1.12 — 2026-07-16
+
+- **Feature**: Fullscreen button on the OHIF preview pane, next to "Open in New
+  Tab". Native fullscreen renders the pane's existing iframe without moving it
+  in the DOM, so OHIF never reloads — zero new requests, zero extra memory. Exit
+  with Esc or the pane's Exit button. "Open in New Tab" is unchanged and still
+  refetches: a new tab is a separate browsing context, and at 512.5 KiB/frame a
+  study costs 18 MiB (median) to 540 MiB (p99) to load again. Caching frames to
+  close that gap was rejected — it would churn gigabytes through the browser
+  cache during a scoring run and put patient images at rest on disk.
+- Collapsing the preview pane now hides the iframe instead of unmounting it, so
+  re-opening the same study costs nothing. Trade-off: a collapsed pane holds one
+  study's frames in memory rather than releasing them.
+- No migration.
+
 ## v1.11 — 2026-07-16
 
 - **Fix**: the OHIF viewer's black-screen startup delay. Orthanc serves the OHIF

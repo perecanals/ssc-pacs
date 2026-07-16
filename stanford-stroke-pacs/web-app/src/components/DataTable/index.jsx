@@ -51,6 +51,7 @@ function DataTableInner({
   previewOpen,
   previewUrl,
   onPreviewClose,
+  onPreviewFullscreen,
   onLabelsMutated,
   serverPrefs,
 }) {
@@ -864,6 +865,18 @@ function DataTableInner({
         <div className="dt__footer-slot">
           {previewOpen && (
             <div className="dt__pane-tabs">
+              {previewUrl && onPreviewFullscreen && (
+                // Fullscreens the pane's existing iframe: no reload, no
+                // refetch. Prefer this over New Tab, which is a fresh browsing
+                // context and re-downloads every frame.
+                <button
+                  type="button"
+                  onClick={onPreviewFullscreen}
+                  className="dt__pane-tab"
+                >
+                  Fullscreen <span aria-hidden="true">⤢</span>
+                </button>
+              )}
               {previewUrl && (
                 <a
                   href={previewUrl}
@@ -966,6 +979,7 @@ DataTableInner.propTypes = {
   previewOpen: PropTypes.bool,
   previewUrl: PropTypes.string,
   onPreviewClose: PropTypes.func,
+  onPreviewFullscreen: PropTypes.func,
   onLabelsMutated: PropTypes.func,
   serverPrefs: PropTypes.object.isRequired,
 };
@@ -1010,5 +1024,6 @@ DataTable.propTypes = {
   previewOpen: PropTypes.bool,
   previewUrl: PropTypes.string,
   onPreviewClose: PropTypes.func,
+  onPreviewFullscreen: PropTypes.func,
   onLabelsMutated: PropTypes.func,
 };
