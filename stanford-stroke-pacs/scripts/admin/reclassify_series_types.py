@@ -49,10 +49,9 @@ from series_classification import (  # noqa: E402
     ASSIGN_RANKS_SQL,
     CLEAR_RANKS_SQL,
     RULES_VERSION,
+    assign_patient_timepoints,
     classify_series,
     classify_study,
-    classify_timepoint,
-    resolve_event_anchor,
 )
 
 
@@ -122,6 +121,7 @@ def _print_timepoint_report(rows: list[dict]) -> None:
         "femoral_sheath_time": "recorded puncture",
         "receiving_arrival_time": "ESTIMATED (arrival + 5h)",
         "time_recognized": "ESTIMATED (recognition + 10h)",
+        "thrombectomy_study": "episode's own thrombectomy study time (no clinical anchor)",
         None: "no anchor at all -> timepoint is NULL",
     }
     for source, count in Counter(r["timepoint_anchor_source"] for r in rows).most_common():
@@ -217,14 +217,15 @@ def main() -> int:
     # is passed for signature parity but deliberately unused, so a series-rule
     # change can never silently move a study's type.
     #
-    # timepoint anchors on the femoral-sheath puncture from lvo_clinical_data
-    # (NOT patient.stroke_date — a different clock). Joined LEFT, so the 26% of
-    # patients with no anchor get a NULL timepoint rather than a guess.
+    # timepoint is episode-aware (assign_patient_timepoints): a patient's studies
+    # are split into episodes and each anchored on its own femoral-sheath puncture
+    # from lvo_clinical_data (NOT patient.stroke_date — a different clock), else its
+    # own thrombectomy study. Episodes with neither get a NULL timepoint, not a guess.
     with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
         cur.execute(
             """
-            SELECT st.studyinstanceuid, st.study_type, st.studydescription,
-                   st.timepoint, st.acquisitiondatetime,
+            SELECT st.studyinstanceuid, st.patient_id, st.study_type,
+                   st.studydescription, st.timepoint, st.acquisitiondatetime,
                    c.femoral_sheath_time, c.receiving_arrival_time, c.time_recognized
             FROM image_study st
             LEFT JOIN lvo_clinical_data c ON c.study_id = st.patient_id
@@ -234,26 +235,54 @@ def main() -> int:
         )
         study_rows = cur.fetchall()
 
-    studies = []
+    # First pass: proposed study_type per study (thrombectomy anchoring needs it).
+    proposed_study_type, by_patient, clinical_by_patient = {}, defaultdict(list), {}
     for row in study_rows:
-        proposed, rule = classify_study(
+        proposed, _ = classify_study(
             row["studydescription"], study_types.get(row["studyinstanceuid"])
         )
-        anchor, anchor_source = resolve_event_anchor(row)
-        timepoint, hours_to_event, tp_rule = classify_timepoint(
-            row["acquisitiondatetime"], anchor, proposed
+        proposed_study_type[row["studyinstanceuid"]] = proposed
+        by_patient[row["patient_id"]].append(row)
+        clinical_by_patient.setdefault(row["patient_id"], {
+            "femoral_sheath_time": row["femoral_sheath_time"],
+            "receiving_arrival_time": row["receiving_arrival_time"],
+            "time_recognized": row["time_recognized"],
+        })
+
+    # Second pass: episode-aware timepoints, one call per patient.
+    timepoint_by_suid = {}
+    for patient_id, rows in by_patient.items():
+        patient_studies = [
+            {
+                "studyinstanceuid": r["studyinstanceuid"],
+                "acquisition_datetime": r["acquisitiondatetime"],
+                "study_type": proposed_study_type[r["studyinstanceuid"]],
+            }
+            for r in rows
+        ]
+        timepoint_by_suid.update(
+            assign_patient_timepoints(patient_studies, clinical_by_patient[patient_id])
         )
+
+    studies = []
+    for row in study_rows:
+        suid = row["studyinstanceuid"]
+        proposed, rule = classify_study(
+            row["studydescription"], study_types.get(suid)
+        )
+        tp = timepoint_by_suid[suid]
         studies.append({
-            "suid": row["studyinstanceuid"],
+            "suid": suid,
             "current": row["study_type"],
             "proposed": proposed,
             "rule": rule,
             "descr": row["studydescription"],
             "current_timepoint": row["timepoint"],
-            "timepoint": timepoint,
-            "timepoint_anchor_source": anchor_source,
-            "hours_to_event": hours_to_event,
-            "timepoint_rule": tp_rule,
+            "episode": tp["episode"],
+            "timepoint": tp["timepoint"],
+            "timepoint_anchor_source": tp["timepoint_anchor_source"],
+            "hours_to_event": tp["hours_to_event"],
+            "timepoint_rule": tp["timepoint_rule"],
         })
 
     _print_study_report(studies)
@@ -275,14 +304,14 @@ def main() -> int:
         psycopg2.extras.execute_batch(
             cur,
             "UPDATE image_study SET study_type = %s, study_type_version = %s, "
-            "timepoint = %s, timepoint_anchor_source = %s, hours_to_event = %s, "
-            "timepoint_version = %s "
+            "episode = %s, timepoint = %s, timepoint_anchor_source = %s, "
+            "hours_to_event = %s, timepoint_version = %s "
             "WHERE studyinstanceuid = %s",
             [
                 (
                     r["proposed"], RULES_VERSION,
-                    r["timepoint"], r["timepoint_anchor_source"], r["hours_to_event"],
-                    RULES_VERSION, r["suid"],
+                    r["episode"], r["timepoint"], r["timepoint_anchor_source"],
+                    r["hours_to_event"], RULES_VERSION, r["suid"],
                 )
                 for r in studies
             ],

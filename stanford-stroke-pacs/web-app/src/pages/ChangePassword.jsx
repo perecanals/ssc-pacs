@@ -23,7 +23,9 @@ export default function ChangePassword() {
       setError(`New password must be at least ${MIN_LENGTH} characters.`);
       return;
     }
-    if (newPassword === currentPassword) {
+    // The current password is only collected for a voluntary change; on the
+    // forced first-login change the field is hidden and not sent.
+    if (!mustChangePassword && newPassword === currentPassword) {
       setError("New password must differ from your current password.");
       return;
     }
@@ -35,7 +37,10 @@ export default function ChangePassword() {
     try {
       const res = await apiPost(
         "/api/auth/change-password",
-        { current_password: currentPassword, new_password: newPassword },
+        {
+          new_password: newPassword,
+          ...(mustChangePassword ? {} : { current_password: currentPassword }),
+        },
         { suppressAuthEvent: true },
       );
       if (!res.ok) {
@@ -67,17 +72,19 @@ export default function ChangePassword() {
       )}
 
       <form className="login__card" onSubmit={onSubmit}>
-        <label className="login__field">
-          <span>Current password</span>
-          <input
-            type="password"
-            value={currentPassword}
-            onChange={(e) => setCurrentPassword(e.target.value)}
-            autoComplete="current-password"
-            autoFocus
-            required
-          />
-        </label>
+        {!mustChangePassword && (
+          <label className="login__field">
+            <span>Current password</span>
+            <input
+              type="password"
+              value={currentPassword}
+              onChange={(e) => setCurrentPassword(e.target.value)}
+              autoComplete="current-password"
+              autoFocus
+              required
+            />
+          </label>
+        )}
         <label className="login__field">
           <span>New password</span>
           <input
@@ -86,6 +93,7 @@ export default function ChangePassword() {
             onChange={(e) => setNewPassword(e.target.value)}
             autoComplete="new-password"
             minLength={MIN_LENGTH}
+            autoFocus={mustChangePassword}
             required
           />
           <span className="change-password__hint">

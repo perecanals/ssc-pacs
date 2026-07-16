@@ -158,6 +158,7 @@ def test_me_includes_must_change_flag_for_existing_user(logged_in_client):
 
 
 def test_change_password_happy_path(client):
+    """Forced first-login change: no current password required."""
     user, pw = "change_pw_user", "tempPass123"
     new_pw = "brandNewPass456"
     _seed_user_must_change(user, pw)
@@ -168,7 +169,7 @@ def test_change_password_happy_path(client):
 
     resp = client.post(
         "/api/auth/change-password",
-        json={"current_password": pw, "new_password": new_pw},
+        json={"new_password": new_pw},
     )
     assert resp.status_code == 200, resp.text
     assert resp.json()["ok"] is True
@@ -186,16 +187,18 @@ def test_change_password_happy_path(client):
     assert ok.json()["must_change_password"] is False
 
 
-def test_change_password_wrong_current(client):
-    user, pw = "change_pw_wrong_current", "tempPass123"
+def test_change_password_first_login_ignores_current(client):
+    """A supplied (even wrong) current password is not verified on the forced change."""
+    user, pw = "change_pw_ignore_current", "tempPass123"
+    new_pw = "anotherPass456"
     _seed_user_must_change(user, pw)
     client.post("/api/login", json={"username": user, "password": pw})
 
     resp = client.post(
         "/api/auth/change-password",
-        json={"current_password": "not-it", "new_password": "anotherPass456"},
+        json={"current_password": "not-it", "new_password": new_pw},
     )
-    assert resp.status_code == 401
+    assert resp.status_code == 200, resp.text
 
 
 def test_change_password_too_short(client):
@@ -205,21 +208,59 @@ def test_change_password_too_short(client):
 
     resp = client.post(
         "/api/auth/change-password",
-        json={"current_password": pw, "new_password": "short"},
+        json={"new_password": "short"},
     )
     assert resp.status_code == 422
 
 
-def test_change_password_same_as_current(client):
+def test_change_password_first_login_rejects_reuse_of_temp(client):
+    """Even without the old-password field, the new password must differ from the temp."""
     user, pw = "change_pw_same", "tempPass123"
     _seed_user_must_change(user, pw)
     client.post("/api/login", json={"username": user, "password": pw})
 
     resp = client.post(
         "/api/auth/change-password",
-        json={"current_password": pw, "new_password": pw},
+        json={"new_password": pw},
     )
     assert resp.status_code == 422
+
+
+def test_change_password_voluntary_still_requires_current(client):
+    """After the forced change is done (must_change=FALSE), a further change
+    must prove knowledge of the current password — a stolen cookie can't rotate it."""
+    user, pw = "change_pw_voluntary", "tempPass123"
+    first_pw = "firstRealPass456"
+    _seed_user_must_change(user, pw)
+    client.post("/api/login", json={"username": user, "password": pw})
+    # Clear the must_change flag via the forced change.
+    assert (
+        client.post(
+            "/api/auth/change-password", json={"new_password": first_pw}
+        ).status_code
+        == 200
+    )
+
+    # Now a voluntary change without the correct current password is rejected.
+    wrong = client.post(
+        "/api/auth/change-password",
+        json={"current_password": "not-it", "new_password": "secondRealPass789"},
+    )
+    assert wrong.status_code == 401
+
+    # Omitting it entirely is likewise rejected.
+    missing = client.post(
+        "/api/auth/change-password",
+        json={"new_password": "secondRealPass789"},
+    )
+    assert missing.status_code == 401
+
+    # With the correct current password it succeeds.
+    ok = client.post(
+        "/api/auth/change-password",
+        json={"current_password": first_pw, "new_password": "secondRealPass789"},
+    )
+    assert ok.status_code == 200, ok.text
 
 
 def test_must_change_gate_blocks_protected_endpoints(client):

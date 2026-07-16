@@ -11,9 +11,12 @@ import pytest
 
 from series_classification import (
     RULES_VERSION,
+    assign_episodes,
+    assign_patient_timepoints,
     classify_series,
     classify_study,
     classify_timepoint,
+    construct_acquisition_datetime,
     resolve_event_anchor,
 )
 
@@ -549,3 +552,166 @@ def test_stroke_date_is_not_the_anchor():
     # different from what the reference implementation means.
     anchor, source = resolve_event_anchor({"stroke_date": "2020-05-01 00:00:00"})
     assert anchor is None and source is None
+
+
+# --- Acquisition-datetime construction ----------------------------------------
+
+
+def test_acquisition_datetime_wins_outright():
+    dt, source = construct_acquisition_datetime({
+        "AcquisitionDateTime": "20200501120000.500000+0100",
+        "StudyDate": "20200430", "StudyTime": "000000",
+    })
+    # Fraction and timezone dropped; acquisition clock preferred.
+    assert dt == datetime(2020, 5, 1, 12, 0, 0)
+    assert source == "acquisition"
+
+
+def test_acquisition_date_time_pair_when_no_combined_tag():
+    dt, source = construct_acquisition_datetime({
+        "AcquisitionDate": "20200501", "AcquisitionTime": "093015",
+        "StudyDate": "20200430", "StudyTime": "120000",
+    })
+    assert dt == datetime(2020, 5, 1, 9, 30, 15)
+    assert source == "acquisition"
+
+
+def test_content_and_series_are_ignored():
+    # Derived series (RAPID/MIP/MPR) carry a ContentDate/SeriesDate of when the
+    # derivative was COMPUTED — often months after the scan. Probing them would
+    # mis-date those series and fabricate spurious episodes, so with no acquisition
+    # tag we go straight to the study encounter day, ignoring content/series.
+    dt, source = construct_acquisition_datetime({
+        "ContentDate": "20250110", "ContentTime": "1030",
+        "SeriesDate": "20250110", "SeriesTime": "0900",
+        "StudyDate": "20240930", "StudyTime": "025921",
+    })
+    assert dt == datetime(2024, 9, 30, 2, 59, 21)  # the scan day, not the RAPID day
+    assert source == "study"
+
+
+def test_study_is_the_final_fallback():
+    dt, source = construct_acquisition_datetime({"StudyDate": "20200501", "StudyTime": "080000"})
+    assert dt == datetime(2020, 5, 1, 8, 0, 0)
+    assert source == "study"
+
+
+def test_no_parseable_datetime():
+    assert construct_acquisition_datetime({}) == (None, None)
+    assert construct_acquisition_datetime({"StudyDate": ""}) == (None, None)
+
+
+def test_bare_date_defaults_to_midnight():
+    dt, source = construct_acquisition_datetime({"StudyDate": "20200501"})
+    assert dt == datetime(2020, 5, 1, 0, 0, 0)
+    assert source == "study"
+
+
+# --- Episode detection --------------------------------------------------------
+
+
+def test_single_episode_when_studies_are_close():
+    dts = ["2020-05-01 08:00:00", "2020-05-01 14:00:00", "2020-05-03 09:00:00"]
+    assert assign_episodes(dts) == [1, 1, 1]
+
+
+def test_large_gap_starts_a_new_episode():
+    # The 11-* pattern: two stroke episodes ~14 months apart.
+    dts = ["2022-02-19 04:00:00", "2022-02-22 09:00:00", "2023-04-27 16:00:00"]
+    assert assign_episodes(dts) == [1, 1, 2]
+
+
+def test_episode_indices_follow_input_order_not_time_order():
+    dts = ["2023-04-27 16:00:00", "2022-02-19 04:00:00"]  # later study first
+    assert assign_episodes(dts) == [2, 1]
+
+
+def test_unparseable_datetime_gets_no_episode():
+    assert assign_episodes(["2020-05-01 08:00:00", None, "garbage"]) == [1, None, None]
+
+
+# --- Episode-aware per-patient timepoints -------------------------------------
+
+
+def _study(suid, dt, study_type=None):
+    return {"studyinstanceuid": suid, "acquisition_datetime": dt, "study_type": study_type}
+
+
+def test_two_episodes_are_anchored_independently():
+    # 11-004-style: a 2022 episode with its own thrombectomy, and a 2023 episode
+    # whose femoral-sheath puncture is the only clinical anchor. The old logic
+    # scored the 2022 studies against the 2023 anchor (hours_to_event ~ -10000).
+    studies = [
+        _study("s2022_bl", "2022-02-19 04:00:00", "CT_STROKE_PROTOCOL"),
+        _study("s2022_evt", "2022-02-19 06:00:00", "THROMBECTOMY"),
+        _study("s2022_fu", "2022-02-20 08:00:00", "CT_HEAD"),
+        _study("s2023_bl", "2023-04-27 16:00:00", "CT_HEAD"),
+        _study("s2023_fu", "2023-04-27 21:00:00", "MR_BRAIN"),
+    ]
+    clinical = {"femoral_sheath_time": "2023-04-27 19:10:00"}
+    result = assign_patient_timepoints(studies, clinical)
+
+    # Episode 1 (2022) anchors on its own thrombectomy study.
+    assert result["s2022_bl"]["episode"] == 1
+    assert result["s2022_bl"]["timepoint"] == "BL"
+    assert result["s2022_bl"]["timepoint_anchor_source"] == "thrombectomy_study"
+    assert result["s2022_evt"]["timepoint"] == "THROMBECTOMY"
+    assert result["s2022_fu"]["timepoint"] == "FU"
+    # Sanity: hours_to_event is small (own episode), not tens of thousands.
+    assert abs(result["s2022_bl"]["hours_to_event"]) < 48
+
+    # Episode 2 (2023) anchors on the clinical puncture.
+    assert result["s2023_bl"]["episode"] == 2
+    assert result["s2023_bl"]["timepoint"] == "BL"
+    assert result["s2023_bl"]["timepoint_anchor_source"] == "femoral_sheath_time"
+    assert result["s2023_fu"]["timepoint"] == "FU"
+
+
+def test_single_episode_lvo_is_unchanged_behaviour():
+    # A plain single-episode LVO patient must behave exactly as before rules-v3.
+    studies = [
+        _study("bl", "2020-05-01 09:00:00", "CT_HEAD"),
+        _study("evt", "2020-05-01 12:30:00", "THROMBECTOMY"),
+        _study("fu", "2020-05-02 12:00:00", "CT_HEAD"),
+    ]
+    result = assign_patient_timepoints(studies, {"femoral_sheath_time": PUNCTURE})
+    assert {s: result[s]["episode"] for s in result} == {"bl": 1, "evt": 1, "fu": 1}
+    assert result["bl"]["timepoint"] == "BL"
+    assert result["bl"]["timepoint_anchor_source"] == "femoral_sheath_time"
+    assert result["bl"]["hours_to_event"] == -3.0
+    assert result["evt"]["timepoint"] == "THROMBECTOMY"
+    assert result["fu"]["timepoint"] == "FU"
+
+
+def test_non_lvo_patient_anchored_on_thrombectomy():
+    # No clinical row at all: fall back to the episode's thrombectomy study.
+    studies = [
+        _study("bl", "2021-03-10 08:00:00", "CT_STROKE_PROTOCOL"),
+        _study("evt", "2021-03-10 10:00:00", "THROMBECTOMY"),
+        _study("fu", "2021-03-11 08:00:00", "CT_HEAD"),
+    ]
+    result = assign_patient_timepoints(studies, None)
+    assert result["bl"]["timepoint"] == "BL"
+    assert result["bl"]["timepoint_anchor_source"] == "thrombectomy_study"
+    assert result["evt"]["timepoint"] == "THROMBECTOMY"
+    assert result["fu"]["timepoint"] == "FU"
+
+
+def test_episode_without_any_anchor_is_null():
+    # A single episode, no clinical row, no thrombectomy study -> NULL, no guess.
+    studies = [
+        _study("a", "2021-03-10 08:00:00", "CT_HEAD"),
+        _study("b", "2021-03-11 08:00:00", "MR_BRAIN"),
+    ]
+    result = assign_patient_timepoints(studies, None)
+    assert result["a"]["timepoint"] is None
+    assert result["a"]["timepoint_anchor_source"] is None
+    assert result["a"]["episode"] == 1  # still placed in an episode
+
+
+def test_study_without_acquisition_time_is_unplaced():
+    studies = [_study("a", None, "CT_HEAD")]
+    result = assign_patient_timepoints(studies, {"femoral_sheath_time": PUNCTURE})
+    assert result["a"]["episode"] is None
+    assert result["a"]["timepoint"] is None
+    assert result["a"]["timepoint_rule"] == "no-acquisition-time"

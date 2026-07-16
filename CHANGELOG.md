@@ -1,5 +1,63 @@
 # Changelog
 
+## v1.10 — 2026-07-15
+
+- **Feature**: femoral sheath (arterial puncture) time at the patient level.
+  Surfaced in the patient table as an off-by-default column ("Femoral Sheath
+  Time", opt-in via the Displayed Columns menu) and filterable. Present only for
+  the CRISP2/LVO cohort. The web app prefers the live clinical value,
+  `COALESCE(c.femoral_sheath_time, p.femoral_sheath_time)`, over a durable copy
+  that ingestion (`_upsert_patient`) now populates prospectively from
+  `lvo_clinical_data`. Existing patients display immediately via the live join;
+  there is no historical bulk backfill.
+- Migration `0017_patient_femoral_sheath_time` adds the nullable
+  `patient.femoral_sheath_time` (text) column — instant, no-op downgrade.
+  `patient` is upstream-owned: mirror the same column into the out-of-band
+  production DDL (`ssc-sql-db/create_patient.sql`) so fresh provisioning matches.
+
+## v1.9 — 2026-07-15
+
+- Sidebar quick filters now cascade into the expanded subtables. Picking an Auto
+  Classification value (e.g. Auto Series Type `CTA`, Auto Timepoint `BL`) or a
+  select-value annotation label narrows the study/series sub-rows too, not just
+  the top-level list: a series-level pick keeps only the studies that have a
+  matching series and, within them, only the matching series; a study-level pick
+  keeps only the matching studies. The sub-row endpoints
+  (`/api/patients/{id}/studies`, `/api/studies/{uid}/series`) gained the same
+  `series_type` / `timepoint` / `label_filters` params as the flat list endpoints
+  and reuse their match logic. No migration.
+- Forced first-login password change no longer asks for the temporary password.
+  The user has just signed in with it, so `/change-password` only requires the
+  new password (which must still differ from the temp one); a later *voluntary*
+  change still requires the current password. No migration.
+- Fixed the Status/Action column's row-separator line not aligning with the other
+  columns (the action cells were flex containers, dropping out of the table's
+  row-height sync).
+
+## v1.8 — 2026-07-15
+
+- **Feature**: episode-aware study timepoints (`rules-v3`). A patient's studies
+  are split into episodes (a >45-day inter-study gap starts a new one) and each
+  episode is anchored independently. Fixes the `11-*` multi-episode cohort, whose
+  two distinct stroke episodes were previously scored against a single clinical
+  anchor — a whole episode mislabelled `BL` with `hours_to_event` in the tens of
+  thousands. New `image_study.episode` column.
+- Episodes with no clinical anchor (non-LVO patients, and the second episode of a
+  multi-episode patient) now fall back to the episode's own `THROMBECTOMY` study
+  acquisition time (`timepoint_anchor_source = 'thrombectomy_study'`), giving
+  ~1,478 previously-`NULL` studies a real BL/FU label.
+- `acquisitiondatetime` construction (`Acquisition → Study`) factored into the
+  shared `construct_acquisition_datetime()`, with a new `acquisitiondatetime_source`
+  column (`acquisition` | `study`) on `image_study`/`image_series`. `Content`/`Series`
+  dates are deliberately not used — for derived series they are the post-processing
+  day, which mis-dates the study.
+- **Migration `0016_study_episode`**: adds `image_study.episode`,
+  `acquisitiondatetime_source` (both tables), and `idx_image_study_episode`. All
+  nullable ADDs (metadata-only). Recompute both scripts share the logic:
+  `scripts/admin/recompute_timepoints.py` (new, standalone) and
+  `scripts/admin/reclassify_series_types.py` (now episode-aware). Backfill ran
+  over the full corpus.
+
 ## v1.7 — 2026-07-14
 
 - **Feature**: clean deletion of a study or series across all three layers it

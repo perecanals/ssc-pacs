@@ -180,7 +180,7 @@ the tar.
 | 9 | `create_nifti_files` | In `legacy` mode: runs DICOM→NIFTI conversion for select series and writes `{seriesUID}/NIFTI/image.nii.gz`. In `cold_path_cache` mode (production): **skipped by design** — NIFTIs would orphan once their sibling loose DICOMs are cleaned up. The conversion code is kept-dormant-by-design (available for a future legacy-style run); generate NIFTIs on demand via `scripts/dicom/dicom_to_nifti.py` (see [`../recipes/dicom_processing.md`](../recipes/dicom_processing.md)). |
 | 10 | `format_column_names` | Normalizes DataFrame column names, including adding `dicom_archive_path` to the set of columns to upsert |
 | 11 | `_require_import_id_columns` / `_require_import_label_columns` / `_require_number_of_slices_column` / `_require_dicom_archive_path_column` | Auto-DDL: `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` for any columns the protocol writes that don't yet exist. Safe to run against a fresh DB. |
-| 12 | `update_postgres_tables` | Upserts `image_series`, `image_study`, then `patient` — all in one transaction. `_upsert_patient` registers one row per patient: `stroke_date = MIN(image_study.acquisitiondatetime)` (recomputed across all of the patient's studies), `import_id`/`import_label` keep the **origin** (first-seen, preserved on conflict), and `dataset` is the deduped union of the `dataset` config across batches. As a belt-and-suspenders guard, `_upsert_dataframe` drops any rows duplicated on the conflict key (keep-last, with a WARNING) before the INSERT — so a stray duplicate can never again roll back a whole case via `CardinalityViolation` (`ON CONFLICT DO UPDATE` cannot touch the same target twice). |
+| 12 | `update_postgres_tables` | Upserts `image_series`, `image_study`, then `patient` — all in one transaction. `_upsert_patient` registers one row per patient: `stroke_date = MIN(image_study.acquisitiondatetime)` (recomputed across all of the patient's studies), `femoral_sheath_time = MIN(lvo_clinical_data.femoral_sheath_time)` via a LEFT JOIN on `c.study_id = s.patient_id` (a durable copy of the clinical arterial-puncture time, NULL for patients with no clinical row — i.e. non-CRISP2/LVO), `import_id`/`import_label` keep the **origin** (first-seen, preserved on conflict), and `dataset` is the deduped union of the `dataset` config across batches. As a belt-and-suspenders guard, `_upsert_dataframe` drops any rows duplicated on the conflict key (keep-last, with a WARNING) before the INSERT — so a stray duplicate can never again roll back a whole case via `CardinalityViolation` (`ON CONFLICT DO UPDATE` cannot touch the same target twice). |
 | 13 | `verify_ingested_case` + `delete_original_case_dir` | **Only if `delete_originals_after_verification=true`.** Iterates the recorded source→dest pairs (so it survives the collision-rename case), byte-compares each copied file against its source, then removes the source case directory. |
 
 Return value: `{"studyinstanceuids": [...], "seriesinstanceuids": [...]}` —
@@ -319,34 +319,60 @@ python scripts/admin/reclassify_series_types.py --execute   # apply
 intervention: `BL` (before), `THROMBECTOMY` (the procedure study itself), `FU`
 (after), or `NULL`. Assigned by `assign_study_timepoints()`, which must run after
 `load_clinical_data_table()` — the anchor lives in `lvo_clinical_data`, which
-`create_study_table()` (earlier in the sequence) cannot see.
+`create_study_table()` (earlier in the sequence) cannot see. The per-patient
+logic lives in `series_classification.assign_patient_timepoints()`, shared with
+`scripts/admin/recompute_timepoints.py` so ingestion and backfill can't diverge.
 
 > **The anchor is femoral-sheath puncture, NOT stroke onset.** `BL` means
 > *pre-thrombectomy*, not *post-onset*. `patient.stroke_date` is a different clock
 > and is deliberately not used — mixing them would silently change what `BL` means.
 
-Anchor precedence (ported verbatim from the reference implementation, so our
-labels reproduce its numbers):
+**Episodes (`image_study.episode`).** A patient's studies are first split into
+episodes: sorted by acquisition time, a gap greater than **45 days** starts a new
+1-based episode. A handful of patients (the `11-*` cohort, ~15 in all) carry two
+distinct stroke episodes months apart, and a single per-patient anchor scored one
+episode's imaging against the *other* episode's puncture — a whole episode
+mislabelled `BL` with `hours_to_event` in the tens of thousands. Each episode is
+now anchored independently.
 
-| Priority | Column (`lvo_clinical_data`) | Offset | Coverage |
+**Per-episode anchor precedence.** For the episode the clinical puncture falls in
+(nearest-window match), the puncture is used; any other episode falls back to its
+own thrombectomy study:
+
+| Priority | Anchor | Offset | `timepoint_anchor_source` |
 |---|---|---|---|
-| 1 | `femoral_sheath_time` | none — the recorded puncture | 59% of clinical rows |
-| 2 | `receiving_arrival_time` | **+5 h** (estimate) | 94% |
-| 3 | `time_recognized` | **+10 h** (estimate) | 84% |
+| 1 | `lvo_clinical_data.femoral_sheath_time` | none — recorded puncture | `femoral_sheath_time` |
+| 2 | `lvo_clinical_data.receiving_arrival_time` | **+5 h** (estimate) | `receiving_arrival_time` |
+| 3 | `lvo_clinical_data.time_recognized` | **+10 h** (estimate) | `time_recognized` |
+| 4 | the episode's own `THROMBECTOMY` study acquisition time | none | `thrombectomy_study` |
 
-`timepoint_anchor_source` records which column supplied the anchor. This is
-load-bearing, not bookkeeping: only priority 1 is a *recorded* puncture time, so
-a `BL`/`FU` resting on a `+10h` estimate is materially weaker evidence — and
-without this column the two are indistinguishable. Always filter on it before
-treating a timepoint as ground truth.
+Priorities 1–3 are the clinical anchor (unchanged from rules-v2). Priority 4 is
+new: it gives non-LVO patients (no clinical row) and the second episode of
+multi-episode patients a real anchor — the thrombectomy (XA) study's own
+acquisition time — instead of `NULL`.
+
+`timepoint_anchor_source` records which supplied the anchor. This is load-bearing,
+not bookkeeping: only `femoral_sheath_time` is a *recorded* puncture, so a `BL`/`FU`
+resting on a `+10h` estimate is materially weaker evidence. Always filter on it
+before treating a timepoint as ground truth.
 
 `hours_to_event` is the signed offset from the anchor (negative before, positive
 after). A bare BL/FU flag cannot *select* a scan; this is what lets you pick, say,
 the follow-up nearest 24 h.
 
 Studies typed `THROMBECTOMY` are labelled `THROMBECTOMY` regardless of anchor
-availability — the procedure study identifies itself. Everyone else with no anchor
-(26% of patients) gets `NULL` rather than a guess.
+availability — the procedure study identifies itself. An episode with neither a
+clinical anchor nor a thrombectomy study gets `NULL` rather than a guess.
+
+**Acquisition clock (`acquisitiondatetime` + `acquisitiondatetime_source`).** The
+timestamp compared against the anchor is built by
+`series_classification.construct_acquisition_datetime()`:
+`AcquisitionDateTime` → `AcquisitionDate`+`AcquisitionTime` → `StudyDate`+`StudyTime`.
+`acquisitiondatetime_source` records which was used (`acquisition` | `study`). The
+~16% of series with no acquisition tag fall to the `StudyDate` **encounter** day.
+`ContentDate`/`SeriesDate` are deliberately *not* used: for a derived series
+(RAPID/MIP/MPR) they are the day the derivative was *computed* — often months
+after the scan — which mis-dates the study and fabricates spurious episodes.
 
 > **Re-opens `lvo_clinical_data`.** That table was previously retired as a roster
 > ("joined only to prefer its clinical `stroke_date` via COALESCE, never otherwise

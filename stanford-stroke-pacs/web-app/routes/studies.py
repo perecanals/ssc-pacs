@@ -75,6 +75,7 @@ def _dataset_member_sql(patient_id_expr: str) -> str:
 def list_patients(
     patient_id: str | None = Query(None),
     stroke_date: str | None = Query(None),
+    femoral_sheath_time: str | None = Query(None),
     study_import_label: str | None = Query(
         None,
         description=(
@@ -148,6 +149,12 @@ def list_patients(
             # the clinical string, fall back to the imaging date as YYYY-MM-DD —
             # preserving the prior text contract and lexicographic date sort.
             stroke_date_expr = "COALESCE(c.stroke_date, p.stroke_date::date::text)"
+            # Clinical arterial-puncture time (CRISP2/LVO only). Prefer the live
+            # clinical value, fall back to the durable patient copy that
+            # ingestion populates prospectively; NULL for non-clinical patients.
+            femoral_sheath_time_expr = (
+                "COALESCE(c.femoral_sheath_time, p.femoral_sheath_time)"
+            )
 
             if patient_id:
                 conditions.append("p.patient_id::text LIKE %s")
@@ -155,6 +162,9 @@ def list_patients(
             if stroke_date:
                 conditions.append(f"{stroke_date_expr}::text LIKE %s")
                 params.append(f"%{stroke_date}%")
+            if femoral_sheath_time:
+                conditions.append(f"{femoral_sheath_time_expr}::text LIKE %s")
+                params.append(f"%{femoral_sheath_time}%")
             sil = (study_import_label or "").strip()
             if sil:
                 conditions.append(
@@ -209,7 +219,9 @@ def list_patients(
             )
             cur.execute(
                 "SELECT p.patient_id AS patient_id, "
-                f"{stroke_date_expr} AS stroke_date, {study_labels_agg}, "
+                f"{stroke_date_expr} AS stroke_date, "
+                f"{femoral_sheath_time_expr} AS femoral_sheath_time, "
+                f"{study_labels_agg}, "
                 f"array_to_string(p.dataset, ', ') AS dataset "
                 f"{from_clause} {where} "
                 f"ORDER BY {order_expr} {direction} NULLS LAST, p.patient_id ASC "
@@ -233,26 +245,62 @@ def patient_studies(
         None,
         description="If set, only studies connected to this import_label are returned.",
     ),
+    series_type: list[str] | None = Query(
+        None,
+        description="Only studies containing a series with this machine-derived label.",
+    ),
+    timepoint: list[str] | None = Query(
+        None,
+        description=(
+            "Machine-derived timepoint (BL / THROMBECTOMY / FU). Substring "
+            "match, repeatable (ORed)."
+        ),
+    ),
+    label_filters: str | None = Query(None),
     scope: list[str] | None = Depends(get_dataset_scope),
 ):
-    """Studies for a patient (expandable sub-rows); optionally filtered by import_label."""
+    """Studies for a patient (expandable sub-rows).
+
+    Optionally narrowed by the sidebar quick filters (import_label, the Auto
+    `series_type` / `timepoint` columns, and select-value annotation labels) so
+    an expanded subtable mirrors the top-level filter. `series_type` is a
+    "has-one" match (study kept if any of its series matches); `timepoint` and
+    the label filters apply to the study directly — the same semantics as the
+    flat `list_studies` endpoint.
+    """
     conn = get_conn()
     try:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             ensure_patient_access(cur, patient_id, scope)
+            conditions = ["st.patient_id = %s"]
+            params: list = [patient_id]
             sil = (study_import_label or "").strip()
-            where_st = "st.patient_id = %s"
-            qparams: list = [patient_id]
             if sil:
-                where_st += (
-                    " AND ("
+                conditions.append(
+                    "("
                     "st.import_label = %s OR EXISTS ("
                     "  SELECT 1 FROM image_series s "
                     "  WHERE s.studyinstanceuid = st.studyinstanceuid AND s.import_label = %s"
                     "))"
                 )
-                qparams.append(sil)
-                qparams.append(sil)
+                params.append(sil)
+                params.append(sil)
+            tp_sql, tp_params = auto_match_sql(TIMEPOINT_MATCH_EXPR, timepoint)
+            if tp_sql:
+                conditions.append(tp_sql)
+                params.extend(tp_params)
+            st_sql, st_params = auto_match_sql(SERIES_TYPE_MATCH_EXPR, series_type)
+            if st_sql:
+                conditions.append(
+                    "EXISTS (SELECT 1 FROM image_series s "
+                    f"WHERE s.studyinstanceuid = st.studyinstanceuid AND {st_sql})"
+                )
+                params.extend(st_params)
+            apply_label_filters(
+                parse_label_filters(label_filters),
+                "study", "st.studyinstanceuid", conditions, params,
+            )
+            where = "WHERE " + " AND ".join(conditions)
             cur.execute(
                 "SELECT st.patient_id, st.import_id, st.import_label, st.acquisitiondatetime, st.studyinstanceuid, "
                 "st.studydescription, st.study_type, "
@@ -263,9 +311,9 @@ def patient_studies(
                 "), '') AS modality, "
                 f"{_dataset_display_sql('st.patient_id')} "
                 "FROM image_study st "
-                f"WHERE {where_st} "
+                f"{where} "
                 "ORDER BY st.acquisitiondatetime",
-                tuple(qparams),
+                tuple(params),
             )
             rows = cur.fetchall()
             for r in rows:
@@ -523,22 +571,57 @@ def list_studies(
 @router.get("/api/studies/{studyinstanceuid}/series")
 def study_series(
     studyinstanceuid: str,
+    series_type: list[str] | None = Query(
+        None,
+        description=(
+            "Machine-derived series label. Substring match, repeatable (ORed)."
+        ),
+    ),
+    timepoint: list[str] | None = Query(
+        None,
+        description=(
+            "The owning study's machine-derived timepoint (BL / THROMBECTOMY / "
+            "FU). Substring match, repeatable (ORed)."
+        ),
+    ),
+    label_filters: str | None = Query(None),
     scope: list[str] | None = Depends(get_dataset_scope),
 ):
-    """All series for a given study (for expandable sub-rows)."""
+    """Series for a given study (expandable sub-rows).
+
+    Optionally narrowed by the sidebar quick filters (the Auto `series_type` /
+    `timepoint` columns and select-value annotation labels) so an expanded
+    subtable mirrors the top-level filter — the same semantics as the flat
+    `list_series` endpoint.
+    """
     conn = get_conn()
     try:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             ensure_study_access(cur, studyinstanceuid, scope)
+            conditions = ["s.studyinstanceuid = %s"]
+            params: list = [studyinstanceuid]
+            for expr, vals in (
+                (SERIES_TYPE_MATCH_EXPR, series_type),
+                (TIMEPOINT_MATCH_EXPR, timepoint),
+            ):
+                sql, ps = auto_match_sql(expr, vals)
+                if sql:
+                    conditions.append(sql)
+                    params.extend(ps)
+            apply_label_filters(
+                parse_label_filters(label_filters),
+                "series", "s.seriesinstanceuid", conditions, params,
+            )
+            where = "WHERE " + " AND ".join(conditions)
             cur.execute(
                 "SELECT s.seriesinstanceuid, s.studyinstanceuid, s.patient_id, s.import_id, s.import_label, "
                 "s.modality, s.seriesdescription, s.acquisitiondatetime, s.number_of_slices, "
                 "s.slicethickness, s.scanaxialcoverage_mm, "
                 f"{SERIES_AUTO_COLS}, {STUDY_AUTO_COLS}, "
                 f"{_dataset_display_sql('s.patient_id')} "
-                f"FROM {SERIES_FROM_CLAUSE} WHERE s.studyinstanceuid = %s "
+                f"FROM {SERIES_FROM_CLAUSE} {where} "
                 "ORDER BY s.acquisitiondatetime, s.seriesdescription",
-                (studyinstanceuid,),
+                tuple(params),
             )
             rows = cur.fetchall()
             for r in rows:

@@ -92,10 +92,12 @@ def scratch_engine():
     engine = create_engine(scratch_url)
     with engine.begin() as conn:
         # 11-001 clinically matched; 11-002 deliberately unmatched. The protocol
-        # reads only study_id + stroke_date from the (wide) lvo_clinical_data.
+        # reads only study_id + stroke_date + femoral_sheath_time from the (wide)
+        # lvo_clinical_data.
         conn.execute(text(
-            "INSERT INTO lvo_clinical_data (study_id, stroke_date) "
-            "VALUES ('11-001', '2026-01-01')"))
+            "INSERT INTO lvo_clinical_data "
+            "(study_id, stroke_date, femoral_sheath_time) "
+            "VALUES ('11-001', '2026-01-01', '08:45')"))
 
     yield engine
 
@@ -189,8 +191,8 @@ def test_end_to_end_two_patients(roots, scratch_engine, capsys):
             "SELECT studyinstanceuid, compressed_size_mb, decompressed_size_mb "
             "FROM image_study ORDER BY studyinstanceuid")).mappings().all()
         patients = conn.execute(text(
-            "SELECT patient_id, stroke_date, dataset, import_label "
-            "FROM patient ORDER BY patient_id")).mappings().all()
+            "SELECT patient_id, stroke_date, femoral_sheath_time, dataset, "
+            "import_label FROM patient ORDER BY patient_id")).mappings().all()
 
     assert len(series) == 4
     for row in series:
@@ -218,6 +220,11 @@ def test_end_to_end_two_patients(roots, scratch_engine, capsys):
         assert p["stroke_date"].strftime("%Y%m%d") == ACQ_DATE[p["patient_id"]]
         assert p["dataset"] == ["audit"]
         assert p["import_label"] == "audit_batch"
+    # femoral_sheath_time is copied from the clinical row (prospective), NULL
+    # for the deliberately-unmatched patient.
+    by_pid = {p["patient_id"]: p for p in patients}
+    assert by_pid["11-001"]["femoral_sheath_time"] == "08:45"
+    assert by_pid["11-002"]["femoral_sheath_time"] is None
 
     # Source tree untouched.
     assert _manifest(roots / "src") == src_manifest

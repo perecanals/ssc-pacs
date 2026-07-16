@@ -37,17 +37,21 @@ These tables drive browsing in the Navigator UI:
     backfillable from imaging. Comprehensive: a patient appears here whether or
     not a clinical row exists in `lvo_clinical_data`.
   - fields: `patient_id` (PK), `stroke_date` (imaging-derived =
-    `MIN(image_study.acquisitiondatetime)`), `import_id`/`import_label` (origin
-    batch, preserved on conflict), `dataset` (`text[]`, union-accumulated),
-    `created_at`, `updated_at`
+    `MIN(image_study.acquisitiondatetime)`), `femoral_sheath_time` (TEXT, Alembic
+    `0017`; durable copy of the clinical arterial-puncture time, populated
+    prospectively by ingestion from `lvo_clinical_data`, present only for the
+    CRISP2/LVO cohort), `import_id`/`import_label` (origin batch, preserved on
+    conflict), `dataset` (`text[]`, union-accumulated), `created_at`,
+    `updated_at`
 - **`lvo_clinical_data`** (clinical side-table — *not* the patient spine)
   - clinical variables (demographics, outcomes, etc.). Retired as a roster: the
-    patient tab joins it only to prefer its `stroke_date` when a patient is
-    clinically matched.
+    patient tab joins it only to prefer its `stroke_date` (and
+    `femoral_sheath_time`) when a patient is clinically matched.
   - **Scoped exception (Alembic `0015`)**: the timepoint classifier reads three
     time columns — `femoral_sheath_time`, `receiving_arrival_time`,
     `time_recognized` — to anchor `image_study.timepoint` on the thrombectomy
-    puncture. That is the *only* other sanctioned read; do not widen it.
+    puncture. Ingestion also copies `femoral_sheath_time` onto `patient` (Alembic
+    `0017`). Those are the *only* other sanctioned reads; do not widen them.
   - key fields: `study_id` (the patient id; joined as `c.study_id = patient.patient_id`), `stroke_date` (TEXT)
   - Contains identifiable clinical data. Treat as sensitive: query it in the
     aggregate, and don't page through row values without a reason.
@@ -55,9 +59,9 @@ These tables drive browsing in the Navigator UI:
   - typical fields: `patient_id`, `studyinstanceuid`, `studydescription`, `study_type`, `study_path`, `acquisitiondatetime`, `import_id`, `import_label`
   - storage-size rollups (Alembic `0012`, `double precision`, decimal MB): `compressed_size_mb`, `decompressed_size_mb` — stay NULL until every child series has that size
   - classification: **`study_type`** — machine-derived from `StudyDescription` at ingest, plus `study_type_version` (Alembic `0015`). See [`image_ingestion_protocol.md`](image_ingestion_protocol.md) §How `series_type` and `study_type` are detected
-  - temporal (Alembic `0015`): **`timepoint`** (`BL` / `THROMBECTOMY` / `FU` / NULL), `timepoint_anchor_source`, `hours_to_event` (signed), `timepoint_version`. Anchored on the **femoral-sheath puncture** from `lvo_clinical_data` — *not* stroke onset, so `BL` means pre-thrombectomy. Only 59% of clinical rows carry a recorded puncture; the rest are `+5h`/`+10h` estimates, which is why `timepoint_anchor_source` exists — filter on it before trusting a timepoint. See [`image_ingestion_protocol.md`](image_ingestion_protocol.md) §How `timepoint` is detected
+  - temporal (Alembic `0015`, extended `0016`): **`timepoint`** (`BL` / `THROMBECTOMY` / `FU` / NULL), `timepoint_anchor_source`, `hours_to_event` (signed), `timepoint_version`, **`episode`** (1-based, `0016`). Anchored **per episode** on the **femoral-sheath puncture** from `lvo_clinical_data` — *not* stroke onset, so `BL` means pre-thrombectomy — falling back to the episode's own `THROMBECTOMY` study when there is no clinical anchor (`timepoint_anchor_source = 'thrombectomy_study'`, covers non-LVO patients + the second episode of the `11-*` multi-episode cohort). Only 59% of clinical rows carry a recorded puncture; the rest are `+5h`/`+10h` estimates, which is why `timepoint_anchor_source` exists — filter on it before trusting a timepoint. `acquisitiondatetime_source` (`0016`, `acquisition` | `study`) records which DICOM clock built `acquisitiondatetime`. See [`image_ingestion_protocol.md`](image_ingestion_protocol.md) §How `timepoint` is detected
 - **`image_series`** (series-level imaging metadata)
-  - typical fields: `patient_id`, `studyinstanceuid`, `seriesinstanceuid`, `seriesdescription`, `modality`, `acquisitiondatetime`
+  - typical fields: `patient_id`, `studyinstanceuid`, `seriesinstanceuid`, `seriesdescription`, `modality`, `acquisitiondatetime`, `acquisitiondatetime_source` (`0016`)
   - file pointers: `dicom_dir_path`, `nifti_path`
   - optional cold storage: **`dicom_archive_path`** — path to per-series `*.tar.zst` when using `cold_path_cache` mode
   - storage sizes (Alembic `0012`, `double precision`, decimal MB): `compressed_size_mb`, `decompressed_size_mb`
@@ -256,7 +260,7 @@ Populated by `annotations_audit_trg` trigger (PL/pgSQL). See [`../operations/ann
 
 ## How the web app queries the DB
 
-- **Patients**: listed from the `patient` registry, LEFT JOINing `lvo_clinical_data` on `c.study_id = p.patient_id` to display `COALESCE(c.stroke_date, p.stroke_date::date::text)` — the clinical date when matched, the imaging-derived date otherwise.
+- **Patients**: listed from the `patient` registry, LEFT JOINing `lvo_clinical_data` on `c.study_id = p.patient_id` to display `COALESCE(c.stroke_date, p.stroke_date::date::text)` — the clinical date when matched, the imaging-derived date otherwise. `femoral_sheath_time` is surfaced the same way, `COALESCE(c.femoral_sheath_time, p.femoral_sheath_time)` — the live clinical value preferred over the durable patient copy (off by default in the Displayed Columns menu).
 - **Studies**: listed from `image_study`, and modality is aggregated from `image_series` by `studyinstanceuid`.
 - **Series**: listed from `image_series` and LEFT JOINs `image_study` to include `study_type`.
 - **Annotations** are joined/attached per row and **inherit downward** (patient → study → series) in API responses.

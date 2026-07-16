@@ -9,7 +9,10 @@ missing from the inner SELECT raises UndefinedColumn at request time — nothing
 else catches that.
 """
 
-from tests.conftest import USER_CRISP, login_as
+import psycopg2
+import pytest
+
+from tests.conftest import USER_CRISP, USER_NONE, login_as
 
 SERIES_AUTO_FIELDS = (
     "series_type",
@@ -31,6 +34,46 @@ def _find(rows, key, value):
         if r[key] == value:
             return r
     return None
+
+
+@pytest.fixture()
+def two_series_study(seeded_db):
+    """A P-0001 study carrying two differently-typed series (CTA + NCCT).
+
+    The session-scoped seed has one series per study, so it can't exercise
+    within-study narrowing; the shared exact-set assertions elsewhere forbid
+    adding matching rows globally. This inserts + COMMITs a dedicated study so
+    the API's own connection sees it, then removes it on teardown. Tests run
+    sequentially, so no other test observes these rows.
+    """
+    uid = "9.9.9.9.9"
+    conn = psycopg2.connect(**seeded_db)
+    try:
+        conn.autocommit = True
+        with conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO image_study "
+                "(patient_id, studyinstanceuid, study_type, acquisitiondatetime, "
+                " timepoint, timepoint_anchor_source, hours_to_event, timepoint_version) "
+                "VALUES ('P-0001', %s, 'CTA', '2025-04-04', "
+                " 'BL', 'femoral_sheath_time', -2.0, 'rules-v1')",
+                (uid,),
+            )
+            cur.execute(
+                "INSERT INTO image_series "
+                "(patient_id, studyinstanceuid, seriesinstanceuid, modality, seriesdescription, "
+                " series_type, series_type_rank, series_label, series_type_rule, series_type_version) "
+                "VALUES "
+                " ('P-0001', %s, '9.9.9.9.9.1', 'CT', 'Angio', 'CTA', 1, 'CTA_1', 'kernel-soft', 'rules-v1'), "
+                " ('P-0001', %s, '9.9.9.9.9.2', 'CT', 'Axial', 'NCCT', 1, 'NCCT_1', 'kernel-soft', 'rules-v1')",
+                (uid, uid),
+            )
+        yield uid
+    finally:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM image_series WHERE studyinstanceuid = %s", (uid,))
+            cur.execute("DELETE FROM image_study WHERE studyinstanceuid = %s", (uid,))
+        conn.close()
 
 
 class TestSeriesEndpoint:
@@ -134,6 +177,67 @@ class TestStudyEndpoints:
         assert row["series_type"] == "NCCT"
         assert row["timepoint"] == "BL"
 
+    # The sidebar quick filters cascade into these expandable sub-row endpoints,
+    # so an expanded subtable mirrors the top-level filter (same "has-one" at the
+    # study level / direct match at the series level as the flat endpoints).
+    def test_patient_studies_filter_by_timepoint(self, logged_in_client):
+        hit = logged_in_client.get("/api/patients/P-0001/studies?timepoint=BL")
+        assert _find(hit.json(), "studyinstanceuid", "1.2.3.4.5")
+        miss = logged_in_client.get("/api/patients/P-0001/studies?timepoint=FU")
+        assert miss.json() == []
+
+    def test_patient_studies_filter_series_type_is_has_one(self, logged_in_client):
+        # P-0001's only study has an NCCT series but no CTA series.
+        hit = logged_in_client.get("/api/patients/P-0001/studies?series_type=NCCT")
+        assert _find(hit.json(), "studyinstanceuid", "1.2.3.4.5")
+        miss = logged_in_client.get("/api/patients/P-0001/studies?series_type=CTA")
+        assert miss.json() == []
+
+    def test_patient_studies_filters_and_together(self, logged_in_client):
+        both = logged_in_client.get(
+            "/api/patients/P-0001/studies?series_type=NCCT&timepoint=BL"
+        )
+        assert _find(both.json(), "studyinstanceuid", "1.2.3.4.5")
+        neither = logged_in_client.get(
+            "/api/patients/P-0001/studies?series_type=NCCT&timepoint=FU"
+        )
+        assert neither.json() == []
+
+    def test_patient_studies_import_label_coexists_with_new_params(
+        self, logged_in_client
+    ):
+        # A non-matching import label ANDs with (matching) timepoint -> empty,
+        # proving the refactored import-label fragment still binds correctly
+        # alongside the new params.
+        resp = logged_in_client.get(
+            "/api/patients/P-0001/studies?study_import_label=zzz&timepoint=BL"
+        )
+        assert resp.status_code == 200
+        assert resp.json() == []
+
+    def test_study_series_filter_by_series_type(self, logged_in_client):
+        hit = logged_in_client.get("/api/studies/1.2.3.4.5/series?series_type=NCCT")
+        assert len(hit.json()) == 1
+        miss = logged_in_client.get("/api/studies/1.2.3.4.5/series?series_type=CTA")
+        assert miss.json() == []
+
+    def test_study_series_filter_by_owning_study_timepoint(self, logged_in_client):
+        hit = logged_in_client.get("/api/studies/1.2.3.4.5/series?timepoint=BL")
+        assert len(hit.json()) == 1
+        miss = logged_in_client.get("/api/studies/1.2.3.4.5/series?timepoint=FU")
+        assert miss.json() == []
+
+    def test_study_series_narrows_within_a_multi_series_study(
+        self, logged_in_client, two_series_study
+    ):
+        """Study with a CTA and an NCCT series: filtering CTA leaves only the CTA."""
+        uid = two_series_study
+        allrows = logged_in_client.get(f"/api/studies/{uid}/series")
+        assert len(allrows.json()) == 2
+        cta = logged_in_client.get(f"/api/studies/{uid}/series?series_type=CTA")
+        types = [r["series_type"] for r in cta.json()]
+        assert types == ["CTA"]
+
 
 class TestSidebarQuickFilters:
     """The sidebar multi-select: repeated params, ORed, at every level."""
@@ -194,3 +298,11 @@ class TestDatasetScoping:
         assert resp.status_code == 200
         for row in resp.json()["series"]:
             assert row["patient_id"] == "P-0001"
+
+    def test_subtable_filters_do_not_bypass_scope(self, client):
+        """A user with no grants can't reach the sub-row endpoints, filter or not."""
+        login_as(client, USER_NONE)
+        studies = client.get("/api/patients/P-0001/studies?series_type=NCCT")
+        assert studies.status_code == 404
+        series = client.get("/api/studies/1.2.3.4.5/series?series_type=NCCT")
+        assert series.status_code == 404

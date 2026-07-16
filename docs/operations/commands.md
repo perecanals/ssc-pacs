@@ -161,9 +161,12 @@ restart needed.
 `add` and `passwd` both set the user's `must_change_password` flag to TRUE. On
 their next sign-in the Navigator UI redirects them to `/change-password` and
 the API blocks every other endpoint with `403 password_change_required` until
-they pick a new password. There is no self-service password reset — a forgotten
-password requires an admin to run `passwd` and share a fresh temporary one
-out-of-band.
+they pick a new password. This forced first-login change does **not** ask for
+the temporary password again (the user just authenticated with it) — it only
+requires the new password, which must differ from the temp one. A later
+*voluntary* change still requires the current password. There is no self-service
+password reset — a forgotten password requires an admin to run `passwd` and
+share a fresh temporary one out-of-band.
 
 Adding, removing, or changing the password of a **non-admin** user only touches
 PostgreSQL — no service restart is needed. For **admin** users the script also

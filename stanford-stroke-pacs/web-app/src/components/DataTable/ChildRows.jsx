@@ -145,66 +145,68 @@ function GrandChildTable({
                       className="dt__gc-td--actions"
                       onClick={(e) => e.stopPropagation()}
                     >
-                      {gc.studyinstanceuid && (
-                        <button
-                          onClick={() =>
-                            onResolveOhifLink(
-                              gc.studyinstanceuid,
-                              gc.seriesinstanceuid,
-                            )
-                          }
-                          className="dt__gc-link-btn"
-                        >
-                          OHIF
-                        </button>
-                      )}
-                      {gc.seriesinstanceuid && canWarm && (
-                        <WarmButton
-                          status={seriesStatus[gc.seriesinstanceuid]}
-                          onWarm={() => onWarmSeries(gc.seriesinstanceuid)}
-                          baseClass="dt__gc-link-btn"
-                        />
-                      )}
-                      {gc.seriesinstanceuid && isAdmin && (
-                        <>
+                      <div className="dt__actions-inner dt__actions-inner--tight">
+                        {gc.studyinstanceuid && (
                           <button
                             onClick={() =>
-                              onDicomDownload(gc.seriesinstanceuid)
+                              onResolveOhifLink(
+                                gc.studyinstanceuid,
+                                gc.seriesinstanceuid,
+                              )
                             }
                             className="dt__gc-link-btn"
-                            title="Download DICOM as zip"
-                            disabled={
-                              downloadingSeries === gc.seriesinstanceuid
-                            }
                           >
-                            {downloadingSeries === gc.seriesinstanceuid ? (
-                              "\u2026"
-                            ) : (
-                              <DownloadIcon />
-                            )}
+                            OHIF
                           </button>
-                          <CopyPathButtons
-                            seriesUid={gc.seriesinstanceuid}
+                        )}
+                        {gc.seriesinstanceuid && canWarm && (
+                          <WarmButton
+                            status={seriesStatus[gc.seriesinstanceuid]}
+                            onWarm={() => onWarmSeries(gc.seriesinstanceuid)}
                             baseClass="dt__gc-link-btn"
                           />
-                        </>
-                      )}
-                      {gc.seriesinstanceuid && isAdmin && onRequestDelete && (
-                        <button
-                          onClick={() =>
-                            onRequestDelete(
-                              "series",
-                              gc.seriesinstanceuid,
-                              gc.seriesdescription,
-                            )
-                          }
-                          className="dt__gc-link-btn dt__gc-link-btn--danger"
-                          title="Delete this series"
-                          aria-label="Delete this series"
-                        >
-                          <TrashIcon />
-                        </button>
-                      )}
+                        )}
+                        {gc.seriesinstanceuid && isAdmin && (
+                          <>
+                            <button
+                              onClick={() =>
+                                onDicomDownload(gc.seriesinstanceuid)
+                              }
+                              className="dt__gc-link-btn"
+                              title="Download DICOM as zip"
+                              disabled={
+                                downloadingSeries === gc.seriesinstanceuid
+                              }
+                            >
+                              {downloadingSeries === gc.seriesinstanceuid ? (
+                                "\u2026"
+                              ) : (
+                                <DownloadIcon />
+                              )}
+                            </button>
+                            <CopyPathButtons
+                              seriesUid={gc.seriesinstanceuid}
+                              baseClass="dt__gc-link-btn"
+                            />
+                          </>
+                        )}
+                        {gc.seriesinstanceuid && isAdmin && onRequestDelete && (
+                          <button
+                            onClick={() =>
+                              onRequestDelete(
+                                "series",
+                                gc.seriesinstanceuid,
+                                gc.seriesdescription,
+                              )
+                            }
+                            className="dt__gc-link-btn dt__gc-link-btn--danger"
+                            title="Delete this series"
+                            aria-label="Delete this series"
+                          >
+                            <TrashIcon />
+                          </button>
+                        )}
+                      </div>
                     </td>
                     <td
                       className="dt__gc-td dt__gc-td--spacer"
@@ -365,89 +367,91 @@ export default function ChildRows({
                   className="dt__child-td--actions"
                   onClick={(e) => e.stopPropagation()}
                 >
-                  {child.studyinstanceuid && (
-                    <button
-                      onClick={() =>
-                        onResolveOhifLink(
-                          child.studyinstanceuid,
-                          childConfig.idCol === "seriesinstanceuid"
-                            ? child.seriesinstanceuid
-                            : null,
-                        )
-                      }
-                      className="link-btn"
-                    >
-                      OHIF
-                    </button>
-                  )}
-                  {childConfig.idCol === "studyinstanceuid" &&
-                    child.studyinstanceuid &&
-                    canWarm && (
-                      <WarmButton
-                        status={studyStatus[child.studyinstanceuid]}
-                        onWarm={() => onWarmStudy(child.studyinstanceuid)}
-                      />
-                    )}
-                  {childConfig.idCol === "seriesinstanceuid" &&
-                    child.seriesinstanceuid &&
-                    canWarm && (
-                      <WarmButton
-                        status={seriesStatus[child.seriesinstanceuid]}
-                        onWarm={() => onWarmSeries(child.seriesinstanceuid)}
-                      />
-                    )}
-                  {childConfig.idCol === "seriesinstanceuid" &&
-                    child.seriesinstanceuid &&
-                    isAdmin && (
-                      <>
-                        <button
-                          onClick={() =>
-                            onDicomDownload(child.seriesinstanceuid)
-                          }
-                          className="link-btn"
-                          title="Download DICOM as zip"
-                          disabled={
-                            downloadingSeries === child.seriesinstanceuid
-                          }
-                        >
-                          {downloadingSeries === child.seriesinstanceuid ? (
-                            "\u2026"
-                          ) : (
-                            <DownloadIcon />
-                          )}
-                        </button>
-                        <CopyPathButtons
-                          seriesUid={child.seriesinstanceuid}
-                          baseClass="link-btn"
-                        />
-                      </>
-                    )}
-                  {isAdmin &&
-                    onRequestDelete &&
-                    (childConfig.idCol === "studyinstanceuid"
-                      ? child.studyinstanceuid
-                      : child.seriesinstanceuid) && (
+                  <div className="dt__actions-inner">
+                    {child.studyinstanceuid && (
                       <button
                         onClick={() =>
-                          childConfig.idCol === "studyinstanceuid"
-                            ? onRequestDelete(
-                                "study",
-                                child.studyinstanceuid,
-                                child.studydescription,
-                              )
-                            : onRequestDelete(
-                                "series",
-                                child.seriesinstanceuid,
-                                child.seriesdescription,
-                              )
+                          onResolveOhifLink(
+                            child.studyinstanceuid,
+                            childConfig.idCol === "seriesinstanceuid"
+                              ? child.seriesinstanceuid
+                              : null,
+                          )
                         }
-                        className="link-btn link-btn--danger"
-                        title={`Delete this ${childLevel}`}
-                        aria-label={`Delete this ${childLevel}`}
+                        className="link-btn"
                       >
-                        <TrashIcon />
+                        OHIF
                       </button>
                     )}
+                    {childConfig.idCol === "studyinstanceuid" &&
+                      child.studyinstanceuid &&
+                      canWarm && (
+                        <WarmButton
+                          status={studyStatus[child.studyinstanceuid]}
+                          onWarm={() => onWarmStudy(child.studyinstanceuid)}
+                        />
+                      )}
+                    {childConfig.idCol === "seriesinstanceuid" &&
+                      child.seriesinstanceuid &&
+                      canWarm && (
+                        <WarmButton
+                          status={seriesStatus[child.seriesinstanceuid]}
+                          onWarm={() => onWarmSeries(child.seriesinstanceuid)}
+                        />
+                      )}
+                    {childConfig.idCol === "seriesinstanceuid" &&
+                      child.seriesinstanceuid &&
+                      isAdmin && (
+                        <>
+                          <button
+                            onClick={() =>
+                              onDicomDownload(child.seriesinstanceuid)
+                            }
+                            className="link-btn"
+                            title="Download DICOM as zip"
+                            disabled={
+                              downloadingSeries === child.seriesinstanceuid
+                            }
+                          >
+                            {downloadingSeries === child.seriesinstanceuid ? (
+                              "\u2026"
+                            ) : (
+                              <DownloadIcon />
+                            )}
+                          </button>
+                          <CopyPathButtons
+                            seriesUid={child.seriesinstanceuid}
+                            baseClass="link-btn"
+                          />
+                        </>
+                      )}
+                    {isAdmin &&
+                      onRequestDelete &&
+                      (childConfig.idCol === "studyinstanceuid"
+                        ? child.studyinstanceuid
+                        : child.seriesinstanceuid) && (
+                        <button
+                          onClick={() =>
+                            childConfig.idCol === "studyinstanceuid"
+                              ? onRequestDelete(
+                                  "study",
+                                  child.studyinstanceuid,
+                                  child.studydescription,
+                                )
+                              : onRequestDelete(
+                                  "series",
+                                  child.seriesinstanceuid,
+                                  child.seriesdescription,
+                                )
+                          }
+                          className="link-btn link-btn--danger"
+                          title={`Delete this ${childLevel}`}
+                          aria-label={`Delete this ${childLevel}`}
+                        >
+                          <TrashIcon />
+                        </button>
+                      )}
+                  </div>
                 </td>
                 <td
                   className="dt__child-td dt__child-td--spacer"

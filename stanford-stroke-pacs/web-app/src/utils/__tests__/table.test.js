@@ -6,6 +6,9 @@ import {
   getTextFilterValue,
   buildBuiltinColumnCatalog,
   buildPatientStudiesUrl,
+  appendCascadeFilters,
+  buildLabelFiltersFromValues,
+  appendAutoValueParams,
   compareLabelDefsDefault,
   LEVEL_CONFIG,
   PER_PAGE,
@@ -97,18 +100,21 @@ describe("buildBuiltinColumnCatalog", () => {
 
   it("marks patient-level columns as visible when activeLevel is patient", () => {
     const cols = buildBuiltinColumnCatalog("patient");
-    // Columns flagged defaultVisible:false (the opt-in "study import labels"
-    // column) stay hidden even at their own level; all others default to
-    // visible — including "dataset", which replaced import labels as the
-    // default cohort column.
+    // Columns flagged defaultVisible:false (the opt-in "study import labels" and
+    // "femoral sheath time" columns) stay hidden even at their own level; all
+    // others default to visible — including "dataset", which replaced import
+    // labels as the default cohort column.
+    const optIn = ["study_import_labels", "femoral_sheath_time"];
     const patientCols = cols.filter(
-      (c) => c.level === "patient" && c.sourceKey !== "study_import_labels",
+      (c) => c.level === "patient" && !optIn.includes(c.sourceKey),
     );
     expect(patientCols.every((c) => c.defaultVisible === true)).toBe(true);
-    const importLabels = cols.find(
-      (c) => c.level === "patient" && c.sourceKey === "study_import_labels",
-    );
-    expect(importLabels.defaultVisible).toBe(false);
+    for (const key of optIn) {
+      const optInCol = cols.find(
+        (c) => c.level === "patient" && c.sourceKey === key,
+      );
+      expect(optInCol.defaultVisible).toBe(false);
+    }
   });
 
   it("hides import_label by default at study and series levels", () => {
@@ -136,22 +142,102 @@ describe("buildBuiltinColumnCatalog", () => {
 });
 
 describe("buildPatientStudiesUrl", () => {
-  it("returns base URL without label", () => {
+  it("returns base URL without filters", () => {
+    expect(buildPatientStudiesUrl({ patient_id: "P1" }, {})).toBe(
+      "/api/patients/P1/studies",
+    );
     expect(buildPatientStudiesUrl({ patient_id: "P1" })).toBe(
       "/api/patients/P1/studies",
     );
   });
 
-  it("appends label parameter", () => {
-    expect(buildPatientStudiesUrl({ patient_id: "P1" }, "batch1")).toBe(
-      "/api/patients/P1/studies?study_import_label=batch1",
-    );
+  it("appends study import label", () => {
+    expect(
+      buildPatientStudiesUrl(
+        { patient_id: "P1" },
+        { studyImportLabel: "batch1" },
+      ),
+    ).toBe("/api/patients/P1/studies?study_import_label=batch1");
   });
 
   it("ignores blank label", () => {
-    expect(buildPatientStudiesUrl({ patient_id: "P1" }, "  ")).toBe(
-      "/api/patients/P1/studies",
+    expect(
+      buildPatientStudiesUrl({ patient_id: "P1" }, { studyImportLabel: "  " }),
+    ).toBe("/api/patients/P1/studies");
+  });
+
+  it("appends cascade filters alongside the import label", () => {
+    const url = buildPatientStudiesUrl(
+      { patient_id: "P1" },
+      { studyImportLabel: "batch1", autoValues: { series_type: ["CTA"] } },
     );
+    expect(url).toBe(
+      "/api/patients/P1/studies?study_import_label=batch1&series_type=CTA",
+    );
+  });
+});
+
+describe("appendAutoValueParams", () => {
+  it("appends repeated params the API ORs", () => {
+    const params = new URLSearchParams();
+    appendAutoValueParams(params, {
+      series_type: ["NCCT", "CTA"],
+      timepoint: ["BL"],
+    });
+    expect(params.getAll("series_type")).toEqual(["NCCT", "CTA"]);
+    expect(params.getAll("timepoint")).toEqual(["BL"]);
+  });
+
+  it("is a no-op for empty/invalid input", () => {
+    const params = new URLSearchParams();
+    appendAutoValueParams(params, null);
+    appendAutoValueParams(params, {});
+    expect(params.toString()).toBe("");
+  });
+});
+
+describe("buildLabelFiltersFromValues", () => {
+  it("serializes labelValues keyed by <level>:<label>", () => {
+    const out = buildLabelFiltersFromValues({ "series:foo": ["a", "b"] });
+    expect(out).toEqual([
+      { label: "foo", level: "series", values: ["a", "b"], datatype: "select" },
+    ]);
+  });
+
+  it("unions into an existing select filter for the same label+level", () => {
+    const existing = [
+      { label: "foo", level: "series", values: ["a"], datatype: "select" },
+    ];
+    buildLabelFiltersFromValues({ "series:foo": ["a", "c"] }, existing);
+    expect(existing[0].values).toEqual(["a", "c"]);
+  });
+});
+
+describe("appendCascadeFilters", () => {
+  it("returns the base URL unchanged when there are no cascade filters", () => {
+    expect(appendCascadeFilters("/api/x", {})).toBe("/api/x");
+  });
+
+  it("appends autoValues and labelValues", () => {
+    const url = appendCascadeFilters("/api/x", {
+      autoValues: { series_type: ["CTA"] },
+      labelValues: { "series:foo": ["a"] },
+    });
+    expect(url).toContain("series_type=CTA");
+    expect(url).toContain(
+      `label_filters=${encodeURIComponent(
+        JSON.stringify([
+          { label: "foo", level: "series", values: ["a"], datatype: "select" },
+        ]),
+      )}`,
+    );
+  });
+
+  it("uses & when the base URL already has a query string", () => {
+    const url = appendCascadeFilters("/api/x?study_import_label=b", {
+      autoValues: { timepoint: ["BL"] },
+    });
+    expect(url).toBe("/api/x?study_import_label=b&timepoint=BL");
   });
 });
 
@@ -193,6 +279,19 @@ describe("constants", () => {
 
   it("PER_PAGE is 50", () => {
     expect(PER_PAGE).toBe(50);
+  });
+
+  it("exposes the patient femoral_sheath_time column mapped to its filter param", () => {
+    const cols = buildBuiltinColumnCatalog("patient");
+    const fst = cols.find(
+      (c) => c.level === "patient" && c.sourceKey === "femoral_sheath_time",
+    );
+    expect(fst).toBeTruthy();
+    expect(fst.key).toBe("builtin:patient:femoral_sheath_time");
+    expect(fst.filterable).toBe(true);
+    expect(LEVEL_CONFIG.patient.filterParamMap.femoral_sheath_time).toBe(
+      "femoral_sheath_time",
+    );
   });
 });
 
