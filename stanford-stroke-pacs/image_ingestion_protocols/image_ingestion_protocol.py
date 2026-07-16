@@ -1481,18 +1481,27 @@ class ImageIngestionProtocol:
             return
 
         dataset_arr = [self.dataset] if self.dataset else []
+        # femoral_sheath_time is the clinical arterial-puncture time from
+        # lvo_clinical_data (present only for CRISP2/LVO). One clinical row per
+        # patient (study_id = patient_id), so MIN() is a deterministic pick and
+        # is NULL for patients with no clinical row. A durable copy on `patient`,
+        # populated prospectively — the web app still prefers the live clinical
+        # value via COALESCE(c.femoral_sheath_time, p.femoral_sheath_time).
         connection.execute(
             text(
                 "INSERT INTO patient "
-                "(patient_id, stroke_date, import_id, import_label, dataset, "
-                " created_at, updated_at) "
+                "(patient_id, stroke_date, femoral_sheath_time, import_id, "
+                " import_label, dataset, created_at, updated_at) "
                 "SELECT s.patient_id, MIN(s.acquisitiondatetime), "
+                "       MIN(c.femoral_sheath_time), "
                 "       :import_id, :import_label, :dataset, now(), now() "
                 "FROM image_study s "
+                "LEFT JOIN lvo_clinical_data c ON c.study_id = s.patient_id "
                 "WHERE s.patient_id = ANY(:patient_ids) "
                 "GROUP BY s.patient_id "
                 "ON CONFLICT (patient_id) DO UPDATE SET "
                 "  stroke_date = EXCLUDED.stroke_date, "
+                "  femoral_sheath_time = EXCLUDED.femoral_sheath_time, "
                 "  dataset = ARRAY(SELECT DISTINCT unnest("
                 "      patient.dataset || EXCLUDED.dataset) ORDER BY 1), "
                 "  updated_at = now()"

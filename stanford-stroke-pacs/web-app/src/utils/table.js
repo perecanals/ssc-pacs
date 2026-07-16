@@ -12,6 +12,13 @@ const LEVEL_CONFIG = {
       { key: "patient_id", label: "Patient ID", filterable: true },
       { key: "stroke_date", label: "Stroke Date", filterable: true },
       {
+        key: "femoral_sheath_time",
+        label: "Femoral Sheath Time",
+        filterable: true,
+        sortable: false,
+        defaultVisible: false,
+      },
+      {
         key: "study_import_labels",
         label: "Study import labels",
         filterable: true,
@@ -24,6 +31,7 @@ const LEVEL_CONFIG = {
     filterParamMap: {
       patient_id: "patient_id",
       stroke_date: "stroke_date",
+      femoral_sheath_time: "femoral_sheath_time",
       study_import_labels: "study_import_label",
       dataset: "dataset",
     },

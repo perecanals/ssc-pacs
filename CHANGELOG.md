@@ -1,5 +1,20 @@
 # Changelog
 
+## v1.10 — 2026-07-15
+
+- **Feature**: femoral sheath (arterial puncture) time at the patient level.
+  Surfaced in the patient table as an off-by-default column ("Femoral Sheath
+  Time", opt-in via the Displayed Columns menu) and filterable. Present only for
+  the CRISP2/LVO cohort. The web app prefers the live clinical value,
+  `COALESCE(c.femoral_sheath_time, p.femoral_sheath_time)`, over a durable copy
+  that ingestion (`_upsert_patient`) now populates prospectively from
+  `lvo_clinical_data`. Existing patients display immediately via the live join;
+  there is no historical bulk backfill.
+- Migration `0017_patient_femoral_sheath_time` adds the nullable
+  `patient.femoral_sheath_time` (text) column — instant, no-op downgrade.
+  `patient` is upstream-owned: mirror the same column into the out-of-band
+  production DDL (`ssc-sql-db/create_patient.sql`) so fresh provisioning matches.
+
 ## v1.9 — 2026-07-15
 
 - Sidebar quick filters now cascade into the expanded subtables. Picking an Auto

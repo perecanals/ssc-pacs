@@ -59,6 +59,28 @@ class TestPatientListing:
         # text[] {lvo,crisp2} is returned array_to_string-joined for the table cell.
         assert row["dataset"] == "lvo, crisp2"
 
+    def test_patient_row_exposes_femoral_sheath_time(self, logged_in_client):
+        """Clinical femoral_sheath_time surfaces on the matched patient; blank otherwise."""
+        resp = logged_in_client.get("/api/patients", params={"patient_id": "P-0001"})
+        row = _find(resp.json()["items"], "P-0001")
+        assert row is not None
+        assert row["femoral_sheath_time"] == "09:30"
+        # P-0002 has no clinical row → NULL (renders as a blank cell).
+        resp2 = logged_in_client.get("/api/patients", params={"patient_id": "P-0002"})
+        row2 = _find(resp2.json()["items"], "P-0002")
+        assert row2 is not None
+        assert row2["femoral_sheath_time"] is None
+
+    def test_femoral_sheath_time_filter(self, logged_in_client):
+        """Filtering by femoral_sheath_time isolates the clinically-matched patient."""
+        resp = logged_in_client.get(
+            "/api/patients", params={"femoral_sheath_time": "09:30"}
+        )
+        assert resp.status_code == 200
+        items = resp.json()["items"]
+        assert _find(items, "P-0001") is not None
+        assert _find(items, "P-0002") is None
+
     def test_dataset_filter_shared_tag_keeps_both(self, logged_in_client):
         """dataset=lvo is a member of both patients' arrays → both listed."""
         resp = logged_in_client.get("/api/patients", params={"dataset": "lvo"})
@@ -112,15 +134,17 @@ class TestPatientListing:
 # The exact ON CONFLICT clause used by ImageIngestionProtocol._upsert_patient.
 # Kept in sync with image_ingestion_protocol.py; psycopg2 paramstyle.
 _UPSERT_SQL = """
-INSERT INTO patient (patient_id, stroke_date, import_id, import_label, dataset,
-                     created_at, updated_at)
-SELECT s.patient_id, MIN(s.acquisitiondatetime),
+INSERT INTO patient (patient_id, stroke_date, femoral_sheath_time, import_id,
+                     import_label, dataset, created_at, updated_at)
+SELECT s.patient_id, MIN(s.acquisitiondatetime), MIN(c.femoral_sheath_time),
        %(import_id)s, %(import_label)s, %(dataset)s, now(), now()
 FROM image_study s
+LEFT JOIN lvo_clinical_data c ON c.study_id = s.patient_id
 WHERE s.patient_id = ANY(%(patient_ids)s)
 GROUP BY s.patient_id
 ON CONFLICT (patient_id) DO UPDATE SET
   stroke_date = EXCLUDED.stroke_date,
+  femoral_sheath_time = EXCLUDED.femoral_sheath_time,
   dataset = ARRAY(SELECT DISTINCT unnest(patient.dataset || EXCLUDED.dataset) ORDER BY 1),
   updated_at = now()
 """
@@ -179,3 +203,23 @@ class TestPatientUpsertSemantics:
         iid, dataset = cur.fetchone()
         assert (iid, dataset) == (10, ["ds1", "ds2"])
         # db_conn fixture rolls back — no committed test rows to clean up.
+
+    def test_femoral_sheath_time_populated_from_clinical(self, db_conn):
+        """Prospective population: the upsert copies clinical femoral_sheath_time
+        onto the patient row (NULL when the patient has no clinical row)."""
+        cur = db_conn.cursor()
+        cur.execute(
+            "INSERT INTO image_study (patient_id, studyinstanceuid, acquisitiondatetime, "
+            "import_id, import_label) VALUES (%s, 'fst.1', '2025-06-06', 30, 'b')",
+            (self.PID,),
+        )
+        cur.execute(
+            "INSERT INTO lvo_clinical_data (study_id, femoral_sheath_time) "
+            "VALUES (%s, '10:15')",
+            (self.PID,),
+        )
+        self._upsert(cur, import_id=30, import_label="b", dataset=["ds"])
+        cur.execute(
+            "SELECT femoral_sheath_time FROM patient WHERE patient_id=%s", (self.PID,)
+        )
+        assert cur.fetchone()[0] == "10:15"

@@ -75,6 +75,7 @@ def _dataset_member_sql(patient_id_expr: str) -> str:
 def list_patients(
     patient_id: str | None = Query(None),
     stroke_date: str | None = Query(None),
+    femoral_sheath_time: str | None = Query(None),
     study_import_label: str | None = Query(
         None,
         description=(
@@ -148,6 +149,12 @@ def list_patients(
             # the clinical string, fall back to the imaging date as YYYY-MM-DD —
             # preserving the prior text contract and lexicographic date sort.
             stroke_date_expr = "COALESCE(c.stroke_date, p.stroke_date::date::text)"
+            # Clinical arterial-puncture time (CRISP2/LVO only). Prefer the live
+            # clinical value, fall back to the durable patient copy that
+            # ingestion populates prospectively; NULL for non-clinical patients.
+            femoral_sheath_time_expr = (
+                "COALESCE(c.femoral_sheath_time, p.femoral_sheath_time)"
+            )
 
             if patient_id:
                 conditions.append("p.patient_id::text LIKE %s")
@@ -155,6 +162,9 @@ def list_patients(
             if stroke_date:
                 conditions.append(f"{stroke_date_expr}::text LIKE %s")
                 params.append(f"%{stroke_date}%")
+            if femoral_sheath_time:
+                conditions.append(f"{femoral_sheath_time_expr}::text LIKE %s")
+                params.append(f"%{femoral_sheath_time}%")
             sil = (study_import_label or "").strip()
             if sil:
                 conditions.append(
@@ -209,7 +219,9 @@ def list_patients(
             )
             cur.execute(
                 "SELECT p.patient_id AS patient_id, "
-                f"{stroke_date_expr} AS stroke_date, {study_labels_agg}, "
+                f"{stroke_date_expr} AS stroke_date, "
+                f"{femoral_sheath_time_expr} AS femoral_sheath_time, "
+                f"{study_labels_agg}, "
                 f"array_to_string(p.dataset, ', ') AS dataset "
                 f"{from_clause} {where} "
                 f"ORDER BY {order_expr} {direction} NULLS LAST, p.patient_id ASC "
