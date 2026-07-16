@@ -179,9 +179,14 @@ async def sliding_jwt(request, call_next):
     # Skip sliding-refresh on routes that own their own auth_token cookie
     # (login sets a fresh token; logout deletes it) and on read-only probes
     # we don't want to extend the session from (/api/me, static assets).
+    # Content-hashed OHIF assets are static assets too, and are served with a
+    # long-lived Cache-Control — a Set-Cookie on them is 54 needless HMAC
+    # signings per cold viewer open. The session still slides on /dicom-web
+    # frame fetches and /api calls, which run throughout a viewing session.
     if (
         path.startswith("/assets/")
         or path in ("/api/me", "/api/login", "/api/logout")
+        or proxy.is_immutable_ohif_asset(path)
     ):
         return response
     token = request.cookies.get("auth_token")

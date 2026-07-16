@@ -24,6 +24,35 @@ router = APIRouter()
 # WADO-RS/QIDO-RS path form: /dicom-web/studies/{StudyInstanceUID}[/...]
 _STUDY_PATH_RE = re.compile(r"^/dicom-web/studies/([^/]+)")
 
+# Webpack emits OHIF's assets with a 20-hex [contenthash] as a whole
+# dot-delimited segment: app.bundle.<hash>.js, <hash>.woff2, <hash>.wasm. The
+# name derives from the bytes, so a rebuild always produces a *new* URL and a
+# cached old URL can never go stale — that is what makes `immutable` safe. No
+# extension allowlist: the hash is the proof, and an allowlist would silently
+# drop future asset types (.svg, .map) out of caching.
+_CONTENTHASH_ASSET_RE = re.compile(r"(?:^|[.-])[0-9a-f]{20}\.[A-Za-z0-9]+$")
+
+# Orthanc serves the OHIF build with no Cache-Control/ETag/Last-Modified, so
+# every viewer open re-downloads ~21 MiB. `private`, not `public`: these sit
+# behind get_current_user, and the browser is the only cache on this path
+# anyway. No Vary: Cookie needed — the 200 bytes are user-independent.
+_IMMUTABLE_CACHE_CONTROL = "private, max-age=31536000, immutable"
+
+
+def is_immutable_ohif_asset(path: str) -> bool:
+    """True for content-hashed OHIF build artefacts under /ohif/.
+
+    Unhashed siblings (app.bundle.css, app-config.js, manifest.json, and the
+    /ohif/ and /ohif/viewer entry documents) deliberately return False: they
+    keep their names across rebuilds, so caching them would go stale, and
+    Orthanc sends no ETag/Last-Modified for a revalidating policy to use.
+    """
+    if not path.startswith("/ohif/"):
+        return False
+    # Match the basename — `(?:^|[.-])` excludes `/`, so searching the full
+    # path would miss /ohif/<hash>.woff2.
+    return bool(_CONTENTHASH_ASSET_RE.search(path.rpartition("/")[2]))
+
 
 async def dicomweb_dataset_guard(
     request: Request,
@@ -141,10 +170,13 @@ async def _proxy(request: Request) -> StreamingResponse:
         content=body,
     )
     upstream = await client.send(upstream_req, stream=True)
+    headers = _filtered_response_headers(upstream)
+    if upstream.status_code == 200 and is_immutable_ohif_asset(request.url.path):
+        headers["cache-control"] = _IMMUTABLE_CACHE_CONTROL
     return StreamingResponse(
         upstream.aiter_raw(),
         status_code=upstream.status_code,
-        headers=_filtered_response_headers(upstream),
+        headers=headers,
         background=BackgroundTask(upstream.aclose),
     )
 

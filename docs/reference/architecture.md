@@ -184,6 +184,30 @@ The web app authenticates against `users`:
   (see `web-app/routes/proxy.py`), attaching the service-account credential
   from `.env`. End users never present credentials to Orthanc directly.
 
+#### OHIF asset caching
+
+Orthanc serves the OHIF build with no `Cache-Control`, `ETag`, or
+`Last-Modified`, so without intervention every viewer open re-downloads the
+whole bundle (~21 MiB across ~54 requests) — the black screen before OHIF
+appears. The proxy therefore stamps
+`Cache-Control: private, max-age=31536000, immutable` onto **content-hashed**
+assets only (`is_immutable_ohif_asset()` in `routes/proxy.py`: a 20-hex webpack
+contenthash as a whole dot-delimited segment, e.g. `app.bundle.<hash>.js`,
+`<hash>.woff2`, `<hash>.wasm`). A rebuild changes the bytes, hence the hash,
+hence the URL — so a cached entry can never go stale.
+
+Unhashed siblings (`app.bundle.css`, `app-config.js`, `manifest.json`, and the
+`/ohif/` + `/ohif/viewer` entry documents) are deliberately **not** cached: they
+keep their names across rebuilds, and Orthanc sends no validator for a
+revalidating policy to use. This is what makes deployment config changes take
+effect on the next load. `sliding_jwt` (`app.py`) skips the cacheable assets for
+the same reason it skips `/assets/` — a `Set-Cookie` on them is pure waste. The
+session still slides on `/dicom-web/*` and `/api/*`, which run throughout a
+viewing session.
+
+This addresses repeat opens only. A *first* load still transfers the full
+~21 MiB: Orthanc ignores `Accept-Encoding`, so nothing is compressed.
+
 ### 5.2 Orthanc auth (service account + admins only)
 
 `orthanc_users.json` is no longer a runtime user store. It contains:
