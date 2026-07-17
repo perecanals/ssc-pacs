@@ -11,9 +11,11 @@ from pydantic import BaseModel
 from auth import get_current_user, get_dataset_scope, require_admin
 from common import (
     VALID_LEVELS,
+    can_edit_label,
     ensure_patient_access,
     ensure_series_access,
     ensure_study_access,
+    fetch_label_def,
     record_label_value,
 )
 from db import get_conn
@@ -120,6 +122,16 @@ def create_annotation(
     conn = get_conn()
     try:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            # One lookup serves both the permission gate and the select-vocabulary
+            # branch below. Checked before any write, and before the dataset-scope
+            # checks are irrelevant to it: a protected label is protected
+            # regardless of which cohort the entity is in.
+            label_def = fetch_label_def(cur, body.label)
+            if not can_edit_label(label_def, username):
+                raise HTTPException(
+                    status_code=403,
+                    detail=f"Label '{body.label}' is not editable by you",
+                )
             sql = _UPSERT_SQL[body.level]
             if body.level == "series":
                 if not body.seriesinstanceuid:
@@ -150,15 +162,17 @@ def create_annotation(
             # Record the value in the select-label vocabulary so it shows up
             # immediately in the inline dropdown and the column filter. Same
             # transaction as the annotation, so a rolled-back write leaves no
-            # orphan vocabulary row. Only for select-type labels.
-            if body.value and body.value.strip():
-                cur.execute(
-                    "SELECT 1 FROM label_definitions "
-                    "WHERE name = %s AND datatype = 'select'",
-                    (body.label,),
-                )
-                if cur.fetchone():
-                    record_label_value(cur, body.label, body.value, username)
+            # orphan vocabulary row. Only for select-type labels. Reuses the
+            # definition fetched above — the permission gate already means a
+            # protected label can no longer have its vocabulary extended by
+            # POSTing a novel value.
+            if (
+                body.value
+                and body.value.strip()
+                and label_def
+                and label_def["datatype"] == "select"
+            ):
+                record_label_value(cur, body.label, body.value, username)
         # Commit the annotation write independently; refresh the labelled mirror
         # table off the request path so it never blocks (or rolls back) the save.
         conn.commit()
@@ -175,19 +189,27 @@ def create_annotation(
 def delete_annotation(
     annotation_id: int,
     background_tasks: BackgroundTasks,
+    username: str = Depends(get_current_user),
     scope: list[str] | None = Depends(get_dataset_scope),
 ):
     conn = get_conn()
     try:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             cur.execute(
-                "SELECT id, level, patient_id, studyinstanceuid, seriesinstanceuid "
+                "SELECT id, level, label, patient_id, studyinstanceuid, "
+                "       seriesinstanceuid "
                 "FROM annotations WHERE id = %s",
                 (annotation_id,),
             )
             row = cur.fetchone()
             if not row:
                 raise HTTPException(status_code=404, detail="Annotation not found")
+            # Clearing a value is a write: gate it exactly like the upsert.
+            if not can_edit_label(fetch_label_def(cur, row["label"]), username):
+                raise HTTPException(
+                    status_code=403,
+                    detail=f"Label '{row['label']}' is not editable by you",
+                )
             if row["level"] == "series":
                 ensure_series_access(cur, row["seriesinstanceuid"], scope)
             elif row["level"] == "study":

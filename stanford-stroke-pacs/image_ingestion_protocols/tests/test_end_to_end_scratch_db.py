@@ -92,12 +92,10 @@ def scratch_engine():
     engine = create_engine(scratch_url)
     with engine.begin() as conn:
         # 11-001 clinically matched; 11-002 deliberately unmatched. The protocol
-        # reads only study_id + stroke_date + femoral_sheath_time from the (wide)
-        # lvo_clinical_data.
+        # reads only study_id + stroke_date from the (wide) lvo_clinical_data.
         conn.execute(text(
-            "INSERT INTO lvo_clinical_data "
-            "(study_id, stroke_date, femoral_sheath_time) "
-            "VALUES ('11-001', '2026-01-01', '08:45')"))
+            "INSERT INTO lvo_clinical_data (study_id, stroke_date) "
+            "VALUES ('11-001', '2026-01-01')"))
 
     yield engine
 
@@ -191,7 +189,7 @@ def test_end_to_end_two_patients(roots, scratch_engine, capsys):
             "SELECT studyinstanceuid, compressed_size_mb, decompressed_size_mb "
             "FROM image_study ORDER BY studyinstanceuid")).mappings().all()
         patients = conn.execute(text(
-            "SELECT patient_id, stroke_date, femoral_sheath_time, dataset, "
+            "SELECT patient_id, stroke_date, dataset, "
             "import_label FROM patient ORDER BY patient_id")).mappings().all()
 
     assert len(series) == 4
@@ -220,11 +218,6 @@ def test_end_to_end_two_patients(roots, scratch_engine, capsys):
         assert p["stroke_date"].strftime("%Y%m%d") == ACQ_DATE[p["patient_id"]]
         assert p["dataset"] == ["audit"]
         assert p["import_label"] == "audit_batch"
-    # femoral_sheath_time is copied from the clinical row (prospective), NULL
-    # for the deliberately-unmatched patient.
-    by_pid = {p["patient_id"]: p for p in patients}
-    assert by_pid["11-001"]["femoral_sheath_time"] == "08:45"
-    assert by_pid["11-002"]["femoral_sheath_time"] is None
 
     # Source tree untouched.
     assert _manifest(roots / "src") == src_manifest
@@ -264,6 +257,40 @@ def test_drift_series_reingested_alone(roots, scratch_engine):
             {"uid": SERIES_UIDS[pid]["A"]},
         ).scalar()
     assert n == 5
+
+
+def test_ingests_without_lvo_clinical_data(roots, scratch_engine):
+    """lvo_clinical_data is a site-specific import a deployment may not have.
+
+    Absent it, `load_clinical_data_table` used to raise out of `read_sql_table`
+    and abort the whole run. It must instead disable clinical enrichment and let
+    ingestion complete; `_clinical_row` then returns None for every patient,
+    which the timepoint classifier already handles.
+    """
+    from sqlalchemy import text
+
+    pid = "11-001"  # the clinically-matched patient — the interesting one
+    with scratch_engine.begin() as conn:
+        conn.execute(text("ALTER TABLE lvo_clinical_data RENAME TO lvo_hidden"))
+    try:
+        # A full protocol run, not a poke at one method: this is the path that
+        # used to abort at `read_sql_table`. The series are already ingested by
+        # the tests above, so they skip — the run still exercises clinical
+        # loading, validation, and the patient upsert.
+        res = _run_case(roots, scratch_engine, pid)
+        assert res["skipped_existing_seriesinstanceuids"] == sorted(
+            SERIES_UIDS[pid].values())
+
+        with scratch_engine.begin() as conn:
+            stroke = conn.execute(
+                text("SELECT stroke_date FROM patient WHERE patient_id = :p"),
+                {"p": pid},
+            ).scalar()
+        # Imaging-derived stroke_date, upserted with no clinical join.
+        assert stroke.strftime("%Y%m%d") == ACQ_DATE[pid]
+    finally:
+        with scratch_engine.begin() as conn:
+            conn.execute(text("ALTER TABLE lvo_hidden RENAME TO lvo_clinical_data"))
 
 
 if __name__ == "__main__":

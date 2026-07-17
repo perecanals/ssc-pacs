@@ -1,5 +1,43 @@
 # Changelog
 
+## v1.15 — 2026-07-16
+
+- **Feature**: per-label edit permissions — who may change a label's *values* is
+  now a property of the label. `label_definitions.edit_policy`
+  (`everyone` / `nobody` / `users`) + `edit_users text[]`. "Editable by me" is
+  just `users = {me}`, so one mechanism covers all four cases. Prompted by
+  v1.13: `femoral_sheath_time` holds 874 values copied verbatim from
+  `lvo_clinical_data`, and any logged-in user could silently overwrite one by
+  clicking the cell.
+- **Admins do not bypass a lock**, deliberately — the opposite of dataset
+  access. `nobody` means nobody: the failure mode is a stray click overwriting
+  bulk-loaded clinical data, and the person clicking with admin rights is the
+  one who loaded it. Correcting a locked value means changing the policy first
+  (Label Access → edit → re-lock), which is deliberate and audited. Changing a
+  policy requires being the label's owner (`created_by`) or an admin; bulk-loaded
+  labels are owned by `bulk:<user>`, which matches no login, so they are
+  admin-only to unlock with no special-casing.
+- Enforced **server-side** on `POST /api/annotations` and
+  `DELETE /api/annotations/{id}` (clearing is a write); the read-only cell is
+  cosmetic. This also closes a pre-existing hole: any user could extend a select
+  label's controlled vocabulary just by posting a novel value. A protected
+  select value keeps its pill but in the muted outlined form the Auto columns
+  use; protected text/int values render as plain text — a hash colour groups
+  equal values, and free text has no categories to group.
+- New admin page **Label Access** (`/admin/labels`), modelled on the user
+  dataset-access page: policy per label plus a user checkbox list.
+  `GET /api/admin/label-definitions`, `PUT …/{id}/permissions`. The label modal
+  gains everyone / only me / no one for self-service, and
+  `bulk_set_label_values.py` gains `--edit-policy` / `--edit-users` at creation
+  — the "backfill something raters must not touch" path in one command. The CLI
+  still bypasses the gate by design; it is the admin backdoor.
+- Migration `0019_label_edit_policy` adds both columns — instant, and
+  **allow-by-default**, so nothing changes on upgrade and no rater is
+  interrupted. No backfill on purpose: the tempting "lock the bulk-created
+  labels" rule would have been wrong, since `timepoint` and `series_type` are
+  bulk-created but human-maintained (1387 and 360 rater edits). Lock
+  `femoral_sheath_time` from Label Access after deploying.
+
 ## v1.14 — 2026-07-16
 
 - **Fix**: `config.toml` was silently ignored by every systemd-driven shell
@@ -21,6 +59,38 @@
   and launchd units at install time; the Vite dev proxy honours a `WEBAPP_PORT`
   env var. Default remains 8043.
 - No schema migration.
+
+## v1.13 — 2026-07-16
+
+- **Change**: femoral sheath (arterial puncture) time is no longer a column on
+  `patient`. v1.10's approach is withdrawn as a design mistake: a column per
+  clinical variable needs its own migration on an upstream-owned table, COALESCE
+  expression, frontend column, and out-of-band `create_patient.sql` mirror —
+  every time. It is now an ordinary **patient-level label**
+  (`femoral_sheath_time`, datatype `text`, instrument `redcap_lvo_clinical`),
+  bulk-loaded from `lvo_clinical_data` for 874 patients via
+  `scripts/admin/bulk_set_label_values.py`. Nothing was lost: the column was
+  populated prospectively with no backfill and no re-ingest ran, so it was
+  0-of-1854 populated when dropped. **The label is a point-in-time copy** —
+  unlike the old live join, refreshing the REDCap export does not propagate;
+  re-run the bulk script. Users who had the "Femoral Sheath Time" column enabled
+  must opt into the new label column in the Displayed Columns menu.
+- **Feature**: `lvo_clinical_data` is now genuinely **optional**, so the stack can
+  deploy at sites that have no such clinical import. Every read is guarded by an
+  existence probe (`common.table_exists` in the web app, promoted from
+  `deletion.py`; `inspect(...).has_table` in ingestion). Without the table the
+  patient tab shows the imaging-derived `stroke_date` for everyone (the same
+  value a clinically-unmatched patient already gets), ingestion completes with
+  clinical enrichment skipped, and the timepoint classifier anchors each episode
+  on its own `THROMBECTOMY` study — episodes without one get a NULL timepoint, as
+  they already did. `series_type` and `episode` are never time-based and are
+  unaffected. `docs/reference/architecture.md` had promised this behavior since
+  v1.0; it is now actually true rather than a 500.
+- Migration `0018_drop_femoral_sheath_time` drops the nullable column — instant,
+  and a true inverse downgrade (unlike `0017`'s no-op) precisely because the
+  column holds no data. `0017` is superseded, not edited: it is released history
+  and production is stamped at it. Note revision ids must fit
+  `alembic_version.version_num`, a `varchar(32)`.
 
 ## v1.12 — 2026-07-16
 

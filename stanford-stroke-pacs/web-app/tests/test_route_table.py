@@ -66,6 +66,9 @@ EXPECTED_ROUTES = {
     # User dataset permissions (admin page + script-facing API).
     ("GET", "/api/admin/users"),
     ("PUT", "/api/admin/users/{username}/datasets"),
+    # Label edit permissions (admin page): who may write a label's values.
+    ("GET", "/api/admin/label-definitions"),
+    ("PUT", "/api/admin/label-definitions/{label_id}/permissions"),
     # Admin study/series deletion (Orthanc + DB; files via sudo CLI sweep).
     ("GET", "/api/admin/studies/{studyinstanceuid}/deletion-plan"),
     ("DELETE", "/api/admin/studies/{studyinstanceuid}"),

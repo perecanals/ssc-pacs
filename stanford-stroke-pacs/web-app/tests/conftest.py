@@ -161,9 +161,8 @@ def seeded_db(test_db):
             # differs from its imaging date (2025-02-02) so we can assert the tab
             # prefers the clinical value via COALESCE.
             cur.execute(
-                "INSERT INTO lvo_clinical_data "
-                "(study_id, stroke_date, femoral_sheath_time) "
-                "VALUES ('P-0001', '2025-01-01', '09:30') ON CONFLICT DO NOTHING"
+                "INSERT INTO lvo_clinical_data (study_id, stroke_date) "
+                "VALUES ('P-0001', '2025-01-01') ON CONFLICT DO NOTHING"
             )
             # The machine-derived columns (series_type / timepoint and their
             # provenance) are what the "Auto ..." API fields expose. P-0001's

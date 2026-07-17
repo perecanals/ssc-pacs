@@ -56,7 +56,7 @@ required** — `web-app/config.py` fails fast if it is missing.
 | DB host/port/name/creds | `.env` | `docker-compose.yml` (`${DB_*}`/`${PG_ORTHANC_*}`), `web-app/db.py` | docker-compose `${VAR}` interpolation + `env_file: .env` (automatic) |
 | Storage mode + DICOM mount path | `config.toml` `[storage]` | the Orthanc `/dicom-data` bind mount | `scripts/orthanc/dc.sh` exports `DICOM_MOUNT_SOURCE` (automatic) |
 | Orthanc HTTP/DICOM ports | `.env` (optional) → `orthanc.json` default | `docker-compose*` | compose interpolation, default `8042`/`4242` |
-| Web-app HTTP port | `config.toml` `[web-app].port` (per-host override: `deploy.env` `WEBAPP_PORT`) | rendered service units, Vite dev proxy (`WEBAPP_PORT` env) | the two installers substitute `__WEBAPP_PORT__` at install time — **re-run the installer after changing it** |
+| Web-app HTTP port | `config.toml` `[web-app].port` (per-host override: `deploy.env` `WEBAPP_PORT`) | rendered service units, Vite dev proxy (`WEBAPP_PORT` env), SSH-tunnel helpers (`scripts/connectivity/tunnel/*` — **hardcoded**, edit by hand) | the two installers substitute `__WEBAPP_PORT__` at install time — **re-run the installer after changing it**, and update the tunnel helpers to match |
 | Per-host user / repo path / conda bin | `deploy.env` (or auto-derived) | every rendered service unit | the two installers substitute `__TOKENS__` |
 | Effective non-secret config | `config.toml` | — | `web-app/config.py` fails fast if absent, WARNs on missing keys, and logs the effective values at startup (`startup: effective config`) |
 

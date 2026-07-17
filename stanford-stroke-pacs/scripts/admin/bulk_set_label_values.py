@@ -5,6 +5,17 @@ Driven entirely by CLI flags. Dry-run by default — nothing is written without
 ``--execute``. The only interactive prompt is the y/n confirmation when the
 target label does not yet exist and must be created (``--yes`` bypasses it).
 
+Writes direct SQL and **deliberately bypasses the API's per-label edit gate**
+(``label_definitions.edit_policy``): this *is* the admin backdoor, and its only
+authorization is shell + ``.env`` access. Every write still lands in
+``annotations_history`` via the row-level trigger, attributed ``bulk:<user>``.
+
+Use ``--edit-policy nobody`` when creating a label to backfill upstream data
+that raters must not overwrite — the values then render read-only in the web
+app. It applies on label *creation* only (like ``--instrument`` /
+``--description``); change an existing label's policy from the Label Access
+admin page.
+
 Examples
 --------
 Dry-run (default; validate and report, no DB writes):
@@ -103,6 +114,17 @@ def _parse_args() -> argparse.Namespace:
         "--description", default=None,
         help="Optional description (used only on label creation).",
     )
+    parser.add_argument(
+        "--edit-policy", default="everyone", choices=("everyone", "nobody", "users"),
+        help="Who may edit these values in the web app, used only on label "
+             "creation (default: everyone). Use 'nobody' for a backfill of "
+             "upstream data that raters must not overwrite.",
+    )
+    parser.add_argument(
+        "--edit-users", default=None,
+        help="Comma-separated usernames for --edit-policy=users "
+             "(used only on label creation).",
+    )
 
     parser.add_argument(
         "--sheet", default=0,
@@ -190,6 +212,30 @@ def _fetch_label_def(conn, label: str) -> dict | None:
         }
 
 
+def _parse_edit_users(conn, args) -> list[str]:
+    """Validate --edit-users against real usernames; return the normalized list.
+
+    Mirrors the API's validate_edit_policy: trim, drop empties, dedupe, sort,
+    and reject unknown names. `edit_users` is forced empty unless the policy is
+    `users`, so the column can never hold a stale list.
+    """
+    if args.edit_policy != "users":
+        return []
+    names = sorted({u.strip() for u in (args.edit_users or "").split(",") if u.strip()})
+    if not names:
+        sys.exit(
+            "Error: --edit-policy=users requires --edit-users 'a,b' "
+            "(an empty list is indistinguishable from --edit-policy=nobody)."
+        )
+    with conn.cursor() as cur:
+        cur.execute("SELECT username FROM users WHERE username = ANY(%s)", (names,))
+        known = {r[0] for r in cur.fetchall()}
+    unknown = [n for n in names if n not in known]
+    if unknown:
+        sys.exit(f"Error: unknown user(s): {', '.join(unknown)}")
+    return names
+
+
 def _create_label_definition(conn, args, audit_user: str) -> None:
     if not LABEL_NAME_RE.match(args.label):
         sys.exit(
@@ -216,11 +262,14 @@ def _create_label_definition(conn, args, audit_user: str) -> None:
             f"Error: label name conflicts with existing column generated from {conflict!r}"
         )
 
+    edit_users = _parse_edit_users(conn, args)
+
     with conn.cursor() as cur:
         cur.execute(
             "INSERT INTO label_definitions "
-            "(name, description, level, datatype, options, instrument, created_by) "
-            "VALUES (%s, %s, %s, %s, %s, %s, %s)",
+            "(name, description, level, datatype, options, instrument, "
+            " created_by, edit_policy, edit_users) "
+            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s::text[])",
             (
                 args.label,
                 (args.description or None),
@@ -229,6 +278,8 @@ def _create_label_definition(conn, args, audit_user: str) -> None:
                 options_json,
                 (args.instrument or None),
                 audit_user,
+                args.edit_policy,
+                edit_users,
             ),
         )
     sync_labelled_schema(conn, args.level)
@@ -327,7 +378,8 @@ def main() -> None:
             print(f"Label {args.label!r} does not exist.")
             if dry_run:
                 print(f"  Would create at level={args.level}, "
-                      f"datatype={args.datatype}, instrument={args.instrument!r}")
+                      f"datatype={args.datatype}, instrument={args.instrument!r}, "
+                      f"edit_policy={args.edit_policy!r}")
             else:
                 if not args.yes:
                     answer = input(

@@ -43,6 +43,7 @@ from typing import Any
 import psycopg2.extras
 import requests
 
+from common import table_exists
 from config import COLD_ARCHIVE_ROOT, DICOM_DATA_ROOT
 from orthanc_client import (
     ORTHANC_PASS,
@@ -110,11 +111,6 @@ def _prune_empty_parents(start: Path, stop_at: Path) -> list[str]:
 # --------------------------------------------------------------------------- #
 # Plan building (read-only)
 # --------------------------------------------------------------------------- #
-def _table_exists(cur, name: str) -> bool:
-    cur.execute("SELECT to_regclass(%s)", (f"public.{name}",))
-    return cur.fetchone()[0] is not None
-
-
 def build_study_deletion_plan(conn, studyinstanceuid: str) -> dict[str, Any] | None:
     """Read-only inventory of everything a study delete would remove.
 
@@ -283,12 +279,12 @@ def delete_index_and_db(conn, plan: dict[str, Any], *, execute: bool) -> dict[st
             )
             result["annotations"] = cur.rowcount
             _delete_series_side_rows(cur, series_uids)
-            if _table_exists(cur, "image_series_labelled"):
+            if table_exists(cur, "image_series_labelled"):
                 cur.execute(
                     "DELETE FROM image_series_labelled WHERE studyinstanceuid = %s",
                     (study_uid,),
                 )
-            if _table_exists(cur, "image_study_labelled"):
+            if table_exists(cur, "image_study_labelled"):
                 cur.execute(
                     "DELETE FROM image_study_labelled WHERE studyinstanceuid = %s",
                     (study_uid,),
@@ -308,7 +304,7 @@ def delete_index_and_db(conn, plan: dict[str, Any], *, execute: bool) -> dict[st
             )
             result["annotations"] = cur.rowcount
             _delete_series_side_rows(cur, series_uids)
-            if _table_exists(cur, "image_series_labelled"):
+            if table_exists(cur, "image_series_labelled"):
                 cur.execute(
                     "DELETE FROM image_series_labelled WHERE seriesinstanceuid = %s",
                     (series_uid,),
@@ -323,7 +319,7 @@ def delete_index_and_db(conn, plan: dict[str, Any], *, execute: bool) -> dict[st
 
 def _delete_series_side_rows(cur, series_uids: list[str]) -> None:
     for table in _SERIES_SIDE_TABLES:
-        if _table_exists(cur, table):
+        if table_exists(cur, table):
             cur.execute(
                 f"DELETE FROM {table} WHERE seriesinstanceuid = ANY(%s)",
                 (series_uids,),

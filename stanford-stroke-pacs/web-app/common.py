@@ -64,6 +64,20 @@ def auto_match_sql(expr: str, values: list[str] | None) -> tuple[str, list[str]]
     ors = " OR ".join(f"UPPER({expr}) LIKE UPPER(%s)" for _ in vals)
     return f"({ors})", [f"%{v}%" for v in vals]
 
+
+def table_exists(cur, name: str) -> bool:
+    """Whether `public.<name>` is present.
+
+    Lets callers treat a table as optional: `lvo_clinical_data` is a
+    site-specific clinical import that a deployment may not have at all, and a
+    not-yet-migrated DB or a stripped test fixture may be missing side-tables.
+    """
+    cur.execute("SELECT to_regclass(%s) AS reg", (f"public.{name}",))
+    row = cur.fetchone()
+    # Tolerate either a RealDictCursor (the list endpoints) or a plain cursor.
+    return (row["reg"] if isinstance(row, dict) else row[0]) is not None
+
+
 # ---------------------------------------------------------------------------
 # Dataset (cohort) scoping
 #
@@ -142,6 +156,62 @@ def check_study_access(studyinstanceuid: str, scope: list[str] | None) -> None:
 
 def check_series_access(seriesinstanceuid: str, scope: list[str] | None) -> None:
     _check_access(ensure_series_access, seriesinstanceuid, scope)
+
+
+# ---------------------------------------------------------------------------
+# Per-label edit permissions (label_definitions.edit_policy / edit_users)
+#
+# Answers "who may set or clear this label's values" — Alembic 0019. Read
+# inline per request (one indexed lookup), like require_admin and
+# get_dataset_scope; the dataset_access TTL cache exists only for the per-frame
+# DICOMweb proxy, which this is not.
+# ---------------------------------------------------------------------------
+
+EDIT_POLICIES = ("everyone", "nobody", "users")
+
+# Columns every permission decision needs. Callers fetch these once and pass the
+# row to both helpers rather than re-querying.
+LABEL_PERMISSION_COLUMNS = "datatype, edit_policy, edit_users, created_by"
+
+
+def fetch_label_def(cur, label: str) -> dict | None:
+    """The permission-relevant label_definitions row, or None if undefined."""
+    cur.execute(
+        f"SELECT {LABEL_PERMISSION_COLUMNS} FROM label_definitions WHERE name = %s",
+        (label,),
+    )
+    return cur.fetchone()
+
+
+def can_edit_label(label_def: dict | None, username: str) -> bool:
+    """Whether ``username`` may set or clear values of this label.
+
+    ``label_def`` is None for a label with no definition row: annotations for
+    undefined labels are already accepted, so they stay editable — this function
+    restricts, it never newly forbids.
+
+    **No admin bypass.** ``nobody`` means nobody. An admin who must correct a
+    value changes the policy first, which is deliberate and audited; a silent
+    bypass would reintroduce the stray-click overwrite this exists to prevent.
+    """
+    if label_def is None:
+        return True
+    policy = label_def["edit_policy"]
+    if policy == "everyone":
+        return True
+    if policy == "nobody":
+        return False
+    return username in (label_def["edit_users"] or [])
+
+
+def can_change_label_policy(label_def: dict, username: str, is_admin: bool) -> bool:
+    """Whether ``username`` may change this label's edit policy: owner or admin.
+
+    Being *listed* in ``edit_users`` grants value edits, not control over who
+    else may edit. Note bulk-created labels have a ``bulk:<user>`` owner, which
+    matches no real login — so they are admin-only to unlock, for free.
+    """
+    return is_admin or label_def["created_by"] == username
 
 
 # ---------------------------------------------------------------------------

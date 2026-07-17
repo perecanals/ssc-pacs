@@ -112,7 +112,15 @@ Key behaviors:
 - study rows can expand into series
 - nested rows support inherited annotations
 - columns can include both source metadata and annotation-driven fields
-- inline editors allow direct annotation changes in the table
+- inline editors allow direct annotation changes in the table — unless the
+  label's edit policy excludes you, in which case the value is shown without an
+  editor, with a tooltip explaining why. A **select** value keeps its pill (the
+  hash colour is meaningful — equal values group by eye) but takes the muted
+  outlined form the Auto columns use, so it never reads as clickable; **text and
+  int** values render as plain unformatted text, since colouring them would
+  invent categories that do not exist. Set under Label Access
+  (`/admin/labels`); a locked label is read-only for admins too. See
+  [`architecture.md`](architecture.md) §5.5
 - the machine classifier's verdicts appear as read-only **Auto Series Type** and
   **Auto Timepoint** columns, rendered as muted outlined pills next to — and
   deliberately distinct from — the editable human labels of the same name; they

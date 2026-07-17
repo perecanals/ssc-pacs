@@ -83,6 +83,12 @@ The app defines five routes (`App.jsx`):
   `PUT /api/admin/users/{username}/datasets`, with optimistic updates that
   revert on error. Non-admins are redirected to `/` (the backend 403s the
   API regardless). Reuses `TopBar` and the Navigator visual conventions.
+- `/admin/labels` — admin-only **Label Access** page (`AdminLabels.jsx`), built
+  to the same pattern: one row per label (name, level, owner) with an
+  everyone / selected-users / no-one policy control, backed by
+  `GET /api/admin/label-definitions` and
+  `PUT /api/admin/label-definitions/{id}/permissions`. Decides who may edit each
+  label's *values*; see [`architecture.md`](architecture.md) §5.5.
 
 The Navigator page (`Navigator.jsx`) provides three hierarchical levels:
 **Patients**, **Studies**, and **Series**. The level switcher lives in the
@@ -295,7 +301,7 @@ The Navigator page is decomposed into focused React components:
 
 | Level   | Columns                                              |
 |---------|------------------------------------------------------|
-| Patient | Patient ID, Stroke Date, Dataset, Study Import Labels, Femoral Sheath Time (off by default) |
+| Patient | Patient ID, Stroke Date, Dataset, Study Import Labels (off by default) |
 | Study   | Patient ID, Acquisition Date, Modality, Study Description, Dataset, Import ID, Import Label, **Auto Timepoint** |
 | Series  | Patient ID, Acquisition Date, Modality, Series Description, Slices, Slice Thickness (mm), Axial Coverage (mm), Dataset, Import ID, Import Label, **Auto Series Type**, **Auto Timepoint** (flat series table only by default) |
 

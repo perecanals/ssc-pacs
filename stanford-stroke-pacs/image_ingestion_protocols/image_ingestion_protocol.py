@@ -295,6 +295,19 @@ class ImageIngestionProtocol:
         )
 
     def load_clinical_data_table(self):
+        # lvo_clinical_data is a site-specific clinical import, not part of a
+        # standard deployment. Absent it, clinical enrichment is skipped and
+        # `_clinical_row` returns None for every patient — the same shape a
+        # patient with no clinical row already produces, which the timepoint
+        # classifier handles by falling back to the thrombectomy-study anchor.
+        if not inspect(self.postgres_engine).has_table("lvo_clinical_data"):
+            print(
+                "Note: table lvo_clinical_data not found — clinical enrichment "
+                "disabled. Timepoints will anchor on each episode's own "
+                "thrombectomy study where one exists."
+            )
+            self.clinical_data = None
+            return
         self.clinical_data = pd.read_sql_table("lvo_clinical_data", self.postgres_engine)
         if "study_id" in self.clinical_data.columns:
             self.clinical_data["study_id"] = self.clinical_data["study_id"].apply(
@@ -1067,6 +1080,12 @@ class ImageIngestionProtocol:
         if self.case_study_table.empty:
             return
 
+        # Still None => lvo_clinical_data does not exist here. There is nothing
+        # to validate against, so every study is trivially unmatched; skip
+        # rather than warn once per patient about an absent table.
+        if self.clinical_data is None:
+            return
+
         clinical_study_ids = set(self.clinical_data["study_id"].dropna().astype(str))
         self.case_study_table["clinical_match_found"] = self.case_study_table["patient_id"].astype(str).isin(
             clinical_study_ids
@@ -1481,27 +1500,22 @@ class ImageIngestionProtocol:
             return
 
         dataset_arr = [self.dataset] if self.dataset else []
-        # femoral_sheath_time is the clinical arterial-puncture time from
-        # lvo_clinical_data (present only for CRISP2/LVO). One clinical row per
-        # patient (study_id = patient_id), so MIN() is a deterministic pick and
-        # is NULL for patients with no clinical row. A durable copy on `patient`,
-        # populated prospectively — the web app still prefers the live clinical
-        # value via COALESCE(c.femoral_sheath_time, p.femoral_sheath_time).
+        # Imaging-derived only — no clinical join. Clinical variables belong in
+        # annotations (see scripts/admin/bulk_set_label_values.py), not in
+        # columns on this upstream-owned table: a column per variable does not
+        # generalize and makes lvo_clinical_data a hard dependency.
         connection.execute(
             text(
                 "INSERT INTO patient "
-                "(patient_id, stroke_date, femoral_sheath_time, import_id, "
+                "(patient_id, stroke_date, import_id, "
                 " import_label, dataset, created_at, updated_at) "
                 "SELECT s.patient_id, MIN(s.acquisitiondatetime), "
-                "       MIN(c.femoral_sheath_time), "
                 "       :import_id, :import_label, :dataset, now(), now() "
                 "FROM image_study s "
-                "LEFT JOIN lvo_clinical_data c ON c.study_id = s.patient_id "
                 "WHERE s.patient_id = ANY(:patient_ids) "
                 "GROUP BY s.patient_id "
                 "ON CONFLICT (patient_id) DO UPDATE SET "
                 "  stroke_date = EXCLUDED.stroke_date, "
-                "  femoral_sheath_time = EXCLUDED.femoral_sheath_time, "
                 "  dataset = ARRAY(SELECT DISTINCT unnest("
                 "      patient.dataset || EXCLUDED.dataset) ORDER BY 1), "
                 "  updated_at = now()"

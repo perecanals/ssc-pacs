@@ -2,8 +2,13 @@
 
 Regression coverage for the bug where patients with imaging but no
 lvo_clinical_data row were invisible at the patient level, plus the
-clinical-preferred / imaging-fallback stroke_date behavior.
+clinical-preferred / imaging-fallback stroke_date behavior, plus the
+degradation when lvo_clinical_data does not exist at all.
 """
+
+import contextlib
+
+import psycopg2
 
 
 def _find(items, patient_id):
@@ -11,6 +16,27 @@ def _find(items, patient_id):
         if it["patient_id"] == patient_id:
             return it
     return None
+
+
+@contextlib.contextmanager
+def _table_hidden(dsn, table):
+    """Rename `table` out of the way for the body, then restore it.
+
+    Committed DDL on its own connection: the app under test reads through the
+    pool, so the table must genuinely be gone as far as `to_regclass` is
+    concerned. Restored even if the body raises, since the scratch DB is
+    session-scoped and shared with every other test.
+    """
+    conn = psycopg2.connect(**dsn)
+    conn.autocommit = True
+    try:
+        with conn.cursor() as cur:
+            cur.execute(f"ALTER TABLE {table} RENAME TO {table}_hidden")
+        yield
+    finally:
+        with conn.cursor() as cur:
+            cur.execute(f"ALTER TABLE {table}_hidden RENAME TO {table}")
+        conn.close()
 
 
 class TestPatientListing:
@@ -58,28 +84,6 @@ class TestPatientListing:
         assert row is not None
         # text[] {lvo,crisp2} is returned array_to_string-joined for the table cell.
         assert row["dataset"] == "lvo, crisp2"
-
-    def test_patient_row_exposes_femoral_sheath_time(self, logged_in_client):
-        """Clinical femoral_sheath_time surfaces on the matched patient; blank otherwise."""
-        resp = logged_in_client.get("/api/patients", params={"patient_id": "P-0001"})
-        row = _find(resp.json()["items"], "P-0001")
-        assert row is not None
-        assert row["femoral_sheath_time"] == "09:30"
-        # P-0002 has no clinical row → NULL (renders as a blank cell).
-        resp2 = logged_in_client.get("/api/patients", params={"patient_id": "P-0002"})
-        row2 = _find(resp2.json()["items"], "P-0002")
-        assert row2 is not None
-        assert row2["femoral_sheath_time"] is None
-
-    def test_femoral_sheath_time_filter(self, logged_in_client):
-        """Filtering by femoral_sheath_time isolates the clinically-matched patient."""
-        resp = logged_in_client.get(
-            "/api/patients", params={"femoral_sheath_time": "09:30"}
-        )
-        assert resp.status_code == 200
-        items = resp.json()["items"]
-        assert _find(items, "P-0001") is not None
-        assert _find(items, "P-0002") is None
 
     def test_dataset_filter_shared_tag_keeps_both(self, logged_in_client):
         """dataset=lvo is a member of both patients' arrays → both listed."""
@@ -131,20 +135,69 @@ class TestPatientListing:
         assert dates == sorted(dates)
 
 
+class TestWithoutClinicalTable:
+    """lvo_clinical_data is a site-specific import a deployment may not have.
+
+    Without it the patient tab must still work, degrading to the imaging-derived
+    stroke_date for everyone — the same value a clinically-unmatched patient
+    already gets — rather than 500ing on a missing relation.
+    """
+
+    def test_patients_listed_without_clinical_table(self, logged_in_client, seeded_db):
+        with _table_hidden(seeded_db, "lvo_clinical_data"):
+            resp = logged_in_client.get("/api/patients")
+            assert resp.status_code == 200
+            items = resp.json()["items"]
+            assert _find(items, "P-0001") is not None
+            assert _find(items, "P-0002") is not None
+
+    def test_stroke_date_falls_back_to_imaging(self, logged_in_client, seeded_db):
+        """P-0001 prefers its clinical date (2025-01-01) only while the table
+        exists; without it, its imaging date (2025-02-02) shows instead."""
+        with _table_hidden(seeded_db, "lvo_clinical_data"):
+            resp = logged_in_client.get("/api/patients", params={"patient_id": "P-0001"})
+            row = _find(resp.json()["items"], "P-0001")
+            assert str(row["stroke_date"]).startswith("2025-02-02")
+
+    def test_stroke_date_filter_and_sort_still_work(self, logged_in_client, seeded_db):
+        """Filter and sort reuse the same expression as the SELECT, so they must
+        follow it into the no-clinical-table branch."""
+        with _table_hidden(seeded_db, "lvo_clinical_data"):
+            resp = logged_in_client.get(
+                "/api/patients", params={"stroke_date": "2025-02-02"}
+            )
+            assert resp.status_code == 200
+            assert _find(resp.json()["items"], "P-0001") is not None
+
+            resp = logged_in_client.get(
+                "/api/patients", params={"sort_by": "stroke_date", "sort_dir": "asc"}
+            )
+            assert resp.status_code == 200
+            dates = [
+                str(it["stroke_date"]) for it in resp.json()["items"]
+                if it["stroke_date"] is not None
+            ]
+            assert dates == sorted(dates)
+
+    def test_clinical_preference_restored_afterwards(self, logged_in_client):
+        """Guard against the hide/restore helper leaking into other tests."""
+        resp = logged_in_client.get("/api/patients", params={"patient_id": "P-0001"})
+        row = _find(resp.json()["items"], "P-0001")
+        assert str(row["stroke_date"]).startswith("2025-01-01")
+
+
 # The exact ON CONFLICT clause used by ImageIngestionProtocol._upsert_patient.
 # Kept in sync with image_ingestion_protocol.py; psycopg2 paramstyle.
 _UPSERT_SQL = """
-INSERT INTO patient (patient_id, stroke_date, femoral_sheath_time, import_id,
+INSERT INTO patient (patient_id, stroke_date, import_id,
                      import_label, dataset, created_at, updated_at)
-SELECT s.patient_id, MIN(s.acquisitiondatetime), MIN(c.femoral_sheath_time),
+SELECT s.patient_id, MIN(s.acquisitiondatetime),
        %(import_id)s, %(import_label)s, %(dataset)s, now(), now()
 FROM image_study s
-LEFT JOIN lvo_clinical_data c ON c.study_id = s.patient_id
 WHERE s.patient_id = ANY(%(patient_ids)s)
 GROUP BY s.patient_id
 ON CONFLICT (patient_id) DO UPDATE SET
   stroke_date = EXCLUDED.stroke_date,
-  femoral_sheath_time = EXCLUDED.femoral_sheath_time,
   dataset = ARRAY(SELECT DISTINCT unnest(patient.dataset || EXCLUDED.dataset) ORDER BY 1),
   updated_at = now()
 """
@@ -203,23 +256,3 @@ class TestPatientUpsertSemantics:
         iid, dataset = cur.fetchone()
         assert (iid, dataset) == (10, ["ds1", "ds2"])
         # db_conn fixture rolls back — no committed test rows to clean up.
-
-    def test_femoral_sheath_time_populated_from_clinical(self, db_conn):
-        """Prospective population: the upsert copies clinical femoral_sheath_time
-        onto the patient row (NULL when the patient has no clinical row)."""
-        cur = db_conn.cursor()
-        cur.execute(
-            "INSERT INTO image_study (patient_id, studyinstanceuid, acquisitiondatetime, "
-            "import_id, import_label) VALUES (%s, 'fst.1', '2025-06-06', 30, 'b')",
-            (self.PID,),
-        )
-        cur.execute(
-            "INSERT INTO lvo_clinical_data (study_id, femoral_sheath_time) "
-            "VALUES (%s, '10:15')",
-            (self.PID,),
-        )
-        self._upsert(cur, import_id=30, import_label="b", dataset=["ds"])
-        cur.execute(
-            "SELECT femoral_sheath_time FROM patient WHERE patient_id=%s", (self.PID,)
-        )
-        assert cur.fetchone()[0] == "10:15"

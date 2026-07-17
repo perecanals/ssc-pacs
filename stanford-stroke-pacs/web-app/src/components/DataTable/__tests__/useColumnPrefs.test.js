@@ -54,3 +54,42 @@ describe("useColumnPrefs — newly-introduced builtin columns", () => {
     expect(result.current.visibleKeys).toContain(NEW_COL.key);
   });
 });
+
+// Column prefs are saved per user and outlive the columns they name. A builtin
+// that is retired (femoral_sheath_time, Alembic 0018/v1.13) leaves a dangling
+// key in every saved pref that had it selected. Resolution is by lookup against
+// the live catalog, so an unknown key matches nothing and is simply not
+// rendered — it must never throw or blank the table.
+const RETIRED_KEY = "builtin:patient:femoral_sheath_time";
+
+describe("useColumnPrefs — prefs naming a column that no longer exists", () => {
+  it("ignores the dangling key and still renders the surviving columns", () => {
+    const { result } = render({
+      visibleKeys: [OLD_COL.key, RETIRED_KEY],
+      defaultsVersion: COLUMN_DEFAULTS_VERSION,
+    });
+    expect(result.current.visibleCols.map((c) => c.key)).toEqual([OLD_COL.key]);
+    expect(result.current.allCols.map((c) => c.key)).not.toContain(RETIRED_KEY);
+  });
+
+  it("survives a saved column order that references it", () => {
+    const { result } = render({
+      visibleKeys: [OLD_COL.key, RETIRED_KEY],
+      columnOrder: [RETIRED_KEY, OLD_COL.key],
+      defaultsVersion: COLUMN_DEFAULTS_VERSION,
+    });
+    expect(result.current.visibleCols.map((c) => c.key)).toEqual([OLD_COL.key]);
+  });
+
+  it("survives prefs that name ONLY the retired column", () => {
+    // The worst case: nothing left to render from the saved set. An empty table
+    // is recoverable via Reset View; a crash is not.
+    const { result } = render({
+      visibleKeys: [RETIRED_KEY],
+      defaultsVersion: COLUMN_DEFAULTS_VERSION,
+    });
+    expect(result.current.visibleCols).toEqual([]);
+    act(() => result.current.resetColumns());
+    expect(result.current.visibleKeys).toContain(NEW_COL.key);
+  });
+});

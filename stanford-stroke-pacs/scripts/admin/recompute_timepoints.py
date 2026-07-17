@@ -48,6 +48,7 @@ load_dotenv(STACK_ROOT / ".env")
 sys.path.insert(0, str(STACK_ROOT / "web-app"))
 sys.path.insert(0, str(STACK_ROOT / "image_ingestion_protocols"))
 
+from common import table_exists  # noqa: E402
 from series_classification import (  # noqa: E402
     RULES_VERSION,
     assign_patient_timepoints,
@@ -153,13 +154,29 @@ def main() -> int:
         study_params.append(args.patient)
 
     with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+        # lvo_clinical_data is optional (site-specific import). Without it every
+        # anchor column reads NULL — the exact shape a patient with no clinical
+        # row already yields — so `resolve_event_anchor` returns no anchor and
+        # each episode falls back to its own thrombectomy study.
+        if table_exists(cur, "lvo_clinical_data"):
+            clinical_cols = (
+                "c.femoral_sheath_time, c.receiving_arrival_time, c.time_recognized"
+            )
+            clinical_join = "LEFT JOIN lvo_clinical_data c ON c.study_id = st.patient_id"
+        else:
+            clinical_cols = (
+                "NULL::text AS femoral_sheath_time, "
+                "NULL::text AS receiving_arrival_time, "
+                "NULL::text AS time_recognized"
+            )
+            clinical_join = ""
         cur.execute(
             f"""
             SELECT st.studyinstanceuid, st.patient_id, st.study_type,
                    st.timepoint AS current_timepoint, st.episode AS current_episode,
-                   c.femoral_sheath_time, c.receiving_arrival_time, c.time_recognized
+                   {clinical_cols}
             FROM image_study st
-            LEFT JOIN lvo_clinical_data c ON c.study_id = st.patient_id
+            {clinical_join}
             WHERE {' AND '.join(study_where)}
             ORDER BY st.patient_id, st.studyinstanceuid
             """,

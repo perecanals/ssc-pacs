@@ -146,7 +146,8 @@ DICOMs to Orthanc was removed — see [`../cold_storage/design.md`](../cold_stor
    `image_study`, series from `image_series`). `lvo_clinical_data` is **retired
    as a roster**: it is never the patient source and is otherwise unqueried —
    the patient list joins it in a single LEFT JOIN (`routes/studies.py`) only to
-   prefer its clinical `stroke_date` via `COALESCE`.
+   prefer its clinical `stroke_date` via `COALESCE`, and only when the table
+   exists (it is optional; see §"Redeploying elsewhere").
 2. The web app reads these tables to build patient, study, and series browsers
    with filtering, sorting, and pagination. Series listings JOIN `image_study`
    for `study_type`.
@@ -273,6 +274,41 @@ and aggregate counts across all data (no identifiers or values).
 from the `label_value_options` table — a **global** value set, not scoped per
 dataset (only the value strings are shared, never patient data).
 
+### 5.5 Label-level authorization (who may edit a label's values)
+
+The sibling of 5.4: that gates which cohorts a user may **see**, this gates
+which labels a user may **write**. Each label carries
+`label_definitions.edit_policy` (`everyone` / `nobody` / `users`) plus
+`edit_users text[]` (Alembic `0019`). Schema and the full table:
+[`data_stores.md`](data_stores.md#label_definitions).
+
+- **Allow by default** — `everyone`, so nothing changed on upgrade. Restricting
+  is an explicit act. (Contrast 5.4, which is deny-by-default: that one guards
+  patient data, this one guards *data integrity*.)
+- **Admins do NOT bypass** — the deliberate opposite of 5.4. `nobody` means
+  nobody: the threat is a stray click overwriting bulk-loaded clinical data, and
+  the person most likely to be clicking with admin rights is the one who loaded
+  it. Correcting a locked value means changing the policy first — deliberate,
+  and audited in `annotations_history`.
+- **Enforced server-side** on `POST /api/annotations` (which covers both the
+  upsert and the select-vocabulary extension) and `DELETE /api/annotations/{id}`
+  — clearing is a write. `common.can_edit_label`, read inline per request; no
+  cache, unlike 5.4's proxy hot path. The UI's read-only rendering is cosmetic.
+- **Ownership**: `created_by` owns the label; only the owner or an admin may
+  change its policy (`common.can_change_label_policy`). Being listed in
+  `edit_users` confers value edits, not control. Bulk-created labels are owned
+  by `bulk:<user>`, which matches no login — so they are admin-only to unlock
+  without any special-casing.
+- **Managed by**: the `/admin/labels` page (admin-only, policy + user
+  checkboxes, `GET /api/admin/label-definitions` +
+  `PUT /api/admin/label-definitions/{id}/permissions`), the label modal
+  (everyone / only me / no one, for the owner), or
+  `bulk_set_label_values.py --edit-policy` at creation.
+
+Known limitation: the CLI writes direct SQL and bypasses this gate by design —
+it is the admin backdoor, authorized by shell + `.env` access. The
+`annotations_history` trigger records those writes but does not gate them.
+
 ---
 
 ## 6. Packaging model
@@ -334,7 +370,10 @@ then the PACS stack can usually be redeployed without using
 `image_ingestion_protocols/`. The patient tab is sourced from the `patient`
 registry; `lvo_clinical_data` is an optional clinical side-table — if absent,
 the patient tab still works and shows the imaging-derived `stroke_date` instead
-of the clinical one.
+of the clinical one, and the timepoint classifier anchors each episode on its
+own thrombectomy study. Every read of the table is guarded by an existence probe
+(`common.table_exists` in the web app, `inspect(...).has_table` in ingestion), so
+"absent" is a supported deployment shape, not a crash.
 
 If the new deployment does not already have equivalent metadata tables, that
 metadata-ingestion problem must be solved separately from the PACS deployment.

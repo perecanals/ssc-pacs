@@ -24,6 +24,12 @@
   @apply w-full px-2.5 py-1.5 border border-border rounded-md text-sm mb-3 font-[inherit];
 }
 
+/* Explains the consequence of the adjacent select. Sits directly under it, so
+   it reclaims the select's bottom margin. */
+.label-modal__hint {
+  @apply -mt-2 mb-3 text-xs text-text-muted leading-snug;
+}
+
 .label-modal__options-section {
   @apply mb-3;
 }
