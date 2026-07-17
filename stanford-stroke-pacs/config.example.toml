@@ -1,14 +1,26 @@
-# Non-secret operational settings (version-controllable).
+# Copy to `config.toml` and set the installation-specific values for this host.
+#
+# `config.toml` is the single source of truth for non-secret operational
+# settings and is gitignored (per-host, like `.env`). Keys marked REQUIRED have
+# no built-in default — the web app refuses to start until they are set.
+# Benign tuning knobs ship with safe defaults and may be left as-is.
 # Secrets stay in `.env` (DB_PASSWORD, JWT_SECRET, Orthanc admin password, etc.).
+# See docs/reference/configuration_sources.md.
 
 [storage]
-# "legacy" | "cold_path_cache"
-mode = "cold_path_cache"
-# Uncompressed DICOM tree Orthanc indexes. In cold_path_cache mode this doubles
-# as the warm cache: archives are extracted back here on warm (the path each
+# REQUIRED — "legacy" | "cold_path_cache".
+#   legacy:          Orthanc's Folder Indexer reads loose DICOMs from dicom_data_root.
+#   cold_path_cache: canonical series are *.tar.zst under cold_archive_root; warm
+#                    extracts back to dicom_data_root (needs the patched Orthanc image).
+mode = "legacy"
+# REQUIRED — uncompressed DICOM tree Orthanc indexes. In cold_path_cache mode this
+# doubles as the warm cache: archives are extracted back here on warm (the path each
 # series records in image_series.dicom_dir_path lives under this root).
-dicom_data_root = "/media/pacs-ssd-1/ssc-pacs/ssc-pacs-data/imaging_data"
-cold_archive_root = "/media/pacs-ssd-1/ssc-pacs/ssc-pacs-data/compressed"
+dicom_data_root = "/path/to/imaging_data"
+# REQUIRED — root of the *.tar.zst cold archives (cold_path_cache mode; still
+# required in legacy mode, where it only names the future archive location).
+cold_archive_root = "/path/to/imaging_data_compressed"
+# Cold-cache tuning (benign defaults).
 eviction_ttl_hours = 168
 # Cold-storage warm watchdog: a `cache_state` row stuck in status='warming'
 # longer than this is treated as cold by the next warm attempt (recovers
@@ -30,9 +42,9 @@ warm_workers = 6
 # Single source of truth for the backup scripts (scripts/backup/*). Each script
 # still honours an explicit env override (BACKUP_ROOT / RETENTION_DAYS /
 # MAX_AGE_HOURS) for one-off runs; these values are the deployment default.
-# Root directory for all backups. Each target (orthanc_db, stanford-stroke,
-# orthanc_storage) gets its own subdirectory here.
-backup_root = "/DATA2/ssc-pacs-backups"
+# REQUIRED (by the backup scripts) — root directory for all backups. Each target
+# (orthanc_db, stanford-stroke, orthanc_storage) gets its own subdirectory here.
+backup_root = "/path/to/backups"
 # Days to keep dated dumps/archives before pruning (always keeps >= 1).
 retention_days = 60
 # Freshness-monitor alert threshold: a backup older than this many hours is
@@ -49,15 +61,14 @@ port = 8043
 # no request is made for this many hours the session is dead. The SPA proactively
 # redirects to /login with an "expired" banner once idle this long (its watchdog
 # reads this value via /api/me) — it no longer waits for the next request to 401.
-# 0.0833 ≈ 5 minutes.
-session_timeout_hours = 0.0833
+session_timeout_hours = 2
 # Absolute (non-sliding) session lifetime. A token minted more than this many
 # hours ago is rejected regardless of sliding refresh activity.
 session_absolute_timeout_hours = 24
 # Emit the JWT cookie with Secure=true so browsers only send it over HTTPS.
-# Disabled because all access is via SSH tunnel (browser↔web-app is loopback,
-# wire is SSH-encrypted) and Safari refuses Secure cookies on http://localhost.
-cookie_secure = false
+# Disable when all access is via SSH tunnel (browser↔web-app is loopback,
+# wire is SSH-encrypted); Safari refuses Secure cookies on http://localhost.
+cookie_secure = true
 # Per-IP cap for POST /api/login attempts inside a 5-minute rolling window.
 login_rate_limit_per_5min = 10
 # Which clinical_data column supplies the patient tab's "Episode Date"

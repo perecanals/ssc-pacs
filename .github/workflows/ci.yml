@@ -80,6 +80,11 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
+      # config.toml is per-host and gitignored; config.py fails fast without
+      # it. The example template satisfies the required keys (paths need not
+      # exist — tests patch the storage constants they exercise).
+      - name: Materialize config.toml from the example template
+        run: cp stanford-stroke-pacs/config.example.toml stanford-stroke-pacs/config.toml
       - name: Install dependencies
         working-directory: stanford-stroke-pacs/web-app
         run: |
@@ -101,6 +106,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
+      # The ingestion executor imports web-app config.py, which fails fast
+      # without a config.toml (per-host, gitignored).
+      - name: Materialize config.toml from the example template
+        run: cp stanford-stroke-pacs/config.example.toml stanford-stroke-pacs/config.toml
       - name: Install dependencies
         # The ingestion executor imports web-app modules (config,
         # labelled_table_sync → common → fastapi), so the web-app runtime deps
