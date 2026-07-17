@@ -1,5 +1,35 @@
 # Changelog
 
+## v1.12 — 2026-07-16
+
+- **Feature**: Fullscreen button on the OHIF preview pane, next to "Open in New
+  Tab". Native fullscreen renders the pane's existing iframe without moving it
+  in the DOM, so OHIF never reloads — zero new requests, zero extra memory. Exit
+  with Esc or the pane's Exit button. "Open in New Tab" is unchanged and still
+  refetches: a new tab is a separate browsing context, and at 512.5 KiB/frame a
+  study costs 18 MiB (median) to 540 MiB (p99) to load again. Caching frames to
+  close that gap was rejected — it would churn gigabytes through the browser
+  cache during a scoring run and put patient images at rest on disk.
+- Collapsing the preview pane now hides the iframe instead of unmounting it, so
+  re-opening the same study costs nothing. Trade-off: a collapsed pane holds one
+  study's frames in memory rather than releasing them.
+- No migration.
+
+## v1.11 — 2026-07-16
+
+- **Fix**: the OHIF viewer's black-screen startup delay. Orthanc serves the OHIF
+  build with no cache headers at all, so every viewer open re-downloaded ~21 MiB
+  across ~54 requests. The web-app proxy now stamps
+  `Cache-Control: private, max-age=31536000, immutable` onto content-hashed
+  assets (`app.bundle.<hash>.js`, `<hash>.woff2`, `<hash>.wasm`), taking a repeat
+  open down to ~114 KiB. Unhashed assets (`app.bundle.css`, `app-config.js`, the
+  `/ohif/viewer` entry document) stay uncached, so config changes still take
+  effect on the next load. No migration.
+- Known gap: a *first* load still transfers the full ~21 MiB — Orthanc ignores
+  `Accept-Encoding`, so nothing is compressed. Slow *image* loading is a separate,
+  unrelated issue (per-frame round-trip serialization, ~62 frames/s observed
+  against ~1,183 frames/s that Orthanc can serve).
+
 ## v1.10 — 2026-07-15
 
 - **Feature**: femoral sheath (arterial puncture) time at the patient level.

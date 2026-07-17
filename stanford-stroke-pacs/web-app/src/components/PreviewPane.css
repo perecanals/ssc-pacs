@@ -12,6 +12,25 @@
   @apply h-[52vh] min-h-80 max-h-[calc(100vh-16rem)] rounded-t-none;
 }
 
+/* Collapsed hides rather than unmounts (see PreviewPane.jsx) — display:none
+   keeps the iframe's document alive, so re-opening costs no network. */
+.preview-pane--collapsed {
+  @apply hidden;
+}
+
+/* Native fullscreen sizes the element itself, so this only has to undo the
+   docked chrome and the height clamps. The inline drag height is suppressed in
+   JS rather than fought with !important here. */
+.preview-pane:fullscreen {
+  @apply h-full max-h-none rounded-none border-0;
+}
+
+.preview-pane__exit-fullscreen {
+  @apply absolute top-2 right-2 z-20 px-2.5 py-1 rounded
+         text-xs bg-surface/90 text-text border border-border
+         hover:bg-surface focus-visible:outline-2 focus-visible:outline-primary;
+}
+
 /* Invisible drag strip along the pane's top edge; shows a primary-colored
    line on hover/drag. Double-click resets to the default height. */
 .preview-pane__resize-handle {
