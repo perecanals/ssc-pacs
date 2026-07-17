@@ -19,8 +19,8 @@ Nothing else (compose, service units, `orthanc.json`) should need hand-editing.
 | Tier | Authoritative file | Holds | Consumed by |
 |---|---|---|---|
 | **Secrets** | `.env` | DB credentials, Orthanc service-account credential, JWT secret, optional Orthanc ports | `web-app/db.py`, docker-compose `${VAR}` interpolation, `init_orthanc_db.sh`, host-local scripts |
-| **Non-secret ops** | `config.toml` | storage mode + paths, cold-cache tuning, backup settings, session/auth tuning | `web-app/config.py`, `scripts/orthanc/dc.sh`, `scripts/backup/*` (via `config_get`) |
-| **Per-host identity** | `deploy.env` (optional; auto-derived) | OS user/group, repo path, python/uvicorn bin, Homebrew prefix, conda env, PGDATA | `scripts/linux/install_systemd.sh`, `scripts/macos/install_launchd.sh`, `scripts/_lib.sh` (`resolve_python` reads `PYTHON_BIN`/`CONDA_ENV_BIN` at runtime) |
+| **Non-secret ops** | `config.toml` | storage mode + paths, cold-cache tuning, backup settings, session/auth tuning | `web-app/config.py`, `scripts/orthanc/dc.sh`, `scripts/backup/*` (via `config_get`, which parses TOML with the `resolve_python` interpreter — `tomllib` needs Python ≥ 3.11, so a bare systemd `python3` is not good enough and `config_get` WARNs when it must fall back) |
+| **Per-host identity** | `deploy.env` (optional; auto-derived) | OS user/group, repo path, python/uvicorn bin, Homebrew prefix, conda env, Postgres cluster identity (`PG_OS_USER`/`PG_BIN`/`PGDATA`) | `scripts/linux/install_systemd.sh`, `scripts/linux/provision_postgres.sh` (`PG_OS_USER`/`PG_BIN`/`PGDATA`), `scripts/macos/install_launchd.sh` (`PGDATA`), `scripts/_lib.sh` (`resolve_python` reads `PYTHON_BIN`/`CONDA_ENV_BIN` at runtime) |
 
 `.env` and `deploy.env` are gitignored. `config.toml` is **version-controlled and
 required** — `web-app/config.py` fails fast if it is missing.

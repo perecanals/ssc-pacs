@@ -76,7 +76,7 @@ Production runs on **Linux via systemd** (`ssc-web-app.service` + the `deploy/sy
 |---------|--------------------------|------|
 | Orthanc (`ssc-orthanc`) | Docker (`ssc-orthanc:patched-indexer`) | HTTP `8042`, DICOM `4242` |
 | Web App | systemd `ssc-web-app.service`, uvicorn (macOS: `com.ssc.webapp`) | HTTP `8043` |
-| PostgreSQL | host `postgresql18.service` (macOS: `com.ssc.postgres`, Homebrew) | from `.env` |
+| PostgreSQL | host `ssc-postgres.service` (macOS: `com.ssc.postgres`, Homebrew) | from `.env` |
 
 User-facing URLs (via SSH tunnel or localhost):
 - `http://localhost:8042/ui/app/` — Orthanc Explorer 2
@@ -153,7 +153,8 @@ Two services and two databases. Full topology + request/ingest flows: `docs/refe
 **Two-database model:**
 - `orthanc_db` — Orthanc's internal index; do not query/mutate except explicit enrichment. (Sanctioned exception: reconciliation bulk-reads series UIDs read-only via `PG_ORTHANC_*` creds — one query instead of ~100k REST calls.)
 - `stanford-stroke` — upstream read-only tables (`patient`, `image_study`, `image_series`, clinical side-table `lvo_clinical_data`) plus web-app-owned tables (`annotations`, `annotations_history`, `label_definitions`, `label_value_options`, `users`, `user_preferences`, `series_cache_state`, `*_labelled` mirrors). Connection from `.env` (`DB_HOST/PORT/NAME/USER/PASSWORD`); web-app-owned tables are Alembic-migrated at startup.
-- `patient` is the **patient-level spine** (one row per patient, ingest-populated). `lvo_clinical_data` is retired as a roster — joined only to prefer its clinical `stroke_date` via `COALESCE(c.stroke_date, p.stroke_date)`, never otherwise queried.
+- `patient` is the **patient-level spine** (one row per patient, ingest-populated), and is **imaging-derived only** — clinical variables belong in `annotations` as patient-level labels (`scripts/admin/bulk_set_label_values.py`), never as new columns here (Alembic `0017` added one, `0018` took it back out).
+- `lvo_clinical_data` is retired as a roster — joined only to prefer its clinical `stroke_date` via `COALESCE(c.stroke_date, p.stroke_date::date::text)` (the cast is load-bearing: it keeps both branches text so the lexicographic date sort holds), never otherwise queried. It is also **optional**: a deployment may not have the table, so every read is guarded (`common.table_exists` / `inspect(...).has_table`). Without it, `stroke_date` falls back to imaging and timepoints anchor on each episode's own thrombectomy study.
 
 **Annotation model:** three levels (`patient`/`study`/`series`); annotations are shared (one value per entity+label; `created_by` = last editor); parent-level values inherit downward; cross-level filtering is supported; every write is captured in `annotations_history` by a PL/pgSQL trigger (`docs/operations/annotation_history.md`).
 

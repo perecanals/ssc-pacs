@@ -72,9 +72,18 @@ render() {
       "$1"
 }
 
+# ssc-postgres.service.in is provisioned separately: its tokens (__PG_BIN__,
+# __PGDATA__, __PG_OS_USER__…) are cluster identity, not deploy identity, and
+# are resolved by scripts/linux/provision_postgres.sh against the actual
+# cluster. Skipping it here also keeps the token guard below honest.
+skip_template() { [[ "$(basename "$1")" == ssc-postgres.service.in ]]; }
+
 if [[ "$DRY_RUN" == yes ]]; then
   out="$(mktemp -d)"
-  for f in "$SRC"/*.in; do render "$f" > "$out/$(basename "${f%.in}")"; done
+  for f in "$SRC"/*.in; do
+    skip_template "$f" && continue
+    render "$f" > "$out/$(basename "${f%.in}")"
+  done
   echo "==> Rendered $(ls -1 "$out" | wc -l | tr -d ' ') units into $out"
   echo "--- ssc-web-app.service ---"; cat "$out/ssc-web-app.service"
   # Surface any token that survived substitution.
@@ -88,6 +97,7 @@ fi
 
 echo "==> Installing units into $DST"
 for f in "$SRC"/*.in; do
+  skip_template "$f" && { echo "  skipping $(basename "$f") (installed by provision_postgres.sh)"; continue; }
   name="$(basename "${f%.in}")"
   render "$f" > "$DST/$name"
   chmod 644 "$DST/$name"

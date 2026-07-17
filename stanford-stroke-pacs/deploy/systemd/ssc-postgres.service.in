@@ -1,0 +1,29 @@
+# Rendered and installed by scripts/linux/provision_postgres.sh — NOT by
+# install_systemd.sh (which skips this template: the tokens below are cluster
+# identity, resolved against the actual cluster, not deploy identity).
+#
+# __PG_OS_USER__ is always a literal, dedicated SYSTEM account (uid < UID_MIN),
+# never the deploy/operator user: systemd-logind purges a login user's POSIX
+# shared memory when their last session ends (RemoveIPC=yes default), which
+# makes every new Postgres connection FATAL on an otherwise idle server.
+[Unit]
+Description=PostgreSQL (SSC PACS)
+Documentation=file:__DOCS_ROOT__/operations/postgres_provisioning.md
+After=network.target
+RequiresMountsFor=__PGDATA__
+
+[Service]
+Type=forking
+User=__PG_OS_USER__
+Group=__PG_OS_GROUP__
+Environment=PGDATA=__PGDATA__
+OOMScoreAdjust=-1000
+ExecStart=__PG_BIN__/pg_ctl start -D ${PGDATA} -s -w -t 60 -l ${PGDATA}/server.log
+ExecStop=__PG_BIN__/pg_ctl stop -D ${PGDATA} -s -m fast
+ExecReload=__PG_BIN__/pg_ctl reload -D ${PGDATA} -s
+TimeoutSec=90
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

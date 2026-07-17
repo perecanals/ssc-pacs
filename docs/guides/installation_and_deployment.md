@@ -67,8 +67,14 @@ The host should satisfy all of the following:
 - Linux host compatible with Docker host networking
 - Docker daemon running
 - Docker Compose plugin available
-- PostgreSQL **server** installed and running (a single server hosts both the
-  `stanford-stroke` and `orthanc_db` databases)
+- PostgreSQL **≥ 16** installed (a single server hosts both the
+  `stanford-stroke` and `orthanc_db` databases; the floor and the version
+  policy are defined in
+  [`../operations/postgres_provisioning.md`](../operations/postgres_provisioning.md) §2).
+  If no cluster exists yet, `scripts/linux/provision_postgres.sh` creates one
+  correctly — dedicated system OS user, hardened `pg_hba.conf`, managed by
+  `ssc-postgres.service` (§5 Step 0). The cluster's OS user must **never** be a
+  login account — see the invariant in that doc.
 - PostgreSQL admin access to bootstrap the databases — either `sudo -u postgres
   psql`, or a role with `CREATEDB`/`CREATEROLE` you can connect as (§3)
 - free host ports:
@@ -159,6 +165,24 @@ app and metadata-driven scripts will not function as documented.
 ## 5. First-time bootstrap sequence
 
 Use this order for a new deployment.
+
+### Step 0. Provision (or audit) the host PostgreSQL cluster — Linux
+
+If the host already runs a suitable PostgreSQL server, this is a no-op — the
+script adopts it. If not, it provisions one safely (system OS user, `initdb`
+with `peer`/`scram-sha-256` auth, `ssc-postgres.service`). It never touches an
+existing data directory and never installs PostgreSQL binaries:
+
+```bash
+scripts/linux/provision_postgres.sh --check       # audit what exists
+scripts/linux/provision_postgres.sh               # dry-run the plan
+sudo scripts/linux/provision_postgres.sh --execute
+```
+
+Details, decision tree, and the version floor:
+[`../operations/postgres_provisioning.md`](../operations/postgres_provisioning.md).
+(macOS: Homebrew Postgres per [`deployment_on_mac.md`](deployment_on_mac.md);
+there is no OS `postgres` user there and this script does not apply.)
 
 ### Step 1. Install the stack's script dependencies
 
@@ -598,7 +622,7 @@ scripts/linux/stop_stack.sh --dry-run       # print the exact sequence, change n
 ```
 
 The shared host services — **dockerd** and **PostgreSQL**
-(`postgresql18.service`) — are left running, since other things on the box may
+(`ssc-postgres.service`) — are left running, since other things on the box may
 use them (the script prints the one-line opt-in to stop Postgres too if you are
 powering the whole machine down).
 
