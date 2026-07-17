@@ -80,7 +80,8 @@ The host should satisfy all of the following:
 - free host ports:
   - `8042` for Orthanc HTTP
   - `4242` for Orthanc DICOM
-  - `8043` for the web app app
+  - `8043` for the web app app (configurable: `config.toml` `[web-app].port`,
+    rendered into the service units at install time)
 - writable checkout of this repository
 - a conda (or equivalent) Python **3.12+** environment for the stack — the
   docs assume one named `ssc-pacs`; Node.js **20+** for the frontend build

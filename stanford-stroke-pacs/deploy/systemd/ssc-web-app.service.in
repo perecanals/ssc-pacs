@@ -11,7 +11,7 @@ Wants=ssc-postgres.service
 Type=simple
 User=__DEPLOY_USER__
 WorkingDirectory=__REPO_ROOT__/web-app
-ExecStart=__UVICORN_BIN__ app:app --host 0.0.0.0 --port 8043
+ExecStart=__UVICORN_BIN__ app:app --host 0.0.0.0 --port __WEBAPP_PORT__
 Restart=on-failure
 RestartSec=5
 

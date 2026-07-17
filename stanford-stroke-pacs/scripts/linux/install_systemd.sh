@@ -21,6 +21,11 @@ STACK_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
 SRC="$STACK_DIR/deploy/systemd"
 DST=/etc/systemd/system
 
+# _lib.sh provides config_get (config.toml is the authoritative home for the
+# web-app port; deploy.env's WEBAPP_PORT overrides it per host).
+# shellcheck source=../_lib.sh
+. "$SCRIPT_DIR/../_lib.sh"
+
 if [[ "$DRY_RUN" == no && $EUID -ne 0 ]]; then
   echo "Run with sudo (or pass --dry-run to preview)." >&2
   exit 1
@@ -53,10 +58,12 @@ if [[ -z "${PYTHON_BIN:-}" ]]; then
   PYTHON_BIN="${PYTHON_BIN:-$(command -v python3 || true)}"
 fi
 UVICORN_BIN="${UVICORN_BIN:-$(dirname "$PYTHON_BIN")/uvicorn}"
+WEBAPP_PORT="${WEBAPP_PORT:-$(config_get web-app port 8043)}"
 
 echo "==> Resolved deployment identity"
 printf '  %-13s %s\n' REPO_ROOT "$REPO_ROOT" DEPLOY_USER "$DEPLOY_USER" \
-  DEPLOY_GROUP "$DEPLOY_GROUP" PYTHON_BIN "$PYTHON_BIN" UVICORN_BIN "$UVICORN_BIN"
+  DEPLOY_GROUP "$DEPLOY_GROUP" PYTHON_BIN "$PYTHON_BIN" UVICORN_BIN "$UVICORN_BIN" \
+  WEBAPP_PORT "$WEBAPP_PORT"
 
 # Warn (don't fail) on missing binaries so --dry-run still works off-host.
 [[ -x "$UVICORN_BIN" ]] || echo "  !! UVICORN_BIN not executable here: $UVICORN_BIN" >&2
@@ -69,6 +76,7 @@ render() {
       -e "s|__DEPLOY_GROUP__|$DEPLOY_GROUP|g" \
       -e "s|__PYTHON_BIN__|$PYTHON_BIN|g" \
       -e "s|__UVICORN_BIN__|$UVICORN_BIN|g" \
+      -e "s|__WEBAPP_PORT__|$WEBAPP_PORT|g" \
       "$1"
 }
 
