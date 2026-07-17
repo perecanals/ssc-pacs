@@ -54,10 +54,14 @@ if [[ -z "${BREW_PREFIX:-}" ]]; then
 fi
 CONDA_ENV_BIN="${CONDA_ENV_BIN:-$BREW_PREFIX/Caskroom/miniconda/base/envs/ssc-pacs/bin}"
 PGDATA="${PGDATA:-$BREW_PREFIX/var/postgresql@16}"
+# shellcheck source=../_lib.sh
+. "$SCRIPT_DIR/../_lib.sh"
+WEBAPP_PORT="${WEBAPP_PORT:-$(config_get web-app port 8043)}"
 
 echo "==> Resolved deployment identity"
 printf '  %-14s %s\n' REPO_ROOT "$REPO_ROOT" DEPLOY_USER "$DEPLOY_USER" \
-  HOME_DIR "$HOME_DIR" BREW_PREFIX "$BREW_PREFIX" CONDA_ENV_BIN "$CONDA_ENV_BIN" PGDATA "$PGDATA"
+  HOME_DIR "$HOME_DIR" BREW_PREFIX "$BREW_PREFIX" CONDA_ENV_BIN "$CONDA_ENV_BIN" PGDATA "$PGDATA" \
+  WEBAPP_PORT "$WEBAPP_PORT"
 [[ -x "$CONDA_ENV_BIN/uvicorn" ]] || echo "  !! $CONDA_ENV_BIN/uvicorn not executable here" >&2
 
 render() {
@@ -66,6 +70,7 @@ render() {
       -e "s|__HOME_DIR__|$HOME_DIR|g" \
       -e "s|__BREW_PREFIX__|$BREW_PREFIX|g" \
       -e "s|__CONDA_ENV_BIN__|$CONDA_ENV_BIN|g" \
+      -e "s|__WEBAPP_PORT__|$WEBAPP_PORT|g" \
       "$1"
 }
 

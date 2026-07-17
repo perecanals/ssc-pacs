@@ -7,7 +7,10 @@
 #   CONFIG_TOML  — $STACK_DIR/config.toml
 #   config_get <section> <key> <fallback>
 #                — echo config.toml [section].key, or <fallback> if the file,
-#                  section, key, or python3 is unavailable.
+#                  section, or key is unavailable. Parses TOML with the
+#                  interpreter from resolve_python (tomllib needs >= 3.11 —
+#                  bare `python3` under systemd is not good enough) and WARNs
+#                  on stderr when the file exists but cannot be parsed.
 #   deploy_env_get <key>
 #                — echo a KEY=value from the gitignored per-host deploy.env
 #                  (stack root), or nothing. Read, not sourced, so callers'
@@ -29,21 +32,31 @@ CONFIG_TOML="$STACK_DIR/config.toml"
 DEPLOY_ENV="$STACK_DIR/deploy.env"
 
 config_get() {
-    local section="$1" key="$2" fallback="$3" val=""
-    if [[ -r "$CONFIG_TOML" ]] && command -v python3 >/dev/null 2>&1; then
-        val="$(python3 - "$CONFIG_TOML" "$section" "$key" <<'PY' 2>/dev/null || true
+    local section="$1" key="$2" fallback="$3" val="" py=""
+    # tomllib is Python 3.11+; a bare `python3` under systemd's PATH can be
+    # older (e.g. Ubuntu 22.04 ships 3.10), which used to make every timer
+    # silently fall back to the hardcoded defaults. resolve_python finds the
+    # project interpreter (deploy.env PYTHON_BIN etc.) regardless of PATH.
+    py="$(resolve_python || true)"
+    if [[ -r "$CONFIG_TOML" && -n "$py" ]]; then
+        if ! val="$("$py" - "$CONFIG_TOML" "$section" "$key" 2>/dev/null <<'PY'
 import sys, tomllib
 path, section, key = sys.argv[1], sys.argv[2], sys.argv[3]
-try:
-    with open(path, "rb") as f:
-        data = tomllib.load(f)
-    v = data.get(section, {}).get(key)
-    if v is not None:
-        print(v)
-except Exception:
-    pass
+with open(path, "rb") as f:
+    data = tomllib.load(f)
+v = data.get(section, {}).get(key)
+if v is not None:
+    print(v)
 PY
-)"
+)"; then
+            # A missing key exits 0 (fallback is the intended answer); reaching
+            # here means the interpreter could not parse config.toml at all
+            # (no tomllib, syntax error). Say so instead of diverging silently.
+            echo "config_get: WARNING: $py failed to read $CONFIG_TOML" \
+                 "(needs Python >= 3.11 for tomllib); using fallback" \
+                 "'$fallback' for [$section].$key" >&2
+            val=""
+        fi
     fi
     printf '%s' "${val:-$fallback}"
 }

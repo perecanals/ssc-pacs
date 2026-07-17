@@ -25,7 +25,7 @@ by default and applies only with `--execute`; interactive prompts have a
 | `connectivity/` | Sanitized SSH tunnel templates for end users (per OS) | `tunnel/{linux,macos,windows}/tunnel.*` |
 | `data_integrity/` | Cross-store audits + repairs (see matrix below) | `reconcile.py`, `dicom_path_sql_fs_audit.py`, `disk_vs_db_series_audit.py`, `detect_mixed_dirs.py`, `repair_dicomweb_metadata_cache.py` |
 | `dicom/` | DICOM conversion utilities | `dicom_to_nifti.py` |
-| `linux/` | Linux deploy path (systemd units) + whole-stack control | `install_systemd.sh`, `stop_stack.sh`, `start_stack.sh` |
+| `linux/` | Linux deploy path (systemd units, Postgres cluster) + whole-stack control | `install_systemd.sh`, `provision_postgres.sh`, `stop_stack.sh`, `start_stack.sh` |
 | `macos/` | macOS host tooling (Colima, launchd, disks) + whole-stack control | `colima_start.sh`, `colima_watchdog.sh`, `install_launchd.sh`, `stop_stack.sh`, `start_stack.sh` |
 | `migration/` | Port the stack to a new host | `repoint_host_paths.py`, `reconcile_migration.py` |
 | `orthanc/` | Compose wrapper, status check | `dc.sh`, `check_status.sh` |
@@ -114,4 +114,9 @@ python scripts/dicom/dicom_to_nifti.py --series-uid <uid> --warm-if-cold
 # Backup
 ./scripts/backup/backup_pg_db.sh stanford-stroke
 ./scripts/backup/check_backup_freshness.sh
+
+# Host Postgres cluster (Linux; see docs/operations/postgres_provisioning.md)
+scripts/linux/provision_postgres.sh --check          # read-only invariant audit
+scripts/linux/provision_postgres.sh                  # dry-run the provisioning plan
+sudo scripts/linux/provision_postgres.sh --execute   # apply
 ```

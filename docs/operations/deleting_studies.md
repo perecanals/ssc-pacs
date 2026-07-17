@@ -32,7 +32,7 @@ indexer purge**.
 
 ## No sudo required
 
-The web-app service user (`perecanals`) **owns both storage roots** — it already
+The web-app service user **owns both storage roots** — it already
 deletes loose files there during cold-cache eviction — so file removal needs no
 privilege escalation. Deletion is complete from either entry point (UI or CLI).
 The safety gate for the irreversible file delete is the **path-safety guard**

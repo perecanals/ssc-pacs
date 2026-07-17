@@ -21,6 +21,11 @@ STACK_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
 SRC="$STACK_DIR/deploy/systemd"
 DST=/etc/systemd/system
 
+# _lib.sh provides config_get (config.toml is the authoritative home for the
+# web-app port; deploy.env's WEBAPP_PORT overrides it per host).
+# shellcheck source=../_lib.sh
+. "$SCRIPT_DIR/../_lib.sh"
+
 if [[ "$DRY_RUN" == no && $EUID -ne 0 ]]; then
   echo "Run with sudo (or pass --dry-run to preview)." >&2
   exit 1
@@ -53,10 +58,12 @@ if [[ -z "${PYTHON_BIN:-}" ]]; then
   PYTHON_BIN="${PYTHON_BIN:-$(command -v python3 || true)}"
 fi
 UVICORN_BIN="${UVICORN_BIN:-$(dirname "$PYTHON_BIN")/uvicorn}"
+WEBAPP_PORT="${WEBAPP_PORT:-$(config_get web-app port 8043)}"
 
 echo "==> Resolved deployment identity"
 printf '  %-13s %s\n' REPO_ROOT "$REPO_ROOT" DEPLOY_USER "$DEPLOY_USER" \
-  DEPLOY_GROUP "$DEPLOY_GROUP" PYTHON_BIN "$PYTHON_BIN" UVICORN_BIN "$UVICORN_BIN"
+  DEPLOY_GROUP "$DEPLOY_GROUP" PYTHON_BIN "$PYTHON_BIN" UVICORN_BIN "$UVICORN_BIN" \
+  WEBAPP_PORT "$WEBAPP_PORT"
 
 # Warn (don't fail) on missing binaries so --dry-run still works off-host.
 [[ -x "$UVICORN_BIN" ]] || echo "  !! UVICORN_BIN not executable here: $UVICORN_BIN" >&2
@@ -69,12 +76,22 @@ render() {
       -e "s|__DEPLOY_GROUP__|$DEPLOY_GROUP|g" \
       -e "s|__PYTHON_BIN__|$PYTHON_BIN|g" \
       -e "s|__UVICORN_BIN__|$UVICORN_BIN|g" \
+      -e "s|__WEBAPP_PORT__|$WEBAPP_PORT|g" \
       "$1"
 }
 
+# ssc-postgres.service.in is provisioned separately: its tokens (__PG_BIN__,
+# __PGDATA__, __PG_OS_USER__…) are cluster identity, not deploy identity, and
+# are resolved by scripts/linux/provision_postgres.sh against the actual
+# cluster. Skipping it here also keeps the token guard below honest.
+skip_template() { [[ "$(basename "$1")" == ssc-postgres.service.in ]]; }
+
 if [[ "$DRY_RUN" == yes ]]; then
   out="$(mktemp -d)"
-  for f in "$SRC"/*.in; do render "$f" > "$out/$(basename "${f%.in}")"; done
+  for f in "$SRC"/*.in; do
+    skip_template "$f" && continue
+    render "$f" > "$out/$(basename "${f%.in}")"
+  done
   echo "==> Rendered $(ls -1 "$out" | wc -l | tr -d ' ') units into $out"
   echo "--- ssc-web-app.service ---"; cat "$out/ssc-web-app.service"
   # Surface any token that survived substitution.
@@ -88,6 +105,7 @@ fi
 
 echo "==> Installing units into $DST"
 for f in "$SRC"/*.in; do
+  skip_template "$f" && { echo "  skipping $(basename "$f") (installed by provision_postgres.sh)"; continue; }
   name="$(basename "${f%.in}")"
   render "$f" > "$DST/$name"
   chmod 644 "$DST/$name"

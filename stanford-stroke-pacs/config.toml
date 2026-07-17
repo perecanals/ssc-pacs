@@ -40,6 +40,11 @@ retention_days = 60
 max_age_hours = 36
 
 [web-app]
+# HTTP port uvicorn serves on. Consumed at unit-install time: the systemd and
+# launchd installers render it into the service templates (override per host
+# with WEBAPP_PORT in deploy.env). Changing it requires re-running the unit
+# installer, and remember to adjust SSH-tunnel forwards to match.
+port = 8043
 # Sliding idle timeout. Cookie is refreshed on every authenticated request; if
 # no request is made for this many hours the session is dead. The SPA proactively
 # redirects to /login with an "expired" banner once idle this long (its watchdog

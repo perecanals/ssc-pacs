@@ -21,6 +21,7 @@ One **Orthanc** container (`ssc-orthanc`), one native-host **Web App** service o
 | Day-2 commands | [`operations/commands.md`](operations/commands.md) |
 | Upgrading dependencies (pinned packages) | [`operations/upgrading_dependencies.md`](operations/upgrading_dependencies.md) |
 | Schema migrations (Alembic, `stanford-stroke` DB) | [`operations/schema_migrations.md`](operations/schema_migrations.md) |
+| PostgreSQL provisioning (cluster OS user, version floor, `provision_postgres.sh`) | [`operations/postgres_provisioning.md`](operations/postgres_provisioning.md) |
 | Secret rotation (JWT, Orthanc admin, DB) | [`operations/secret_rotation.md`](operations/secret_rotation.md) |
 | Observability (logs, /healthz, /metrics, Grafana) | [`operations/observability.md`](operations/observability.md) |
 | Two-DB reconciliation (image_series vs Orthanc) | [`operations/reconciliation.md`](operations/reconciliation.md) |

@@ -67,15 +67,25 @@ The host should satisfy all of the following:
 - Linux host compatible with Docker host networking
 - Docker daemon running
 - Docker Compose plugin available
-- PostgreSQL **server** installed and running (a single server hosts both the
-  `stanford-stroke` and `orthanc_db` databases)
+- PostgreSQL **≥ 16** installed (a single server hosts both the
+  `stanford-stroke` and `orthanc_db` databases; the floor and the version
+  policy are defined in
+  [`../operations/postgres_provisioning.md`](../operations/postgres_provisioning.md) §2).
+  If no cluster exists yet, `scripts/linux/provision_postgres.sh` creates one
+  correctly — dedicated system OS user, hardened `pg_hba.conf`, managed by
+  `ssc-postgres.service` (§5 Step 0). The cluster's OS user must **never** be a
+  login account — see the invariant in that doc.
 - PostgreSQL admin access to bootstrap the databases — either `sudo -u postgres
   psql`, or a role with `CREATEDB`/`CREATEROLE` you can connect as (§3)
 - free host ports:
   - `8042` for Orthanc HTTP
   - `4242` for Orthanc DICOM
-  - `8043` for the web app app
+  - `8043` for the web app app (configurable: `config.toml` `[web-app].port`,
+    rendered into the service units at install time)
 - writable checkout of this repository
+- a conda (or equivalent) Python **3.12+** environment for the stack — the
+  docs assume one named `ssc-pacs`; Node.js **20+** for the frontend build
+  (build-time only, §5 Step 7)
 - filesystem path for the DICOM repository chosen and available
 
 For the helper scripts, install Python packages from the **stack root**
@@ -159,6 +169,29 @@ app and metadata-driven scripts will not function as documented.
 ## 5. First-time bootstrap sequence
 
 Use this order for a new deployment.
+
+### Step 0. Provision (or audit) the host PostgreSQL cluster — Linux
+
+If the host already runs a suitable PostgreSQL server, this is a no-op — the
+script adopts it. If not, it provisions one safely (system OS user, `initdb`
+with `peer`/`scram-sha-256` auth, `ssc-postgres.service`). It never touches an
+existing data directory and never installs PostgreSQL binaries.
+
+**Provisioning a fresh cluster requires `PGDATA` in `deploy.env`** (this is the
+one case where `deploy.env` is not optional; add `PG_BIN` too when more than
+one PostgreSQL major is installed — see `deploy.env.example`):
+
+```bash
+scripts/linux/provision_postgres.sh --check       # audit what exists
+scripts/linux/provision_postgres.sh               # dry-run the plan
+sudo scripts/linux/provision_postgres.sh --execute
+```
+
+Details, decision tree, the version floor, and the recommended host-wide
+`RemoveIPC=no` logind drop-in (defense in depth, §4 there):
+[`../operations/postgres_provisioning.md`](../operations/postgres_provisioning.md).
+(macOS: Homebrew Postgres per [`deployment_on_mac.md`](deployment_on_mac.md);
+there is no OS `postgres` user there and this script does not apply.)
 
 ### Step 1. Install the stack's script dependencies
 
@@ -420,6 +453,7 @@ curl -s -b cookies.txt 'http://localhost:8043/api/series?per_page=5' | python3 -
 The repo includes:
 
 ```bash
+scripts/linux/provision_postgres.sh --check   # cluster invariants — expect 0 findings
 ./scripts/orthanc/check_status.sh
 python scripts/data_integrity/reconcile.py
 ```
@@ -598,7 +632,7 @@ scripts/linux/stop_stack.sh --dry-run       # print the exact sequence, change n
 ```
 
 The shared host services — **dockerd** and **PostgreSQL**
-(`postgresql18.service`) — are left running, since other things on the box may
+(`ssc-postgres.service`) — are left running, since other things on the box may
 use them (the script prints the one-line opt-in to stop Postgres too if you are
 powering the whole machine down).
 

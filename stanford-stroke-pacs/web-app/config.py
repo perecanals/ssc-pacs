@@ -30,6 +30,9 @@ _DEFAULT_STORAGE = {
     "warm_workers": 2,
 }
 _DEFAULT_WEB_APP = {
+    # The port is bound by uvicorn (rendered into the service units at install
+    # time), not by app code — exposed here so the startup log shows it.
+    "port": 8043,
     "session_timeout_hours": 2.0,
     "session_absolute_timeout_hours": 24.0,
     "cookie_secure": True,
@@ -91,6 +94,8 @@ WARMING_DISK_MIN_FREE_BYTES = int(
 )
 WARM_WORKERS = int(_storage.get("warm_workers", _DEFAULT_STORAGE["warm_workers"]))
 
+WEB_APP_PORT = int(_web_app.get("port", _DEFAULT_WEB_APP["port"]))
+
 SESSION_TIMEOUT_HOURS = float(
     _web_app.get("session_timeout_hours", _DEFAULT_WEB_APP["session_timeout_hours"])
 )
@@ -119,6 +124,7 @@ def effective_config_summary() -> dict:
     """
     return {
         "config_path": str(_CONFIG_PATH),
+        "port": WEB_APP_PORT,
         "storage_mode": STORAGE_MODE,
         "dicom_data_root": str(DICOM_DATA_ROOT),
         "cold_archive_root": str(COLD_ARCHIVE_ROOT),

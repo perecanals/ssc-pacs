@@ -7,7 +7,7 @@
 #
 # Sequence: stop the scheduled timers (so no backup/health job fires mid-stop),
 # stop the web app, then `dc.sh down` for Orthanc. dockerd and the shared host
-# PostgreSQL (postgresql18.service) are LEFT RUNNING by design — other things on
+# PostgreSQL (ssc-postgres.service) are LEFT RUNNING by design — other things on
 # the box may use them. A commented opt-in below stops Postgres too if you are
 # shutting down the whole machine.
 #
@@ -72,7 +72,7 @@ run "$STACK_DIR/scripts/orthanc/dc.sh" down
 
 echo "==> Leaving host PostgreSQL and dockerd running (shared services)."
 echo "    To stop Postgres too (only when shutting down the whole box):"
-echo "      sudo systemctl stop postgresql18.service"
+echo "      sudo systemctl stop ssc-postgres.service"
 
 if [[ "$RETIRE" == yes ]]; then
   echo "==> Retiring: disabling units so they do NOT autostart on boot"

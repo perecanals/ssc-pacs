@@ -29,7 +29,7 @@
     <string>__CONDA_ENV_BIN__/uvicorn</string>
     <string>app:app</string>
     <string>--host</string><string>0.0.0.0</string>
-    <string>--port</string><string>8043</string>
+    <string>--port</string><string>__WEBAPP_PORT__</string>
   </array>
   <key>WorkingDirectory</key> <string>__REPO_ROOT__/web-app</string>
   <key>EnvironmentVariables</key>

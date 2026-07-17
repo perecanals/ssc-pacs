@@ -1,12 +1,17 @@
 [Unit]
 Description=SSC Web App (FastAPI)
-After=network.target postgresql.service
+# Order after the repo's Postgres unit. systemd silently ignores After= on
+# units that don't exist (the old `postgresql.service` reference here was a
+# no-op for years), so this stays harmless on hosts where Postgres is remote
+# or managed by a distro unit — there Restart=on-failure covers the race.
+After=network.target ssc-postgres.service
+Wants=ssc-postgres.service
 
 [Service]
 Type=simple
 User=__DEPLOY_USER__
 WorkingDirectory=__REPO_ROOT__/web-app
-ExecStart=__UVICORN_BIN__ app:app --host 0.0.0.0 --port 8043
+ExecStart=__UVICORN_BIN__ app:app --host 0.0.0.0 --port __WEBAPP_PORT__
 Restart=on-failure
 RestartSec=5
 
