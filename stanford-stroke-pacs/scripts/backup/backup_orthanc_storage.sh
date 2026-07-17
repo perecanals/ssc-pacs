@@ -13,7 +13,7 @@
 #
 # Optional env overrides:
 #   BACKUP_ENV_FILE          (default: <stack>/.env resolved from the script location; sourced if present)
-#   BACKUP_ROOT              (default: config.toml [backup].backup_root, else /DATA2/pg_backups)
+#   BACKUP_ROOT              (default: config.toml [backup].backup_root, else /DATA2/ssc-pacs-backups)
 #   RETENTION_DAYS           (default: config.toml [backup].retention_days, else 60)
 #   ORTHANC_STORAGE_VOLUME   (default stanford-stroke-pacs_ssc-orthanc-storage)
 #   BACKUP_HELPER_IMAGE      (default python:3.12-slim)
@@ -41,7 +41,7 @@ SNAP_PY="$SCRIPT_DIR/orthanc_storage_snapshot.py"
 . "$SCRIPT_DIR/../_lib.sh"
 
 BACKUP_ENV_FILE="${BACKUP_ENV_FILE:-$STACK_DIR/.env}"
-BACKUP_ROOT="${BACKUP_ROOT:-$(config_get backup backup_root /DATA2/pg_backups)}"
+BACKUP_ROOT="${BACKUP_ROOT:-$(config_get backup backup_root /DATA2/ssc-pacs-backups)}"
 RETENTION_DAYS="${RETENTION_DAYS:-$(config_get backup retention_days 60)}"
 ORTHANC_STORAGE_VOLUME="${ORTHANC_STORAGE_VOLUME:-stanford-stroke-pacs_ssc-orthanc-storage}"
 BACKUP_HELPER_IMAGE="${BACKUP_HELPER_IMAGE:-python:3.12-slim}"

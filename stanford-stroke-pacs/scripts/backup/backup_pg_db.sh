@@ -6,7 +6,7 @@
 # Reads connection details from BACKUP_ENV_FILE (default: <stack>/.env resolved
 # from the script location). Required keys:
 #   DB_HOST, DB_PORT, DB_USER, DB_PASSWORD
-# Optional override: BACKUP_ROOT (default: config.toml [backup].backup_root, else /DATA2/pg_backups).
+# Optional override: BACKUP_ROOT (default: config.toml [backup].backup_root, else /DATA2/ssc-pacs-backups).
 # Optional override: RETENTION_DAYS (default: config.toml [backup].retention_days, else 60).
 #
 # Output layout:
@@ -36,7 +36,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "$SCRIPT_DIR/../_lib.sh"
 
 BACKUP_ENV_FILE="${BACKUP_ENV_FILE:-$STACK_DIR/.env}"
-BACKUP_ROOT="${BACKUP_ROOT:-$(config_get backup backup_root /DATA2/pg_backups)}"
+BACKUP_ROOT="${BACKUP_ROOT:-$(config_get backup backup_root /DATA2/ssc-pacs-backups)}"
 RETENTION_DAYS="${RETENTION_DAYS:-$(config_get backup retention_days 60)}"
 
 if [[ ! -r "$BACKUP_ENV_FILE" ]]; then
