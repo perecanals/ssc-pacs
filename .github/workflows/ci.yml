@@ -39,11 +39,18 @@ jobs:
         run: ruff check . --config ../web-app/pyproject.toml
 
   backend-tests:
-    name: Backend tests (pytest)
+    name: Backend tests (pytest, pg${{ matrix.postgres }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Supported PostgreSQL range is a floor, not a pin: 16 is the declared
+        # minimum, 18 is what production runs (see
+        # docs/operations/postgres_provisioning.md). Test both ends.
+        postgres: ["16", "18"]
     services:
       postgres:
-        image: postgres:16
+        image: postgres:${{ matrix.postgres }}
         env:
           POSTGRES_USER: ci_user
           POSTGRES_PASSWORD: ci_pass

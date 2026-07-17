@@ -19,8 +19,8 @@ and how to recover. Restore steps live in
 
 | Data | Where | Backed up? | Why |
 |---|---|---|---|
-| `stanford-stroke` PostgreSQL DB | host PostgreSQL 16 | **Yes — Tier 1, daily** | Authored content (annotations, users, label defs, preferences) cannot be reconstructed |
-| `orthanc_db` PostgreSQL DB | host PostgreSQL 16 | **Yes — Tier 1, daily** | Orthanc's index — rebuildable from disk but slow; cheap to back up |
+| `stanford-stroke` PostgreSQL DB | host PostgreSQL (≥ 16) | **Yes — Tier 1, daily** | Authored content (annotations, users, label defs, preferences) cannot be reconstructed |
+| `orthanc_db` PostgreSQL DB | host PostgreSQL (≥ 16) | **Yes — Tier 1, daily** | Orthanc's index — rebuildable from disk but slow; cheap to back up |
 | Cold DICOM archives (`cold_archive_root`) | local disk | **Not yet** — mirror script implemented (Tier 2, dormant) | Re-ingest from source is currently acceptable; a mirror needs a destination |
 | Uncompressed/warm DICOM tree (`dicom_data_root`) | local disk | No | Reconstructible from cold archives on demand |
 | Orthanc storage volume (`…_ssc-orthanc-storage` at `/var/lib/orthanc/db`) | docker volume | **Yes — Tier 1, daily** | Holds OHIF-authored DICOM SR annotations (**no other copy**) + the Folder Indexer `indexer-plugin.db` (rebuild = full cold-archive decompression + reindex) |
