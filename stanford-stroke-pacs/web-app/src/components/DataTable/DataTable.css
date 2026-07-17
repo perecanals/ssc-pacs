@@ -298,7 +298,7 @@
   @apply flex items-center gap-2;
 }
 
-/* Narrow columns (Patient ID, Stroke Date): trim padding and let the cell
+/* Narrow columns (Patient ID, Episode Date): trim padding and let the cell
    shrink to content, reducing column width ~20% versus default px-3 padding. */
 .dt__th--narrow,
 .dt__td--narrow,
