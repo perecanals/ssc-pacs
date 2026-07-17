@@ -32,7 +32,7 @@ required** — `web-app/config.py` fails fast if it is missing.
 | File | Holds | Secret? | In git? | Authoritative or derived | Per-host edit on fresh deploy? |
 |---|---|---|---|---|---|
 | `.env` | DB + Orthanc-service-account creds, `JWT_SECRET`, `ORTHANC_URL`, optional `ORTHANC_HTTP_PORT`/`ORTHANC_DICOM_PORT` | **Yes** | No (`.env.example` is) | **Authoritative** for all secrets | **Yes** — copy from `.env.example`, fill in |
-| `config.toml` | `[storage]` mode + paths + cold-cache tuning, `[backup]`, `[web-app]` session/auth | No | Yes (required) | **Authoritative** for non-secret ops | **Yes** — set mode + paths for this host |
+| `config.toml` | `[storage]` mode + paths + cold-cache tuning, `[backup]`, `[web-app]` session/auth + `clinical_episode_date_column` | No | Yes (required) | **Authoritative** for non-secret ops | **Yes** — set mode + paths for this host |
 | `deploy.env` | per-host service-unit identity (user, paths, conda) | No | No (`deploy.env.example` is) | **Authoritative** override; else auto-derived | Only if auto-derivation is wrong |
 | `orthanc.json` | Orthanc structural config: ports (in-image default), Folder Indexer (`ScanRoots: ["/dicom-data"]`, `Folders: []`, `RemoveMissingFiles:false`), plugins | No | Yes | **Authoritative** for Orthanc structure; ports are overridable from `.env` | No |
 | `orthanc_users.json` | Orthanc service-account + admin plaintext creds | **Yes** | No | **Derived** from `.env` + DB via `manage_users.py` | No — never hand-edit |
@@ -57,6 +57,7 @@ required** — `web-app/config.py` fails fast if it is missing.
 | Storage mode + DICOM mount path | `config.toml` `[storage]` | the Orthanc `/dicom-data` bind mount | `scripts/orthanc/dc.sh` exports `DICOM_MOUNT_SOURCE` (automatic) |
 | Orthanc HTTP/DICOM ports | `.env` (optional) → `orthanc.json` default | `docker-compose*` | compose interpolation, default `8042`/`4242` |
 | Web-app HTTP port | `config.toml` `[web-app].port` (per-host override: `deploy.env` `WEBAPP_PORT`) | rendered service units, Vite dev proxy (`WEBAPP_PORT` env), SSH-tunnel helpers (`scripts/connectivity/tunnel/*` — **hardcoded**, edit by hand) | the two installers substitute `__WEBAPP_PORT__` at install time — **re-run the installer after changing it**, and update the tunnel helpers to match |
+| Episode-date source column | `config.toml` `[web-app].clinical_episode_date_column` (default `stroke_date`) | the patient tab's Episode Date (`/api/patients` COALESCE over the optional `clinical_data` table) | validated as a strict SQL identifier at startup (the web-app refuses to start otherwise); if the column is missing from `clinical_data` it falls back to `stroke_date` with a startup WARN |
 | Per-host user / repo path / conda bin | `deploy.env` (or auto-derived) | every rendered service unit | the two installers substitute `__TOKENS__` |
 | Effective non-secret config | `config.toml` | — | `web-app/config.py` fails fast if absent, WARNs on missing keys, and logs the effective values at startup (`startup: effective config`) |
 

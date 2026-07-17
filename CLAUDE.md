@@ -61,7 +61,7 @@ ssc-pacs/                     # git checkout root (Makefile, CI, root scripts)
 │   │   └── migration/        # reconcile_migration.py
 │   ├── deploy/               # systemd/ + launchd/ service + timer templates (*.in), rendered by the installers
 │   ├── orthanc_users.json    # Service account + admin users only (managed by manage_users.py — never edit manually)
-│   └── image_ingestion_protocols/  # Legacy SSC metadata ingestion (site-specific)
+│   └── image_ingestion_protocols/  # Imaging-data ingestion pipeline (clinical enrichment optional)
 ├── docs/                     # Modular docs — start with docs/context.md
 ├── maintenance/              # gitignored local workspace (one-off scripts, benchmarks, attic, audit)
 ├── CHANGELOG.md              # release log (created at v1.0)
@@ -152,9 +152,9 @@ Two services and two databases. Full topology + request/ingest flows: `docs/refe
 
 **Two-database model:**
 - `orthanc_db` — Orthanc's internal index; do not query/mutate except explicit enrichment. (Sanctioned exception: reconciliation bulk-reads series UIDs read-only via `PG_ORTHANC_*` creds — one query instead of ~100k REST calls.)
-- `stanford-stroke` — upstream read-only tables (`patient`, `image_study`, `image_series`, clinical side-table `lvo_clinical_data`) plus web-app-owned tables (`annotations`, `annotations_history`, `label_definitions`, `label_value_options`, `users`, `user_preferences`, `series_cache_state`, `*_labelled` mirrors). Connection from `.env` (`DB_HOST/PORT/NAME/USER/PASSWORD`); web-app-owned tables are Alembic-migrated at startup.
+- `stanford-stroke` — upstream read-only tables (`patient`, `image_study`, `image_series`, clinical side-table `clinical_data`) plus web-app-owned tables (`annotations`, `annotations_history`, `label_definitions`, `label_value_options`, `users`, `user_preferences`, `series_cache_state`, `*_labelled` mirrors). Connection from `.env` (`DB_HOST/PORT/NAME/USER/PASSWORD`); web-app-owned tables are Alembic-migrated at startup.
 - `patient` is the **patient-level spine** (one row per patient, ingest-populated), and is **imaging-derived only** — clinical variables belong in `annotations` as patient-level labels (`scripts/admin/bulk_set_label_values.py`), never as new columns here (Alembic `0017` added one, `0018` took it back out).
-- `lvo_clinical_data` is retired as a roster — joined only to prefer its clinical `stroke_date` via `COALESCE(c.stroke_date, p.stroke_date::date::text)` (the cast is load-bearing: it keeps both branches text so the lexicographic date sort holds), never otherwise queried. It is also **optional**: a deployment may not have the table, so every read is guarded (`common.table_exists` / `inspect(...).has_table`). Without it, `stroke_date` falls back to imaging and timepoints anchor on each episode's own thrombectomy study.
+- `clinical_data` is retired as a roster — joined only to prefer its clinical `stroke_date` via `COALESCE(c.stroke_date, p.stroke_date::date::text)` (the cast is load-bearing: it keeps both branches text so the lexicographic date sort holds), never otherwise queried. It is also **optional**: a deployment may not have the table, so every read is guarded (`common.table_exists` / `inspect(...).has_table`). Without it, `stroke_date` falls back to imaging and timepoints anchor on each episode's own thrombectomy study.
 
 **Annotation model:** three levels (`patient`/`study`/`series`); annotations are shared (one value per entity+label; `created_by` = last editor — the upsert overwrites it, so only `annotations_history` knows the original author); parent-level values inherit downward; cross-level filtering is supported; every write is captured in `annotations_history` by a PL/pgSQL trigger (`docs/operations/annotation_history.md`). **Who may edit a label's values** is a property of the label: `label_definitions.edit_policy` (`everyone`/`nobody`/`users`) + `edit_users text[]` (Alembic `0019`) — allow-by-default, **no admin bypass**, owner (`created_by`) or admin may change it. See architecture.md §5.5.
 
@@ -171,7 +171,7 @@ Two services and two databases. Full topology + request/ingest flows: `docs/refe
 
 ## Image ingestion protocol
 
-New imaging data is ingested via `stanford-stroke-pacs/image_ingestion_protocols/` (site-specific to SSC layout/metadata; not part of a fresh deployment):
+New imaging data is ingested via `stanford-stroke-pacs/image_ingestion_protocols/` (general pipeline; the clinical-enrichment step against the optional `clinical_data` table is skipped when the table is absent):
 ```bash
 cd stanford-stroke-pacs/image_ingestion_protocols
 cp execute_image_ingestion_protocol.example.yaml execute_image_ingestion_protocol.yaml  # then edit (gitignored)
@@ -194,7 +194,7 @@ Depends on the `ssc-orthanc:patched-indexer` image + `"RemoveMissingFiles": fals
 - The stack depends on the custom `ssc-orthanc:patched-indexer` image; build it on the host before `dc.sh up`.
 - `scripts/admin/teardown.sh` is destructive; it resolves `.env` and the compose dir from the stack root (`$SCRIPT_DIR/../..`) and is confirmation-guarded — use with care.
 - `orthanc_users.json` must never be edited manually; always use `scripts/admin/manage_users.py` (admin users) or `scripts/admin/rotate_service_account.py` (service-account rotation).
-- `image_ingestion_protocols/` is the legacy SSC-specific ingestion pipeline; not part of a standard fresh deployment.
+- `image_ingestion_protocols/` is the general ingestion pipeline; only its clinical enrichment (the optional `clinical_data` table) is deployment-specific.
 
 ## Documentation index
 

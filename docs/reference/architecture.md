@@ -33,7 +33,7 @@ annotations.
 **Web App** is a FastAPI service (native host process) serving a React frontend
 and a REST API for the multi-level annotation workflow Orthanc Explorer 2 does
 not support. It browses patients (from the `patient` registry, LEFT JOINing
-`lvo_clinical_data` only for the clinical `stroke_date`), studies, and series;
+`clinical_data` only for the clinical `stroke_date`), studies, and series;
 stores shared multi-level annotations and level-aware label definitions; does
 cross-level label filtering and downward annotation inheritance; authenticates
 against `users`; and builds study/series-aware OHIF links for the embedded
@@ -73,7 +73,7 @@ The second logical database is the research/application database, currently
 
 It contains:
 
-- the existing read-only source tables `patient`, `lvo_clinical_data`,
+- the existing read-only source tables `patient`, `clinical_data`,
   `image_series`, and `image_study`
 - web-app-owned tables:
   - `annotations` — multi-level (patient/study/series) with shared partial
@@ -143,7 +143,7 @@ DICOMs to Orthanc was removed — see [`../cold_storage/design.md`](../cold_stor
 
 1. `patient`, `image_series`, and `image_study` provide the metadata that drives
    the web app (patient browsing from the `patient` spine, studies from
-   `image_study`, series from `image_series`). `lvo_clinical_data` is **retired
+   `image_study`, series from `image_series`). `clinical_data` is **retired
    as a roster**: it is never the patient source and is otherwise unqueried —
    the patient list joins it in a single LEFT JOIN (`routes/studies.py`) only to
    prefer its clinical `stroke_date` via `COALESCE`, and only when the table
@@ -337,7 +337,7 @@ architecturally:
 
 ---
 
-## 7. Portable versus site-specific parts
+## 7. Portable versus deployment-specific parts
 
 ### 7.1 Portable core
 
@@ -352,18 +352,19 @@ follow the same pattern:
 - `scripts/admin/manage_users.py`
 - `init_orthanc_db.sh`
 
-### 7.2 Site-specific parts
+### 7.2 Deployment-specific parts
 
-These parts depend on the SSC metadata conventions or local filesystem
-assumptions.
+These parts depend on each deployment's data sources rather than on the stack
+itself.
 
-`image_ingestion_protocols/` is strongly site-specific:
+`image_ingestion_protocols/` is the general pipeline that creates and curates
+`image_series` and `image_study`; what varies per deployment is its input:
 
-- it is the legacy pipeline that created and curated `image_series` and
-  `image_study`
-- it assumes SSC-specific directory layouts and metadata rules
-- it contains local path assumptions and dataset-specific heuristics
-- it is not part of standard PACS deployment on a fresh server
+- the source DICOM directory layout it walks (configured per run via the YAML)
+- the optional clinical enrichment: it reads the `clinical_data` table when
+  present and skips that step entirely when a deployment has no clinical source
+- it is only needed when ingesting new imaging data, not to deploy the PACS
+  services themselves
 
 ### 7.3 Practical guidance for new deployments
 
@@ -372,11 +373,11 @@ If a new server already has:
 - a DICOM tree
 - a PostgreSQL server
 - metadata tables equivalent to `patient`, `image_series`, `image_study`, and
-  (optionally) `lvo_clinical_data`
+  (optionally) `clinical_data`
 
 then the PACS stack can usually be redeployed without using
 `image_ingestion_protocols/`. The patient tab is sourced from the `patient`
-registry; `lvo_clinical_data` is an optional clinical side-table — if absent,
+registry; `clinical_data` is an optional clinical side-table — if absent,
 the patient tab still works and shows the imaging-derived `stroke_date` instead
 of the clinical one, and the timepoint classifier anchors each episode on its
 own thrombectomy study. Every read of the table is guarded by an existence probe
