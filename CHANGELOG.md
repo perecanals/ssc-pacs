@@ -1,5 +1,27 @@
 # Changelog
 
+## v1.14 — 2026-07-16
+
+- **Fix**: `config.toml` was silently ignored by every systemd-driven shell
+  script — `config_get` parsed TOML with bare `python3` (3.10 under systemd's
+  PATH; `tomllib` needs 3.11+) and swallowed the failure. It now uses the
+  `resolve_python` interpreter and WARNs on stderr when it must fall back.
+  Backups moved to the configured `/DATA2/ssc-pacs-backups` root as part of the
+  cutover (they had been landing in the hardcoded fallback path).
+- **New**: `scripts/linux/provision_postgres.sh` + `ssc-postgres.service`
+  template — provision/audit the host PostgreSQL cluster with the OS-user
+  invariant enforced (dedicated system account, never a login user: logind's
+  `RemoveIPC` purge killed all new DB connections in the 2026-07-16 incident).
+  Runbook + rationale in `docs/operations/postgres_provisioning.md`.
+- Declared PostgreSQL version floor (≥ 16); CI backend tests now run against
+  both postgres:16 and postgres:18. `ssc-web-app.service` orders after
+  `ssc-postgres.service` (the old `postgresql.service` reference never existed).
+- The web-app HTTP port is now configurable: `config.toml` `[web-app].port`
+  (per-host override `WEBAPP_PORT` in `deploy.env`), rendered into the systemd
+  and launchd units at install time; the Vite dev proxy honours a `WEBAPP_PORT`
+  env var. Default remains 8043.
+- No schema migration.
+
 ## v1.12 — 2026-07-16
 
 - **Feature**: Fullscreen button on the OHIF preview pane, next to "Open in New
