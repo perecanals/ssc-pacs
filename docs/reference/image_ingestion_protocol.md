@@ -180,7 +180,7 @@ the tar.
 | 9 | `create_nifti_files` | In `legacy` mode: runs DICOM→NIFTI conversion for select series and writes `{seriesUID}/NIFTI/image.nii.gz`. In `cold_path_cache` mode (production): **skipped by design** — NIFTIs would orphan once their sibling loose DICOMs are cleaned up. The conversion code is kept-dormant-by-design (available for a future legacy-style run); generate NIFTIs on demand via `scripts/dicom/dicom_to_nifti.py` (see [`../recipes/dicom_processing.md`](../recipes/dicom_processing.md)). |
 | 10 | `format_column_names` | Normalizes DataFrame column names, including adding `dicom_archive_path` to the set of columns to upsert |
 | 11 | `_require_import_id_columns` / `_require_import_label_columns` / `_require_number_of_slices_column` / `_require_dicom_archive_path_column` | Auto-DDL: `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` for any columns the protocol writes that don't yet exist. Safe to run against a fresh DB. |
-| 12 | `update_postgres_tables` | Upserts `image_series`, `image_study`, then `patient` — all in one transaction. `_upsert_patient` registers one row per patient: `stroke_date = MIN(image_study.acquisitiondatetime)` (recomputed across all of the patient's studies), `femoral_sheath_time = MIN(lvo_clinical_data.femoral_sheath_time)` via a LEFT JOIN on `c.study_id = s.patient_id` (a durable copy of the clinical arterial-puncture time, NULL for patients with no clinical row — i.e. non-CRISP2/LVO), `import_id`/`import_label` keep the **origin** (first-seen, preserved on conflict), and `dataset` is the deduped union of the `dataset` config across batches. As a belt-and-suspenders guard, `_upsert_dataframe` drops any rows duplicated on the conflict key (keep-last, with a WARNING) before the INSERT — so a stray duplicate can never again roll back a whole case via `CardinalityViolation` (`ON CONFLICT DO UPDATE` cannot touch the same target twice). |
+| 12 | `update_postgres_tables` | Upserts `image_series`, `image_study`, then `patient` — all in one transaction. `_upsert_patient` registers one row per patient, **imaging-derived only** (no clinical join): `stroke_date = MIN(image_study.acquisitiondatetime)` (recomputed across all of the patient's studies), `import_id`/`import_label` keep the **origin** (first-seen, preserved on conflict), and `dataset` is the deduped union of the `dataset` config across batches. As a belt-and-suspenders guard, `_upsert_dataframe` drops any rows duplicated on the conflict key (keep-last, with a WARNING) before the INSERT — so a stray duplicate can never again roll back a whole case via `CardinalityViolation` (`ON CONFLICT DO UPDATE` cannot touch the same target twice). |
 | 13 | `verify_ingested_case` + `delete_original_case_dir` | **Only if `delete_originals_after_verification=true`.** Iterates the recorded source→dest pairs (so it survives the collision-rename case), byte-compares each copied file against its source, then removes the source case directory. |
 
 Return value: `{"studyinstanceuids": [...], "seriesinstanceuids": [...]}` —
@@ -350,6 +350,14 @@ Priorities 1–3 are the clinical anchor (unchanged from rules-v2). Priority 4 i
 new: it gives non-LVO patients (no clinical row) and the second episode of
 multi-episode patients a real anchor — the thrombectomy (XA) study's own
 acquisition time — instead of `NULL`.
+
+`lvo_clinical_data` is **optional**. Where the table does not exist, clinical
+enrichment is skipped (a note is printed) and priorities 1–3 are simply
+unavailable, so every episode resolves via priority 4. Episodes with no
+`THROMBECTOMY` study then get `timepoint = NULL` — the same deliberate NULL a
+patient with no anchor already gets, not an error. `episode` is always computed
+(it is imaging-derived, gap-based) and `series_type` is never time-based, so
+neither is affected.
 
 `timepoint_anchor_source` records which supplied the anchor. This is load-bearing,
 not bookkeeping: only `femoral_sheath_time` is a *recorded* puncture, so a `BL`/`FU`

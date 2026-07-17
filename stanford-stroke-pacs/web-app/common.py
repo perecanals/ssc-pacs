@@ -64,6 +64,20 @@ def auto_match_sql(expr: str, values: list[str] | None) -> tuple[str, list[str]]
     ors = " OR ".join(f"UPPER({expr}) LIKE UPPER(%s)" for _ in vals)
     return f"({ors})", [f"%{v}%" for v in vals]
 
+
+def table_exists(cur, name: str) -> bool:
+    """Whether `public.<name>` is present.
+
+    Lets callers treat a table as optional: `lvo_clinical_data` is a
+    site-specific clinical import that a deployment may not have at all, and a
+    not-yet-migrated DB or a stripped test fixture may be missing side-tables.
+    """
+    cur.execute("SELECT to_regclass(%s) AS reg", (f"public.{name}",))
+    row = cur.fetchone()
+    # Tolerate either a RealDictCursor (the list endpoints) or a plain cursor.
+    return (row["reg"] if isinstance(row, dict) else row[0]) is not None
+
+
 # ---------------------------------------------------------------------------
 # Dataset (cohort) scoping
 #

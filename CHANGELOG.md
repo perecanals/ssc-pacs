@@ -22,6 +22,38 @@
   env var. Default remains 8043.
 - No schema migration.
 
+## v1.13 — 2026-07-16
+
+- **Change**: femoral sheath (arterial puncture) time is no longer a column on
+  `patient`. v1.10's approach is withdrawn as a design mistake: a column per
+  clinical variable needs its own migration on an upstream-owned table, COALESCE
+  expression, frontend column, and out-of-band `create_patient.sql` mirror —
+  every time. It is now an ordinary **patient-level label**
+  (`femoral_sheath_time`, datatype `text`, instrument `redcap_lvo_clinical`),
+  bulk-loaded from `lvo_clinical_data` for 874 patients via
+  `scripts/admin/bulk_set_label_values.py`. Nothing was lost: the column was
+  populated prospectively with no backfill and no re-ingest ran, so it was
+  0-of-1854 populated when dropped. **The label is a point-in-time copy** —
+  unlike the old live join, refreshing the REDCap export does not propagate;
+  re-run the bulk script. Users who had the "Femoral Sheath Time" column enabled
+  must opt into the new label column in the Displayed Columns menu.
+- **Feature**: `lvo_clinical_data` is now genuinely **optional**, so the stack can
+  deploy at sites that have no such clinical import. Every read is guarded by an
+  existence probe (`common.table_exists` in the web app, promoted from
+  `deletion.py`; `inspect(...).has_table` in ingestion). Without the table the
+  patient tab shows the imaging-derived `stroke_date` for everyone (the same
+  value a clinically-unmatched patient already gets), ingestion completes with
+  clinical enrichment skipped, and the timepoint classifier anchors each episode
+  on its own `THROMBECTOMY` study — episodes without one get a NULL timepoint, as
+  they already did. `series_type` and `episode` are never time-based and are
+  unaffected. `docs/reference/architecture.md` had promised this behavior since
+  v1.0; it is now actually true rather than a 500.
+- Migration `0018_drop_femoral_sheath_time` drops the nullable column — instant,
+  and a true inverse downgrade (unlike `0017`'s no-op) precisely because the
+  column holds no data. `0017` is superseded, not edited: it is released history
+  and production is stamped at it. Note revision ids must fit
+  `alembic_version.version_num`, a `varchar(32)`.
+
 ## v1.12 — 2026-07-16
 
 - **Feature**: Fullscreen button on the OHIF preview pane, next to "Open in New

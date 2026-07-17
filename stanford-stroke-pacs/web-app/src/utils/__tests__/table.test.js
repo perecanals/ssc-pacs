@@ -100,11 +100,11 @@ describe("buildBuiltinColumnCatalog", () => {
 
   it("marks patient-level columns as visible when activeLevel is patient", () => {
     const cols = buildBuiltinColumnCatalog("patient");
-    // Columns flagged defaultVisible:false (the opt-in "study import labels" and
-    // "femoral sheath time" columns) stay hidden even at their own level; all
-    // others default to visible — including "dataset", which replaced import
-    // labels as the default cohort column.
-    const optIn = ["study_import_labels", "femoral_sheath_time"];
+    // Columns flagged defaultVisible:false (the opt-in "study import labels"
+    // column) stay hidden even at their own level; all others default to
+    // visible — including "dataset", which replaced import labels as the
+    // default cohort column.
+    const optIn = ["study_import_labels"];
     const patientCols = cols.filter(
       (c) => c.level === "patient" && !optIn.includes(c.sourceKey),
     );
@@ -279,19 +279,6 @@ describe("constants", () => {
 
   it("PER_PAGE is 50", () => {
     expect(PER_PAGE).toBe(50);
-  });
-
-  it("exposes the patient femoral_sheath_time column mapped to its filter param", () => {
-    const cols = buildBuiltinColumnCatalog("patient");
-    const fst = cols.find(
-      (c) => c.level === "patient" && c.sourceKey === "femoral_sheath_time",
-    );
-    expect(fst).toBeTruthy();
-    expect(fst.key).toBe("builtin:patient:femoral_sheath_time");
-    expect(fst.filterable).toBe(true);
-    expect(LEVEL_CONFIG.patient.filterParamMap.femoral_sheath_time).toBe(
-      "femoral_sheath_time",
-    );
   });
 });
 

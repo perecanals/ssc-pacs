@@ -146,7 +146,8 @@ DICOMs to Orthanc was removed — see [`../cold_storage/design.md`](../cold_stor
    `image_study`, series from `image_series`). `lvo_clinical_data` is **retired
    as a roster**: it is never the patient source and is otherwise unqueried —
    the patient list joins it in a single LEFT JOIN (`routes/studies.py`) only to
-   prefer its clinical `stroke_date` via `COALESCE`.
+   prefer its clinical `stroke_date` via `COALESCE`, and only when the table
+   exists (it is optional; see §"Redeploying elsewhere").
 2. The web app reads these tables to build patient, study, and series browsers
    with filtering, sorting, and pagination. Series listings JOIN `image_study`
    for `study_type`.
@@ -334,7 +335,10 @@ then the PACS stack can usually be redeployed without using
 `image_ingestion_protocols/`. The patient tab is sourced from the `patient`
 registry; `lvo_clinical_data` is an optional clinical side-table — if absent,
 the patient tab still works and shows the imaging-derived `stroke_date` instead
-of the clinical one.
+of the clinical one, and the timepoint classifier anchors each episode on its
+own thrombectomy study. Every read of the table is guarded by an existence probe
+(`common.table_exists` in the web app, `inspect(...).has_table` in ingestion), so
+"absent" is a supported deployment shape, not a crash.
 
 If the new deployment does not already have equivalent metadata tables, that
 metadata-ingestion problem must be solved separately from the PACS deployment.

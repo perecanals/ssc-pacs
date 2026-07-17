@@ -40,6 +40,7 @@ from common import (
     ensure_patient_access,
     ensure_study_access,
     parse_label_filters,
+    table_exists,
 )
 from config import STORAGE_MODE
 from db import get_conn
@@ -75,7 +76,6 @@ def _dataset_member_sql(patient_id_expr: str) -> str:
 def list_patients(
     patient_id: str | None = Query(None),
     stroke_date: str | None = Query(None),
-    femoral_sheath_time: str | None = Query(None),
     study_import_label: str | None = Query(
         None,
         description=(
@@ -136,25 +136,29 @@ def list_patients(
                 params.extend(tp_params)
 
             # Patient level is sourced from the `patient` registry (one row per
-            # patient, comprehensive). lvo_clinical_data is joined only to prefer
-            # the clinical stroke_date when the patient is clinically matched;
-            # otherwise the imaging-derived patient.stroke_date is shown. (Its
-            # patient-id column is historically named study_id.)
-            from_clause = (
-                "FROM patient p "
-                "LEFT JOIN lvo_clinical_data c ON c.study_id = p.patient_id"
-            )
+            # patient, comprehensive). lvo_clinical_data is a site-specific
+            # clinical import that a deployment may not have at all; when it is
+            # present it is joined only to prefer its clinical stroke_date for
+            # clinically-matched patients. Without it every patient falls back to
+            # the imaging-derived patient.stroke_date — the same value a patient
+            # with no clinical row already gets. (Its patient-id column is
+            # historically named study_id.)
+            #
             # lvo_clinical_data.stroke_date is TEXT (free-form clinical date);
             # patient.stroke_date is a timestamp. Coalesce in text space — prefer
             # the clinical string, fall back to the imaging date as YYYY-MM-DD —
             # preserving the prior text contract and lexicographic date sort.
-            stroke_date_expr = "COALESCE(c.stroke_date, p.stroke_date::date::text)"
-            # Clinical arterial-puncture time (CRISP2/LVO only). Prefer the live
-            # clinical value, fall back to the durable patient copy that
-            # ingestion populates prospectively; NULL for non-clinical patients.
-            femoral_sheath_time_expr = (
-                "COALESCE(c.femoral_sheath_time, p.femoral_sheath_time)"
-            )
+            # Filter, sort, and SELECT all reuse stroke_date_expr, so the two
+            # branches cannot drift apart.
+            if table_exists(cur, "lvo_clinical_data"):
+                from_clause = (
+                    "FROM patient p "
+                    "LEFT JOIN lvo_clinical_data c ON c.study_id = p.patient_id"
+                )
+                stroke_date_expr = "COALESCE(c.stroke_date, p.stroke_date::date::text)"
+            else:
+                from_clause = "FROM patient p"
+                stroke_date_expr = "p.stroke_date::date::text"
 
             if patient_id:
                 conditions.append("p.patient_id::text LIKE %s")
@@ -162,9 +166,6 @@ def list_patients(
             if stroke_date:
                 conditions.append(f"{stroke_date_expr}::text LIKE %s")
                 params.append(f"%{stroke_date}%")
-            if femoral_sheath_time:
-                conditions.append(f"{femoral_sheath_time_expr}::text LIKE %s")
-                params.append(f"%{femoral_sheath_time}%")
             sil = (study_import_label or "").strip()
             if sil:
                 conditions.append(
@@ -220,7 +221,6 @@ def list_patients(
             cur.execute(
                 "SELECT p.patient_id AS patient_id, "
                 f"{stroke_date_expr} AS stroke_date, "
-                f"{femoral_sheath_time_expr} AS femoral_sheath_time, "
                 f"{study_labels_agg}, "
                 f"array_to_string(p.dataset, ', ') AS dataset "
                 f"{from_clause} {where} "
