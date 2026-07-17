@@ -72,8 +72,11 @@ db_url = os.environ.get("DATABASE_URL") or _build_db_url()
 # Tables owned outside the web app's migration scope. Listed by name only —
 # they all live in the `public` schema. See workstream 04 §2.
 UPSTREAM_TABLES = frozenset({
+    "clinical_data",
     "image_series",
     "image_study",
+    # Pre-0020 name of clinical_data, kept so --autogenerate against a
+    # not-yet-migrated DB doesn't draft a DROP of the clinical side-table.
     "lvo_clinical_data",
     "patient",
 })

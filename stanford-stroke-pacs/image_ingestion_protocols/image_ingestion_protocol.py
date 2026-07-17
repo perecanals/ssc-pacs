@@ -160,7 +160,7 @@ class ImageIngestionProtocol:
         print(f"Validated clinical matches in {time.perf_counter() - step_started:.2f}s")
 
         # Must run after load_clinical_data_table: the timepoint anchor comes from
-        # lvo_clinical_data, which create_study_table cannot see (it runs first).
+        # clinical_data, which create_study_table cannot see (it runs first).
         step_started = time.perf_counter()
         self.assign_study_timepoints()
         print(f"Assigned study timepoints in {time.perf_counter() - step_started:.2f}s")
@@ -295,20 +295,20 @@ class ImageIngestionProtocol:
         )
 
     def load_clinical_data_table(self):
-        # lvo_clinical_data is a site-specific clinical import, not part of a
-        # standard deployment. Absent it, clinical enrichment is skipped and
+        # clinical_data is an optional clinical import a deployment may not
+        # have. Absent it, clinical enrichment is skipped and
         # `_clinical_row` returns None for every patient — the same shape a
         # patient with no clinical row already produces, which the timepoint
         # classifier handles by falling back to the thrombectomy-study anchor.
-        if not inspect(self.postgres_engine).has_table("lvo_clinical_data"):
+        if not inspect(self.postgres_engine).has_table("clinical_data"):
             print(
-                "Note: table lvo_clinical_data not found — clinical enrichment "
+                "Note: table clinical_data not found — clinical enrichment "
                 "disabled. Timepoints will anchor on each episode's own "
                 "thrombectomy study where one exists."
             )
             self.clinical_data = None
             return
-        self.clinical_data = pd.read_sql_table("lvo_clinical_data", self.postgres_engine)
+        self.clinical_data = pd.read_sql_table("clinical_data", self.postgres_engine)
         if "study_id" in self.clinical_data.columns:
             self.clinical_data["study_id"] = self.clinical_data["study_id"].apply(
                 lambda value: str(value).strip() if pd.notna(value) else None
@@ -724,7 +724,7 @@ class ImageIngestionProtocol:
         return matches["stroke_date"].dropna().iloc[0] if matches["stroke_date"].notna().any() else pd.NaT
 
     def _clinical_row(self, patient_id):
-        """The patient's lvo_clinical_data row as a plain dict, or None."""
+        """The patient's clinical_data row as a plain dict, or None."""
         if self.clinical_data is None or self.clinical_data.empty:
             return None
         matches = self.clinical_data[self.clinical_data["study_id"] == str(patient_id)]
@@ -736,7 +736,7 @@ class ImageIngestionProtocol:
         """Label each study BL / THROMBECTOMY / FU, split by episode.
 
         A separate step (not part of create_study_table) because the anchor lives
-        in lvo_clinical_data, which is only loaded later in the sequence. Studies
+        in clinical_data, which is only loaded later in the sequence. Studies
         are grouped per patient and split into episodes; each episode is anchored
         on its own clinical puncture or, failing that, its own thrombectomy study
         (see series_classification.assign_patient_timepoints).
@@ -1080,7 +1080,7 @@ class ImageIngestionProtocol:
         if self.case_study_table.empty:
             return
 
-        # Still None => lvo_clinical_data does not exist here. There is nothing
+        # Still None => clinical_data does not exist here. There is nothing
         # to validate against, so every study is trivially unmatched; skip
         # rather than warn once per patient about an absent table.
         if self.clinical_data is None:
@@ -1100,7 +1100,7 @@ class ImageIngestionProtocol:
                 continue
 
             print(
-                f"Warning: study_id {patient_id} is not present in lvo_clinical_data. "
+                f"Warning: study_id {patient_id} is not present in clinical_data. "
                 "The study will still be ingested, but remains clinically unmatched."
             )
 
@@ -1503,7 +1503,7 @@ class ImageIngestionProtocol:
         # Imaging-derived only — no clinical join. Clinical variables belong in
         # annotations (see scripts/admin/bulk_set_label_values.py), not in
         # columns on this upstream-owned table: a column per variable does not
-        # generalize and makes lvo_clinical_data a hard dependency.
+        # generalize and makes clinical_data a hard dependency.
         connection.execute(
             text(
                 "INSERT INTO patient "

@@ -60,3 +60,9 @@ session_absolute_timeout_hours = 24
 cookie_secure = false
 # Per-IP cap for POST /api/login attempts inside a 5-minute rolling window.
 login_rate_limit_per_5min = 10
+# Which clinical_data column supplies the patient tab's "Episode Date"
+# (COALESCEd over the imaging-derived patient.stroke_date). Must be a bare SQL
+# identifier — the web-app refuses to start otherwise — and should exist on
+# clinical_data when the table is present (falls back to stroke_date with a
+# startup WARN if not). Irrelevant when the optional clinical table is absent.
+clinical_episode_date_column = "stroke_date"
