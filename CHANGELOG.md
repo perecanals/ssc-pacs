@@ -1,5 +1,20 @@
 # Changelog
 
+## v1.16 — 2026-07-17
+
+- **Fix**: OHIF's study-browser panel (patient-scoped QIDO search) returned 403
+  for every non-admin — the DICOMweb guard only resolved a StudyInstanceUID,
+  and the panel searches by PatientID. The guard now also resolves
+  `00100020`/`PatientID` → `patient.dataset` and scope-checks it; searches with
+  neither identifier remain denied for non-admins (deny-by-default preserved).
+- **Fix**: the same panel 500'd whenever Orthanc could not read a stored file —
+  OHIF asks for `includefield=Modality` (0008,0060), a series-level tag, which
+  forces Orthanc to open one DICOM file per matching study (fatal with evicted
+  cold series or a stale index path). The proxy now strips that token from
+  study-level QIDO searches for all users; OHIF renders modalities from the
+  index-computed ModalitiesInStudy (0008,0061) Orthanc always returns.
+- No schema migration.
+
 ## v1.15 — 2026-07-16
 
 - **Feature**: per-label edit permissions — who may change a label's *values* is

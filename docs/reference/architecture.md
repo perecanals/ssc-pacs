@@ -258,12 +258,20 @@ Beyond authentication, every non-admin user carries a **dataset scope**:
     `/api/ohif-link`, warm/evict/cache-status, annotation reads/writes)
     return **404** for out-of-scope ids, so they are indistinguishable from
     nonexistent ones;
-  - the DICOMweb reverse proxy extracts the StudyInstanceUID from each
-    `/dicom-web/*` request (path or QIDO query param) and rejects
-    out-of-scope studies with 403. Lookups are served from in-process TTL
-    caches (`web-app/dataset_access.py`: user scope 30 s, study→datasets
-    5 min), so per-frame WADO requests cost no DB round-trips. Unscoped QIDO
-    searches are denied for non-admins.
+  - the DICOMweb reverse proxy resolves each `/dicom-web/*` request to a
+    scoped entity — the StudyInstanceUID (path or QIDO query param), or,
+    failing that, the PatientID (`00100020`/`PatientID` query param; OHIF's
+    study-browser panel searches by PatientID) — and rejects out-of-scope
+    requests with 403. Lookups are served from in-process TTL caches
+    (`web-app/dataset_access.py`: user scope 30 s, study/patient→datasets
+    5 min), so per-frame WADO requests cost no DB round-trips. QIDO searches
+    with neither identifier are denied for non-admins.
+  - The proxy also strips `Modality` (0008,0060) from `includefield` on
+    study-level QIDO searches (`routes/proxy.py:sanitize_study_search_query`):
+    it is a series-level tag, so Orthanc answers it by opening one stored
+    DICOM file per matching study — a 500 for the whole search when any file
+    is evicted (cold storage) or stale. Lossless: Orthanc always returns the
+    index-computed ModalitiesInStudy (0008,0061), which OHIF falls back to.
 - **Managed by**: the `/admin` page (admin-only, users × dataset checkboxes,
   `GET /api/admin/users` + `PUT /api/admin/users/{username}/datasets`) or
   `scripts/admin/manage_users.py set-datasets`.

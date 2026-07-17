@@ -25,7 +25,8 @@ Scope = frozenset | None
 
 # Bound staleness after an admin edits grants mid-session.
 _USER_TTL_SECONDS = 30.0
-# study → datasets is effectively immutable (cohort tags only grow at ingest).
+# study/patient → datasets is effectively immutable (cohort tags only grow at
+# ingest).
 _STUDY_TTL_SECONDS = 300.0
 
 
@@ -63,6 +64,7 @@ class _TTLCache:
 
 _user_cache = _TTLCache(ttl=_USER_TTL_SECONDS)
 _study_cache = _TTLCache(ttl=_STUDY_TTL_SECONDS)
+_patient_cache = _TTLCache(ttl=_STUDY_TTL_SECONDS)
 
 # Cached sentinels: _TTLCache.get returns None for "miss", so cached values
 # must never be None. Admin scope and unknown-study both need distinct markers.
@@ -112,6 +114,28 @@ def fetch_study_datasets(studyinstanceuid: str) -> frozenset | None:
     return frozenset(row[0] or [])
 
 
+def fetch_patient_datasets(patient_id: str) -> frozenset | None:
+    """Dataset tags of a patient; None if the patient is unknown.
+
+    Keyed by ``patient.patient_id`` — the value OHIF sends as the DICOM
+    PatientID (0010,0020) in QIDO patient-scoped searches. A QIDO wildcard
+    pattern simply matches no row and resolves to None (deny for non-admins).
+    """
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT dataset FROM patient WHERE patient_id = %s LIMIT 1",
+                (patient_id,),
+            )
+            row = cur.fetchone()
+    finally:
+        conn.close()
+    if not row:
+        return None
+    return frozenset(row[0] or [])
+
+
 def get_user_scope_cached(username: str) -> Scope:
     cached = _user_cache.get(username)
     if cached is not None:
@@ -130,6 +154,15 @@ def get_study_datasets_cached(studyinstanceuid: str) -> frozenset | None:
     return datasets
 
 
+def get_patient_datasets_cached(patient_id: str) -> frozenset | None:
+    cached = _patient_cache.get(patient_id)
+    if cached is not None:
+        return None if cached == _UNKNOWN else cached
+    datasets = fetch_patient_datasets(patient_id)
+    _patient_cache.set(patient_id, _UNKNOWN if datasets is None else datasets)
+    return datasets
+
+
 def invalidate_user_scope(username: str) -> None:
     """Drop a user's cached scope so grant changes apply immediately."""
     _user_cache.invalidate(username)
@@ -137,10 +170,9 @@ def invalidate_user_scope(username: str) -> None:
 
 def clear_caches() -> None:
     """Drop all cached scopes/datasets (test isolation, ops escape hatch)."""
-    with _user_cache._lock:
-        _user_cache._data.clear()
-    with _study_cache._lock:
-        _study_cache._data.clear()
+    for cache in (_user_cache, _study_cache, _patient_cache):
+        with cache._lock:
+            cache._data.clear()
 
 
 def scope_allows(scope: Scope, datasets: frozenset | None) -> bool:

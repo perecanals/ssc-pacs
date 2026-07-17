@@ -8,6 +8,7 @@ no longer need entries in orthanc_users.json.
 from __future__ import annotations
 
 import re
+from urllib.parse import parse_qsl, urlencode
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -60,11 +61,16 @@ async def dicomweb_dataset_guard(
 ) -> None:
     """Per-request dataset scoping for the DICOMweb proxy.
 
-    Extracts the StudyInstanceUID from the WADO-RS path or the QIDO-RS query
-    string and rejects studies outside the caller's dataset scope. Admins
-    bypass. Requests with no resolvable study UID (unscoped QIDO searches)
-    are denied for non-admins — OHIF is always opened with explicit
-    StudyInstanceUIDs, so the viewer never needs an unscoped search.
+    Resolves the request to a dataset-taggable entity and rejects anything
+    outside the caller's dataset scope. Admins bypass. Two resolution paths:
+
+     - StudyInstanceUID from the WADO-RS path or QIDO-RS query string
+       (OHIF's viewer requests);
+     - PatientID (0010,0020) from the QIDO-RS query string — OHIF's study
+       browser panel searches by PatientID, not StudyInstanceUID.
+
+    Requests with neither identifier (unscoped QIDO searches) are denied for
+    non-admins: deny-by-default.
 
     DB lookups are cached in-process (dataset_access TTL caches) and run in
     the threadpool, so per-frame requests cost no DB round-trips and never
@@ -78,13 +84,56 @@ async def dicomweb_dataset_guard(
         request.query_params.get("StudyInstanceUID")
         or request.query_params.get("0020000D")
     )
-    if not uid:
-        raise HTTPException(status_code=403, detail="Dataset access denied")
-    datasets = await run_in_threadpool(
-        dataset_access.get_study_datasets_cached, uid
-    )
+    if uid:
+        datasets = await run_in_threadpool(
+            dataset_access.get_study_datasets_cached, uid
+        )
+    else:
+        patient_id = (
+            request.query_params.get("PatientID")
+            or request.query_params.get("00100020")
+        )
+        if not patient_id:
+            raise HTTPException(status_code=403, detail="Dataset access denied")
+        datasets = await run_in_threadpool(
+            dataset_access.get_patient_datasets_cached, patient_id
+        )
     if not dataset_access.scope_allows(scope, datasets):
         raise HTTPException(status_code=403, detail="Dataset access denied")
+
+
+# QIDO study-level search endpoint (exact path — study sub-resources like
+# /studies/{uid}/series are series-level, where Modality is answerable).
+_STUDY_SEARCH_PATH = "/dicom-web/studies"
+
+# includefield tokens Orthanc cannot answer from its index at study level.
+# Modality (0008,0060) is a series-level tag: requesting it in a study-level
+# QIDO search makes Orthanc open one DICOM file from storage per matching
+# study (its own log flags this, W001/W005) — a disk read per study that turns
+# into a 500 for the whole search whenever any referenced file is absent
+# (evicted cold series under RemoveMissingFiles:false, or a stale index path).
+# Stripping it is lossless: Orthanc always returns the index-computed
+# ModalitiesInStudy (0008,0061) in study-level responses, and OHIF's
+# getModalities() falls back to it when Modality is absent.
+_STUDY_LEVEL_UNANSWERABLE = frozenset({"00080060", "modality"})
+
+
+def sanitize_study_search_query(query: str) -> str:
+    """Drop storage-forcing tokens from includefield in a QIDO study search."""
+    if "includefield" not in query.lower():
+        return query
+    pairs = []
+    for key, value in parse_qsl(query, keep_blank_values=True):
+        if key.lower() == "includefield":
+            kept = [
+                tok for tok in value.split(",")
+                if tok.strip().lower() not in _STUDY_LEVEL_UNANSWERABLE
+            ]
+            if not kept:
+                continue
+            value = ",".join(kept)
+        pairs.append((key, value))
+    return urlencode(pairs)
 
 # Hop-by-hop headers per RFC 7230 §6.1 — must not be forwarded in either direction.
 _HOP_BY_HOP = frozenset({
@@ -157,8 +206,11 @@ def _filtered_response_headers(upstream: httpx.Response) -> dict[str, str]:
 async def _proxy(request: Request) -> StreamingResponse:
     client = _get_client()
     upstream_url = f"{ORTHANC_URL}{request.url.path}"
-    if request.url.query:
-        upstream_url = f"{upstream_url}?{request.url.query}"
+    query = request.url.query
+    if query and request.url.path == _STUDY_SEARCH_PATH:
+        query = sanitize_study_search_query(query)
+    if query:
+        upstream_url = f"{upstream_url}?{query}"
 
     headers = _filtered_request_headers(request)
     body = await request.body() if request.method not in ("GET", "HEAD") else None
