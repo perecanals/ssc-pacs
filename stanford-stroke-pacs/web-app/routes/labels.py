@@ -10,8 +10,14 @@ import psycopg2.extras
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
-from auth import get_current_user
-from common import LABEL_NAME_RE, VALID_LEVELS, record_label_value
+from auth import get_current_user, is_user_admin
+from common import (
+    EDIT_POLICIES,
+    LABEL_NAME_RE,
+    VALID_LEVELS,
+    can_change_label_policy,
+    record_label_value,
+)
 from db import get_conn
 from labelled_table_sync import (
     find_label_column_conflict,
@@ -136,9 +142,9 @@ def get_label_values(
 # ---------------------------------------------------------------------------
 
 
-_LABEL_DEF_COLUMNS = (
+LABEL_DEF_COLUMNS = (
     "id, name, description, level, datatype, options, instrument, "
-    "created_by, created_at"
+    "created_by, created_at, edit_policy, edit_users"
 )
 
 
@@ -150,10 +156,13 @@ def _clean_optional_text(value: str | None) -> str | None:
     return stripped or None
 
 
-def _serialize_label_def_row(row: dict) -> dict:
+def serialize_label_def_row(row: dict) -> dict:
     if row.get("created_at"):
         row["created_at"] = row["created_at"].isoformat()
     row["options"] = json.loads(row["options"]) if row.get("options") else []
+    # Sorted on the way out, like admin._serialize_user_row does for
+    # allowed_datasets: it is what lets the frontend and tests assert exact lists.
+    row["edit_users"] = sorted(row.get("edit_users") or [])
     return row
 
 
@@ -179,6 +188,41 @@ def _merge_select_value_options(cur, rows: list[dict]) -> None:
         row["options"] = sorted(merged, key=_select_value_sort_key)
 
 
+def validate_edit_policy(cur, policy: str, users: list[str] | None) -> list[str]:
+    """Validate an (edit_policy, edit_users) pair; return the normalized users.
+
+    Normalized like set_user_datasets does for datasets: trim, drop empties,
+    dedupe, sort. Usernames must exist (422 otherwise — same contract as the
+    dataset grants, and the detail reaches the admin page's error banner).
+
+    ``edit_users`` is forced empty unless the policy is ``users``, so the column
+    can never hold a stale list that silently reactivates on a later flip.
+    """
+    if policy not in EDIT_POLICIES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"edit_policy must be one of: {', '.join(EDIT_POLICIES)}",
+        )
+    if policy != "users":
+        return []
+    names = sorted({u.strip() for u in (users or []) if u.strip()})
+    if not names:
+        raise HTTPException(
+            status_code=422,
+            detail="edit_policy 'users' needs at least one username "
+                   "(an empty list is indistinguishable from 'nobody')",
+        )
+    cur.execute("SELECT username FROM users WHERE username = ANY(%s)", (names,))
+    known = {r["username"] for r in cur.fetchall()}
+    unknown = [n for n in names if n not in known]
+    if unknown:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Unknown user(s): {', '.join(unknown)}",
+        )
+    return names
+
+
 class LabelDefinitionCreate(BaseModel):
     name: str
     description: str | None = None
@@ -186,11 +230,15 @@ class LabelDefinitionCreate(BaseModel):
     datatype: str = "bool"
     options: list[str] | None = None
     instrument: str | None = None
+    edit_policy: str = "everyone"
+    edit_users: list[str] | None = None
 
 
 class LabelDefinitionUpdate(BaseModel):
     description: str | None = None
     instrument: str | None = None
+    edit_policy: str | None = None
+    edit_users: list[str] | None = None
 
 
 @router.get("/api/label-definitions")
@@ -203,16 +251,16 @@ def list_label_definitions(
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             if level and level in VALID_LEVELS:
                 cur.execute(
-                    f"SELECT {_LABEL_DEF_COLUMNS} "
+                    f"SELECT {LABEL_DEF_COLUMNS} "
                     "FROM label_definitions WHERE level = %s ORDER BY name",
                     (level,),
                 )
             else:
                 cur.execute(
-                    f"SELECT {_LABEL_DEF_COLUMNS} "
+                    f"SELECT {LABEL_DEF_COLUMNS} "
                     "FROM label_definitions ORDER BY name"
                 )
-            rows = [_serialize_label_def_row(r) for r in cur.fetchall()]
+            rows = [serialize_label_def_row(r) for r in cur.fetchall()]
             _merge_select_value_options(cur, rows)
             return rows
     finally:
@@ -244,11 +292,15 @@ def create_label_definition(
                 detail=f"Label name conflicts with existing column generated from '{conflict}'",
             )
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            # Any user may create a *restricted* label — a policy only ever
+            # narrows who may write. The creator is the owner and can relax it.
+            edit_users = validate_edit_policy(cur, body.edit_policy, body.edit_users)
             cur.execute(
                 "INSERT INTO label_definitions "
-                "(name, description, level, datatype, options, instrument, created_by) "
-                "VALUES (%s, %s, %s, %s, %s, %s, %s) "
-                f"RETURNING {_LABEL_DEF_COLUMNS}",
+                "(name, description, level, datatype, options, instrument, "
+                " created_by, edit_policy, edit_users) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s::text[]) "
+                f"RETURNING {LABEL_DEF_COLUMNS}",
                 (
                     body.name.strip(),
                     _clean_optional_text(body.description),
@@ -257,9 +309,11 @@ def create_label_definition(
                     options_json,
                     instrument,
                     username,
+                    body.edit_policy,
+                    edit_users,
                 ),
             )
-            row = _serialize_label_def_row(cur.fetchone())
+            row = serialize_label_def_row(cur.fetchone())
             # Seed the vocabulary table with the curated options so they are
             # available to the inline dropdown and column filter from the start.
             if body.datatype == "select" and body.options:
@@ -280,42 +334,74 @@ def update_label_definition(
     body: LabelDefinitionUpdate,
     user: str = Depends(get_current_user),
 ):
-    """Edit `description` and/or `instrument` on an existing label.
+    """Edit `description`, `instrument`, and/or the edit policy on a label.
 
     Editing `name`, `level`, `datatype`, or `options` is intentionally
     out of scope — those are baked into the labelled-table sync and
     annotation entity-id constraints; renaming/retyping belongs in a
     dedicated migration flow.
-    """
-    updates: list[str] = []
-    params: list[object] = []
-    fields = body.model_dump(exclude_unset=True)
-    if "description" in fields:
-        updates.append("description = %s")
-        params.append(_clean_optional_text(fields["description"]))
-    if "instrument" in fields:
-        updates.append("instrument = %s")
-        params.append(_clean_optional_text(fields["instrument"]))
 
-    if not updates:
+    `description`/`instrument` stay editable by any authenticated user, as they
+    always have been. Changing `edit_policy`/`edit_users` is restricted to the
+    label's owner or an admin (`can_change_label_policy`) — otherwise the
+    protection would be self-defeating, since anyone could simply unlock a label
+    and then edit it.
+    """
+    fields = body.model_dump(exclude_unset=True)
+    wants_policy = "edit_policy" in fields or "edit_users" in fields
+    if not fields:
         raise HTTPException(
             status_code=400,
-            detail="No editable fields provided (allowed: description, instrument)",
+            detail="No editable fields provided "
+                   "(allowed: description, instrument, edit_policy, edit_users)",
         )
 
-    params.append(label_id)
     conn = get_conn()
     try:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             cur.execute(
+                f"SELECT {LABEL_DEF_COLUMNS} FROM label_definitions WHERE id = %s",
+                (label_id,),
+            )
+            existing = cur.fetchone()
+            if existing is None:
+                raise HTTPException(status_code=404, detail="Label definition not found")
+
+            updates: list[str] = []
+            params: list[object] = []
+            if "description" in fields:
+                updates.append("description = %s")
+                params.append(_clean_optional_text(fields["description"]))
+            if "instrument" in fields:
+                updates.append("instrument = %s")
+                params.append(_clean_optional_text(fields["instrument"]))
+
+            if wants_policy:
+                if not can_change_label_policy(
+                    existing, user, is_user_admin(user)
+                ):
+                    raise HTTPException(
+                        status_code=403,
+                        detail="Only the label's owner or an admin may change "
+                               "who can edit it",
+                    )
+                # Policy and users move together: changing one without the other
+                # would let a stale list decide the outcome.
+                policy = fields.get("edit_policy", existing["edit_policy"])
+                users = fields.get("edit_users", existing["edit_users"])
+                edit_users = validate_edit_policy(cur, policy, users)
+                updates.append("edit_policy = %s")
+                params.append(policy)
+                updates.append("edit_users = %s::text[]")
+                params.append(edit_users)
+
+            params.append(label_id)
+            cur.execute(
                 f"UPDATE label_definitions SET {', '.join(updates)} "
-                f"WHERE id = %s RETURNING {_LABEL_DEF_COLUMNS}",
+                f"WHERE id = %s RETURNING {LABEL_DEF_COLUMNS}",
                 params,
             )
-            row = cur.fetchone()
-            if row is None:
-                raise HTTPException(status_code=404, detail="Label definition not found")
-            row = _serialize_label_def_row(row)
+            row = serialize_label_def_row(cur.fetchone())
         conn.commit()
         return row
     finally:

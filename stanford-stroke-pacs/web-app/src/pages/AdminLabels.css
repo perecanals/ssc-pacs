@@ -1,0 +1,101 @@
+@reference "../app.css";
+
+/* Mirrors AdminUsers.css — same semantic tokens, so light/dark parity is free.
+   Wider than that page: this table carries a policy control per row. */
+
+.admin-labels {
+  @apply min-h-screen bg-bg text-text text-sm;
+}
+
+.admin-labels__main {
+  @apply pt-9 px-4 pb-6 max-w-4xl mx-auto;
+}
+
+.admin-labels__header {
+  @apply py-4;
+}
+
+.admin-labels__title {
+  @apply text-lg font-semibold;
+}
+
+.admin-labels__subtitle {
+  @apply text-xs text-text-muted mt-1 max-w-2xl leading-relaxed;
+}
+
+.admin-labels__error {
+  @apply mb-3 px-3 py-2 text-xs rounded-md border border-danger/40 bg-danger/10 text-danger;
+}
+
+.admin-labels__loading {
+  @apply text-xs text-text-muted;
+}
+
+.admin-labels__table-wrap {
+  @apply bg-surface border border-border rounded-md overflow-x-auto;
+}
+
+.admin-labels__table {
+  @apply w-full border-collapse text-sm;
+}
+
+.admin-labels__th {
+  @apply px-3 py-2 text-left text-xs font-semibold text-text-muted border-b border-border bg-table-header-bg;
+}
+
+.admin-labels__row:hover {
+  @apply bg-table-row-hover;
+}
+
+.admin-labels__row--saving {
+  @apply opacity-60;
+}
+
+.admin-labels__td {
+  @apply px-3 py-2 border-b border-border align-top;
+}
+
+.admin-labels__td--muted {
+  @apply text-xs text-text-muted;
+}
+
+.admin-labels__name {
+  @apply font-medium;
+}
+
+/* Instrument group header. Same grouping the sidebar and Displayed Columns menu
+   use, so a label is found in the same place everywhere. Each group is its own
+   <tbody>, so the header is a th[scope=colgroup] rather than a faked row.
+   Same treatment as those two (uppercase + tracking + semibold + muted), but
+   sized ABOVE the label names rather than below: there it is a hint inside a
+   dense list, here it is the structure of the page. */
+.admin-labels__instrument-header {
+  @apply px-3 pt-4 pb-1.5 text-left text-base font-semibold uppercase tracking-wide
+         text-text-muted border-b border-border bg-table-header-bg;
+}
+
+.admin-labels__group:not(:first-child) .admin-labels__instrument-header {
+  @apply border-t border-border;
+}
+
+.admin-labels__instrument-count {
+  @apply text-sm font-normal normal-case text-text-muted/70;
+}
+
+.admin-labels__select {
+  @apply px-2 py-1 border border-border rounded-md text-xs font-[inherit] bg-surface;
+}
+
+/* Only rendered for the "Selected users" policy. Wraps so a long roster does
+   not force the table to scroll horizontally. */
+.admin-labels__users {
+  @apply mt-2 flex flex-wrap gap-x-3 gap-y-1;
+}
+
+.admin-labels__user {
+  @apply flex items-center gap-1 text-xs text-text-muted cursor-pointer;
+}
+
+.admin-labels__checkbox {
+  @apply h-3.5 w-3.5 cursor-pointer accent-primary disabled:cursor-default;
+}

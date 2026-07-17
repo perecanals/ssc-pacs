@@ -105,3 +105,95 @@ describe("usePreferencePersistence", () => {
     expect(body.prefs.defaultsVersion).toBe(COLUMN_DEFAULTS_VERSION);
   });
 });
+
+// Saved prefs outlive the columns they name: a retired builtin
+// (femoral_sheath_time, v1.13) or a deleted label leaves a dead key behind.
+// Reading already tolerates them; these pin that we also stop writing them back.
+describe("usePreferencePersistence — pruning prefs that name dead columns", () => {
+  beforeEach(() => apiFetch.mockClear());
+
+  const LIVE = {
+    key: "builtin:patient:stroke_date",
+    sourceKey: "stroke_date",
+    builtin: true,
+  };
+  const LABEL = { key: "label:series_type", builtin: false };
+  const ALL_COLS = [LIVE, LABEL];
+  const DEAD = "builtin:patient:femoral_sheath_time";
+
+  const withCatalog = (extra = {}) => ({
+    allCols: ALL_COLS,
+    catalogReady: true,
+    ...extra,
+  });
+
+  it("self-heals on load: drops the dead key without waiting for an interaction", async () => {
+    renderPersistence(
+      withCatalog({
+        visibleKeys: [LIVE.key, DEAD],
+        columnOrder: [DEAD, LIVE.key],
+      }),
+    );
+    await waitFor(() => expect(apiFetch).toHaveBeenCalled(), { timeout: 3000 });
+    const body = JSON.parse(apiFetch.mock.calls.at(-1)[1].body);
+    expect(body.prefs.visibleKeys).toEqual([LIVE.key]);
+    expect(body.prefs.columnOrder).toEqual([LIVE.key]);
+  });
+
+  it("drops a filter naming a dead column", async () => {
+    renderPersistence(
+      withCatalog({
+        columnFilters: { stroke_date: "2025", femoral_sheath_time: "09:30" },
+      }),
+    );
+    await waitFor(() => expect(apiFetch).toHaveBeenCalled(), { timeout: 3000 });
+    const body = JSON.parse(apiFetch.mock.calls.at(-1)[1].body);
+    expect(body.prefs.columnFilters).toEqual({ stroke_date: "2025" });
+  });
+
+  it("keeps builtin filters, which are keyed by sourceKey not by column key", async () => {
+    // The namespaces differ (TableHeader filters builtins by sourceKey, labels
+    // by key). Pruning filters against the column-key set would wipe every
+    // builtin filter — this is the regression guard for that.
+    renderPersistence(
+      withCatalog({
+        columnFilters: { stroke_date: "2025", "label:series_type": "CTA" },
+      }),
+    );
+    await waitFor(() => expect(apiFetch).toHaveBeenCalled(), { timeout: 3000 });
+    const body = JSON.parse(apiFetch.mock.calls.at(-1)[1].body);
+    expect(body.prefs.columnFilters).toEqual({
+      stroke_date: "2025",
+      "label:series_type": "CTA",
+    });
+  });
+
+  it("does not prune before the label catalog has loaded", async () => {
+    // labelDefs arrive async. Pruning against a catalog that has not landed
+    // would delete every saved label column — so nothing is pruned, and with
+    // nothing to prune there is no reason to save on mount either.
+    const { rerender } = renderPersistence({
+      allCols: [LIVE],
+      catalogReady: false,
+      visibleKeys: [LIVE.key, LABEL.key],
+    });
+    await new Promise((r) => setTimeout(r, 600));
+    expect(apiFetch).not.toHaveBeenCalled();
+
+    rerender({
+      allCols: [LIVE],
+      catalogReady: false,
+      visibleKeys: [LIVE.key, LABEL.key],
+      sortDir: "desc",
+    });
+    await waitFor(() => expect(apiFetch).toHaveBeenCalled(), { timeout: 3000 });
+    const body = JSON.parse(apiFetch.mock.calls.at(-1)[1].body);
+    expect(body.prefs.visibleKeys).toEqual([LIVE.key, LABEL.key]);
+  });
+
+  it("does not save on mount when there is nothing to prune", async () => {
+    renderPersistence(withCatalog({ visibleKeys: [LIVE.key, LABEL.key] }));
+    await new Promise((r) => setTimeout(r, 600));
+    expect(apiFetch).not.toHaveBeenCalled();
+  });
+});

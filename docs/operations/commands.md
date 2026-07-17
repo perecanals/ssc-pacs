@@ -380,7 +380,23 @@ python scripts/admin/bulk_set_label_values.py \
     --id-column seriesinstanceuid --value-column quality \
     --label series_quality --datatype select --options 'good,acceptable,poor' \
     --execute
+
+# Backfill upstream data raters must not overwrite: create the label locked, so
+# its cells render read-only in the web app (--edit-policy applies on label
+# CREATION only, like --instrument; change it later under Label Access).
+#   --edit-policy everyone (default) | nobody | users (+ --edit-users 'a,b')
+python scripts/admin/bulk_set_label_values.py \
+    --file /tmp/femoral_sheath_time.csv --level patient \
+    --id-column patient_id --value-column femoral_sheath_time \
+    --label femoral_sheath_time --datatype text \
+    --edit-policy nobody --execute --yes
 ```
+
+The script writes direct SQL and **bypasses the per-label edit gate by design**
+— it is the admin backdoor, authorized by shell + `.env` access. Writes are
+still recorded in `annotations_history` as `bulk:<user>`. Who may edit a label's
+values in the web app: [`../reference/architecture.md`](../reference/architecture.md)
+§5.5.
 
 The backend module map lives in
 [`../reference/architecture.md`](../reference/architecture.md); scripts import

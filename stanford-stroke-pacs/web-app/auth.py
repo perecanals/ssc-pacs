@@ -67,19 +67,31 @@ def get_optional_user(auth_token: str | None = Cookie(None)) -> str | None:
     return payload.get("sub") if payload else None
 
 
-def require_admin(user: str = Depends(get_current_user)) -> str:
-    """FastAPI dependency: 401 if not logged in, 403 if user is not an admin."""
+def is_user_admin(username: str) -> bool:
+    """Whether a user is an admin, as a value rather than a gate.
+
+    ``require_admin`` refuses the request; callers that need to *branch* on
+    admin-ness (e.g. who may change a label's edit policy) need the boolean.
+    Uncached — one indexed PK lookup, same as ``require_admin`` and
+    ``get_dataset_scope``. An unknown user resolves to False: a valid JWT for a
+    deleted user confers nothing.
+    """
     conn = get_conn()
     try:
         with conn.cursor() as cur:
             cur.execute(
                 "SELECT is_admin FROM users WHERE username = %s",
-                (user,),
+                (username,),
             )
             row = cur.fetchone()
     finally:
         conn.close()
-    if not row or not row[0]:
+    return bool(row and row[0])
+
+
+def require_admin(user: str = Depends(get_current_user)) -> str:
+    """FastAPI dependency: 401 if not logged in, 403 if user is not an admin."""
+    if not is_user_admin(user):
         raise HTTPException(status_code=403, detail="Admin access required")
     return user
 

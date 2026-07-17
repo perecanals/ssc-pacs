@@ -187,6 +187,38 @@ export const COLUMN_DEFAULTS_VERSION = 1;
 // same rule as built-in child-level columns).
 export const DEFAULT_VISIBLE_LABEL_NAMES = ["timepoint", "series_type"];
 
+// Whether the current user may edit a label's values, mirroring the server's
+// common.can_edit_label (Alembic 0019). This is presentation only — it decides
+// whether to offer an editor. The server enforces with a 403; never treat this
+// as the control.
+//
+// No admin bypass here either: `nobody` means nobody, so an admin sees the same
+// muted pill and must change the policy (admin page) rather than click through.
+// A label with no definition stays editable — that is already allowed today.
+export function labelEditability(labelDef, currentUser) {
+  if (
+    !labelDef ||
+    !labelDef.edit_policy ||
+    labelDef.edit_policy === "everyone"
+  ) {
+    return { canEdit: true, reason: null };
+  }
+  if (labelDef.edit_policy === "nobody") {
+    return {
+      canEdit: false,
+      reason: `"${labelDef.name}" is locked: no one can edit it. An admin can change this under Label Access.`,
+    };
+  }
+  const allowed = labelDef.edit_users || [];
+  if (currentUser && allowed.includes(currentUser)) {
+    return { canEdit: true, reason: null };
+  }
+  return {
+    canEdit: false,
+    reason: `"${labelDef.name}" is editable only by: ${allowed.join(", ") || "(no one)"}.`,
+  };
+}
+
 // Shared default ordering for annotation labels (used by both the default
 // column order in the data table and the sidebar quick-filter list, so the
 // two stay consistent): grouped by instrument (alphabetical, unassigned/null

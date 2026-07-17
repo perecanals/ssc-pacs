@@ -16,7 +16,7 @@ import {
 } from "./actions";
 import ColumnSelector from "../ColumnSelector";
 import useColumnPrefs from "./useColumnPrefs";
-import InlineEdit from "../InlineEdit";
+import LabelCell from "./LabelCell";
 import LabelDefModal from "../LabelDefModal";
 import DeleteEntityModal from "../DeleteEntityModal";
 import { useAuth } from "../../context/AuthContext";
@@ -102,9 +102,15 @@ function DataTableInner({
   const builtinCols = useMemo(() => buildBuiltinColumnCatalog(level), [level]);
 
   const [labelDefs, setLabelDefs] = useState([]);
+  // Only true once the catalog has genuinely arrived. Load-bearing for pref
+  // pruning: an empty labelDefs from a *failed* fetch is indistinguishable from
+  // "no labels exist", and pruning against it would delete every saved
+  // label column. Stays false on failure, which disables pruning entirely.
+  const [labelDefsLoaded, setLabelDefsLoaded] = useState(false);
   const fetchLabelDefs = useCallback(async () => {
     try {
       setLabelDefs(await apiGet("/api/label-definitions"));
+      setLabelDefsLoaded(true);
     } catch {
       setLabelDefs([]);
     }
@@ -199,6 +205,8 @@ function DataTableInner({
     fontScale,
     statusColVisible,
     prefsUpgraded,
+    allCols,
+    catalogReady: labelDefsLoaded,
   });
 
   const [downloadingSeries, setDownloadingSeries] = useState(null);
@@ -483,16 +491,13 @@ function DataTableInner({
     if (col.builtin) {
       return <BuiltinCell col={col} row={row} />;
     }
-    const labelName = col.key.replace("label:", "");
     return (
-      <InlineEdit
-        level={col.level || level}
+      <LabelCell
+        col={col}
         entity={row}
-        labelName={labelName}
-        datatype={col.datatype}
-        defOptions={col.options || []}
         annotations={allAnnotations(row)}
         onMutated={handleMutated}
+        levelFallback={level}
       />
     );
   };

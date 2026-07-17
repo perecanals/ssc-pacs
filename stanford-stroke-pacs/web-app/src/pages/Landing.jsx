@@ -28,6 +28,15 @@ const adminOnlyCards = [
     hint: "Manage access",
   },
   {
+    to: "/admin/labels",
+    internal: true,
+    icon: "\u{1F512}",
+    title: "Label Access",
+    description:
+      "Choose who can edit each label's values. Lock a label to protect bulk-loaded data from being overwritten.",
+    hint: "Manage labels",
+  },
+  {
     href: () => "/ohif/",
     icon: "\u{1F5BC}",
     title: "OHIF Viewer",
@@ -49,7 +58,8 @@ export default function Landing() {
   const { currentUser, isAdmin, logout } = useAuth();
   const navigate = useNavigate();
   const cards = isAdmin ? [...baseCards, ...adminOnlyCards] : baseCards;
-  const containerClass = cards.length === 1 ? "landing__single" : "landing__grid";
+  const containerClass =
+    cards.length === 1 ? "landing__single" : "landing__grid";
 
   const handleLogout = async () => {
     await logout();
@@ -71,9 +81,7 @@ export default function Landing() {
 
       <div className="landing__content">
         <header className="landing__header">
-          <h1 className="landing__title">
-            Stanford Stroke Center PACS
-          </h1>
+          <h1 className="landing__title">Stanford Stroke Center PACS</h1>
           <p className="landing__subtitle">
             Lightweight DICOM management for the Stanford Stroke Center
           </p>
@@ -85,12 +93,8 @@ export default function Landing() {
               <>
                 <span className="landing__card-icon">{c.icon}</span>
                 <h2 className="landing__card-title">{c.title}</h2>
-                <p className="landing__card-desc">
-                  {c.description}
-                </p>
-                <span className="landing__card-hint">
-                  {c.hint} &rarr;
-                </span>
+                <p className="landing__card-desc">{c.description}</p>
+                <span className="landing__card-hint">{c.hint} &rarr;</span>
               </>
             );
 

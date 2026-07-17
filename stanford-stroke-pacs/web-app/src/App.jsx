@@ -5,6 +5,7 @@ import Navigator from "./pages/Navigator";
 import Login from "./pages/Login";
 import ChangePassword from "./pages/ChangePassword";
 import AdminUsers from "./pages/AdminUsers";
+import AdminLabels from "./pages/AdminLabels";
 import ProtectedRoute from "./components/ProtectedRoute";
 
 export default function App() {
@@ -41,6 +42,14 @@ export default function App() {
           element={
             <ProtectedRoute>
               <AdminUsers />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/admin/labels"
+          element={
+            <ProtectedRoute>
+              <AdminLabels />
             </ProtectedRoute>
           }
         />

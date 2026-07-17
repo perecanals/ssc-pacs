@@ -172,8 +172,11 @@ datatype    TEXT NOT NULL DEFAULT 'bool'
             CHECK (datatype IN ('bool', 'int', 'text', 'select'))
 options     TEXT
 instrument  TEXT                       -- free-text grouping (NULL = "Unassigned"); Alembic 0004
-created_by  TEXT NOT NULL
+created_by  TEXT NOT NULL              -- the label's OWNER (see edit_policy)
 created_at  TIMESTAMPTZ DEFAULT now()
+edit_policy TEXT NOT NULL DEFAULT 'everyone'   -- Alembic 0019
+            CHECK (edit_policy IN ('everyone', 'nobody', 'users'))
+edit_users  TEXT[] NOT NULL DEFAULT '{}'       -- Alembic 0019
 ```
 
 `instrument` groups labels in the sidebar and default column order (instruments
@@ -182,6 +185,35 @@ not editable afterward). For select labels the *effective* option list returned
 by `GET /api/label-definitions` is `options` ∪ the live values in
 `label_value_options` — so values created inline while annotating appear in both
 the inline dropdown and the column filter without editing the definition.
+
+**Edit permissions** (`edit_policy` + `edit_users`, Alembic `0019`) answer *who
+may write this label's values*:
+
+| `edit_policy` | `edit_users` | who may set/clear values |
+|---|---|---|
+| `everyone` (default) | `{}` | any authenticated user — the pre-`0019` behavior |
+| `nobody` | `{}` | no one via the API/UI, **admins included** |
+| `users` | `{a,b,…}` | exactly those usernames ("editable by me" is `{me}`) |
+
+- **No admin bypass.** `nobody` means nobody: the point is to stop a stray click
+  silently overwriting bulk-loaded clinical data. To correct a locked value an
+  admin changes the policy, edits, and changes it back — deliberate, and every
+  step lands in `annotations_history`.
+- Enforced server-side on `POST /api/annotations` and `DELETE
+  /api/annotations/{id}` (`common.can_edit_label`); the read-only rendering in
+  the UI is cosmetic. A label with **no definition row** stays editable — this
+  restricts, it never newly forbids.
+- Changing the policy requires being the label's **owner** (`created_by`) or an
+  admin (`common.can_change_label_policy`); being listed in `edit_users` grants
+  value edits, not control. Bulk-created labels have a `bulk:<user>` owner that
+  matches no login, so they are admin-only to unlock — for free.
+- Set from the Label Access admin page (`/admin/labels`), the label modal
+  (everyone / only me / no one), or `bulk_set_label_values.py --edit-policy` at
+  creation. `edit_users` is not FK'd to `users`: a deleted user leaves a stale
+  name that simply never matches.
+- `scripts/admin/bulk_set_label_values.py` writes direct SQL and **bypasses this
+  gate by design** — it is the admin backdoor, authorized by shell + `.env`
+  access.
 
 ### `label_value_options`
 

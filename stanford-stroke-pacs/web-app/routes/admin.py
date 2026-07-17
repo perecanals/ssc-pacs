@@ -21,6 +21,7 @@ from db import DB_CONFIG, get_conn
 from metrics import REGISTRY as METRICS_REGISTRY
 from metrics import refresh_cold_storage_gauges
 from orthanc_client import orthanc_system_check
+from routes import labels as labels_routes
 
 router = APIRouter()
 
@@ -233,3 +234,71 @@ def set_user_datasets(
         conn.close()
     dataset_access.invalidate_user_scope(username)
     return _serialize_user_row(row)
+
+
+# ---------------------------------------------------------------------------
+# Label edit permissions (admin-only)
+#
+# Sibling of the dataset grants above: that gates which cohorts a user may
+# *see*, this gates which labels a user may *write*. See labels.py for the
+# self-service subset (a label's owner can set its own policy).
+# ---------------------------------------------------------------------------
+
+
+class LabelEditPermissions(BaseModel):
+    edit_policy: str
+    edit_users: list[str] | None = None
+
+
+@router.get("/api/admin/label-definitions")
+def admin_list_label_definitions(user: str = Depends(require_admin)):
+    """All label definitions with owner + edit policy, for the /admin/labels page."""
+    conn = get_conn()
+    try:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute(
+                f"SELECT {labels_routes.LABEL_DEF_COLUMNS} "
+                "FROM label_definitions ORDER BY name"
+            )
+            return [
+                labels_routes.serialize_label_def_row(r) for r in cur.fetchall()
+            ]
+    finally:
+        conn.close()
+
+
+@router.put("/api/admin/label-definitions/{label_id}/permissions")
+def set_label_permissions(
+    label_id: int,
+    body: LabelEditPermissions,
+    admin: str = Depends(require_admin),
+):
+    """Replace a label's edit policy.
+
+    Replace-not-merge, like the dataset grants. `edit_users` is validated
+    against existing usernames (422 otherwise) and forced empty unless the
+    policy is `users`. No cache to invalidate: the permission is read inline on
+    every write (see common.can_edit_label).
+    """
+    conn = get_conn()
+    try:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            edit_users = labels_routes.validate_edit_policy(
+                cur, body.edit_policy, body.edit_users
+            )
+            cur.execute(
+                "UPDATE label_definitions "
+                "SET edit_policy = %s, edit_users = %s::text[] "
+                f"WHERE id = %s RETURNING {labels_routes.LABEL_DEF_COLUMNS}",
+                (body.edit_policy, edit_users, label_id),
+            )
+            row = cur.fetchone()
+            if row is None:
+                raise HTTPException(
+                    status_code=404, detail="Label definition not found"
+                )
+            row = labels_routes.serialize_label_def_row(row)
+        conn.commit()
+        return row
+    finally:
+        conn.close()

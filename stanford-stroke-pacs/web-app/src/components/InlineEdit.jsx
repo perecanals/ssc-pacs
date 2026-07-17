@@ -4,7 +4,8 @@ import PropTypes from "prop-types";
 import { useAuth } from "../context/AuthContext";
 import { apiGet, apiPost, apiDelete } from "../api/client";
 import { valueColor } from "../utils/colors";
-import { compareSelectValues } from "../utils/table";
+import { compareSelectValues, labelEditability } from "../utils/table";
+import { AutoPill } from "./DataTable/BuiltinCell";
 import "./InlineEdit.css";
 
 function SelectPill({ value, onClick, className = "" }) {
@@ -46,7 +47,11 @@ function buildPayload(level, entity, labelName, value) {
     return { ...base, patient_id: entity.patient_id };
   }
   if (level === "study") {
-    return { ...base, studyinstanceuid: entity.studyinstanceuid, patient_id: entity.patient_id };
+    return {
+      ...base,
+      studyinstanceuid: entity.studyinstanceuid,
+      patient_id: entity.patient_id,
+    };
   }
   return {
     ...base,
@@ -64,19 +69,39 @@ export default function InlineEdit({
   defOptions = [],
   annotations,
   onMutated,
+  labelDef = null,
 }) {
-
   const { currentUser } = useAuth();
   const ann = annotations.find((a) => a.label === labelName) || null;
+  const protection = labelEditability(labelDef, currentUser);
 
-  if (!currentUser) {
+  // Read-only render: logged out, or the label's edit policy excludes this user.
+  // The server is the enforcement boundary (403 on POST/DELETE) — this only
+  // avoids offering an editor that would fail.
+  if (!currentUser || !protection.canEdit) {
     if (datatype === "bool") {
       return ann ? <span className="inline-edit__check">&#10003;</span> : null;
     }
     if (datatype === "select") {
-      return ann?.value ? <SelectPill value={ann.value} /> : null;
+      if (!ann?.value) return null;
+      // Select values are categorical, so the hash colour is meaningful: equal
+      // values group by eye. Protected ones take AutoPill — same colour, but
+      // outlined and muted so they never read as editable.
+      return protection.canEdit ? (
+        <SelectPill value={ann.value} />
+      ) : (
+        <AutoPill value={ann.value} title={protection.reason} />
+      );
     }
-    return <span>{ann?.value || ""}</span>;
+    // text/int: plain, unformatted. A pill would be a lie here — the hash
+    // colour groups equal values, and free text has no categories to group
+    // (every femoral_sheath_time is a distinct timestamp). Absence of the
+    // input is the affordance; the tooltip says why.
+    return (
+      <span title={protection.canEdit ? undefined : protection.reason}>
+        {ann?.value || ""}
+      </span>
+    );
   }
 
   if (datatype === "bool") {
@@ -136,7 +161,10 @@ function BoolEdit({ level, entity, labelName, ann, onMutated }) {
     setSaving(true);
     try {
       const res = next
-        ? await apiPost("/api/annotations", buildPayload(level, entity, labelName, null))
+        ? await apiPost(
+            "/api/annotations",
+            buildPayload(level, entity, labelName, null),
+          )
         : ann
           ? await apiDelete(`/api/annotations/${ann.id}`)
           : { ok: true };
@@ -152,7 +180,9 @@ function BoolEdit({ level, entity, labelName, ann, onMutated }) {
   };
 
   return (
-    <span title={ann?.created_by ? `Last edited by ${ann.created_by}` : undefined}>
+    <span
+      title={ann?.created_by ? `Last edited by ${ann.created_by}` : undefined}
+    >
       <input
         type="checkbox"
         checked={pending ?? annChecked}
@@ -171,7 +201,14 @@ const DROPDOWN_MAX_H = 260;
 const DROPDOWN_MIN_W = 200;
 const DROPDOWN_MARGIN = 8;
 
-function SelectEdit({ level, entity, labelName, defOptions = [], ann, onMutated }) {
+function SelectEdit({
+  level,
+  entity,
+  labelName,
+  defOptions = [],
+  ann,
+  onMutated,
+}) {
   const [open, setOpen] = useState(false);
   // Fixed-position coordinates for the portaled dropdown, computed from the
   // trigger's rect at open time. {top} opens downward, {bottom} upward.
@@ -199,11 +236,15 @@ function SelectEdit({ level, entity, labelName, defOptions = [], ann, onMutated 
   const openDropdown = () => {
     const rect = ref.current.getBoundingClientRect();
     const spaceBelow = window.innerHeight - rect.bottom;
-    const openUp = spaceBelow < DROPDOWN_MAX_H + DROPDOWN_MARGIN && rect.top > spaceBelow;
+    const openUp =
+      spaceBelow < DROPDOWN_MAX_H + DROPDOWN_MARGIN && rect.top > spaceBelow;
     setPos({
       left: Math.max(
         DROPDOWN_MARGIN,
-        Math.min(rect.left, window.innerWidth - DROPDOWN_MIN_W - DROPDOWN_MARGIN),
+        Math.min(
+          rect.left,
+          window.innerWidth - DROPDOWN_MIN_W - DROPDOWN_MARGIN,
+        ),
       ),
       top: openUp ? undefined : rect.bottom + 4,
       bottom: openUp ? window.innerHeight - rect.top + 4 : undefined,
@@ -247,12 +288,16 @@ function SelectEdit({ level, entity, labelName, defOptions = [], ann, onMutated 
     }
   }, [open, labelName]);
 
-  const allOptions = [...new Set([...defOptions, ...annValues])].sort(compareSelectValues);
+  const allOptions = [...new Set([...defOptions, ...annValues])].sort(
+    compareSelectValues,
+  );
   const filtered = allOptions.filter((v) =>
     v.toLowerCase().includes(search.toLowerCase()),
   );
   const trimmed = search.trim();
-  const showCreate = trimmed && !allOptions.some((v) => v.toLowerCase() === trimmed.toLowerCase());
+  const showCreate =
+    trimmed &&
+    !allOptions.some((v) => v.toLowerCase() === trimmed.toLowerCase());
 
   const handleSelect = async (value) => {
     const isClear = value === ann?.value;
@@ -264,7 +309,10 @@ function SelectEdit({ level, entity, labelName, defOptions = [], ann, onMutated 
     try {
       const res = isClear
         ? await apiDelete(`/api/annotations/${ann.id}`)
-        : await apiPost("/api/annotations", buildPayload(level, entity, labelName, value));
+        : await apiPost(
+            "/api/annotations",
+            buildPayload(level, entity, labelName, value),
+          );
       if (!res.ok) {
         setPending(undefined);
         alert("Could not save annotation");
@@ -281,77 +329,80 @@ function SelectEdit({ level, entity, labelName, defOptions = [], ann, onMutated 
   const toggleOpen = () => (open ? setOpen(false) : openDropdown());
 
   return (
-    <span className="select-edit" ref={ref} title={ann?.created_by ? `Last edited by ${ann.created_by}` : undefined}>
+    <span
+      className="select-edit"
+      ref={ref}
+      title={ann?.created_by ? `Last edited by ${ann.created_by}` : undefined}
+    >
       {currentValue ? (
         <SelectPill value={currentValue} onClick={toggleOpen} />
       ) : (
-        <button
-          onClick={toggleOpen}
-          className="select-edit__placeholder"
-        >
+        <button onClick={toggleOpen} className="select-edit__placeholder">
           Select&hellip;
         </button>
       )}
-      {open && pos && createPortal(
-        <div
-          className="select-edit__dropdown"
-          ref={dropdownRef}
-          style={{ top: pos.top, bottom: pos.bottom, left: pos.left }}
-        >
-          <div className="select-edit__search-wrap">
-            <input
-              type="text"
-              placeholder="Search or create…"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && showCreate) handleSelect(trimmed);
-              }}
-              className="select-edit__search-input"
-              autoFocus
-            />
-          </div>
-          <div className="select-edit__options">
-            {currentValue && (
-              <button
-                onClick={() => handleSelect(currentValue)}
-                disabled={saving}
-                className="select-edit__clear-btn"
-              >
-                Clear value
-              </button>
-            )}
-            {filtered.map((v) => (
-              <button
-                key={v}
-                onClick={() => handleSelect(v)}
-                disabled={saving}
-                className="select-edit__option-btn"
-              >
-                <SelectPill value={v} />
-                {v === currentValue && (
-                  <span className="select-edit__check-mark">&#10003;</span>
-                )}
-              </button>
-            ))}
-            {showCreate && (
-              <button
-                onClick={() => handleSelect(trimmed)}
-                disabled={saving}
-                className="select-edit__create-btn"
-              >
-                Create &ldquo;<span className="select-edit__create-name">{trimmed}</span>&rdquo;
-              </button>
-            )}
-            {filtered.length === 0 && !showCreate && (
-              <div className="select-edit__empty">
-                No options yet
-              </div>
-            )}
-          </div>
-        </div>,
-        document.body,
-      )}
+      {open &&
+        pos &&
+        createPortal(
+          <div
+            className="select-edit__dropdown"
+            ref={dropdownRef}
+            style={{ top: pos.top, bottom: pos.bottom, left: pos.left }}
+          >
+            <div className="select-edit__search-wrap">
+              <input
+                type="text"
+                placeholder="Search or create…"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && showCreate) handleSelect(trimmed);
+                }}
+                className="select-edit__search-input"
+                autoFocus
+              />
+            </div>
+            <div className="select-edit__options">
+              {currentValue && (
+                <button
+                  onClick={() => handleSelect(currentValue)}
+                  disabled={saving}
+                  className="select-edit__clear-btn"
+                >
+                  Clear value
+                </button>
+              )}
+              {filtered.map((v) => (
+                <button
+                  key={v}
+                  onClick={() => handleSelect(v)}
+                  disabled={saving}
+                  className="select-edit__option-btn"
+                >
+                  <SelectPill value={v} />
+                  {v === currentValue && (
+                    <span className="select-edit__check-mark">&#10003;</span>
+                  )}
+                </button>
+              ))}
+              {showCreate && (
+                <button
+                  onClick={() => handleSelect(trimmed)}
+                  disabled={saving}
+                  className="select-edit__create-btn"
+                >
+                  Create &ldquo;
+                  <span className="select-edit__create-name">{trimmed}</span>
+                  &rdquo;
+                </button>
+              )}
+              {filtered.length === 0 && !showCreate && (
+                <div className="select-edit__empty">No options yet</div>
+              )}
+            </div>
+          </div>,
+          document.body,
+        )}
     </span>
   );
 }
@@ -361,14 +412,7 @@ SelectEdit.propTypes = {
   defOptions: PropTypes.arrayOf(PropTypes.string),
 };
 
-function ValueEdit({
-  level,
-  entity,
-  labelName,
-  datatype,
-  ann,
-  onMutated,
-}) {
+function ValueEdit({ level, entity, labelName, datatype, ann, onMutated }) {
   const [value, setValue] = useState(ann?.value || "");
   const originalRef = useRef(ann?.value || "");
   const [saving, setSaving] = useState(false);
@@ -380,7 +424,8 @@ function ValueEdit({
   const annValue = ann?.value || "";
   useEffect(() => {
     if (annValue === originalRef.current) return;
-    const focused = inputRef.current && document.activeElement === inputRef.current;
+    const focused =
+      inputRef.current && document.activeElement === inputRef.current;
     if (focused || value !== originalRef.current) return;
     originalRef.current = annValue;
     setValue(annValue);
@@ -397,7 +442,10 @@ function ValueEdit({
           setValue(originalRef.current);
           return;
         }
-        const res = await apiPost("/api/annotations", buildPayload(level, entity, labelName, trimmed));
+        const res = await apiPost(
+          "/api/annotations",
+          buildPayload(level, entity, labelName, trimmed),
+        );
         if (!res.ok) {
           setValue(originalRef.current);
           alert("Could not save annotation");
@@ -429,7 +477,9 @@ function ValueEdit({
   };
 
   return (
-    <span title={ann?.created_by ? `Last edited by ${ann.created_by}` : undefined}>
+    <span
+      title={ann?.created_by ? `Last edited by ${ann.created_by}` : undefined}
+    >
       <input
         ref={inputRef}
         type={datatype === "int" ? "number" : "text"}
@@ -439,7 +489,9 @@ function ValueEdit({
         onKeyDown={handleKeyDown}
         disabled={saving}
         className={`value-edit__input ${saving ? "value-edit__input--saving" : ""} ${
-          datatype === "int" ? "value-edit__input--int" : "value-edit__input--text"
+          datatype === "int"
+            ? "value-edit__input--int"
+            : "value-edit__input--text"
         }`}
       />
     </span>
@@ -459,4 +511,7 @@ InlineEdit.propTypes = {
   defOptions: PropTypes.arrayOf(PropTypes.string),
   annotations: PropTypes.array.isRequired,
   onMutated: PropTypes.func.isRequired,
+  // The label_definitions row; carries edit_policy / edit_users. Omitted or
+  // null means unrestricted (matches an undefined label server-side).
+  labelDef: PropTypes.object,
 };

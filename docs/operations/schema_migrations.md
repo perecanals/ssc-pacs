@@ -60,10 +60,11 @@ stanford-stroke-pacs/
         ├── 0015_series_classification.py
         ├── 0016_study_episode.py
         ├── 0017_patient_femoral_sheath_time.py
-        └── 0018_drop_femoral_sheath_time.py
+        ├── 0018_drop_femoral_sheath_time.py
+        └── 0019_label_edit_policy.py
 ```
 
-The chain is linear (`0001` → `0018`). `alembic history` prints the live
+The chain is linear (`0001` → `0019`). `alembic history` prints the live
 graph; `alembic heads` should always show a single head.
 
 Revision ids must fit `alembic_version.version_num`, which is **`varchar(32)`** —

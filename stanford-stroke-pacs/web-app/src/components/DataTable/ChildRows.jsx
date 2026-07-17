@@ -1,6 +1,6 @@
 import { Fragment } from "react";
 import PropTypes from "prop-types";
-import InlineEdit from "../InlineEdit";
+import LabelCell from "./LabelCell";
 import WarmButton from "./WarmButton";
 import CopyPathButtons from "./CopyPathButtons";
 import { isNarrowCol } from "../../utils/table";
@@ -122,19 +122,15 @@ function GrandChildTable({
                           </td>
                         );
                       }
-                      const labelName = c.key.replace("label:", "");
                       return (
                         <td
                           key={c.key}
                           className="dt__gc-td dt__gc-td--label"
                           onClick={(e) => e.stopPropagation()}
                         >
-                          <InlineEdit
-                            level={c.level}
+                          <LabelCell
+                            col={c}
                             entity={gc}
-                            labelName={labelName}
-                            datatype={c.datatype}
-                            defOptions={c.options || []}
                             annotations={gcAnnotations}
                             onMutated={onMutated}
                           />
@@ -344,19 +340,15 @@ export default function ChildRows({
                       </td>
                     );
                   }
-                  const labelName = c.key.replace("label:", "");
                   return (
                     <td
                       key={c.key}
                       className="dt__child-td dt__child-td--label"
                       onClick={(e) => e.stopPropagation()}
                     >
-                      <InlineEdit
-                        level={c.level}
+                      <LabelCell
+                        col={c}
                         entity={child}
-                        labelName={labelName}
-                        datatype={c.datatype}
-                        defOptions={c.options || []}
                         annotations={childAnnotations}
                         onMutated={onMutated}
                       />

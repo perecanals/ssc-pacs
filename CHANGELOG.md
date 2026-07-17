@@ -1,5 +1,43 @@
 # Changelog
 
+## v1.15 — 2026-07-16
+
+- **Feature**: per-label edit permissions — who may change a label's *values* is
+  now a property of the label. `label_definitions.edit_policy`
+  (`everyone` / `nobody` / `users`) + `edit_users text[]`. "Editable by me" is
+  just `users = {me}`, so one mechanism covers all four cases. Prompted by
+  v1.13: `femoral_sheath_time` holds 874 values copied verbatim from
+  `lvo_clinical_data`, and any logged-in user could silently overwrite one by
+  clicking the cell.
+- **Admins do not bypass a lock**, deliberately — the opposite of dataset
+  access. `nobody` means nobody: the failure mode is a stray click overwriting
+  bulk-loaded clinical data, and the person clicking with admin rights is the
+  one who loaded it. Correcting a locked value means changing the policy first
+  (Label Access → edit → re-lock), which is deliberate and audited. Changing a
+  policy requires being the label's owner (`created_by`) or an admin; bulk-loaded
+  labels are owned by `bulk:<user>`, which matches no login, so they are
+  admin-only to unlock with no special-casing.
+- Enforced **server-side** on `POST /api/annotations` and
+  `DELETE /api/annotations/{id}` (clearing is a write); the read-only cell is
+  cosmetic. This also closes a pre-existing hole: any user could extend a select
+  label's controlled vocabulary just by posting a novel value. A protected
+  select value keeps its pill but in the muted outlined form the Auto columns
+  use; protected text/int values render as plain text — a hash colour groups
+  equal values, and free text has no categories to group.
+- New admin page **Label Access** (`/admin/labels`), modelled on the user
+  dataset-access page: policy per label plus a user checkbox list.
+  `GET /api/admin/label-definitions`, `PUT …/{id}/permissions`. The label modal
+  gains everyone / only me / no one for self-service, and
+  `bulk_set_label_values.py` gains `--edit-policy` / `--edit-users` at creation
+  — the "backfill something raters must not touch" path in one command. The CLI
+  still bypasses the gate by design; it is the admin backdoor.
+- Migration `0019_label_edit_policy` adds both columns — instant, and
+  **allow-by-default**, so nothing changes on upgrade and no rater is
+  interrupted. No backfill on purpose: the tempting "lock the bulk-created
+  labels" rule would have been wrong, since `timepoint` and `series_type` are
+  bulk-created but human-maintained (1387 and 360 rater edits). Lock
+  `femoral_sheath_time` from Label Access after deploying.
+
 ## v1.14 — 2026-07-16
 
 - **Fix**: `config.toml` was silently ignored by every systemd-driven shell

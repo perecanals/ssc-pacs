@@ -38,6 +38,10 @@ export default function useColumnPrefs(
         options: d.options || [],
         instrument: d.instrument || null,
         created_at: d.created_at,
+        // Who may edit this label's values (Alembic 0019); read by LabelCell ->
+        // InlineEdit via labelDef.
+        edit_policy: d.edit_policy || "everyone",
+        edit_users: d.edit_users || [],
         labelDef: d,
       })),
     [labelDefs],

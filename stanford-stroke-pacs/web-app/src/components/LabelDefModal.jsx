@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import PropTypes from "prop-types";
 import { apiGet, apiPatch, apiPost } from "../api/client";
+import { useAuth } from "../context/AuthContext";
 import { valueColor } from "../utils/colors";
 import "./LabelDefModal.css";
 
@@ -13,7 +14,9 @@ export default function LabelDefModal({
   const isEdit = existingLabel != null;
 
   const [name, setName] = useState(existingLabel?.name || "");
-  const [description, setDescription] = useState(existingLabel?.description || "");
+  const [description, setDescription] = useState(
+    existingLabel?.description || "",
+  );
   const [level, setLevel] = useState(existingLabel?.level || defaultLevel);
   const [datatype, setDatatype] = useState(existingLabel?.datatype || "bool");
   const [options, setOptions] = useState(existingLabel?.options || []);
@@ -22,9 +25,29 @@ export default function LabelDefModal({
   const [instrumentSuggestions, setInstrumentSuggestions] = useState([]);
   const [error, setError] = useState("");
 
+  // Who may edit this label's values. The self-service subset of the policy:
+  // "everyone", "nobody", or just me ("users" with a single-entry list).
+  // Arbitrary user lists are set by an admin under Label Access, which has the
+  // user roster; picking one here would show it as "Selected users (n)".
+  const [editPolicy, setEditPolicy] = useState(
+    existingLabel?.edit_policy || "everyone",
+  );
+  const { isAdmin, currentUser } = useAuth();
+  // Mirrors the server's can_change_label_policy: owner or admin.
+  const mayChangePolicy =
+    !isEdit || isAdmin || existingLabel?.created_by === currentUser;
+  const existingUsers = existingLabel?.edit_users || [];
+  // A list this modal cannot express (someone other than just me) — keep it
+  // intact rather than silently rewriting it to [me] on an unrelated save.
+  const listIsForeign =
+    editPolicy === "users" &&
+    !(existingUsers.length === 1 && existingUsers[0] === currentUser);
+
   useEffect(() => {
     apiGet("/api/instruments")
-      .then((rows) => setInstrumentSuggestions(rows.map((r) => r.name).filter(Boolean)))
+      .then((rows) =>
+        setInstrumentSuggestions(rows.map((r) => r.name).filter(Boolean)),
+      )
       .catch(() => setInstrumentSuggestions([]));
   }, []);
 
@@ -43,6 +66,17 @@ export default function LabelDefModal({
     setOptions((prev) => prev.filter((_, i) => i !== idx));
   };
 
+  // "Only me" is just a one-entry list — the server has no separate concept.
+  // A foreign list (set under Label Access) is passed through untouched.
+  const policyPayload = () => {
+    if (editPolicy !== "users")
+      return { edit_policy: editPolicy, edit_users: [] };
+    return {
+      edit_policy: "users",
+      edit_users: listIsForeign ? existingUsers : [currentUser],
+    };
+  };
+
   const handleSave = async () => {
     setError("");
 
@@ -50,6 +84,7 @@ export default function LabelDefModal({
       const res = await apiPatch(`/api/label-definitions/${existingLabel.id}`, {
         description: description.trim() || null,
         instrument: instrument.trim() || null,
+        ...(mayChangePolicy ? policyPayload() : {}),
       });
       if (!res.ok) {
         const body = await res.json().catch(() => null);
@@ -71,6 +106,7 @@ export default function LabelDefModal({
       datatype,
       options: datatype === "select" && options.length > 0 ? options : null,
       instrument: instrument.trim() || null,
+      ...policyPayload(),
     });
     if (res.status === 409) {
       setError("A label with this name already exists");
@@ -91,12 +127,12 @@ export default function LabelDefModal({
     >
       <div className="label-modal">
         <h3 className="label-modal__title">
-          {isEdit ? `Edit label: ${existingLabel.name}` : "Define New Label Type"}
+          {isEdit
+            ? `Edit label: ${existingLabel.name}`
+            : "Define New Label Type"}
         </h3>
 
-        <label className="label-modal__label">
-          Name *
-        </label>
+        <label className="label-modal__label">Name *</label>
         <input
           type="text"
           value={name}
@@ -107,9 +143,7 @@ export default function LabelDefModal({
           disabled={isEdit}
         />
 
-        <label className="label-modal__label">
-          Description
-        </label>
+        <label className="label-modal__label">Description</label>
         <input
           type="text"
           value={description}
@@ -118,9 +152,7 @@ export default function LabelDefModal({
           className="label-modal__input"
         />
 
-        <label className="label-modal__label">
-          Instrument
-        </label>
+        <label className="label-modal__label">Instrument</label>
         <input
           type="text"
           value={instrument}
@@ -136,9 +168,7 @@ export default function LabelDefModal({
           ))}
         </datalist>
 
-        <label className="label-modal__label">
-          Level
-        </label>
+        <label className="label-modal__label">Level</label>
         <select
           value={level}
           onChange={(e) => setLevel(e.target.value)}
@@ -150,9 +180,7 @@ export default function LabelDefModal({
           <option value="series">Series</option>
         </select>
 
-        <label className="label-modal__label">
-          Data Type
-        </label>
+        <label className="label-modal__label">Data Type</label>
         <select
           value={datatype}
           onChange={(e) => setDatatype(e.target.value)}
@@ -165,11 +193,34 @@ export default function LabelDefModal({
           <option value="select">Select (pick from predefined values)</option>
         </select>
 
+        <label className="label-modal__label">Who can edit values</label>
+        <select
+          value={editPolicy}
+          onChange={(e) => setEditPolicy(e.target.value)}
+          className="label-modal__select"
+          disabled={!mayChangePolicy}
+        >
+          <option value="everyone">Everyone</option>
+          <option value="users">
+            {listIsForeign
+              ? `Selected users (${existingUsers.length})`
+              : "Only me"}
+          </option>
+          <option value="nobody">No one</option>
+        </select>
+        <p className="label-modal__hint">
+          {!mayChangePolicy
+            ? "Only the label's owner or an admin can change this."
+            : editPolicy === "nobody"
+              ? "No one can edit these values — not even an admin. Change this setting first to correct a value."
+              : listIsForeign
+                ? `Editable by: ${existingUsers.join(", ")}. Change the list under Label Access.`
+                : "Admins can grant specific users under Label Access."}
+        </p>
+
         {datatype === "select" && (
           <div className="label-modal__options-section">
-            <label className="label-modal__label">
-              Initial Values
-            </label>
+            <label className="label-modal__label">Initial Values</label>
             <p className="label-modal__options-hint">
               {isEdit
                 ? "Options are read-only in edit mode."
@@ -227,9 +278,7 @@ export default function LabelDefModal({
           </div>
         )}
 
-        {error && (
-          <p className="label-modal__error">{error}</p>
-        )}
+        {error && <p className="label-modal__error">{error}</p>}
 
         <div className="label-modal__actions">
           <button onClick={onClose} className="btn-outline">

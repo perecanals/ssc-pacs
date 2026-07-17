@@ -156,7 +156,7 @@ Two services and two databases. Full topology + request/ingest flows: `docs/refe
 - `patient` is the **patient-level spine** (one row per patient, ingest-populated), and is **imaging-derived only** — clinical variables belong in `annotations` as patient-level labels (`scripts/admin/bulk_set_label_values.py`), never as new columns here (Alembic `0017` added one, `0018` took it back out).
 - `lvo_clinical_data` is retired as a roster — joined only to prefer its clinical `stroke_date` via `COALESCE(c.stroke_date, p.stroke_date::date::text)` (the cast is load-bearing: it keeps both branches text so the lexicographic date sort holds), never otherwise queried. It is also **optional**: a deployment may not have the table, so every read is guarded (`common.table_exists` / `inspect(...).has_table`). Without it, `stroke_date` falls back to imaging and timepoints anchor on each episode's own thrombectomy study.
 
-**Annotation model:** three levels (`patient`/`study`/`series`); annotations are shared (one value per entity+label; `created_by` = last editor); parent-level values inherit downward; cross-level filtering is supported; every write is captured in `annotations_history` by a PL/pgSQL trigger (`docs/operations/annotation_history.md`).
+**Annotation model:** three levels (`patient`/`study`/`series`); annotations are shared (one value per entity+label; `created_by` = last editor — the upsert overwrites it, so only `annotations_history` knows the original author); parent-level values inherit downward; cross-level filtering is supported; every write is captured in `annotations_history` by a PL/pgSQL trigger (`docs/operations/annotation_history.md`). **Who may edit a label's values** is a property of the label: `label_definitions.edit_policy` (`everyone`/`nobody`/`users`) + `edit_users text[]` (Alembic `0019`) — allow-by-default, **no admin bypass**, owner (`created_by`) or admin may change it. See architecture.md §5.5.
 
 **Storage modes** (`config.toml [storage].mode`):
 - `legacy` — the Folder Indexer reads loose DICOMs from `dicom_data_root`.
@@ -165,6 +165,7 @@ Two services and two databases. Full topology + request/ingest flows: `docs/refe
 **Auth:**
 - End users live in the PostgreSQL `users` table (bcrypt, SSOT); login returns an HttpOnly JWT cookie.
 - **Per-user dataset access**: `users.allowed_datasets text[]` gates the `patient.dataset` cohorts a non-admin may see (deny-by-default: empty = no data; admins bypass). Enforced on every patient-data endpoint + the DICOMweb proxy (`web-app/dataset_access.py`). See architecture.md §5.4.
+- **Per-label edit access**: `label_definitions.edit_policy`/`edit_users` gate who may *write* a label's values (allow-by-default; admins do **not** bypass — deliberately the opposite of dataset access). Enforced on annotation write/delete (`common.can_edit_label`); managed at `/admin/labels`. See architecture.md §5.5.
 - The Web App reverse-proxies `/ohif/*` and `/dicom-web/*` to Orthanc (`routes/proxy.py`, async `httpx`) with the service-account Basic auth from `.env`; end users never present Orthanc credentials.
 - `orthanc_users.json` holds only the service account + admin users; written by `scripts/admin/manage_users.py` (admin mirroring) and `scripts/admin/rotate_service_account.py` (`rotate` rewrites `.env` + JSON atomically).
 
