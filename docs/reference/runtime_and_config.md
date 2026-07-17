@@ -119,7 +119,7 @@ auth model, runtime split, and provisioning flow are canonical in
 ## Deployment order (high level)
 
 1. Host prerequisites: Docker, PostgreSQL, Python, Node/npm for builds, DICOM tree
-2. Create `.env`; set storage mode + paths in `config.toml`
+2. Create `.env`; `cp config.example.toml config.toml` and set storage mode + paths
 3. `python3 -m pip install -r requirements.txt` (stack script deps; run from the
    stack root, `stanford-stroke-pacs/`)
 4. `./init_orthanc_db.sh`
@@ -187,7 +187,7 @@ above the stack root — not under `stanford-stroke-pacs/`.)
 stanford-stroke-pacs/
 ├── .env                          # Local secrets and connection settings
 ├── .env.example                  # Template for .env (secrets only)
-├── config.toml                   # Non-secret paths, storage mode, session length, backup settings (REQUIRED)
+├── config.toml                   # Non-secret paths, storage mode, session length, backup settings (REQUIRED; per-host, from config.example.toml)
 ├── deploy.env.example            # Per-host service-unit identity overrides (copy → deploy.env, gitignored)
 ├── orthanc_users.json            # Service account + admin users only (managed by manage_users.py)
 ├── docker-compose.yml            # Orthanc only (Linux base; DICOM mount via ${DICOM_MOUNT_SOURCE})

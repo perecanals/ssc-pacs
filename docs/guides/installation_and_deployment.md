@@ -129,8 +129,10 @@ one place (default `8042` / `4242` if unset).
 
 Non-secret web app tuning (storage paths, storage mode, session length) lives in
 the stack-root **`config.toml`** (loaded by `web-app/config.py`). `config.toml` is
-**required** — the web app fails fast at startup if it is missing — and ships in
-the repo; edit it in place for this host. Per-host service-unit identity (OS user,
+**required and per-host** (gitignored): `cp config.example.toml config.toml` and
+set the installation-specific values. The web app fails fast at startup if the
+file — or any required `[storage]` key (mode, data roots) — is missing; those
+keys have no built-in defaults. Per-host service-unit identity (OS user,
 repo path, conda python) is auto-derived by the installers and overridable in
 `deploy.env` (`cp deploy.env.example deploy.env`). See the
 [config sources map](../reference/configuration_sources.md).

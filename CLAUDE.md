@@ -46,7 +46,7 @@ work, not as an afterthought:
 
 ```
 ssc-pacs/                     # git checkout root (Makefile, CI, root scripts)
-├── stanford-stroke-pacs/     # stack root — .env, config.toml, orthanc.json, docker-compose.yml live HERE
+├── stanford-stroke-pacs/     # stack root — .env, config.toml (per-host, from config.example.toml), orthanc.json, docker-compose.yml live HERE
 │   ├── web-app/              # FastAPI backend + React frontend (port 8043)
 │   ├── alembic/              # stanford-stroke DB migrations (alembic.ini alongside); web-app runs them at startup
 │   ├── scripts/              # utility scripts (see scripts/README.md); _lib.sh = shared helpers
@@ -191,6 +191,7 @@ Depends on the `ssc-orthanc:patched-indexer` image + `"RemoveMissingFiles": fals
 ## Key caveats
 
 - `docker-compose.yml` uses `env_file: .env` (relative to the compose file); `stanford-stroke-pacs/.env` must exist.
+- `config.toml` is per-host and gitignored (`cp config.example.toml config.toml`); installation-specific keys (`[storage]` mode + data roots, `[backup].backup_root`) have **no built-in defaults** — the web app and backup scripts refuse to run until they are set.
 - The stack depends on the custom `ssc-orthanc:patched-indexer` image; build it on the host before `dc.sh up`.
 - `scripts/admin/teardown.sh` is destructive; it resolves `.env` and the compose dir from the stack root (`$SCRIPT_DIR/../..`) and is confirmation-guarded — use with care.
 - `orthanc_users.json` must never be edited manually; always use `scripts/admin/manage_users.py` (admin users) or `scripts/admin/rotate_service_account.py` (service-account rotation).

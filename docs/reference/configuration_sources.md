@@ -22,8 +22,12 @@ Nothing else (compose, service units, `orthanc.json`) should need hand-editing.
 | **Non-secret ops** | `config.toml` | storage mode + paths, cold-cache tuning, backup settings, session/auth tuning | `web-app/config.py`, `scripts/orthanc/dc.sh`, `scripts/backup/*` (via `config_get`, which parses TOML with the `resolve_python` interpreter — `tomllib` needs Python ≥ 3.11, so a bare systemd `python3` is not good enough and `config_get` WARNs when it must fall back) |
 | **Per-host identity** | `deploy.env` (optional; auto-derived) | OS user/group, repo path, python/uvicorn bin, Homebrew prefix, conda env, Postgres cluster identity (`PG_OS_USER`/`PG_BIN`/`PGDATA`) | `scripts/linux/install_systemd.sh`, `scripts/linux/provision_postgres.sh` (`PG_OS_USER`/`PG_BIN`/`PGDATA`), `scripts/macos/install_launchd.sh` (`PGDATA`), `scripts/_lib.sh` (`resolve_python` reads `PYTHON_BIN`/`CONDA_ENV_BIN` at runtime) |
 
-`.env` and `deploy.env` are gitignored. `config.toml` is **version-controlled and
-required** — `web-app/config.py` fails fast if it is missing.
+`.env`, `deploy.env`, and `config.toml` are all gitignored (per-host); each has
+a committed `*.example` template. `config.toml` is **required** —
+`web-app/config.py` fails fast if it is missing, and refuses to start when an
+installation-specific key (`[storage]` `mode` / `dicom_data_root` /
+`cold_archive_root`) is absent. Benign tuning knobs fall back to built-in
+defaults with a logged warning.
 
 ---
 
@@ -32,7 +36,7 @@ required** — `web-app/config.py` fails fast if it is missing.
 | File | Holds | Secret? | In git? | Authoritative or derived | Per-host edit on fresh deploy? |
 |---|---|---|---|---|---|
 | `.env` | DB + Orthanc-service-account creds, `JWT_SECRET`, `ORTHANC_URL`, optional `ORTHANC_HTTP_PORT`/`ORTHANC_DICOM_PORT` | **Yes** | No (`.env.example` is) | **Authoritative** for all secrets | **Yes** — copy from `.env.example`, fill in |
-| `config.toml` | `[storage]` mode + paths + cold-cache tuning, `[backup]`, `[web-app]` session/auth + `clinical_episode_date_column` | No | Yes (required) | **Authoritative** for non-secret ops | **Yes** — set mode + paths for this host |
+| `config.toml` | `[storage]` mode + paths + cold-cache tuning, `[backup]`, `[web-app]` session/auth + `clinical_episode_date_column` | No | No (`config.example.toml` is) | **Authoritative** for non-secret ops | **Yes** — copy from `config.example.toml`, set mode + paths for this host |
 | `deploy.env` | per-host service-unit identity (user, paths, conda) | No | No (`deploy.env.example` is) | **Authoritative** override; else auto-derived | Only if auto-derivation is wrong |
 | `orthanc.json` | Orthanc structural config: ports (in-image default), Folder Indexer (`ScanRoots: ["/dicom-data"]`, `Folders: []`, `RemoveMissingFiles:false`), plugins | No | Yes | **Authoritative** for Orthanc structure; ports are overridable from `.env` | No |
 | `orthanc_users.json` | Orthanc service-account + admin plaintext creds | **Yes** | No | **Derived** from `.env` + DB via `manage_users.py` | No — never hand-edit |
@@ -59,7 +63,7 @@ required** — `web-app/config.py` fails fast if it is missing.
 | Web-app HTTP port | `config.toml` `[web-app].port` (per-host override: `deploy.env` `WEBAPP_PORT`) | rendered service units, Vite dev proxy (`WEBAPP_PORT` env), SSH-tunnel helpers (`scripts/connectivity/tunnel/*` — **hardcoded**, edit by hand) | the two installers substitute `__WEBAPP_PORT__` at install time — **re-run the installer after changing it**, and update the tunnel helpers to match |
 | Episode-date source column | `config.toml` `[web-app].clinical_episode_date_column` (default `stroke_date`) | the patient tab's Episode Date (`/api/patients` COALESCE over the optional `clinical_data` table) | validated as a strict SQL identifier at startup (the web-app refuses to start otherwise); if the column is missing from `clinical_data` it falls back to `stroke_date` with a startup WARN |
 | Per-host user / repo path / conda bin | `deploy.env` (or auto-derived) | every rendered service unit | the two installers substitute `__TOKENS__` |
-| Effective non-secret config | `config.toml` | — | `web-app/config.py` fails fast if absent, WARNs on missing keys, and logs the effective values at startup (`startup: effective config`) |
+| Effective non-secret config | `config.toml` | — | `web-app/config.py` fails fast if the file or a required `[storage]` key is absent, WARNs when a benign key falls back to its default, and logs the effective values at startup (`startup: effective config`) |
 
 The first row is the only pair with no fully-automatic enforcement at runtime —
 run `python scripts/admin/rotate_service_account.py check` after any manual
@@ -70,7 +74,9 @@ edit (it exits non-zero on mismatch, so it also works from a healthcheck).
 ## Fresh-deploy: what you actually edit
 
 1. **`.env`** — `cp .env.example .env`, fill DB creds, `JWT_SECRET`, service-account password.
-2. **`config.toml`** — set `[storage].mode` and the storage paths for this host.
+2. **`config.toml`** — `cp config.example.toml config.toml`, set `[storage].mode`,
+   the storage paths, and `[backup].backup_root` for this host (the required
+   keys have no built-in defaults — the app refuses to start without them).
 3. **`deploy.env`** *(optional)* — `cp deploy.env.example deploy.env` only if the
    installers' auto-derived user/paths are wrong for this host.
 
@@ -86,8 +92,10 @@ full ordered sequence is in
 - **Secrets** → always `.env`. Never commit them; never duplicate a secret into a
   non-secret file by hand (the one mirror, `orthanc_users.json`, is tool-managed).
 - **Non-secret ops** → always `config.toml`. `web-app/config.py` and the shell
-  scripts (`config_get`) read it; built-in defaults are last-resort only and
-  trigger a WARNING when used.
+  scripts (`config_get`) read it. Installation-specific keys (`[storage]` mode +
+  data roots, `[backup].backup_root`) have **no built-in fallbacks** — readers
+  error out until they are configured. Benign tuning knobs fall back to
+  built-in defaults and trigger a WARNING when used.
 - **Per-host identity** → auto-derived by the installers and by `scripts/_lib.sh:resolve_python`; `deploy.env` overrides (no interpreter paths are hardcoded in tracked files).
 - **Bring the stack up via `scripts/orthanc/dc.sh`**, not bare `docker compose` —
   it is what resolves the DICOM mount from `config.toml` and selects the macOS

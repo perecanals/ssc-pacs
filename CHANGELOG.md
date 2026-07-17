@@ -18,6 +18,20 @@
   Internal keys, API fields, and saved preferences are unchanged.
 - Docs no longer frame `image_ingestion_protocols/` as SSC-specific — the
   pipeline is general; only the clinical enrichment is optional.
+- **Change**: `config.toml` is now **per-host and gitignored** (like `.env`),
+  with a committed `config.example.toml` template. Installation-specific keys
+  lost their hardcoded fallbacks: the web app refuses to start without
+  `[storage]` `mode` / `dicom_data_root` / `cold_archive_root` (it also
+  validates the mode value), and the backup scripts refuse to run without
+  `[backup].backup_root`. Benign tuning knobs keep defaults (with the existing
+  fallback WARN). CI copies the example into place. **Existing clones**: `git
+  pull` deletes the previously tracked `config.toml` — recreate it from
+  `config.example.toml` (production's copy on this host is preserved).
+- **Fix**: `cleanup_loose_dicoms.py` and `repair_dicomweb_metadata_cache.py`
+  defaulted the Orthanc DB name to `orthanc` (canonical: `orthanc_db`);
+  `check_backup_freshness.sh` now takes the DB names from `.env` instead of
+  hardcoding them. Deliberately untouched: client-side tunnel helpers (can't
+  read the server's config.toml) and universal defaults (ports, localhost).
 - Migration `0020_rename_clinical_data` renames the table; `ALTER TABLE IF
   EXISTS` makes it a clean no-op on deployments without it.
 
