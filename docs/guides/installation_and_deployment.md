@@ -518,6 +518,12 @@ The repo ships per-platform tunnel helpers that forward all three ports
 (`8042`, `8043`, `4242`): `scripts/connectivity/tunnel/linux/tunnel.sh`,
 `.../macos/tunnel.command`, and `.../windows/tunnel.cmd`.
 
+> **Non-default ports.** The tunnel helpers **hardcode the default ports** —
+> they are end-user templates, not consumers of `config.toml`. If this
+> deployment changes `[web-app].port` (or the Orthanc ports via `.env`
+> `ORTHANC_HTTP_PORT`/`ORTHANC_DICOM_PORT`), edit the forwards in the three
+> helper scripts to match and redistribute them to users.
+
 ---
 
 ## 8. Developer setup
