@@ -45,9 +45,24 @@ done
 # shellcheck source=../_lib.sh
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../_lib.sh"
 
-BACKUP_ROOT="${BACKUP_ROOT:-$(config_get backup backup_root /DATA2/ssc-pacs-backups)}"
+# backup_root is installation-specific: no hardcoded fallback, configure it or
+# pass BACKUP_ROOT=... explicitly for a one-off run.
+BACKUP_ROOT="${BACKUP_ROOT:-$(config_get backup backup_root "")}"
+if [[ -z "$BACKUP_ROOT" ]]; then
+    echo "ERROR: [backup].backup_root is not configured in config.toml" \
+         "(copy config.example.toml and set it, or pass BACKUP_ROOT=... for a one-off run)" >&2
+    exit 2
+fi
 MAX_AGE_HOURS="${MAX_AGE_HOURS:-$(config_get backup max_age_hours 36)}"
-DBS=("orthanc_db" "stanford-stroke")
+# Dump subdirs are named after the databases; take the names from .env when
+# present so a renamed DB doesn't silently pass freshness on stale dirs.
+if [[ -r "$STACK_DIR/.env" ]]; then
+    set -a
+    # shellcheck disable=SC1091
+    . "$STACK_DIR/.env"
+    set +a
+fi
+DBS=("${PG_ORTHANC_DB:-orthanc_db}" "${DB_NAME:-stanford-stroke}")
 
 now_epoch=$(date +%s)
 max_age_sec=$(( MAX_AGE_HOURS * 3600 ))
