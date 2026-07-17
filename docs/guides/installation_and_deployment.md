@@ -82,6 +82,9 @@ The host should satisfy all of the following:
   - `4242` for Orthanc DICOM
   - `8043` for the web app app
 - writable checkout of this repository
+- a conda (or equivalent) Python **3.12+** environment for the stack — the
+  docs assume one named `ssc-pacs`; Node.js **20+** for the frontend build
+  (build-time only, §5 Step 7)
 - filesystem path for the DICOM repository chosen and available
 
 For the helper scripts, install Python packages from the **stack root**
@@ -171,7 +174,11 @@ Use this order for a new deployment.
 If the host already runs a suitable PostgreSQL server, this is a no-op — the
 script adopts it. If not, it provisions one safely (system OS user, `initdb`
 with `peer`/`scram-sha-256` auth, `ssc-postgres.service`). It never touches an
-existing data directory and never installs PostgreSQL binaries:
+existing data directory and never installs PostgreSQL binaries.
+
+**Provisioning a fresh cluster requires `PGDATA` in `deploy.env`** (this is the
+one case where `deploy.env` is not optional; add `PG_BIN` too when more than
+one PostgreSQL major is installed — see `deploy.env.example`):
 
 ```bash
 scripts/linux/provision_postgres.sh --check       # audit what exists
@@ -179,7 +186,8 @@ scripts/linux/provision_postgres.sh               # dry-run the plan
 sudo scripts/linux/provision_postgres.sh --execute
 ```
 
-Details, decision tree, and the version floor:
+Details, decision tree, the version floor, and the recommended host-wide
+`RemoveIPC=no` logind drop-in (defense in depth, §4 there):
 [`../operations/postgres_provisioning.md`](../operations/postgres_provisioning.md).
 (macOS: Homebrew Postgres per [`deployment_on_mac.md`](deployment_on_mac.md);
 there is no OS `postgres` user there and this script does not apply.)
@@ -444,6 +452,7 @@ curl -s -b cookies.txt 'http://localhost:8043/api/series?per_page=5' | python3 -
 The repo includes:
 
 ```bash
+scripts/linux/provision_postgres.sh --check   # cluster invariants — expect 0 findings
 ./scripts/orthanc/check_status.sh
 python scripts/data_integrity/reconcile.py
 ```
