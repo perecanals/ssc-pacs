@@ -81,7 +81,7 @@ production on 2026-04-15. They fall in three groups:
 | Group | Tables | Managed by |
 |---|---|---|
 | web-app-owned | `annotations`, `label_definitions`, `users`, `user_preferences`, `series_cache_state` | Future Alembic revisions (the per-study `cache_state` and dead `orthanc_resource_map` were replaced/dropped by `0010_series_cache_state`) |
-| Upstream raw | `patient`, `image_series`, `image_study`, `lvo_clinical_data` | External ingest pipeline (out of scope for Alembic; `patient` also has a `CREATE TABLE IF NOT EXISTS` bootstrap in revision `0006`) |
+| Upstream raw | `patient`, `image_series`, `image_study`, `clinical_data` | External ingest pipeline (out of scope for Alembic; `patient` also has a `CREATE TABLE IF NOT EXISTS` bootstrap in revision `0006`) |
 | Dynamic labelled mirrors | `image_series_labelled`, `image_study_labelled`, `patient_labelled` | `web-app/labelled_table_sync.py`, based on `label_definitions`. Refreshed **in the background after each annotation write** (eventually consistent — not in the request transaction) plus on demand via the "Refresh Labelled Tables" button, bulk-label scripts, and image ingest. (The `snapshot_*` tables that once lived here were dropped by `0013_drop_snapshot_tables`.) |
 
 The upstream and dynamic groups are excluded from Alembic's `--autogenerate`
@@ -159,7 +159,7 @@ diff <(grep -v -E '^(\\restrict|\\unrestrict|-- Dumped|-- PostgreSQL)' /tmp/prod
       raise NotImplementedError("Migration <NNNN> is irreversible: <reason>")
   ```
 - Touch only web-app-owned tables. Changes to upstream tables
-  (`image_*`, `lvo_clinical_data`) belong in the external ingest project.
+  (`image_*`, `clinical_data`) belong in the external ingest project.
 
 ### Destructive downgrades — read before running `downgrade`
 

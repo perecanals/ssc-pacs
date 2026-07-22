@@ -131,18 +131,32 @@ function DataTableInner({
     resetColumns,
   } = useColumnPrefs(labelDefs, builtinCols, level, serverPrefs);
 
-  // A sidebar label quick-filter enables that label's column the same way a
-  // dropdown click would (one-time, persisted) — so the ColumnSelector
-  // checkbox reflects it and the user can hide it again without clearing the
-  // filter. Keyed only on the filter changing: a later manual hide is not
-  // undone, and clearing the filter leaves the column as the user left it.
-  const labelFilterKey = filters.label ? `label:${filters.label}` : null;
-  useEffect(() => {
-    if (labelFilterKey && !visibleKeys.includes(labelFilterKey)) {
-      setKeysVisible([labelFilterKey], true);
+  // A sidebar label quick-filter — the plain toggle (filters.label) or a
+  // select label's value picker (filters.labelValues) — enables that label's
+  // column the same way a dropdown click would (one-time, persisted) — so the
+  // ColumnSelector checkbox reflects it and the user can hide it again without
+  // clearing the filter. Keyed only on a filter *becoming* active (the seen
+  // ref): a later manual hide is not undone while other filters change, and
+  // clearing the filter leaves the column as the user left it.
+  const activeLabelColKeys = useMemo(() => {
+    const keys = new Set();
+    if (filters.label) keys.add(`label:${filters.label}`);
+    // labelValues is keyed "<level>:<name>"; the column key is "label:<name>".
+    for (const k of Object.keys(filters.labelValues || {})) {
+      keys.add(`label:${k.slice(k.indexOf(":") + 1)}`);
     }
+    return [...keys].sort();
+  }, [filters.label, filters.labelValues]);
+  const activeLabelColSig = JSON.stringify(activeLabelColKeys);
+  const seenLabelColKeysRef = useRef(new Set());
+  useEffect(() => {
+    const fresh = activeLabelColKeys.filter(
+      (k) => !seenLabelColKeysRef.current.has(k) && !visibleKeys.includes(k),
+    );
+    if (fresh.length) setKeysVisible(fresh, true);
+    seenLabelColKeysRef.current = new Set(activeLabelColKeys);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [labelFilterKey]);
+  }, [activeLabelColSig]);
 
   const { items, total, loading, hasMore, loadMore, reload, resetNonce } =
     useTableData({

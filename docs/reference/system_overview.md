@@ -168,7 +168,7 @@ One PostgreSQL server hosts both. Connection params and credentials are in
 ┌─ stanford-stroke ────────────────────────────────┐
 │  upstream / research metadata (read-only to app):│
 │  ├── patient               (patient level)       │
-│  ├── lvo_clinical_data     (clinical side-table)  │
+│  ├── clinical_data     (clinical side-table)  │
 │  ├── image_study           (study level)         │
 │  └── image_series          (series level)        │
 │       ├── dicom_dir_path                         │
@@ -337,8 +337,8 @@ macOS Archive Utility handles the resulting zip natively.
 
 ## 7. Ingest flow (new imaging data)
 
-`image_ingestion_protocols/` is the SSC-specific pipeline. One run per
-batch:
+`image_ingestion_protocols/` is the ingestion pipeline (general; clinical
+enrichment is optional). One run per batch:
 
 ```
   source case dir
@@ -347,7 +347,7 @@ batch:
   scan + group → case_series_table, case_study_table
         │
         ▼
-  filter existing / validate against lvo_clinical_data
+  filter existing / validate against clinical_data
         │
         ▼
   copy DICOMs →  dicom_data_root/.../DICOM/
@@ -401,13 +401,14 @@ canonical in [`architecture.md`](architecture.md) §5.
 
 ---
 
-## 9. Portable vs site-specific
+## 9. Portable vs deployment-specific
 
 The Orthanc + OHIF + Explorer 2 + custom-indexer layer, the Web App, the
 `cold_path_cache` stack, and `manage_users.py` / `init_orthanc_db.sh` are
-portable; `image_ingestion_protocols/` is SSC-specific. The full portability
-breakdown and fresh-deployment guidance are canonical in
-[`architecture.md`](architecture.md) §7.
+portable; `image_ingestion_protocols/` is general too, with only its inputs
+(source DICOM layout, optional `clinical_data` enrichment) varying per
+deployment. The full portability breakdown and fresh-deployment guidance are
+canonical in [`architecture.md`](architecture.md) §7.
 
 ---
 

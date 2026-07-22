@@ -68,7 +68,7 @@ from config import DICOM_DATA_ROOT, STORAGE_MODE  # noqa: E402
 ORTHANC_DB_CONFIG = dict(
     host=os.getenv("DB_HOST", "localhost"),
     port=os.getenv("DB_PORT", "5432"),
-    dbname=os.getenv("PG_ORTHANC_DB", "orthanc"),
+    dbname=os.getenv("PG_ORTHANC_DB", "orthanc_db"),
     user=os.getenv("PG_ORTHANC_USER"),
     password=os.getenv("PG_ORTHANC_PASSWORD"),
 )

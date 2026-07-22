@@ -55,8 +55,9 @@ schema** for you (§3, via Alembic) — you do **not** need a pre-existing
 metadata layer. What you must supply is the *content*: real rows in the upstream
 `patient` / `image_study` / `image_series` tables (loaded from your source
 metadata or the ingestion pipeline — §5 Step 3d) and the matching DICOM tree on
-disk. `image_ingestion_protocols/` is legacy/site-specific pipeline code, not the
-normal bootstrap path for a fresh install.
+disk. `image_ingestion_protocols/` is the general pipeline for that; only its
+clinical-enrichment step (the optional `clinical_data` table) is skipped when a
+deployment has no clinical source.
 
 ---
 
@@ -128,8 +129,10 @@ one place (default `8042` / `4242` if unset).
 
 Non-secret web app tuning (storage paths, storage mode, session length) lives in
 the stack-root **`config.toml`** (loaded by `web-app/config.py`). `config.toml` is
-**required** — the web app fails fast at startup if it is missing — and ships in
-the repo; edit it in place for this host. Per-host service-unit identity (OS user,
+**required and per-host** (gitignored): `cp config.example.toml config.toml` and
+set the installation-specific values. The web app fails fast at startup if the
+file — or any required `[storage]` key (mode, data roots) — is missing; those
+keys have no built-in defaults. Per-host service-unit identity (OS user,
 repo path, conda python) is auto-derived by the installers and overridable in
 `deploy.env` (`cp deploy.env.example deploy.env`). See the
 [config sources map](../reference/configuration_sources.md).
@@ -244,7 +247,7 @@ The stack uses **two databases on one PostgreSQL server** (see
 [`../reference/configuration_sources.md`](../reference/configuration_sources.md)):
 
 - **`stanford-stroke`** — the research/app DB. Holds the upstream metadata
-  (`patient`, `image_study`, `image_series`, optional `lvo_clinical_data`) **and**
+  (`patient`, `image_study`, `image_series`, optional `clinical_data`) **and**
   the web-app-owned tables (`users`, `annotations`, `annotations_history`,
   `label_definitions`, `user_preferences`, `series_cache_state`, and the
   `*_labelled` mirrors).
@@ -281,7 +284,7 @@ Optionally tighten the runtime role afterwards: `ALTER ROLE "<DB_USER>" NOCREATE
 
 **3c. Create the schema in `stanford-stroke`.** Alembic is the single source of
 truth for the DDL — one `upgrade head` creates the upstream `patient` /
-`image_study` / `image_series` tables, the `lvo_clinical_data` side-table, and
+`image_study` / `image_series` tables, the `clinical_data` side-table, and
 the web-app-owned tables. `web-app/app.py` runs `alembic upgrade head`
 automatically at first startup (Step 8), so you can skip ahead. Run it manually
 now only if you want the upstream spine to exist before loading data in Step 3d:
@@ -297,7 +300,7 @@ alembic upgrade head
 
 **3d. Load the upstream data.** Creating the tables does **not** populate them.
 Load your real `patient` / `image_study` / `image_series` rows from your source
-(a dump from an existing system, your own CSV loader, or the site-specific
+(a dump from an existing system, your own CSV loader, or the
 `image_ingestion_protocols/` pipeline). The web app browses these tables, so it
 will be empty until they are populated.
 
@@ -667,10 +670,10 @@ them.
 
 `image_ingestion_protocols/`
 
-- legacy Stanford Stroke Center–specific metadata ingestion and correction
-  pipeline
-- not required just to deploy PACS services
-- only relevant if recreating the same upstream metadata-generation workflow
+- the imaging-metadata ingestion pipeline — general, but only needed when
+  ingesting new imaging data, not to deploy the PACS services themselves
+- its clinical-enrichment step reads the optional `clinical_data` table and is
+  skipped automatically when a deployment has no clinical source
 
 ---
 

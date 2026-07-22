@@ -1,5 +1,40 @@
 # Changelog
 
+## v1.17 — 2026-07-17
+
+- **Change**: the clinical side-table is renamed `lvo_clinical_data` →
+  `clinical_data` — it was never LVO-specific in function, only in origin. The
+  table remains **optional**: every reader is guarded and a deployment without
+  it degrades exactly as before. Its patient-id column keeps the historical
+  `study_id` name. **External processes that populate the table (the REDCap
+  export import) must write to `clinical_data` after this deploys.**
+- **Feature**: `config.toml [web-app] clinical_episode_date_column` selects
+  which `clinical_data` column supplies the patient tab's episode date
+  (default `stroke_date`, the previous behavior). Validated as a strict SQL
+  identifier at startup (the app refuses to start otherwise); a configured
+  column missing from the table falls back to `stroke_date` with a startup
+  WARN.
+- **UI**: the patient column header reads "Episode Date" (was "Stroke Date").
+  Internal keys, API fields, and saved preferences are unchanged.
+- Docs no longer frame `image_ingestion_protocols/` as SSC-specific — the
+  pipeline is general; only the clinical enrichment is optional.
+- **Change**: `config.toml` is now **per-host and gitignored** (like `.env`),
+  with a committed `config.example.toml` template. Installation-specific keys
+  lost their hardcoded fallbacks: the web app refuses to start without
+  `[storage]` `mode` / `dicom_data_root` / `cold_archive_root` (it also
+  validates the mode value), and the backup scripts refuse to run without
+  `[backup].backup_root`. Benign tuning knobs keep defaults (with the existing
+  fallback WARN). CI copies the example into place. **Existing clones**: `git
+  pull` deletes the previously tracked `config.toml` — recreate it from
+  `config.example.toml` (production's copy on this host is preserved).
+- **Fix**: `cleanup_loose_dicoms.py` and `repair_dicomweb_metadata_cache.py`
+  defaulted the Orthanc DB name to `orthanc` (canonical: `orthanc_db`);
+  `check_backup_freshness.sh` now takes the DB names from `.env` instead of
+  hardcoding them. Deliberately untouched: client-side tunnel helpers (can't
+  read the server's config.toml) and universal defaults (ports, localhost).
+- Migration `0020_rename_clinical_data` renames the table; `ALTER TABLE IF
+  EXISTS` makes it a clean no-op on deployments without it.
+
 ## v1.16 — 2026-07-17
 
 - **Fix**: OHIF's study-browser panel (patient-scoped QIDO search) returned 403

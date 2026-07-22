@@ -154,15 +154,15 @@ def main() -> int:
         study_params.append(args.patient)
 
     with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-        # lvo_clinical_data is optional (site-specific import). Without it every
+        # clinical_data is optional (a deployment may not have it). Without it every
         # anchor column reads NULL — the exact shape a patient with no clinical
         # row already yields — so `resolve_event_anchor` returns no anchor and
         # each episode falls back to its own thrombectomy study.
-        if table_exists(cur, "lvo_clinical_data"):
+        if table_exists(cur, "clinical_data"):
             clinical_cols = (
                 "c.femoral_sheath_time, c.receiving_arrival_time, c.time_recognized"
             )
-            clinical_join = "LEFT JOIN lvo_clinical_data c ON c.study_id = st.patient_id"
+            clinical_join = "LEFT JOIN clinical_data c ON c.study_id = st.patient_id"
         else:
             clinical_cols = (
                 "NULL::text AS femoral_sheath_time, "
