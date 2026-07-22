@@ -209,7 +209,7 @@ viewing session.
 This addresses repeat opens only. A *first* load still transfers the full
 ~21 MiB: Orthanc ignores `Accept-Encoding`, so nothing is compressed.
 
-#### OHIF trackpad scroll damping
+#### OHIF viewport input shim (trackpad + arrow keys)
 
 Cornerstone3D scrolls one slice per wheel *event*, ignoring delta magnitude —
 right for mouse detents, but a trackpad swipe fires dozens of small events and
@@ -221,14 +221,20 @@ nothing in the plugin is patched, so this survives OHIF upgrades.
 The shim acts only on Cornerstone viewports and only on trackpad-like events
 (pixel-mode deltas that are not multiples of the 120 detent quantum): it
 accumulates `deltaY`, swallowing events until the tally crosses
-`[web-app].ohif_trackpad_px_per_slice` (`config.toml`, default 100; `0`
-disables), then lets that event through — one slice. Mouse wheels are
-unaffected either way: they bypass the accumulator, and a single detent
-clears the default threshold regardless.
+`[web-app].ohif_trackpad_px_per_slice` (`config.toml`, default 50; `0`
+disables the whole shim), then lets that event through — one slice. Mouse
+wheels are unaffected either way: they bypass the accumulator, and a single
+detent clears the default threshold regardless.
+
+The same shim makes ArrowUp/ArrowDown slice navigation reliable: OHIF's own
+up/down hotkeys drop keys depending on focus, so the shim owns those keys
+(except while typing in a field) and turns each press into a synthetic
+one-detent wheel on the last-clicked viewport — click the image, then arrows
+just work.
 
 Live tuning per browser, no restart: `localStorage.sscTrackpadPxPerSlice`
-overrides the threshold; `localStorage.sscTrackpadShimOff = '1'` is a kill
-switch. Persist the tuned value in `config.toml`.
+overrides the threshold; `localStorage.sscTrackpadShimOff = '1'` disables the
+damping (arrows stay). Persist the tuned value in `config.toml`.
 
 #### DICOMweb URL relativization
 

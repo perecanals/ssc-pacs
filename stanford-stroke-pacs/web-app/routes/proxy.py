@@ -60,29 +60,38 @@ def is_immutable_ohif_asset(path: str) -> bool:
 
 
 # ---------------------------------------------------------------------------
-# OHIF trackpad scroll damping
+# OHIF viewport input shim (trackpad damping + arrow-key slice navigation)
 # ---------------------------------------------------------------------------
-# Cornerstone3D scrolls one slice per wheel *event*, ignoring delta magnitude
-# — right for mouse detents, but a trackpad swipe fires dozens of small
-# events. No OHIF/plugin knob exists, so this capture-phase shim is injected
-# into the entry documents: trackpad-like events (pixel-mode, wheelDeltaY not
-# a multiple of the 120 detent quantum) accumulate, and one event per
-# `ohif_trackpad_px_per_slice` pixels reaches Cornerstone. Mouse wheels
-# bypass the accumulator — and a single detent clears the default threshold
-# regardless. Per-browser live tuning: localStorage.sscTrackpadPxPerSlice
-# (threshold) / sscTrackpadShimOff = '1' (kill switch).
+# Trackpad: Cornerstone3D scrolls one slice per wheel *event*, ignoring delta
+# magnitude — right for mouse detents, but a trackpad swipe fires dozens of
+# small events. No OHIF/plugin knob exists, so this capture-phase shim is
+# injected into the entry documents: trackpad-like events (pixel-mode,
+# wheelDeltaY not a multiple of the 120 detent quantum) accumulate, and one
+# event per `ohif_trackpad_px_per_slice` pixels reaches Cornerstone. Mouse
+# wheels bypass the accumulator — and a single detent clears the default
+# threshold regardless. Live tuning: localStorage.sscTrackpadPxPerSlice
+# (threshold) / sscTrackpadShimOff = '1' (kill switch for the damping).
+#
+# Arrows: OHIF binds up/down to previous/nextImage via its hotkeys manager,
+# which drops keys depending on focus — flaky. The shim owns ArrowUp/Down in
+# capture phase (unless typing in a field) and turns each press into a
+# synthetic one-detent wheel on the last-clicked viewport, so "click the
+# image, then arrows" always works and OHIF's own binding can't double-step.
 _OHIF_SHIM_MARKER = b"ssc-trackpad-shim"
 
 _OHIF_WHEEL_SHIM = """\
 <script id="ssc-trackpad-shim">/* injected by web-app routes/proxy.py */
 (function () {
   'use strict';
-  var acc = 0, last = 0;
+  var VP = '[data-viewport-uid], .viewport-element';
+  var acc = 0, last = 0, lastVp = null;
+  function vpOf(node) {
+    return node && node.closest ? node.closest(VP) : null;
+  }
   window.addEventListener('wheel', function (e) {
+    if (e.sscSynthetic) return;  // our own arrow-key events pass untouched
     if (localStorage.getItem('sscTrackpadShimOff') === '1') return;
-    var t = e.target;
-    if (!t || !t.closest ||
-        !t.closest('[data-viewport-uid], .viewport-element')) return;
+    if (!vpOf(e.target)) return;
     if (e.deltaMode !== 0) return;  // line/page deltas: a real wheel
     var wdy = e.wheelDeltaY;        // detent-quantized on real wheels
     if (typeof wdy === 'number' && wdy !== 0 && wdy % 120 === 0) return;
@@ -96,6 +105,27 @@ _OHIF_WHEEL_SHIM = """\
     e.preventDefault();  // swallowed: Cornerstone never sees it
     e.stopPropagation();
   }, { capture: true, passive: false });
+  window.addEventListener('pointerdown', function (e) {
+    var vp = vpOf(e.target);
+    if (vp) lastVp = vp;
+  }, true);
+  window.addEventListener('keydown', function (e) {
+    if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
+    var a = document.activeElement, tag = a && a.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' ||
+        (a && a.isContentEditable)) return;
+    var vp = lastVp && document.contains(lastVp)
+      ? lastVp : document.querySelector(VP);
+    if (!vp) return;
+    e.preventDefault();   // the page must not scroll
+    e.stopPropagation();  // OHIF's own hotkey must not double-step
+    var evt = new WheelEvent('wheel', {
+      deltaY: e.key === 'ArrowDown' ? 120 : -120,
+      deltaMode: 0, bubbles: true, cancelable: true
+    });
+    evt.sscSynthetic = true;
+    (vp.querySelector('canvas') || vp).dispatchEvent(evt);
+  }, true);
 })();
 </script>""".replace(
     "__PX_PER_SLICE__", str(OHIF_TRACKPAD_PX_PER_SLICE)

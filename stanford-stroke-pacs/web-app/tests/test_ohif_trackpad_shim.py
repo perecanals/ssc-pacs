@@ -68,6 +68,12 @@ class TestInjectWheelShim:
         # the browser throw and disable damping silently.
         assert b"__PX_PER_SLICE__" not in proxy._OHIF_WHEEL_SHIM
 
+    def test_shim_covers_arrow_key_navigation(self):
+        # Arrow presses become synthetic wheel events, flagged so the damping
+        # handler passes them through untouched.
+        assert b"ArrowDown" in proxy._OHIF_WHEEL_SHIM
+        assert proxy._OHIF_WHEEL_SHIM.count(b"sscSynthetic") >= 2
+
 
 # ---------------------------------------------------------------------------
 # _proxy branch, via httpx.MockTransport against the module-level client

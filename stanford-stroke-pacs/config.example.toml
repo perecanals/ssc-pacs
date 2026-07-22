@@ -77,7 +77,8 @@ login_rate_limit_per_5min = 10
 # clinical_data when the table is present (falls back to stroke_date with a
 # startup WARN if not). Irrelevant when the optional clinical table is absent.
 clinical_episode_date_column = "stroke_date"
-# OHIF slice scrolling: one wheel event per this many pixels of *trackpad*
-# scroll reaches the viewer (mouse wheels unaffected; 0 disables). Tune live
-# via localStorage.sscTrackpadPxPerSlice; see architecture.md §5.1.
+# OHIF input shim: one wheel event per this many pixels of *trackpad* scroll
+# reaches the viewer (mouse wheels unaffected), and ArrowUp/Down reliably
+# step slices. 0 disables the shim. Tune live via
+# localStorage.sscTrackpadPxPerSlice; see architecture.md §5.1.
 ohif_trackpad_px_per_slice = 50
