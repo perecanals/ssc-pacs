@@ -475,18 +475,21 @@ export default function ChildRows({
       </tbody>
     </table>
   );
-  const needsScroll = !childIsExpandable;
+  // Non-expandable child lists (series under a study) get a height-capped
+  // scroll box; expandable ones (studies under a patient) grow freely in
+  // height but still get a horizontal-only scroll wrapper — unwrapped, a wide
+  // child table would propagate its intrinsic width through the colSpan cell
+  // and widen every spanned parent column.
+  const scrollClass = childIsExpandable
+    ? "dt__child-hscroll"
+    : "dt__child-scroll";
   return (
     <tr>
       <td
         colSpan={parentColSpan}
         className={`dt__child-wrapper dt__child-wrapper--level-${childLevel}`}
       >
-        {needsScroll ? (
-          <div className="dt__child-scroll">{childTableContent}</div>
-        ) : (
-          childTableContent
-        )}
+        <div className={scrollClass}>{childTableContent}</div>
       </td>
     </tr>
   );
