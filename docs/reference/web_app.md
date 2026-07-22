@@ -335,8 +335,12 @@ Important implementation nuance:
 - this is acceptable for now, but a deeper integration would be needed for
   seamless in-place series switching without iframe reloads
 
-In **cold storage** mode, the frontend may warm the study cache before opening
-OHIF; see [`../cold_storage/design.md`](../cold_storage/design.md).
+In **cold storage** mode, the frontend warms before opening OHIF — a study
+open waits for the whole study, a series preview waits only for the clicked
+series and queues the rest of the study in the background, with the DICOMweb
+proxy holding sibling metadata requests until each series is hot (so OHIF's
+side panel fills in without error popups); see
+[`../cold_storage/design.md`](../cold_storage/design.md).
 
 ---
 

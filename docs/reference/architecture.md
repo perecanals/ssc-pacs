@@ -209,6 +209,33 @@ viewing session.
 This addresses repeat opens only. A *first* load still transfers the full
 ~21 MiB: Orthanc ignores `Accept-Encoding`, so nothing is compressed.
 
+#### DICOMweb URL relativization
+
+Orthanc's DICOMweb plugin emits **absolute** URLs in its JSON responses —
+`BulkDataURI` (overlay data `(6000,3000)`, bulk pixel data) and
+`RetrieveURL` — pointing at Orthanc itself (`http://localhost:8042/...`).
+OHIF follows `BulkDataURI` verbatim, so from the web-app origin those fetches
+went cross-origin straight at Orthanc: CORS-blocked and credential-less,
+raising a "Something went wrong" toast per overlay-bearing instance while the
+images themselves rendered fine. The proxy rewrites the base to a relative
+`/dicom-web` in every DICOMweb JSON response
+(`routes/proxy.py:rewrite_dicomweb_urls`), so the browser resolves bulkdata
+against the web-app origin and it flows through the authenticated proxy like
+every other request. Frames/bulkdata responses (multipart, non-JSON) stream
+through untouched.
+
+#### DICOMweb series-metadata warm hold (cold storage)
+
+In `cold_path_cache` mode the proxy holds a
+`/dicom-web/.../series/{uid}/metadata` request while that series is
+`queued`/`warming` and forwards it once hot
+(`routes/proxy.py:wait_for_series_warm`), instead of letting Orthanc 500 on
+the not-yet-extracted files (which surfaced as persistent "Something went
+wrong" toasts in OHIF). The frontend queues a background study warm on every
+series preview so cold siblings enter that held state before the viewer
+loads. Details: [`../cold_storage/design.md`](../cold_storage/design.md)
+§"Series previews and the OHIF side panel".
+
 ### 5.2 Orthanc auth (service account + admins only)
 
 `orthanc_users.json` is no longer a runtime user store. It contains:
