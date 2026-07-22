@@ -21,6 +21,7 @@ from starlette.responses import Response, StreamingResponse
 import cache_manager
 import dataset_access
 from auth import get_current_user
+from config import OHIF_TRACKPAD_PX_PER_SLICE
 from orthanc_client import ORTHANC_PASS, ORTHANC_URL, ORTHANC_USER
 
 router = APIRouter()
@@ -56,6 +57,66 @@ def is_immutable_ohif_asset(path: str) -> bool:
     # Match the basename — `(?:^|[.-])` excludes `/`, so searching the full
     # path would miss /ohif/<hash>.woff2.
     return bool(_CONTENTHASH_ASSET_RE.search(path.rpartition("/")[2]))
+
+
+# ---------------------------------------------------------------------------
+# OHIF trackpad scroll damping
+# ---------------------------------------------------------------------------
+# Cornerstone3D scrolls one slice per wheel *event*, ignoring delta magnitude
+# — right for mouse detents, but a trackpad swipe fires dozens of small
+# events. No OHIF/plugin knob exists, so this capture-phase shim is injected
+# into the entry documents: trackpad-like events (pixel-mode, wheelDeltaY not
+# a multiple of the 120 detent quantum) accumulate, and one event per
+# `ohif_trackpad_px_per_slice` pixels reaches Cornerstone. Mouse wheels
+# bypass the accumulator — and a single detent clears the default threshold
+# regardless. Per-browser live tuning: localStorage.sscTrackpadPxPerSlice
+# (threshold) / sscTrackpadShimOff = '1' (kill switch).
+_OHIF_SHIM_MARKER = b"ssc-trackpad-shim"
+
+_OHIF_WHEEL_SHIM = """\
+<script id="ssc-trackpad-shim">/* injected by web-app routes/proxy.py */
+(function () {
+  'use strict';
+  var acc = 0, last = 0;
+  window.addEventListener('wheel', function (e) {
+    if (localStorage.getItem('sscTrackpadShimOff') === '1') return;
+    var t = e.target;
+    if (!t || !t.closest ||
+        !t.closest('[data-viewport-uid], .viewport-element')) return;
+    if (e.deltaMode !== 0) return;  // line/page deltas: a real wheel
+    var wdy = e.wheelDeltaY;        // detent-quantized on real wheels
+    if (typeof wdy === 'number' && wdy !== 0 && wdy % 120 === 0) return;
+    var px = parseFloat(localStorage.getItem('sscTrackpadPxPerSlice'));
+    if (!(px > 0)) px = __PX_PER_SLICE__;
+    // New gesture (idle > 300 ms) or direction flip: restart the tally.
+    if (e.timeStamp - last > 300 || acc * e.deltaY < 0) acc = 0;
+    last = e.timeStamp;
+    acc += e.deltaY;
+    if (Math.abs(acc) >= px) { acc %= px; return; }  // pass: one slice
+    e.preventDefault();  // swallowed: Cornerstone never sees it
+    e.stopPropagation();
+  }, { capture: true, passive: false });
+})();
+</script>""".replace(
+    "__PX_PER_SLICE__", str(OHIF_TRACKPAD_PX_PER_SLICE)
+).encode()
+
+
+def inject_wheel_shim(body: bytes) -> bytes:
+    """Insert the trackpad shim into an OHIF entry document.
+
+    Before </head>, so the capture listener is registered before OHIF's
+    deferred bundle runs (capture-phase ordering would save us regardless;
+    this keeps the intent obvious). No-op when damping is disabled or the
+    shim is already present.
+    """
+    if OHIF_TRACKPAD_PX_PER_SLICE <= 0 or _OHIF_SHIM_MARKER in body:
+        return body
+    for anchor in (b"</head>", b"</body>"):
+        idx = body.find(anchor)
+        if idx != -1:
+            return body[:idx] + _OHIF_WHEEL_SHIM + body[idx:]
+    return body + _OHIF_WHEEL_SHIM
 
 
 async def dicomweb_dataset_guard(
@@ -265,7 +326,7 @@ def _filtered_response_headers(upstream: httpx.Response) -> dict[str, str]:
     }
 
 
-async def _proxy(request: Request) -> StreamingResponse:
+async def _proxy(request: Request) -> Response:
     client = _get_client()
     series_metadata = _SERIES_METADATA_RE.match(request.url.path)
     if series_metadata:
@@ -290,6 +351,26 @@ async def _proxy(request: Request) -> StreamingResponse:
     headers = _filtered_response_headers(upstream)
     if upstream.status_code == 200 and is_immutable_ohif_asset(request.url.path):
         headers["cache-control"] = _IMMUTABLE_CACHE_CONTROL
+    if (
+        upstream.status_code == 200
+        and request.url.path.startswith("/ohif")
+        and upstream.headers.get("content-type", "").lower().startswith("text/html")
+    ):
+        # Entry documents only (/ohif/, /ohif/viewer — a few KB, deliberately
+        # uncached): buffer and inject the trackpad shim. aread() decodes any
+        # content-encoding, so that header and the stale content-length must
+        # go; Response recomputes the length. Assets stream below untouched.
+        try:
+            html = await upstream.aread()
+        finally:
+            await upstream.aclose()
+        headers.pop("content-encoding", None)
+        headers.pop("content-length", None)
+        return Response(
+            content=inject_wheel_shim(html),
+            status_code=upstream.status_code,
+            headers=headers,
+        )
     if (
         upstream.status_code == 200
         and request.url.path.startswith("/dicom-web")
