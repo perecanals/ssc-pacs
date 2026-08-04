@@ -1,6 +1,6 @@
 # Changelog
 
-## v1.17 — 2026-07-17
+## v1.17 — 2026-08-04
 
 - **Change**: the clinical side-table is renamed `lvo_clinical_data` →
   `clinical_data` — it was never LVO-specific in function, only in origin. The
@@ -32,6 +32,18 @@
   `check_backup_freshness.sh` now takes the DB names from `.env` instead of
   hardcoding them. Deliberately untouched: client-side tunnel helpers (can't
   read the server's config.toml) and universal defaults (ports, localhost).
+- **Fix**: OHIF no longer shows error toasts on cold/warming series — series
+  metadata requests hold until the warm completes, and bulkdata URLs are
+  emitted relative so they route through the authenticated proxy.
+- **UI**: expanding a wide subtable no longer shifts the parent table's
+  columns; activating a select label's quick filter shows that label's column.
+- **Feature**: OHIF trackpad slice-scrolling is damped and ArrowUp/Down
+  reliably step one slice, via an input shim injected by the proxy. Tunable
+  per host with `config.toml [web-app] ohif_trackpad_px_per_slice`
+  (0 disables; mouse wheels unaffected).
+- **Feature**: `scripts/admin/manage_readonly_db_users.py` manages read-only
+  PostgreSQL roles for direct (e.g. notebook/SQL) access to the
+  `stanford-stroke` DB.
 - Migration `0020_rename_clinical_data` renames the table; `ALTER TABLE IF
   EXISTS` makes it a clean no-op on deployments without it.
 
