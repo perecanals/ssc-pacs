@@ -85,16 +85,16 @@ def scratch_engine():
         f"postgresql://{quote_plus(creds['user'])}:{quote_plus(creds['password'])}"
         f"@{creds['host']}:{creds['port']}/{SCRATCH_DB}"
     )
-    # Full schema (upstream image_series/image_study/patient + lvo_clinical_data
+    # Full schema (upstream image_series/image_study/patient + clinical_data
     # + web-app tables) straight from the migrations — no hand-maintained mirror.
     _alembic_upgrade(scratch_url)
 
     engine = create_engine(scratch_url)
     with engine.begin() as conn:
         # 11-001 clinically matched; 11-002 deliberately unmatched. The protocol
-        # reads only study_id + stroke_date from the (wide) lvo_clinical_data.
+        # reads only study_id + stroke_date from the (wide) clinical_data.
         conn.execute(text(
-            "INSERT INTO lvo_clinical_data (study_id, stroke_date) "
+            "INSERT INTO clinical_data (study_id, stroke_date) "
             "VALUES ('11-001', '2026-01-01')"))
 
     yield engine
@@ -177,8 +177,8 @@ def test_end_to_end_two_patients(roots, scratch_engine, capsys):
         assert res["studyinstanceuids"] == [STUDY_UIDS[pid]]
         assert res["seriesinstanceuids"] == sorted(SERIES_UIDS[pid].values())
         assert res["skipped_existing_seriesinstanceuids"] == []
-    # 11-002 has no lvo_clinical_data row -> warned, still ingested.
-    assert "11-002 is not present in lvo_clinical_data" in out
+    # 11-002 has no clinical_data row -> warned, still ingested.
+    assert "11-002 is not present in clinical_data" in out
 
     with scratch_engine.begin() as conn:
         series = conn.execute(text(
@@ -259,8 +259,8 @@ def test_drift_series_reingested_alone(roots, scratch_engine):
     assert n == 5
 
 
-def test_ingests_without_lvo_clinical_data(roots, scratch_engine):
-    """lvo_clinical_data is a site-specific import a deployment may not have.
+def test_ingests_without_clinical_table(roots, scratch_engine):
+    """clinical_data is an optional import a deployment may not have.
 
     Absent it, `load_clinical_data_table` used to raise out of `read_sql_table`
     and abort the whole run. It must instead disable clinical enrichment and let
@@ -271,7 +271,7 @@ def test_ingests_without_lvo_clinical_data(roots, scratch_engine):
 
     pid = "11-001"  # the clinically-matched patient — the interesting one
     with scratch_engine.begin() as conn:
-        conn.execute(text("ALTER TABLE lvo_clinical_data RENAME TO lvo_hidden"))
+        conn.execute(text("ALTER TABLE clinical_data RENAME TO clinical_hidden"))
     try:
         # A full protocol run, not a poke at one method: this is the path that
         # used to abort at `read_sql_table`. The series are already ingested by
@@ -290,7 +290,7 @@ def test_ingests_without_lvo_clinical_data(roots, scratch_engine):
         assert stroke.strftime("%Y%m%d") == ACQ_DATE[pid]
     finally:
         with scratch_engine.begin() as conn:
-            conn.execute(text("ALTER TABLE lvo_hidden RENAME TO lvo_clinical_data"))
+            conn.execute(text("ALTER TABLE clinical_hidden RENAME TO clinical_data"))
 
 
 if __name__ == "__main__":

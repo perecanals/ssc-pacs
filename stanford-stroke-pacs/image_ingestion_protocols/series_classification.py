@@ -630,7 +630,7 @@ def _parse_clinical_datetime(value):
 def resolve_event_anchor(clinical_row: dict | None) -> tuple[datetime | None, str | None]:
     """Return `(anchor_datetime, source_column)` for one patient's clinical row.
 
-    `clinical_row` maps the `lvo_clinical_data` column names to values. Returns
+    `clinical_row` maps the `clinical_data` column names to values. Returns
     `(None, None)` when no anchor column is populated — 26% of our patients, who
     get a NULL timepoint rather than a guess.
     """
@@ -826,7 +826,7 @@ def assign_patient_timepoints(
 
     `studies`: iterable of dicts with `studyinstanceuid`, `acquisition_datetime`
     (a datetime / pandas Timestamp / parseable string / None) and `study_type`.
-    `clinical_row`: the patient's `lvo_clinical_data` row (or None).
+    `clinical_row`: the patient's `clinical_data` row (or None).
 
     Returns `{studyinstanceuid: {episode, timepoint, hours_to_event,
     timepoint_anchor_source, timepoint_rule}}`.

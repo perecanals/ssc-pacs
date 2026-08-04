@@ -68,14 +68,24 @@ def auto_match_sql(expr: str, values: list[str] | None) -> tuple[str, list[str]]
 def table_exists(cur, name: str) -> bool:
     """Whether `public.<name>` is present.
 
-    Lets callers treat a table as optional: `lvo_clinical_data` is a
-    site-specific clinical import that a deployment may not have at all, and a
+    Lets callers treat a table as optional: `clinical_data` is an optional
+    clinical import that a deployment may not have at all, and a
     not-yet-migrated DB or a stripped test fixture may be missing side-tables.
     """
     cur.execute("SELECT to_regclass(%s) AS reg", (f"public.{name}",))
     row = cur.fetchone()
     # Tolerate either a RealDictCursor (the list endpoints) or a plain cursor.
     return (row["reg"] if isinstance(row, dict) else row[0]) is not None
+
+
+def column_exists(cur, table: str, column: str) -> bool:
+    """Whether `public.<table>` has `column` (both assumed lower-case)."""
+    cur.execute(
+        "SELECT 1 FROM information_schema.columns "
+        "WHERE table_schema = 'public' AND table_name = %s AND column_name = %s",
+        (table, column),
+    )
+    return cur.fetchone() is not None
 
 
 # ---------------------------------------------------------------------------

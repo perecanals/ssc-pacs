@@ -301,7 +301,7 @@ The Navigator page is decomposed into focused React components:
 
 | Level   | Columns                                              |
 |---------|------------------------------------------------------|
-| Patient | Patient ID, Stroke Date, Dataset, Study Import Labels (off by default) |
+| Patient | Patient ID, Episode Date, Dataset, Study Import Labels (off by default) |
 | Study   | Patient ID, Acquisition Date, Modality, Study Description, Dataset, Import ID, Import Label, **Auto Timepoint** |
 | Series  | Patient ID, Acquisition Date, Modality, Series Description, Slices, Slice Thickness (mm), Axial Coverage (mm), Dataset, Import ID, Import Label, **Auto Series Type**, **Auto Timepoint** (flat series table only by default) |
 

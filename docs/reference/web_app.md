@@ -63,7 +63,7 @@ At runtime:
 1. the browser loads the Navigator UI from FastAPI
 2. the frontend requests metadata and annotations from Web App API endpoints
 3. the backend reads source rows from `patient` (patient tab, joined to
-   `lvo_clinical_data` for the clinical `stroke_date`), `image_study`, and
+   `clinical_data` for the clinical `stroke_date`), `image_study`, and
    `image_series`
 4. the backend reads/writes web-app-owned tables such as `annotations`,
    `label_definitions`, and `users`
@@ -335,8 +335,12 @@ Important implementation nuance:
 - this is acceptable for now, but a deeper integration would be needed for
   seamless in-place series switching without iframe reloads
 
-In **cold storage** mode, the frontend may warm the study cache before opening
-OHIF; see [`../cold_storage/design.md`](../cold_storage/design.md).
+In **cold storage** mode, the frontend warms before opening OHIF — a study
+open waits for the whole study, a series preview waits only for the clicked
+series and queues the rest of the study in the background, with the DICOMweb
+proxy holding sibling metadata requests until each series is hot (so OHIF's
+side panel fills in without error popups); see
+[`../cold_storage/design.md`](../cold_storage/design.md).
 
 ---
 

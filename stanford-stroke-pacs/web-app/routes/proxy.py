@@ -7,15 +7,18 @@ no longer need entries in orthanc_users.json.
 
 from __future__ import annotations
 
+import asyncio
 import re
+import time
 from urllib.parse import parse_qsl, urlencode
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request
 from starlette.background import BackgroundTask
 from starlette.concurrency import run_in_threadpool
-from starlette.responses import StreamingResponse
+from starlette.responses import Response, StreamingResponse
 
+import cache_manager
 import dataset_access
 from auth import get_current_user
 from orthanc_client import ORTHANC_PASS, ORTHANC_URL, ORTHANC_USER
@@ -135,6 +138,65 @@ def sanitize_study_search_query(query: str) -> str:
         pairs.append((key, value))
     return urlencode(pairs)
 
+# WADO-RS series-level metadata: the request OHIF issues once per series when
+# it opens a study, to build the side panel. Orthanc answers it by reading the
+# instance files from storage, so for a series whose files are still being
+# extracted from cold storage it 500s ("series metadata json does not contain
+# an array") and OHIF pops a persistent error toast. Instead of forwarding
+# into that race, the proxy holds the request while the series is
+# 'queued'/'warming' and forwards once it turns hot — the panel entry then
+# simply appears a few seconds later. Frame/instance requests never need this:
+# OHIF only issues them after the metadata resolved, i.e. after the files are
+# back on disk.
+_SERIES_METADATA_RE = re.compile(
+    r"^/dicom-web/studies/[^/]+/series/([^/]+)/metadata$"
+)
+
+# Cap on how long one metadata request is held. Normal per-study warms finish
+# in seconds; on expiry the request is forwarded as-is (worst case: one error
+# toast, i.e. the pre-hold behavior). Stuck 'warming'/'queued' rows are not a
+# concern here — cache_manager's effective status reports them as cold after
+# WARMING_TIMEOUT_MINUTES, which also ends the hold.
+_WARM_WAIT_MAX_SECONDS = 120.0
+_WARM_WAIT_POLL_SECONDS = 0.5
+
+
+async def wait_for_series_warm(seriesinstanceuid: str) -> None:
+    """Hold until the series is no longer queued/warming (bounded).
+
+    Costs one indexed DB read per poll, off the event loop. Series without a
+    cache row (legacy mode, or never archived) report 'cold' and fall straight
+    through — the hold only ever engages while a warm is actually in flight.
+    """
+    deadline = time.monotonic() + _WARM_WAIT_MAX_SECONDS
+    while True:
+        status = (
+            await run_in_threadpool(
+                cache_manager.get_batch_series_status, [seriesinstanceuid]
+            )
+        ).get(seriesinstanceuid, "cold")
+        if status not in ("queued", "warming") or time.monotonic() >= deadline:
+            return
+        await asyncio.sleep(_WARM_WAIT_POLL_SECONDS)
+
+
+# Orthanc's DICOMweb plugin emits *absolute* URLs in its JSON responses —
+# BulkDataURI (overlay data (6000,3000), bulk pixel data (7fe0,0010), ...) and
+# RetrieveURL — built from the upstream request, i.e. pointing at
+# ORTHANC_URL itself. OHIF follows BulkDataURI verbatim, so from a page served
+# on the web app's origin the fetch goes cross-origin straight at Orthanc:
+# blocked by CORS, and end users hold no Orthanc credentials anyway (that is
+# the point of this proxy). Rewriting the base to a relative /dicom-web makes
+# the browser resolve those URLs against the web app origin, sending bulkdata
+# through the authenticated proxy like every other DICOMweb request.
+_ORTHANC_DICOMWEB_BASE = f"{ORTHANC_URL.rstrip('/')}/dicom-web".encode()
+
+
+def rewrite_dicomweb_urls(body: bytes) -> bytes:
+    """Relativize absolute Orthanc DICOMweb URLs in a JSON response body."""
+    return body.replace(_ORTHANC_DICOMWEB_BASE, b"/dicom-web")
+
+
 # Hop-by-hop headers per RFC 7230 §6.1 — must not be forwarded in either direction.
 _HOP_BY_HOP = frozenset({
     "connection",
@@ -205,6 +267,9 @@ def _filtered_response_headers(upstream: httpx.Response) -> dict[str, str]:
 
 async def _proxy(request: Request) -> StreamingResponse:
     client = _get_client()
+    series_metadata = _SERIES_METADATA_RE.match(request.url.path)
+    if series_metadata:
+        await wait_for_series_warm(series_metadata.group(1))
     upstream_url = f"{ORTHANC_URL}{request.url.path}"
     query = request.url.query
     if query and request.url.path == _STUDY_SEARCH_PATH:
@@ -225,6 +290,26 @@ async def _proxy(request: Request) -> StreamingResponse:
     headers = _filtered_response_headers(upstream)
     if upstream.status_code == 200 and is_immutable_ohif_asset(request.url.path):
         headers["cache-control"] = _IMMUTABLE_CACHE_CONTROL
+    if (
+        upstream.status_code == 200
+        and request.url.path.startswith("/dicom-web")
+        and "json" in upstream.headers.get("content-type", "").lower()
+    ):
+        # QIDO / metadata responses only — frames and bulkdata are
+        # multipart/related or application/octet-stream and stream untouched.
+        # aread() decodes any content-encoding, so that header and the stale
+        # content-length must go; Response recomputes the length.
+        try:
+            body = await upstream.aread()
+        finally:
+            await upstream.aclose()
+        headers.pop("content-encoding", None)
+        headers.pop("content-length", None)
+        return Response(
+            content=rewrite_dicomweb_urls(body),
+            status_code=upstream.status_code,
+            headers=headers,
+        )
     return StreamingResponse(
         upstream.aiter_raw(),
         status_code=upstream.status_code,

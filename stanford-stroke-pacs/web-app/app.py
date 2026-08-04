@@ -96,6 +96,14 @@ async def lifespan(application: FastAPI):
     # Alembic's env.py calls logging.config.fileConfig() during the startup
     # migration run, which wipes the JSON handler.  Re-install it.
     configure_logging()
+    # Post-migration, so the check sees the renamed clinical_data table; after
+    # configure_logging(), so a fallback WARN goes through the JSON handler.
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            studies.resolve_clinical_date_column(cur)
+    finally:
+        conn.close()
     logger.info("startup: effective config", extra=effective_config_summary())
     proxy.init_client()
     # Bounded executor for backgrounded cold-storage warms. The route

@@ -10,7 +10,7 @@ const LEVEL_CONFIG = {
     entityLabel: "patients",
     builtinCols: [
       { key: "patient_id", label: "Patient ID", filterable: true },
-      { key: "stroke_date", label: "Stroke Date", filterable: true },
+      { key: "stroke_date", label: "Episode Date", filterable: true },
       {
         key: "study_import_labels",
         label: "Study import labels",
@@ -274,7 +274,7 @@ export function formatBuiltinValue(sourceKey, raw) {
   return raw;
 }
 
-// Narrow columns (Patient ID, Stroke Date) get trimmed padding + 1% width
+// Narrow columns (Patient ID, Episode Date) get trimmed padding + 1% width
 // (see the --narrow CSS modifiers).
 export function isNarrowCol(col) {
   return (

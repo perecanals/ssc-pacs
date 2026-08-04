@@ -298,7 +298,7 @@
   @apply flex items-center gap-2;
 }
 
-/* Narrow columns (Patient ID, Stroke Date): trim padding and let the cell
+/* Narrow columns (Patient ID, Episode Date): trim padding and let the cell
    shrink to content, reducing column width ~20% versus default px-3 padding. */
 .dt__th--narrow,
 .dt__td--narrow,
@@ -345,8 +345,23 @@
   --wrapper-accent: var(--color-level-series);
 }
 
+/* Both scroll wrappers use width:0 + min-width:100%: the zero width keeps the
+   subtable out of the parent table's intrinsic width computation (otherwise a
+   wide subtable widens every parent column its colSpan cell spans), and the
+   percentage min-width — resolved only at final layout — stretches the
+   wrapper back to the cell's width so wider content scrolls instead. */
 .dt__child-scroll {
   @apply max-h-[280px] overflow-auto;
+  width: 0;
+  min-width: 100%;
+}
+
+/* Expandable child lists (studies under a patient): no height cap — nested
+   grandchild tables need room — but the same horizontal containment. */
+.dt__child-hscroll {
+  @apply overflow-x-auto;
+  width: 0;
+  min-width: 100%;
 }
 
 /* Full-width so the row background spans the whole container, but a
@@ -354,7 +369,7 @@
    width:100% and absorbs all slack — so the real columns collapse to
    their content width and stay flushed left while the row still extends
    to the right edge. Wider tables scroll horizontally via the
-   overflow-auto container above, mirroring the main table's behavior. */
+   scroll wrapper above, mirroring the main table's behavior. */
 .dt__child-table {
   @apply w-full border-collapse bg-child-bg;
 }
@@ -446,8 +461,12 @@
   --wrapper-accent: var(--color-level-series);
 }
 
+/* Same width:0/min-width:100% containment as .dt__child-scroll: a wide
+   grandchild table must scroll here, not widen the child/parent columns. */
 .dt__gc-scroll {
   @apply max-h-[280px] overflow-auto;
+  width: 0;
+  min-width: 100%;
 }
 
 /* See .dt__child-table: spacer cell keeps grandchild columns flushed left. */

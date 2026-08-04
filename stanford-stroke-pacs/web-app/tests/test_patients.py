@@ -1,9 +1,9 @@
 """Tests for the patient-level listing sourced from the `patient` registry.
 
 Regression coverage for the bug where patients with imaging but no
-lvo_clinical_data row were invisible at the patient level, plus the
+clinical_data row were invisible at the patient level, plus the
 clinical-preferred / imaging-fallback stroke_date behavior, plus the
-degradation when lvo_clinical_data does not exist at all.
+degradation when clinical_data does not exist at all.
 """
 
 import contextlib
@@ -41,7 +41,7 @@ def _table_hidden(dsn, table):
 
 class TestPatientListing:
     def test_clinically_unmatched_patient_appears(self, logged_in_client):
-        """P-0002 has imaging but no lvo_clinical_data row — must be listed."""
+        """P-0002 has imaging but no clinical_data row — must be listed."""
         resp = logged_in_client.get("/api/patients", params={"patient_id": "P-0002"})
         assert resp.status_code == 200
         items = resp.json()["items"]
@@ -136,7 +136,7 @@ class TestPatientListing:
 
 
 class TestWithoutClinicalTable:
-    """lvo_clinical_data is a site-specific import a deployment may not have.
+    """clinical_data is an optional import a deployment may not have.
 
     Without it the patient tab must still work, degrading to the imaging-derived
     stroke_date for everyone — the same value a clinically-unmatched patient
@@ -144,7 +144,7 @@ class TestWithoutClinicalTable:
     """
 
     def test_patients_listed_without_clinical_table(self, logged_in_client, seeded_db):
-        with _table_hidden(seeded_db, "lvo_clinical_data"):
+        with _table_hidden(seeded_db, "clinical_data"):
             resp = logged_in_client.get("/api/patients")
             assert resp.status_code == 200
             items = resp.json()["items"]
@@ -154,7 +154,7 @@ class TestWithoutClinicalTable:
     def test_stroke_date_falls_back_to_imaging(self, logged_in_client, seeded_db):
         """P-0001 prefers its clinical date (2025-01-01) only while the table
         exists; without it, its imaging date (2025-02-02) shows instead."""
-        with _table_hidden(seeded_db, "lvo_clinical_data"):
+        with _table_hidden(seeded_db, "clinical_data"):
             resp = logged_in_client.get("/api/patients", params={"patient_id": "P-0001"})
             row = _find(resp.json()["items"], "P-0001")
             assert str(row["stroke_date"]).startswith("2025-02-02")
@@ -162,7 +162,7 @@ class TestWithoutClinicalTable:
     def test_stroke_date_filter_and_sort_still_work(self, logged_in_client, seeded_db):
         """Filter and sort reuse the same expression as the SELECT, so they must
         follow it into the no-clinical-table branch."""
-        with _table_hidden(seeded_db, "lvo_clinical_data"):
+        with _table_hidden(seeded_db, "clinical_data"):
             resp = logged_in_client.get(
                 "/api/patients", params={"stroke_date": "2025-02-02"}
             )

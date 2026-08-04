@@ -68,6 +68,10 @@ docker-compose.override.yml
 deploy.env
 **/deploy.env
 
+# Per-host non-secret operational settings (copy config.example.toml → config.toml
+# and set the installation-specific values; the example file is the tracked template).
+stanford-stroke-pacs/config.toml
+
 # Site/run-specific ingestion config (use the .example.yaml template)
 stanford-stroke-pacs/image_ingestion_protocols/execute_image_ingestion_protocol.yaml
 # Per-batch configs derived from the base YAML by run_all_batches.sh

@@ -234,6 +234,31 @@ User clicks a row in the web app DataTable
 No Orthanc API calls during warm itself. The patched Folder Indexer's
 background scan will also notice the new files but that's incidental.
 
+### Series previews and the OHIF side panel (metadata warm hold)
+
+A *series* preview warms and waits on just the clicked series (fast), but the
+OHIF viewer it opens still enumerates the **whole study** and requests
+`/dicom-web/.../series/{uid}/metadata` for every series to build its side
+panel. Orthanc answers those from the instance files on disk, so a sibling
+series whose files are absent or mid-extraction 500s ("The series metadata
+json does not contain an array") and OHIF pops a persistent
+"Something went wrong" toast per failure — while the selected series plays
+fine. Two cooperating pieces remove this:
+
+- **Frontend** (`warmOhif.queueWarmSiblings`): before returning a
+  series-preview URL, queue a best-effort study warm when the study isn't
+  already hot/warming. The 202 is awaited, and `mark_queued` persists the
+  `queued` markers synchronously *before* the 202, so by the time the iframe
+  loads every sibling is at least `queued`.
+- **Proxy** (`routes/proxy.py:wait_for_series_warm`): a series-metadata
+  request whose series is `queued`/`warming` is held (0.5 s effective-status
+  polls, 120 s cap) and forwarded once the series turns hot. Panel entries
+  thus fill in as extraction proceeds instead of erroring. Series with no
+  cache row report `cold` and pass straight through, so legacy mode and
+  never-archived series are untouched; the QIDO series *list* is index-served
+  and never held — every series stays visible in the panel. On cap expiry the
+  request is forwarded as-is (worst case: the pre-hold behavior, one toast).
+
 ### Eviction
 
 ```

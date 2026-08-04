@@ -4,9 +4,11 @@
 inputs, steps, outputs, and how it interacts with each storage mode. For the
 cold storage design see [`../cold_storage/design.md`](../cold_storage/design.md).
 
-Code lives under `stanford-stroke-pacs/image_ingestion_protocols/`. This
-pipeline is **site-specific** to the Stanford Stroke Center DICOM layout and
-metadata conventions. It is not part of a standard fresh deployment.
+Code lives under `stanford-stroke-pacs/image_ingestion_protocols/`. The
+pipeline is general: it walks a configured source DICOM tree and needs no
+particular site layout. Only the clinical-enrichment step is optional — it
+reads the `clinical_data` table when present and is skipped when a deployment
+has no clinical source.
 
 ---
 
@@ -16,7 +18,7 @@ Takes a directory of per-patient source DICOMs, and for each case:
 
 1. Discovers series by grouping every readable file under the case by its `SeriesInstanceUID` (not by folder)
 2. Groups series into studies
-3. Validates studies against `lvo_clinical_data` (clinical DB table)
+3. Validates studies against `clinical_data` (clinical DB table)
 4. Copies DICOMs to the canonical layout under `dicom_data_root`
 5. Optionally compresses each series to a `*.tar.zst` archive under `cold_archive_root`
 6. Converts selected series to NIfTI alongside the DICOM tree
@@ -172,7 +174,7 @@ the tar.
 | 1 | `create_series_table` | Recursively walks `case_dir`, reads each file's DICOM header, and **buckets files by `SeriesInstanceUID`** — one DataFrame row per real series, with the aggregated list of source file paths. A series is defined by its UID, not its folder: same-UID files spread across folders are **merged** into one row; a "mixed" folder holding several UIDs is **split** into its true series; `number_of_slices` = count of files carrying that UID. Files under one UID that disagree on `SeriesNumber`/`StudyInstanceUID` (a standard violation) trigger a **loud WARNING** and are kept merged — a suspected true UID collision to inspect at source (no split, no UID re-mint). This guarantees the upsert conflict key is unique within the batch. See [How series are identified](#how-series-are-identified). |
 | 2 | `create_study_table` | Groups series by StudyInstanceUID, computes per-study metadata, and classifies `study_type` (BASELINE/FOLLOW_UP) from `stroke_date`. **Kept-dormant-by-design:** the classifier still runs and the value is stored, but nothing downstream currently consumes `study_type` beyond display — retained for planned future use, not an active feature. |
 | 3 | `filter_existing_studies` | Decides per study/series what to do given the current DB state. Always loads both `image_study` and `image_series` for the scanned `StudyInstanceUID`s. **Append mode (`overwrite_if_exists=false`):** for studies already in DB, drops the study row from the working set so the persisted `import_id` / `import_label` / `study_path` are preserved; then per series, drops the series row if `(SeriesUID, number_of_slices)` matches DB, keeps it for re-ingest if the slice count drifted (and wipes the stale `dicom_dir_path` and `dicom_archive_path` from disk before re-copy), keeps it if the SeriesUID is new, or warns-and-skips if DB `number_of_slices` is NULL. **Overwrite mode (`overwrite_if_exists=true`):** calls `overwrite_existing_study()`, which deletes the on-disk DICOM directories, stale cold archives, and the rows in `image_study`, `image_series`, `image_study_labelled`, and `image_series_labelled` for that study, all in one transaction — orphan rows from series that no longer exist on disk cannot survive. |
-| 4 | `load_clinical_data_table` | Reads `lvo_clinical_data` |
+| 4 | `load_clinical_data_table` | Reads `clinical_data` |
 | 5 | `validate_studies_against_clinical_data` | Drops studies whose `patient_id` doesn't match a clinical row or whose `studydate` is outside the allowed stroke-date window |
 | 6 | `assign_import_id` / `assign_import_label` | Tags all rows with the batch import_id/label |
 | 7 | `add_paths_and_copy_dicom_files` | **Copies DICOMs** from source → `{dicom_data_root}/{patient_id}/{studyUID}/{seriesDesc}/{seriesUID}/DICOM/`. Copies the series' aggregated file list (which may span several source folders); on a destination basename collision it **renames** the file (`…__dupN`) so nothing is overwritten. Optionally anonymizes. Sets `dicom_dir_path` and records the source→dest pairs for verification. |
@@ -318,7 +320,7 @@ python scripts/admin/reclassify_series_types.py --execute   # apply
 `image_study.timepoint` answers *when* a study happened relative to the
 intervention: `BL` (before), `THROMBECTOMY` (the procedure study itself), `FU`
 (after), or `NULL`. Assigned by `assign_study_timepoints()`, which must run after
-`load_clinical_data_table()` — the anchor lives in `lvo_clinical_data`, which
+`load_clinical_data_table()` — the anchor lives in `clinical_data`, which
 `create_study_table()` (earlier in the sequence) cannot see. The per-patient
 logic lives in `series_classification.assign_patient_timepoints()`, shared with
 `scripts/admin/recompute_timepoints.py` so ingestion and backfill can't diverge.
@@ -341,9 +343,9 @@ own thrombectomy study:
 
 | Priority | Anchor | Offset | `timepoint_anchor_source` |
 |---|---|---|---|
-| 1 | `lvo_clinical_data.femoral_sheath_time` | none — recorded puncture | `femoral_sheath_time` |
-| 2 | `lvo_clinical_data.receiving_arrival_time` | **+5 h** (estimate) | `receiving_arrival_time` |
-| 3 | `lvo_clinical_data.time_recognized` | **+10 h** (estimate) | `time_recognized` |
+| 1 | `clinical_data.femoral_sheath_time` | none — recorded puncture | `femoral_sheath_time` |
+| 2 | `clinical_data.receiving_arrival_time` | **+5 h** (estimate) | `receiving_arrival_time` |
+| 3 | `clinical_data.time_recognized` | **+10 h** (estimate) | `time_recognized` |
 | 4 | the episode's own `THROMBECTOMY` study acquisition time | none | `thrombectomy_study` |
 
 Priorities 1–3 are the clinical anchor (unchanged from rules-v2). Priority 4 is
@@ -351,7 +353,7 @@ new: it gives non-LVO patients (no clinical row) and the second episode of
 multi-episode patients a real anchor — the thrombectomy (XA) study's own
 acquisition time — instead of `NULL`.
 
-`lvo_clinical_data` is **optional**. Where the table does not exist, clinical
+`clinical_data` is **optional**. Where the table does not exist, clinical
 enrichment is skipped (a note is printed) and priorities 1–3 are simply
 unavailable, so every episode resolves via priority 4. Episodes with no
 `THROMBECTOMY` study then get `timepoint = NULL` — the same deliberate NULL a
@@ -382,7 +384,7 @@ timestamp compared against the anchor is built by
 (RAPID/MIP/MPR) they are the day the derivative was *computed* — often months
 after the scan — which mis-dates the study and fabricates spurious episodes.
 
-> **Re-opens `lvo_clinical_data`.** That table was previously retired as a roster
+> **Re-opens `clinical_data`.** That table was previously retired as a roster
 > ("joined only to prefer its clinical `stroke_date` via COALESCE, never otherwise
 > queried"). Reading these three time columns is a deliberate reversal, scoped to
 > exactly them.

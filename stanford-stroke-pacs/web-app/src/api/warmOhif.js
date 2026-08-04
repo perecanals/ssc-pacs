@@ -35,9 +35,12 @@ export function getStorageMode() {
 async function pollCacheUntilHot(uid, maxMs = 600_000, kind = "studies") {
   const t0 = Date.now();
   while (Date.now() - t0 < maxMs) {
-    const st = await apiGet(`/api/${kind}/${encodeURIComponent(uid)}/cache-status`);
+    const st = await apiGet(
+      `/api/${kind}/${encodeURIComponent(uid)}/cache-status`,
+    );
     if (st.status === "hot") return true;
-    if (st.status === "error") throw new Error(st.error_message || "Cache warming failed");
+    if (st.status === "error")
+      throw new Error(st.error_message || "Cache warming failed");
     await new Promise((r) => setTimeout(r, 2000));
   }
   return false;
@@ -54,12 +57,14 @@ export async function warmStudy(studyinstanceuid) {
     { method: "POST" },
   );
   if (!warmRes.ok) {
-    if (warmRes.status === 401) throw new Error("Log in to warm imaging cache.");
+    if (warmRes.status === 401)
+      throw new Error("Log in to warm imaging cache.");
     const t = await warmRes.text();
     throw new Error(t || "Warm request failed");
   }
 
-  if (!(await pollCacheUntilHot(studyinstanceuid))) throw new Error("Warming timed out");
+  if (!(await pollCacheUntilHot(studyinstanceuid)))
+    throw new Error("Warming timed out");
 }
 
 /**
@@ -72,7 +77,8 @@ export async function warmSeriesSync(seriesinstanceuid) {
     { method: "POST" },
   );
   if (!warmRes.ok) {
-    if (warmRes.status === 401) throw new Error("Log in to warm imaging cache.");
+    if (warmRes.status === 401)
+      throw new Error("Log in to warm imaging cache.");
     const t = await warmRes.text();
     throw new Error(t || "Warm request failed");
   }
@@ -93,7 +99,8 @@ export async function queueWarmStudy(studyinstanceuid) {
   );
   if (!res.ok) {
     if (res.status === 401) throw new Error("Log in to decompress studies.");
-    if (res.status === 507) throw new Error("Not enough disk space to decompress this study.");
+    if (res.status === 507)
+      throw new Error("Not enough disk space to decompress this study.");
     throw new Error((await res.text()) || "Decompress request failed");
   }
 }
@@ -110,7 +117,8 @@ export async function queueWarmSeries(seriesinstanceuid) {
   );
   if (!res.ok) {
     if (res.status === 401) throw new Error("Log in to decompress series.");
-    if (res.status === 507) throw new Error("Not enough disk space to decompress this series.");
+    if (res.status === 507)
+      throw new Error("Not enough disk space to decompress this series.");
     throw new Error((await res.text()) || "Decompress request failed");
   }
 }
@@ -120,7 +128,9 @@ export async function queueWarmSeries(seriesinstanceuid) {
  * count from the 202 response.
  */
 export async function queueWarmPatient(patientId) {
-  const res = await apiPost(`/api/patients/${encodeURIComponent(patientId)}/warm`);
+  const res = await apiPost(
+    `/api/patients/${encodeURIComponent(patientId)}/warm`,
+  );
   if (!res.ok) {
     if (res.status === 401) throw new Error("Log in to decompress studies.");
     throw new Error((await res.text()) || "Decompress request failed");
@@ -133,7 +143,11 @@ export async function queueWarmPatient(patientId) {
  * Returns {studies: {uid: status}, patients: {id: {total, cold, warming, hot,
  * error}}, series: {uid: status}}.
  */
-export async function getBatchCacheStatus(uids = [], patientIds = [], seriesUids = []) {
+export async function getBatchCacheStatus(
+  uids = [],
+  patientIds = [],
+  seriesUids = [],
+) {
   if (uids.length === 0 && patientIds.length === 0 && seriesUids.length === 0) {
     return { studies: {}, patients: {}, series: {} };
   }
@@ -147,27 +161,63 @@ export async function getBatchCacheStatus(uids = [], patientIds = [], seriesUids
 }
 
 /**
+ * Best-effort background warm of the rest of the study when previewing a
+ * single series. OHIF's side panel requests metadata for *every* series in
+ * the study, so cold siblings must at least be queued before the iframe
+ * loads: the warm POST persists 'queued' markers synchronously server-side,
+ * and the DICOMweb proxy holds each sibling's metadata request until its
+ * series turns hot — panel entries then appear as extraction proceeds,
+ * instead of erroring. Failures are swallowed: a sibling warm must never
+ * block the series the user actually asked for.
+ */
+async function queueWarmSiblings(studyinstanceuid) {
+  try {
+    if ((await getStorageMode()) !== "cold_path_cache") return;
+    const { studies } = await getBatchCacheStatus([studyinstanceuid]);
+    const status = studies[studyinstanceuid];
+    if (status === "cold" || status === "error") {
+      await queueWarmStudy(studyinstanceuid);
+    }
+  } catch {
+    /* best-effort */
+  }
+}
+
+/**
  * Returns OHIF viewer URL. If cold, warms first (transparently); if already
  * warming, polls until hot then fetches the URL.
  *
  * Granularity follows the request: a *series* preview (seriesinstanceuid given)
  * warms and waits on just that series, so sifting through individual series is
- * fast. A study open (no series UID) warms the whole study — unchanged.
+ * fast — the rest of the study is queued in the background (queueWarmSiblings)
+ * so the OHIF side panel fills in without error popups. A study open (no
+ * series UID) warms the whole study — unchanged.
  */
-export async function resolveOhifViewerUrl(studyinstanceuid, seriesinstanceuid = null) {
+export async function resolveOhifViewerUrl(
+  studyinstanceuid,
+  seriesinstanceuid = null,
+) {
   const path = buildOhifLinkPath(studyinstanceuid, seriesinstanceuid);
 
   const res = await apiFetch(path);
   if (!res.ok) throw new Error(`OHIF link failed: ${res.status}`);
   const data = await res.json();
 
-  // Ready — return URL directly.
-  if (data.url) return data.url;
+  // Ready — return URL directly (after queuing cold siblings on a series
+  // preview: the selected series being hot says nothing about the rest).
+  if (data.url) {
+    if (seriesinstanceuid) await queueWarmSiblings(studyinstanceuid);
+    return data.url;
+  }
 
   // Needs warming — trigger it (or join an in-progress warm) then retry. The
   // ohif-link status reflects the series when a series UID was passed, so we warm
   // at that same granularity.
-  if (data.status === "cold" || data.status === "warming" || data.status === "queued") {
+  if (
+    data.status === "cold" ||
+    data.status === "warming" ||
+    data.status === "queued"
+  ) {
     if (data.status === "cold") {
       if (seriesinstanceuid) await warmSeriesSync(seriesinstanceuid);
       else await warmStudy(studyinstanceuid);
@@ -176,11 +226,15 @@ export async function resolveOhifViewerUrl(studyinstanceuid, seriesinstanceuid =
     } else {
       await pollCacheUntilHot(studyinstanceuid);
     }
+    if (seriesinstanceuid) await queueWarmSiblings(studyinstanceuid);
 
     const retryRes = await apiFetch(path);
     if (!retryRes.ok) throw new Error(`OHIF link failed: ${retryRes.status}`);
     const retryData = await retryRes.json();
-    if (!retryData.url) throw new Error(retryData.detail || "Imaging still not ready after warming");
+    if (!retryData.url)
+      throw new Error(
+        retryData.detail || "Imaging still not ready after warming",
+      );
     return retryData.url;
   }
 

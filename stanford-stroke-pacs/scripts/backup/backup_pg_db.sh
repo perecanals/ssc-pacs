@@ -36,7 +36,14 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "$SCRIPT_DIR/../_lib.sh"
 
 BACKUP_ENV_FILE="${BACKUP_ENV_FILE:-$STACK_DIR/.env}"
-BACKUP_ROOT="${BACKUP_ROOT:-$(config_get backup backup_root /DATA2/ssc-pacs-backups)}"
+# backup_root is installation-specific: no hardcoded fallback, configure it or
+# pass BACKUP_ROOT=... explicitly for a one-off run.
+BACKUP_ROOT="${BACKUP_ROOT:-$(config_get backup backup_root "")}"
+if [[ -z "$BACKUP_ROOT" ]]; then
+    echo "ERROR: [backup].backup_root is not configured in config.toml" \
+         "(copy config.example.toml and set it, or pass BACKUP_ROOT=... for a one-off run)" >&2
+    exit 2
+fi
 RETENTION_DAYS="${RETENTION_DAYS:-$(config_get backup retention_days 60)}"
 
 if [[ ! -r "$BACKUP_ENV_FILE" ]]; then

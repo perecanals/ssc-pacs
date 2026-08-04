@@ -161,7 +161,7 @@ def seeded_db(test_db):
             # differs from its imaging date (2025-02-02) so we can assert the tab
             # prefers the clinical value via COALESCE.
             cur.execute(
-                "INSERT INTO lvo_clinical_data (study_id, stroke_date) "
+                "INSERT INTO clinical_data (study_id, stroke_date) "
                 "VALUES ('P-0001', '2025-01-01') ON CONFLICT DO NOTHING"
             )
             # The machine-derived columns (series_type / timepoint and their
@@ -184,7 +184,7 @@ def seeded_db(test_db):
                 " 'NCCT', 1, 'NCCT_1', 'kernel-soft', 'rules-v1') "
                 "ON CONFLICT DO NOTHING"
             )
-            # P-0002: imaging ingested but NO lvo_clinical_data row — the
+            # P-0002: imaging ingested but NO clinical_data row — the
             # regression fixture. Must still appear in /api/patients, with
             # stroke_date falling back to the earliest study date.
             cur.execute(
