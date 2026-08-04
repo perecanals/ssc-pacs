@@ -144,6 +144,24 @@ python scripts/admin/manage_users.py remove alice
 python scripts/admin/rotate_service_account.py check   # exits non-zero on drift
 ```
 
+Direct-DB collaborators (psql/pandas access, separate from web-app logins —
+those are rows in the `users` table, not PostgreSQL roles) get a read-only
+PostgreSQL role: SELECT on all current and future `public` tables in both
+`stanford-stroke` and `orthanc_db`, sessions forced read-only, web-app auth
+tables (`users`, `user_preferences`) excluded. Password is prompted hidden
+(`--generate` mints one); the server is localhost-only, so remote users
+connect through an SSH tunnel (`scripts/connectivity/`).
+
+```bash
+python scripts/admin/manage_readonly_db_users.py add <user>
+python scripts/admin/manage_readonly_db_users.py passwd <user>
+python scripts/admin/manage_readonly_db_users.py list     # login roles, read-only flagged
+python scripts/admin/manage_readonly_db_users.py remove <user>
+```
+
+Hand collaborators `docs/guides/direct_db_access.md` — tunnel setup, their
+own `.env`, and a pandas/SQLAlchemy example.
+
 Rename a dataset tag across the `patient` table and every user's grants
 (keeps access intact when a cohort is renamed; dry-run default, `--execute`
 to apply):

@@ -51,6 +51,10 @@ _DEFAULT_WEB_APP = {
     # Which clinical_data column supplies the patient tab's episode date
     # (COALESCEd over the imaging-derived patient.stroke_date).
     "clinical_episode_date_column": "stroke_date",
+    # Trackpad slice-scroll damping threshold for the OHIF proxy shim
+    # (routes/proxy.py): pixels of trackpad scroll per slice. 0 disables
+    # injection.
+    "ohif_trackpad_px_per_slice": 50,
 }
 
 
@@ -168,6 +172,13 @@ CLINICAL_EPISODE_DATE_COLUMN = _require_sql_identifier(
     "clinical_episode_date_column",
 )
 
+OHIF_TRACKPAD_PX_PER_SLICE = int(_web_app["ohif_trackpad_px_per_slice"])
+if OHIF_TRACKPAD_PX_PER_SLICE < 0:
+    raise RuntimeError(
+        "config.toml [web-app].ohif_trackpad_px_per_slice must be >= 0 "
+        f"(got {OHIF_TRACKPAD_PX_PER_SLICE}); use 0 to disable the shim."
+    )
+
 
 def effective_config_summary() -> dict:
     """Resolved non-secret settings, for a one-line startup log.
@@ -188,4 +199,5 @@ def effective_config_summary() -> dict:
         "cookie_secure": COOKIE_SECURE,
         "login_rate_limit_per_5min": LOGIN_RATE_LIMIT_PER_5MIN,
         "clinical_episode_date_column": CLINICAL_EPISODE_DATE_COLUMN,
+        "ohif_trackpad_px_per_slice": OHIF_TRACKPAD_PX_PER_SLICE,
     }

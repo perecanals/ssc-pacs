@@ -26,10 +26,14 @@ ORTHANC_USERS_FILE = REPO_ROOT / "orthanc_users.json"
 
 # -- Password input ------------------------------------------------------------
 
-def prompt_password() -> str:
-    """Hidden password prompt with confirmation and minimum-length check."""
+def prompt_password(label: str = "Password") -> str:
+    """Hidden password prompt with confirmation and minimum-length check.
+
+    ``label`` replaces the leading "Password" so callers can say exactly
+    which secret they want (e.g. "New password for DB role 'x'").
+    """
     while True:
-        p1 = getpass.getpass("Password: ")
+        p1 = getpass.getpass(f"{label}: ")
         if len(p1) < 8:
             print("Password must be at least 8 characters.", file=sys.stderr)
             continue

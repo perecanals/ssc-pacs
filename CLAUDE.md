@@ -50,7 +50,7 @@ ssc-pacs/                     # git checkout root (Makefile, CI, root scripts)
 │   ├── web-app/              # FastAPI backend + React frontend (port 8043)
 │   ├── alembic/              # stanford-stroke DB migrations (alembic.ini alongside); web-app runs them at startup
 │   ├── scripts/              # utility scripts (see scripts/README.md); _lib.sh = shared helpers
-│   │   ├── admin/            # manage_users.py, rotate_service_account.py, rotate_db_password.py, rename_dataset_value.py, bulk_set_label_values.*, remove_label.*, teardown.sh
+│   │   ├── admin/            # manage_users.py, manage_readonly_db_users.py, rotate_service_account.py, rotate_db_password.py, rename_dataset_value.py, bulk_set_label_values.*, remove_label.*, teardown.sh
 │   │   ├── backup/           # backup_pg_db.sh, backup_orthanc_storage.sh, check_backup_freshness.sh
 │   │   ├── cold_storage/     # archive, cleanup, health, scoped_index, reindex_missing_series, prune_stale_index_paths, verify_and_repair
 │   │   ├── connectivity/     # tunnel/{linux,macos,windows}/
