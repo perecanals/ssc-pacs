@@ -8,7 +8,7 @@ from pathlib import Path
 
 import psycopg2
 import psycopg2.extras
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import JSONResponse, Response
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from psycopg2 import sql
@@ -338,12 +338,27 @@ def label_deletion_plan(label_id: int, admin: str = Depends(require_admin)):
         conn.close()
 
 
+def _delete_label(cur, label_id: int, name: str, level: str) -> int:
+    """Remove one label on the caller's cursor: annotations (captured in
+    annotations_history by the trigger), vocabulary, definition, and the
+    labelled-table column. Returns the number of annotations deleted."""
+    cur.execute("DELETE FROM annotations WHERE label = %s", (name,))
+    n_annotations = cur.rowcount
+    cur.execute("DELETE FROM label_value_options WHERE label = %s", (name,))
+    cur.execute("DELETE FROM label_definitions WHERE id = %s", (label_id,))
+    cur.execute(
+        sql.SQL("ALTER TABLE {} DROP COLUMN IF EXISTS {}").format(
+            sql.Identifier(get_level_config(level).labelled_table),
+            sql.Identifier(sanitize_label_column(name)),
+        )
+    )
+    return n_annotations
+
+
 @router.delete("/api/admin/label-definitions/{label_id}")
 def delete_label_definition(label_id: int, admin: str = Depends(require_admin)):
-    """Remove a label entirely: its annotations (captured in annotations_history
-    by the trigger), its vocabulary, its definition, and its labelled-table
-    column. Web equivalent of scripts/admin/remove_label.py, in one transaction.
-    """
+    """Remove a label entirely. Web equivalent of
+    scripts/admin/remove_label.py, in one transaction."""
     conn = get_conn()
     try:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
@@ -356,22 +371,86 @@ def delete_label_definition(label_id: int, admin: str = Depends(require_admin)):
                 raise HTTPException(
                     status_code=404, detail="Label definition not found"
                 )
-            name, level = row["name"], row["level"]
-            cur.execute("DELETE FROM annotations WHERE label = %s", (name,))
-            n_annotations = cur.rowcount
-            cur.execute(
-                "DELETE FROM label_value_options WHERE label = %s", (name,)
-            )
-            cur.execute(
-                "DELETE FROM label_definitions WHERE id = %s", (label_id,)
-            )
-            cur.execute(
-                sql.SQL("ALTER TABLE {} DROP COLUMN IF EXISTS {}").format(
-                    sql.Identifier(get_level_config(level).labelled_table),
-                    sql.Identifier(sanitize_label_column(name)),
-                )
-            )
+            name = row["name"]
+            n_annotations = _delete_label(cur, label_id, name, row["level"])
         conn.commit()
         return {"ok": True, "name": name, "n_annotations_deleted": n_annotations}
+    finally:
+        conn.close()
+
+
+# Instrument-wide deletion: the same operation applied to every label in the
+# group. The instrument arrives as a query parameter, not a path segment —
+# instrument names are free text and may contain slashes.
+
+
+def _instrument_labels(cur, instrument: str) -> list[dict]:
+    cur.execute(
+        "SELECT id, name, level FROM label_definitions "
+        "WHERE instrument = %s ORDER BY name",
+        (instrument,),
+    )
+    rows = cur.fetchall()
+    if not rows:
+        raise HTTPException(
+            status_code=404, detail="No labels with this instrument"
+        )
+    return rows
+
+
+@router.get("/api/admin/instruments/deletion-plan")
+def instrument_deletion_plan(
+    name: str = Query(...), admin: str = Depends(require_admin)
+):
+    """What deleting this instrument would remove: every label in the group,
+    with per-label annotation counts — feeds the confirmation dialog."""
+    conn = get_conn()
+    try:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            rows = _instrument_labels(cur, name)
+            cur.execute(
+                "SELECT label, COUNT(*) AS n FROM annotations "
+                "WHERE label = ANY(%s) GROUP BY label",
+                ([r["name"] for r in rows],),
+            )
+            counts = {r["label"]: r["n"] for r in cur.fetchall()}
+        labels = [
+            {
+                "name": r["name"],
+                "level": r["level"],
+                "n_annotations": counts.get(r["name"], 0),
+            }
+            for r in rows
+        ]
+        return {
+            "instrument": name,
+            "labels": labels,
+            "n_labels": len(labels),
+            "n_annotations": sum(item["n_annotations"] for item in labels),
+        }
+    finally:
+        conn.close()
+
+
+@router.delete("/api/admin/instruments")
+def delete_instrument(
+    name: str = Query(...), admin: str = Depends(require_admin)
+):
+    """Remove an instrument: every label in the group, each deleted exactly as
+    the single-label endpoint does, in one transaction."""
+    conn = get_conn()
+    try:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            rows = _instrument_labels(cur, name)
+            n_annotations = sum(
+                _delete_label(cur, r["id"], r["name"], r["level"]) for r in rows
+            )
+        conn.commit()
+        return {
+            "ok": True,
+            "instrument": name,
+            "n_labels_deleted": len(rows),
+            "n_annotations_deleted": n_annotations,
+        }
     finally:
         conn.close()

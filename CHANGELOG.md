@@ -1,5 +1,12 @@
 # Changelog
 
+## v1.19 — 2026-08-05
+
+- **Feature**: admins can delete a whole instrument (every label in the group)
+  from the Label Access page — same always-confirm deletion-plan dialog as
+  single labels, listing the labels and their annotation counts
+  (`DELETE /api/admin/instruments?name=…`). No migration.
+
 ## v1.18 — 2026-08-05
 
 - **Feature**: select-label option values are editable after creation from the

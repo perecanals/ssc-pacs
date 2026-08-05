@@ -372,7 +372,9 @@ which labels a user may **write**. Each label carries
   **delete a label entirely** (`DELETE /api/admin/label-definitions/{id}`,
   always behind a plan-and-confirm dialog): definition, annotations (captured in
   `annotations_history`), vocabulary, and labelled-table column — the web
-  equivalent of `scripts/admin/remove_label.py`.
+  equivalent of `scripts/admin/remove_label.py` — or **delete a whole
+  instrument** the same way (`DELETE /api/admin/instruments?name=…`), which
+  applies that per-label deletion to every label in the group.
 
 Known limitation: the CLI writes direct SQL and bypasses this gate by design —
 it is the admin backdoor, authorized by shell + `.env` access. The

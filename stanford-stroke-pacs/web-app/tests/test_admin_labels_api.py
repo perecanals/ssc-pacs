@@ -213,3 +213,114 @@ class TestDeleteLabelDefinition:
                 "WHERE table_name = 'patient_labelled' AND column_name = 'doomed_label'"
             )
             assert cur.fetchone() is None
+
+
+class TestDeleteInstrument:
+    @pytest.fixture()
+    def instrument_labels(self, logged_in_client):
+        """Two labels in one instrument, one outside it."""
+        made = []
+        for name, instr in [
+            ("instr_del_a", "Doomed Instrument"),
+            ("instr_del_b", "Doomed Instrument"),
+            ("instr_del_other", "Kept Instrument"),
+        ]:
+            resp = logged_in_client.post(
+                "/api/label-definitions",
+                json={
+                    "name": name,
+                    "level": "patient",
+                    "datatype": "text",
+                    "instrument": instr,
+                },
+            )
+            assert resp.status_code == 201, resp.text
+            made.append(resp.json())
+        yield made
+        from db import get_conn
+
+        conn = get_conn()
+        try:
+            with conn.cursor() as cur:
+                names = [m["name"] for m in made]
+                cur.execute("DELETE FROM annotations WHERE label = ANY(%s)", (names,))
+                cur.execute(
+                    "DELETE FROM label_definitions WHERE name = ANY(%s)", (names,)
+                )
+            conn.commit()
+        finally:
+            conn.close()
+
+    def test_requires_admin(self, client):
+        login_as(client, USER_LVO)
+        assert (
+            client.delete("/api/admin/instruments?name=whatever").status_code == 403
+        )
+        assert (
+            client.get(
+                "/api/admin/instruments/deletion-plan?name=whatever"
+            ).status_code
+            == 403
+        )
+
+    def test_unknown_instrument_404(self, logged_in_client):
+        assert (
+            logged_in_client.delete(
+                "/api/admin/instruments?name=no_such_instrument"
+            ).status_code
+            == 404
+        )
+        assert (
+            logged_in_client.get(
+                "/api/admin/instruments/deletion-plan?name=no_such_instrument"
+            ).status_code
+            == 404
+        )
+
+    def test_plan_lists_labels_with_counts(self, instrument_labels, logged_in_client):
+        logged_in_client.post(
+            "/api/annotations",
+            json={
+                "level": "patient",
+                "patient_id": PATIENT,
+                "label": "instr_del_a",
+                "value": "x",
+            },
+        )
+        plan = logged_in_client.get(
+            "/api/admin/instruments/deletion-plan?name=Doomed%20Instrument"
+        ).json()
+        assert plan["instrument"] == "Doomed Instrument"
+        assert plan["n_labels"] == 2
+        assert plan["n_annotations"] == 1
+        by_name = {item["name"]: item for item in plan["labels"]}
+        assert by_name["instr_del_a"]["n_annotations"] == 1
+        assert by_name["instr_del_b"]["n_annotations"] == 0
+
+    def test_delete_removes_only_that_instruments_labels(
+        self, instrument_labels, logged_in_client
+    ):
+        logged_in_client.post(
+            "/api/annotations",
+            json={
+                "level": "patient",
+                "patient_id": PATIENT,
+                "label": "instr_del_a",
+                "value": "x",
+            },
+        )
+        resp = logged_in_client.delete(
+            "/api/admin/instruments?name=Doomed%20Instrument"
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["n_labels_deleted"] == 2
+        assert body["n_annotations_deleted"] == 1
+
+        names = [
+            r["name"]
+            for r in logged_in_client.get("/api/admin/label-definitions").json()
+        ]
+        assert "instr_del_a" not in names
+        assert "instr_del_b" not in names
+        assert "instr_del_other" in names

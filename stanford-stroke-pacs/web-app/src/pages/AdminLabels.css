@@ -130,6 +130,16 @@
   @apply text-sm mb-4 leading-snug;
 }
 
+/* Per-label breakdown inside the instrument-deletion dialog. Scrolls rather
+   than growing past the dialog for instruments with long rosters. */
+.admin-labels__confirm-list {
+  @apply mt-2 max-h-48 overflow-y-auto list-disc pl-5 text-xs text-text-muted;
+}
+
+.admin-labels__instrument-header-row {
+  @apply flex items-center justify-between gap-2;
+}
+
 .admin-labels__confirm-actions {
   @apply flex gap-2 justify-end;
 }

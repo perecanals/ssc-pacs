@@ -117,8 +117,10 @@ export default function AdminLabels() {
     save(label.id, policy, []);
   };
 
+  // Both flavours of deletion — one label, or a whole instrument — share the
+  // same shape: fetch a plan, show it, and only act on an explicit confirm.
   const startDelete = useCallback((label) => {
-    setDeleteTarget(label);
+    setDeleteTarget({ kind: "label", label });
     setDeletePlan(null);
     setError("");
     apiGet(
@@ -131,24 +133,46 @@ export default function AdminLabels() {
       });
   }, []);
 
+  const startDeleteInstrument = useCallback((name) => {
+    setDeleteTarget({ kind: "instrument", name });
+    setDeletePlan(null);
+    setError("");
+    apiGet(
+      `/api/admin/instruments/deletion-plan?name=${encodeURIComponent(name)}`,
+    )
+      .then(setDeletePlan)
+      .catch(() => {
+        setDeleteTarget(null);
+        setError(`Could not load the deletion plan for ${name}.`);
+      });
+  }, []);
+
   const confirmDelete = useCallback(async () => {
     if (!deleteTarget || deleteBusy) return;
+    const isLabel = deleteTarget.kind === "label";
+    const displayName = isLabel ? deleteTarget.label.name : deleteTarget.name;
     setDeleteBusy(true);
     setError("");
     try {
       const res = await apiDelete(
-        `/api/admin/label-definitions/${encodeURIComponent(deleteTarget.id)}`,
+        isLabel
+          ? `/api/admin/label-definitions/${encodeURIComponent(deleteTarget.label.id)}`
+          : `/api/admin/instruments?name=${encodeURIComponent(deleteTarget.name)}`,
       );
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
-        setError(err.detail || `Could not delete ${deleteTarget.name}.`);
+        setError(err.detail || `Could not delete ${displayName}.`);
       } else {
-        setLabels((prev) => prev.filter((l) => l.id !== deleteTarget.id));
+        setLabels((prev) =>
+          isLabel
+            ? prev.filter((l) => l.id !== deleteTarget.label.id)
+            : prev.filter((l) => l.instrument !== deleteTarget.name),
+        );
         setDeleteTarget(null);
         setDeletePlan(null);
       }
     } catch {
-      setError(`Could not delete ${deleteTarget.name}.`);
+      setError(`Could not delete ${displayName}.`);
     } finally {
       setDeleteBusy(false);
     }
@@ -207,10 +231,27 @@ export default function AdminLabels() {
                       colSpan={5}
                       scope="colgroup"
                     >
-                      {g.name}{" "}
-                      <span className="admin-labels__instrument-count">
-                        ({g.items.length})
-                      </span>
+                      <div className="admin-labels__instrument-header-row">
+                        <span>
+                          {g.name}{" "}
+                          <span className="admin-labels__instrument-count">
+                            ({g.items.length})
+                          </span>
+                        </span>
+                        {/* Only real instruments — "Unassigned" is not one. */}
+                        {g.items[0]?.instrument && (
+                          <button
+                            type="button"
+                            className="admin-labels__delete-btn"
+                            onClick={() =>
+                              startDeleteInstrument(g.items[0].instrument)
+                            }
+                            aria-label={`Delete instrument ${g.name}`}
+                          >
+                            Delete instrument
+                          </button>
+                        )}
+                      </div>
                     </th>
                   </tr>
                   {g.items.map((l) => (
@@ -288,12 +329,16 @@ export default function AdminLabels() {
           >
             <div className="admin-labels__confirm">
               <div className="admin-labels__confirm-title">
-                Delete label —{" "}
-                <span className="admin-labels__name">{deleteTarget.name}</span>
+                Delete {deleteTarget.kind} —{" "}
+                <span className="admin-labels__name">
+                  {deleteTarget.kind === "label"
+                    ? deleteTarget.label.name
+                    : deleteTarget.name}
+                </span>
               </div>
               {!deletePlan ? (
                 <p className="admin-labels__confirm-text">Loading plan…</p>
-              ) : (
+              ) : deleteTarget.kind === "label" ? (
                 <p className="admin-labels__confirm-text">
                   Permanently removes this {deletePlan.level}-level label: its
                   definition, its{" "}
@@ -305,6 +350,32 @@ export default function AdminLabels() {
                   <code>{deletePlan.labelled_table}</code>. This cannot be
                   undone from the UI.
                 </p>
+              ) : (
+                <div className="admin-labels__confirm-text">
+                  <p>
+                    Permanently removes{" "}
+                    <strong>
+                      all {deletePlan.n_labels} label
+                      {deletePlan.n_labels === 1 ? "" : "s"}
+                    </strong>{" "}
+                    in this instrument and their{" "}
+                    <strong>
+                      {deletePlan.n_annotations} annotation
+                      {deletePlan.n_annotations === 1 ? "" : "s"}
+                    </strong>{" "}
+                    (kept in history only), plus their labelled-table columns.
+                    This cannot be undone from the UI.
+                  </p>
+                  <ul className="admin-labels__confirm-list">
+                    {deletePlan.labels.map((l) => (
+                      <li key={l.name}>
+                        <span className="admin-labels__name">{l.name}</span> —{" "}
+                        {l.n_annotations} annotation
+                        {l.n_annotations === 1 ? "" : "s"}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
               )}
               <div className="admin-labels__confirm-actions">
                 <button
@@ -321,7 +392,7 @@ export default function AdminLabels() {
                   onClick={confirmDelete}
                   disabled={deleteBusy || !deletePlan}
                 >
-                  {deleteBusy ? "Deleting…" : "Delete label"}
+                  {deleteBusy ? "Deleting…" : `Delete ${deleteTarget.kind}`}
                 </button>
               </div>
             </div>

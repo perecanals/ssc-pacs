@@ -91,7 +91,13 @@ The app defines five routes (`App.jsx`):
   label's *values*; see [`architecture.md`](architecture.md) §5.5. Each row also
   carries a **Delete** button that always confirms through a plan dialog
   (`GET …/{id}/deletion-plan` → `DELETE /api/admin/label-definitions/{id}`) —
-  the web equivalent of `scripts/admin/remove_label.py`.
+  the web equivalent of `scripts/admin/remove_label.py`. Each instrument group
+  header (except Unassigned) has a matching **Delete instrument** button that
+  removes every label in the group the same way, after a confirmation listing
+  the labels and their annotation counts
+  (`GET /api/admin/instruments/deletion-plan?name=…` →
+  `DELETE /api/admin/instruments?name=…`; query parameter because instrument
+  names are free text).
 
 The Navigator page (`Navigator.jsx`) provides three hierarchical levels:
 **Patients**, **Studies**, and **Series**. The level switcher lives in the

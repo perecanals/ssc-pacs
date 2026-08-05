@@ -1,5 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor, fireEvent } from "@testing-library/react";
+import {
+  render,
+  screen,
+  waitFor,
+  fireEvent,
+  within,
+} from "@testing-library/react";
 import { MemoryRouter, Routes, Route } from "react-router-dom";
 
 vi.mock("../api/client", () => ({
@@ -63,6 +69,13 @@ function mockApi({ me, deletionPlan }) {
     if (path === "/api/admin/label-definitions")
       return Promise.resolve(LABELS.map((l) => ({ ...l })));
     if (path === "/api/admin/users") return Promise.resolve(USERS);
+    if (path.startsWith("/api/admin/instruments/deletion-plan"))
+      return Promise.resolve({
+        instrument: "crisp2_blo_aspects",
+        labels: [{ name: "aspects_total", level: "patient", n_annotations: 7 }],
+        n_labels: 1,
+        n_annotations: 7,
+      });
     if (path.endsWith("/deletion-plan"))
       return Promise.resolve(
         deletionPlan || {
@@ -128,7 +141,8 @@ describe("AdminLabels page", () => {
     });
     const headers = screen
       .getAllByRole("columnheader")
-      .map((th) => th.textContent.trim())
+      // Real instrument headers also carry the Delete-instrument button.
+      .map((th) => th.textContent.trim().replace(/Delete instrument$/, ""))
       .filter(
         // "" is the unlabelled actions column (the per-row Delete button).
         (t) =>
@@ -254,6 +268,44 @@ describe("AdminLabels page", () => {
     fireEvent.click(screen.getByText("Cancel"));
 
     expect(apiDelete).not.toHaveBeenCalled();
+    expect(screen.getByText("open_label")).toBeInTheDocument();
+  });
+
+  it("deleting an instrument confirms with its label roster, then removes the group", async () => {
+    mockApi({ me: ADMIN });
+    renderAdminLabels();
+    await waitFor(() => {
+      expect(screen.getByText("aspects_total")).toBeInTheDocument();
+    });
+    // The Unassigned group is not an instrument — no delete button for it.
+    expect(
+      screen.queryByLabelText("Delete instrument Unassigned"),
+    ).not.toBeInTheDocument();
+
+    fireEvent.click(
+      screen.getByLabelText("Delete instrument crisp2_blo_aspects"),
+    );
+    expect(apiDelete).not.toHaveBeenCalled();
+    await waitFor(() => {
+      expect(screen.getByText(/all 1 label/)).toBeInTheDocument();
+    });
+    const dialog = screen
+      .getByText(/all 1 label/)
+      .closest(".admin-labels__confirm");
+    expect(within(dialog).getAllByText(/7 annotations/).length).toBeGreaterThan(
+      0,
+    );
+
+    fireEvent.click(within(dialog).getByText("Delete instrument"));
+    await waitFor(() => {
+      expect(apiDelete).toHaveBeenCalledWith(
+        "/api/admin/instruments?name=crisp2_blo_aspects",
+      );
+    });
+    await waitFor(() => {
+      expect(screen.queryByText("aspects_total")).not.toBeInTheDocument();
+    });
+    // Other groups untouched.
     expect(screen.getByText("open_label")).toBeInTheDocument();
   });
 });

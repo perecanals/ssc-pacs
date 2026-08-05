@@ -72,6 +72,8 @@ EXPECTED_ROUTES = {
     ("PUT", "/api/admin/label-definitions/{label_id}/permissions"),
     ("GET", "/api/admin/label-definitions/{label_id}/deletion-plan"),
     ("DELETE", "/api/admin/label-definitions/{label_id}"),
+    ("GET", "/api/admin/instruments/deletion-plan"),
+    ("DELETE", "/api/admin/instruments"),
     # Admin study/series deletion (Orthanc + DB; files via sudo CLI sweep).
     ("GET", "/api/admin/studies/{studyinstanceuid}/deletion-plan"),
     ("DELETE", "/api/admin/studies/{studyinstanceuid}"),
