@@ -16,6 +16,7 @@ from common import (
     LABEL_NAME_RE,
     VALID_LEVELS,
     can_change_label_policy,
+    can_edit_label,
     record_label_value,
 )
 from db import get_conn
@@ -137,6 +138,27 @@ def get_label_values(
         conn.close()
 
 
+@router.get("/api/labels/{label_name}/value-usage")
+def get_label_value_usage(
+    label_name: str,
+    user: str = Depends(get_current_user),
+):
+    """How many annotations currently hold each value of this label — feeds the
+    remove-option confirmation in the label modal. Aggregate counts only, like
+    the summary endpoint: no entity identifiers."""
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT value, COUNT(*) FROM annotations "
+                "WHERE label = %s AND value IS NOT NULL GROUP BY value",
+                (label_name,),
+            )
+            return {r[0]: r[1] for r in cur.fetchall()}
+    finally:
+        conn.close()
+
+
 # ---------------------------------------------------------------------------
 # Label definitions
 # ---------------------------------------------------------------------------
@@ -237,6 +259,7 @@ class LabelDefinitionCreate(BaseModel):
 class LabelDefinitionUpdate(BaseModel):
     description: str | None = None
     instrument: str | None = None
+    options: list[str] | None = None
     edit_policy: str | None = None
     edit_users: list[str] | None = None
 
@@ -279,7 +302,9 @@ def create_label_definition(
     if not LABEL_NAME_RE.match((body.name or "").strip()):
         raise HTTPException(
             status_code=400,
-            detail="name must match ^[A-Za-z][A-Za-z0-9_]{0,62}$ (letters, digits, underscores; must start with a letter; max 63 chars)",
+            detail="Label name may only contain letters, digits and underscores, "
+                   "must start with a letter, and be at most 63 characters "
+                   "(it becomes a column in the exported tables)",
         )
     options_json = json.dumps(body.options) if body.options else None
     instrument = _clean_optional_text(body.instrument)
@@ -334,18 +359,26 @@ def update_label_definition(
     body: LabelDefinitionUpdate,
     user: str = Depends(get_current_user),
 ):
-    """Edit `description`, `instrument`, and/or the edit policy on a label.
+    """Edit `description`, `instrument`, `options`, and/or the edit policy.
 
-    Editing `name`, `level`, `datatype`, or `options` is intentionally
-    out of scope — those are baked into the labelled-table sync and
-    annotation entity-id constraints; renaming/retyping belongs in a
-    dedicated migration flow.
+    Editing `name`, `level`, or `datatype` is intentionally out of scope —
+    those are baked into the labelled-table sync and annotation entity-id
+    constraints; renaming/retyping belongs in a dedicated migration flow.
 
     `description`/`instrument` stay editable by any authenticated user, as they
     always have been. Changing `edit_policy`/`edit_users` is restricted to the
     label's owner or an admin (`can_change_label_policy`) — otherwise the
     protection would be self-defeating, since anyone could simply unlock a label
     and then edit it.
+
+    `options` (select labels only) is gated by `can_edit_label` — the same rule
+    as writing values inline, which already extends the vocabulary, so the
+    modal's option editor grants nothing the data table doesn't. The submitted
+    list is authoritative over the *merged* vocabulary the client displays:
+    it replaces the curated `label_definitions.options` AND prunes
+    `label_value_options` rows not in the list. Removing a value still assigned
+    to entities is allowed — annotations keep it; it just leaves the pickers
+    (and reappears if saved inline again).
     """
     fields = body.model_dump(exclude_unset=True)
     wants_policy = "edit_policy" in fields or "edit_users" in fields
@@ -376,6 +409,27 @@ def update_label_definition(
                 updates.append("instrument = %s")
                 params.append(_clean_optional_text(fields["instrument"]))
 
+            new_options: list[str] | None = None
+            if "options" in fields:
+                if existing["datatype"] != "select":
+                    raise HTTPException(
+                        status_code=400,
+                        detail="options can only be edited on select-type labels",
+                    )
+                if not can_edit_label(existing, user):
+                    raise HTTPException(
+                        status_code=403,
+                        detail=f"Label '{existing['name']}' values are not editable by you",
+                    )
+                # Trim, drop empties, dedupe preserving order.
+                new_options = list(
+                    dict.fromkeys(
+                        v.strip() for v in (fields["options"] or []) if v.strip()
+                    )
+                )
+                updates.append("options = %s")
+                params.append(json.dumps(new_options) if new_options else None)
+
             if wants_policy:
                 if not can_change_label_policy(
                     existing, user, is_user_admin(user)
@@ -402,6 +456,23 @@ def update_label_definition(
                 params,
             )
             row = serialize_label_def_row(cur.fetchone())
+            if new_options is not None:
+                # The submitted list is authoritative over the merged vocabulary
+                # the client displays, so prune label_value_options too — same
+                # transaction, so a rollback leaves both stores untouched.
+                if new_options:
+                    cur.execute(
+                        "DELETE FROM label_value_options "
+                        "WHERE label = %s AND value != ALL(%s)",
+                        (existing["name"], new_options),
+                    )
+                else:
+                    cur.execute(
+                        "DELETE FROM label_value_options WHERE label = %s",
+                        (existing["name"],),
+                    )
+                for opt in new_options:
+                    record_label_value(cur, existing["name"], opt, user)
         conn.commit()
         return row
     finally:

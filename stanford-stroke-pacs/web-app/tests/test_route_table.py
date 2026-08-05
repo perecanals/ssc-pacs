@@ -56,6 +56,7 @@ EXPECTED_ROUTES = {
     ("GET", "/api/labels"),
     ("GET", "/api/labels/summary"),
     ("GET", "/api/labels/{label_name}/values"),
+    ("GET", "/api/labels/{label_name}/value-usage"),
     ("GET", "/api/label-definitions"),
     ("POST", "/api/label-definitions"),
     ("PATCH", "/api/label-definitions/{label_id}"),

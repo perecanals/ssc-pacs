@@ -181,11 +181,17 @@ edit_users  TEXT[] NOT NULL DEFAULT '{}'       -- Alembic 0019
 ```
 
 `instrument` groups labels in the sidebar and default column order (instruments
-alphabetical, unassigned last). `options` holds the **curated** select values as a JSON array (set at creation;
-not editable afterward). For select labels the *effective* option list returned
-by `GET /api/label-definitions` is `options` ∪ the live values in
+alphabetical, unassigned last). `options` holds the **curated** select values as
+a JSON array — seeded at creation and editable afterwards from the label modal
+by anyone the edit policy allows to write the label's values
+(`PATCH /api/label-definitions/{id}` with `options`, gated by `can_edit_label`).
+For select labels the *effective* option list returned by
+`GET /api/label-definitions` is `options` ∪ the live values in
 `label_value_options` — so values created inline while annotating appear in both
-the inline dropdown and the column filter without editing the definition.
+the inline dropdown and the column filter without editing the definition. A
+PATCH of `options` is authoritative over that merged list: it also prunes
+`label_value_options` rows not in the submitted list (annotations holding a
+removed value are untouched — the value just leaves the pickers).
 
 **Edit permissions** (`edit_policy` + `edit_users`, Alembic `0019`) answer *who
 may write this label's values*:
@@ -232,8 +238,11 @@ revision `0009_label_value_options` backfills both), then kept current by
 `POST /api/annotations` and `POST /api/label-definitions`, which upsert select
 values here in the same transaction (`record_label_value` in `common.py`).
 `GET /api/labels/{name}/values` reads it directly — a fast indexed lookup that
-replaced a `SELECT DISTINCT value FROM annotations` scan. Global vocabulary (not
-dataset-scoped); values persist once created (pruning is a manual admin action).
+replaced a `SELECT DISTINCT value FROM annotations` scan.
+`GET /api/labels/{name}/value-usage` returns per-value annotation counts (the
+label modal's remove-option confirmation). Global vocabulary (not
+dataset-scoped); pruned when a permitted user removes values via
+`PATCH /api/label-definitions/{id}` (see `label_definitions.options` above).
 
 ### `users`
 

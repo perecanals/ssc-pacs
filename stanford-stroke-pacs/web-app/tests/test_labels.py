@@ -2,6 +2,8 @@
 
 import pytest
 
+from tests.conftest import USER_LVO, login_as
+
 
 @pytest.fixture()
 def _cleanup_labels(db_conn):
@@ -67,6 +69,9 @@ class TestLabelDefinitions:
             json={"name": "1_starts_with_digit", "level": "series", "datatype": "bool"},
         )
         assert resp.status_code == 400
+        # The detail must name the *label name* as the culprit — it renders in
+        # the modal, where a vague message reads as an option-value error.
+        assert resp.json()["detail"].startswith("Label name")
 
     def test_invalid_datatype_returns_400(self, logged_in_client):
         resp = logged_in_client.post(
@@ -269,6 +274,197 @@ class TestLabelDefinitions:
             },
         )
         assert logged_in_client.get("/api/labels/free_text/values").json() == []
+
+    def test_patch_options_updates_definition_and_vocabulary(self, logged_in_client):
+        create = logged_in_client.post(
+            "/api/label-definitions",
+            json={
+                "name": "opts_patch",
+                "level": "series",
+                "datatype": "select",
+                "options": ["a", "b"],
+            },
+        )
+        label_id = create.json()["id"]
+        resp = logged_in_client.patch(
+            f"/api/label-definitions/{label_id}",
+            json={"options": ["a", "c"]},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["options"] == ["a", "c"]
+        # Vocabulary reconciled: added value present, removed value pruned.
+        assert logged_in_client.get("/api/labels/opts_patch/values").json() == ["a", "c"]
+        defs = logged_in_client.get("/api/label-definitions").json()
+        match = next(d for d in defs if d["name"] == "opts_patch")
+        assert match["options"] == ["a", "c"]
+
+    def test_patch_options_prunes_inline_values(self, logged_in_client):
+        """The submitted list is authoritative over the merged vocabulary, so it
+        can also remove values that only ever existed in label_value_options."""
+        logged_in_client.post(
+            "/api/label-definitions",
+            json={
+                "name": "opts_inline",
+                "level": "patient",
+                "datatype": "select",
+                "options": ["preset"],
+            },
+        )
+        logged_in_client.post(
+            "/api/annotations",
+            json={
+                "level": "patient",
+                "patient_id": "P-0001",
+                "label": "opts_inline",
+                "value": "typed",
+            },
+        )
+        assert logged_in_client.get("/api/labels/opts_inline/values").json() == [
+            "preset",
+            "typed",
+        ]
+        defs = logged_in_client.get("/api/label-definitions").json()
+        label_id = next(d for d in defs if d["name"] == "opts_inline")["id"]
+        resp = logged_in_client.patch(
+            f"/api/label-definitions/{label_id}",
+            json={"options": ["preset"]},
+        )
+        assert resp.status_code == 200
+        assert logged_in_client.get("/api/labels/opts_inline/values").json() == ["preset"]
+
+    def test_patch_options_removing_in_use_value_keeps_annotation(
+        self, logged_in_client, db_conn
+    ):
+        create = logged_in_client.post(
+            "/api/label-definitions",
+            json={
+                "name": "opts_inuse",
+                "level": "patient",
+                "datatype": "select",
+                "options": ["keep", "drop"],
+            },
+        )
+        label_id = create.json()["id"]
+        logged_in_client.post(
+            "/api/annotations",
+            json={
+                "level": "patient",
+                "patient_id": "P-0001",
+                "label": "opts_inuse",
+                "value": "drop",
+            },
+        )
+        resp = logged_in_client.patch(
+            f"/api/label-definitions/{label_id}",
+            json={"options": ["keep"]},
+        )
+        assert resp.status_code == 200
+        assert logged_in_client.get("/api/labels/opts_inuse/values").json() == ["keep"]
+        # The annotation itself is untouched — removal only curates the pick list.
+        with db_conn.cursor() as cur:
+            cur.execute("SELECT value FROM annotations WHERE label = 'opts_inuse'")
+            assert [r[0] for r in cur.fetchall()] == ["drop"]
+
+    def test_patch_options_trims_and_dedupes(self, logged_in_client):
+        create = logged_in_client.post(
+            "/api/label-definitions",
+            json={"name": "opts_norm", "level": "series", "datatype": "select"},
+        )
+        label_id = create.json()["id"]
+        resp = logged_in_client.patch(
+            f"/api/label-definitions/{label_id}",
+            json={"options": [" a ", "a", "", "b"]},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["options"] == ["a", "b"]
+
+    def test_patch_options_on_non_select_returns_400(self, logged_in_client):
+        create = logged_in_client.post(
+            "/api/label-definitions",
+            json={"name": "opts_bool", "level": "series", "datatype": "bool"},
+        )
+        label_id = create.json()["id"]
+        resp = logged_in_client.patch(
+            f"/api/label-definitions/{label_id}",
+            json={"options": ["a"]},
+        )
+        assert resp.status_code == 400
+
+    def test_patch_options_blocked_by_policy_no_admin_bypass(self, logged_in_client):
+        """edit_policy 'nobody' locks option editing even for the admin owner —
+        same no-bypass rule as value writes."""
+        create = logged_in_client.post(
+            "/api/label-definitions",
+            json={"name": "opts_locked", "level": "series", "datatype": "select"},
+        )
+        label_id = create.json()["id"]
+        assert (
+            logged_in_client.patch(
+                f"/api/label-definitions/{label_id}",
+                json={"edit_policy": "nobody", "edit_users": []},
+            ).status_code
+            == 200
+        )
+        resp = logged_in_client.patch(
+            f"/api/label-definitions/{label_id}",
+            json={"options": ["a"]},
+        )
+        assert resp.status_code == 403
+
+    def test_patch_options_users_policy_gates_by_membership(
+        self, logged_in_client, client
+    ):
+        create = logged_in_client.post(
+            "/api/label-definitions",
+            json={"name": "opts_users", "level": "series", "datatype": "select"},
+        )
+        label_id = create.json()["id"]
+        assert (
+            logged_in_client.patch(
+                f"/api/label-definitions/{label_id}",
+                json={"edit_policy": "users", "edit_users": [USER_LVO]},
+            ).status_code
+            == 200
+        )
+        # The admin owner is not listed → 403 (no bypass) …
+        assert (
+            logged_in_client.patch(
+                f"/api/label-definitions/{label_id}",
+                json={"options": ["a"]},
+            ).status_code
+            == 403
+        )
+        # … while the listed user may edit the vocabulary.
+        login_as(client, USER_LVO)
+        resp = client.patch(
+            f"/api/label-definitions/{label_id}",
+            json={"options": ["a"]},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["options"] == ["a"]
+
+    def test_value_usage_counts(self, logged_in_client):
+        logged_in_client.post(
+            "/api/label-definitions",
+            json={
+                "name": "usage_lbl",
+                "level": "patient",
+                "datatype": "select",
+                "options": ["u1", "u2"],
+            },
+        )
+        logged_in_client.post(
+            "/api/annotations",
+            json={
+                "level": "patient",
+                "patient_id": "P-0001",
+                "label": "usage_lbl",
+                "value": "u1",
+            },
+        )
+        resp = logged_in_client.get("/api/labels/usage_lbl/value-usage")
+        assert resp.status_code == 200
+        assert resp.json() == {"u1": 1}
 
     def test_instruments_endpoint_returns_distinct_with_counts(self, logged_in_client):
         for name, instr in [

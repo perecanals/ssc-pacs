@@ -21,6 +21,8 @@ export default function LabelDefModal({
   const [datatype, setDatatype] = useState(existingLabel?.datatype || "bool");
   const [options, setOptions] = useState(existingLabel?.options || []);
   const [optionInput, setOptionInput] = useState("");
+  const [valueUsage, setValueUsage] = useState({});
+  const [confirmRemove, setConfirmRemove] = useState(null); // {idx, opt, count}
   const [instrument, setInstrument] = useState(existingLabel?.instrument || "");
   const [instrumentSuggestions, setInstrumentSuggestions] = useState([]);
   const [error, setError] = useState("");
@@ -43,6 +45,16 @@ export default function LabelDefModal({
     editPolicy === "users" &&
     !(existingUsers.length === 1 && existingUsers[0] === currentUser);
 
+  // Mirrors the server's can_edit_label — the gate on writing values, which is
+  // also the gate on editing the option vocabulary. Based on the *saved* policy
+  // (the server checks the pre-PATCH row), so unlocking a "nobody" label and
+  // editing its values takes two saves, same as inline edits. No admin bypass.
+  const savedPolicy = existingLabel?.edit_policy || "everyone";
+  const canEditValues =
+    !isEdit ||
+    savedPolicy === "everyone" ||
+    (savedPolicy === "users" && existingUsers.includes(currentUser));
+
   useEffect(() => {
     apiGet("/api/instruments")
       .then((rows) =>
@@ -50,6 +62,14 @@ export default function LabelDefModal({
       )
       .catch(() => setInstrumentSuggestions([]));
   }, []);
+
+  // How many annotations hold each value — drives the remove confirmation.
+  useEffect(() => {
+    if (!isEdit || datatype !== "select") return;
+    apiGet(`/api/labels/${encodeURIComponent(existingLabel.name)}/value-usage`)
+      .then(setValueUsage)
+      .catch(() => setValueUsage({}));
+  }, [isEdit, datatype, existingLabel?.name]);
 
   const addOption = () => {
     const val = optionInput.trim();
@@ -63,7 +83,18 @@ export default function LabelDefModal({
   };
 
   const removeOption = (idx) => {
+    const opt = options[idx];
+    const count = valueUsage[opt] || 0;
+    if (isEdit && count > 0) {
+      setConfirmRemove({ idx, opt, count });
+      return;
+    }
     setOptions((prev) => prev.filter((_, i) => i !== idx));
+  };
+
+  const confirmRemoveOption = () => {
+    setOptions((prev) => prev.filter((_, i) => i !== confirmRemove.idx));
+    setConfirmRemove(null);
   };
 
   // "Only me" is just a one-entry list — the server has no separate concept.
@@ -84,6 +115,7 @@ export default function LabelDefModal({
       const res = await apiPatch(`/api/label-definitions/${existingLabel.id}`, {
         description: description.trim() || null,
         instrument: instrument.trim() || null,
+        ...(datatype === "select" && canEditValues ? { options } : {}),
         ...(mayChangePolicy ? policyPayload() : {}),
       });
       if (!res.ok) {
@@ -97,6 +129,17 @@ export default function LabelDefModal({
 
     if (!name.trim()) {
       setError("Name is required");
+      return;
+    }
+    // Mirrors the server's LABEL_NAME_RE — catch it here so the error points
+    // at the Name field instead of surfacing as a generic save failure.
+    if (!/^[A-Za-z][A-Za-z0-9_]{0,62}$/.test(name.trim())) {
+      setError(
+        "Name may only contain letters, digits and underscores, must start " +
+          "with a letter, and be at most 63 characters (it becomes a column " +
+          "in the exported tables). The values of a Select label are not " +
+          "restricted.",
+      );
       return;
     }
     const res = await apiPost("/api/label-definitions", {
@@ -220,13 +263,15 @@ export default function LabelDefModal({
 
         {datatype === "select" && (
           <div className="label-modal__options-section">
-            <label className="label-modal__label">Initial Values</label>
+            <label className="label-modal__label">
+              {isEdit ? "Values" : "Initial Values"}
+            </label>
             <p className="label-modal__options-hint">
-              {isEdit
-                ? "Options are read-only in edit mode."
-                : "Add values users can pick from. More can be added later."}
+              {canEditValues
+                ? "Add or remove values users can pick from."
+                : "You don't have permission to edit this label's values."}
             </p>
-            {!isEdit && (
+            {canEditValues && (
               <div className="label-modal__options-row">
                 <input
                   type="text"
@@ -261,7 +306,7 @@ export default function LabelDefModal({
                       className="label-modal__pill"
                     >
                       {opt}
-                      {!isEdit && (
+                      {canEditValues && (
                         <button
                           type="button"
                           onClick={() => removeOption(i)}
@@ -275,6 +320,41 @@ export default function LabelDefModal({
                 })}
               </div>
             )}
+          </div>
+        )}
+
+        {confirmRemove && (
+          <div
+            className="label-modal__confirm-overlay"
+            onClick={(e) =>
+              e.target === e.currentTarget && setConfirmRemove(null)
+            }
+          >
+            <div className="label-modal__confirm">
+              <p className="label-modal__confirm-text">
+                <strong>{confirmRemove.opt}</strong> is currently assigned to{" "}
+                <strong>{confirmRemove.count}</strong>{" "}
+                {confirmRemove.count === 1 ? "entry" : "entries"}. Removing it
+                only takes it off the pick list — existing entries keep the
+                value.
+              </p>
+              <div className="label-modal__actions">
+                <button
+                  type="button"
+                  onClick={() => setConfirmRemove(null)}
+                  className="btn-outline"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={confirmRemoveOption}
+                  className="btn-primary"
+                >
+                  Remove
+                </button>
+              </div>
+            </div>
           </div>
         )}
 
@@ -303,6 +383,9 @@ LabelDefModal.propTypes = {
     datatype: PropTypes.string,
     options: PropTypes.array,
     instrument: PropTypes.string,
+    created_by: PropTypes.string,
+    edit_policy: PropTypes.string,
+    edit_users: PropTypes.arrayOf(PropTypes.string),
   }),
   onClose: PropTypes.func.isRequired,
   onSaved: PropTypes.func.isRequired,

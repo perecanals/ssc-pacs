@@ -62,6 +62,19 @@
   @apply text-xs text-danger mb-2;
 }
 
+/* Nested confirmation for removing an in-use select value. */
+.label-modal__confirm-overlay {
+  @apply fixed inset-0 bg-black/35 z-[110] flex justify-center items-center;
+}
+
+.label-modal__confirm {
+  @apply bg-surface rounded-lg p-5 w-[360px] max-w-[85vw] shadow-xl;
+}
+
+.label-modal__confirm-text {
+  @apply text-sm mb-4 leading-snug;
+}
+
 .label-modal__actions {
   @apply flex gap-2 justify-end;
 }
