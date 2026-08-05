@@ -70,6 +70,8 @@ EXPECTED_ROUTES = {
     # Label edit permissions (admin page): who may write a label's values.
     ("GET", "/api/admin/label-definitions"),
     ("PUT", "/api/admin/label-definitions/{label_id}/permissions"),
+    ("GET", "/api/admin/label-definitions/{label_id}/deletion-plan"),
+    ("DELETE", "/api/admin/label-definitions/{label_id}"),
     # Admin study/series deletion (Orthanc + DB; files via sudo CLI sweep).
     ("GET", "/api/admin/studies/{studyinstanceuid}/deletion-plan"),
     ("DELETE", "/api/admin/studies/{studyinstanceuid}"),

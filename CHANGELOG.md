@@ -1,5 +1,20 @@
 # Changelog
 
+## v1.18 — 2026-08-05
+
+- **Feature**: select-label option values are editable after creation from the
+  label modal — add/remove gated by the label's edit policy (`can_edit_label`,
+  no admin bypass; `PATCH /api/label-definitions/{id}` with `options`).
+  Removing a value still in use asks for confirmation (counts from the new
+  `GET /api/labels/{name}/value-usage`) and only prunes it from the pickers —
+  existing annotations keep their value.
+- **Feature**: admins can delete a label entirely from the Label Access page,
+  always behind a deletion-plan confirmation (web equivalent of
+  `scripts/admin/remove_label.py`, which now also prunes the vocabulary).
+- **Fix**: the label-name validation error now plainly names the label name as
+  the culprit (client + server) — it was being misread as a constraint on the
+  option values, which have no character restrictions. No migration.
+
 ## v1.17 — 2026-08-04
 
 - **Change**: the clinical side-table is renamed `lvo_clinical_data` →

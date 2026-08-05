@@ -353,9 +353,12 @@ which labels a user may **write**. Each label carries
   it. Correcting a locked value means changing the policy first — deliberate,
   and audited in `annotations_history`.
 - **Enforced server-side** on `POST /api/annotations` (which covers both the
-  upsert and the select-vocabulary extension) and `DELETE /api/annotations/{id}`
-  — clearing is a write. `common.can_edit_label`, read inline per request; no
-  cache, unlike 5.4's proxy hot path. The UI's read-only rendering is cosmetic.
+  upsert and the select-vocabulary extension), `DELETE /api/annotations/{id}` —
+  clearing is a write — and `PATCH /api/label-definitions/{id}` with `options`
+  (editing a select label's option vocabulary from the label modal is the same
+  privilege as writing its values). `common.can_edit_label`, read inline per
+  request; no cache, unlike 5.4's proxy hot path. The UI's read-only rendering
+  is cosmetic.
 - **Ownership**: `created_by` owns the label; only the owner or an admin may
   change its policy (`common.can_change_label_policy`). Being listed in
   `edit_users` confers value edits, not control. Bulk-created labels are owned
@@ -365,7 +368,11 @@ which labels a user may **write**. Each label carries
   checkboxes, `GET /api/admin/label-definitions` +
   `PUT /api/admin/label-definitions/{id}/permissions`), the label modal
   (everyone / only me / no one, for the owner), or
-  `bulk_set_label_values.py --edit-policy` at creation.
+  `bulk_set_label_values.py --edit-policy` at creation. The same page can
+  **delete a label entirely** (`DELETE /api/admin/label-definitions/{id}`,
+  always behind a plan-and-confirm dialog): definition, annotations (captured in
+  `annotations_history`), vocabulary, and labelled-table column — the web
+  equivalent of `scripts/admin/remove_label.py`.
 
 Known limitation: the CLI writes direct SQL and bypasses this gate by design —
 it is the admin backdoor, authorized by shell + `.env` access. The

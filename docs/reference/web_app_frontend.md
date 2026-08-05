@@ -88,7 +88,10 @@ The app defines five routes (`App.jsx`):
   everyone / selected-users / no-one policy control, backed by
   `GET /api/admin/label-definitions` and
   `PUT /api/admin/label-definitions/{id}/permissions`. Decides who may edit each
-  label's *values*; see [`architecture.md`](architecture.md) §5.5.
+  label's *values*; see [`architecture.md`](architecture.md) §5.5. Each row also
+  carries a **Delete** button that always confirms through a plan dialog
+  (`GET …/{id}/deletion-plan` → `DELETE /api/admin/label-definitions/{id}`) —
+  the web equivalent of `scripts/admin/remove_label.py`.
 
 The Navigator page (`Navigator.jsx`) provides three hierarchical levels:
 **Patients**, **Studies**, and **Series**. The level switcher lives in the
@@ -283,9 +286,12 @@ The Navigator page is decomposed into focused React components:
   their level with headings (Patient labels, Study labels, Series labels).
   Column visibility and order are persisted server-side in
   `user_preferences`.
-- `LabelDefModal` — form to create new label definitions with level and
-  datatype selectors, including a select-type option builder with colored
-  pills
+- `LabelDefModal` — form to create and edit label definitions with level and
+  datatype selectors (create-only), including a select-type option builder
+  with colored pills. In edit mode the option builder stays active for anyone
+  the label's edit policy allows to write its values; removing a value still
+  in use pops an in-modal confirmation (usage counts from
+  `GET /api/labels/{name}/value-usage`)
 - `PreviewPane` — lower OHIF iframe container with inline loading/error states.
   Its "Open in New Tab" / "Collapse" controls are not overlaid on the iframe;
   they render in the `DataTable` footer as dark-navy tabs (default `#1a2256`,

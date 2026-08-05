@@ -70,6 +70,9 @@ def main():
 
         with conn.cursor() as cur:
             cur.execute("DELETE FROM annotations WHERE label = %s", (label_name,))
+            cur.execute(
+                "DELETE FROM label_value_options WHERE label = %s", (label_name,)
+            )
             cur.execute("DELETE FROM label_definitions WHERE id = %s", (label_id,))
             cur.execute(
                 sql.SQL("ALTER TABLE {} DROP COLUMN IF EXISTS {}").format(

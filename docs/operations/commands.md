@@ -386,8 +386,10 @@ curl -s -b cookies.txt -X POST http://localhost:8043/api/annotations \
 # Remove an annotation by ID
 curl -s -b cookies.txt -X DELETE http://localhost:8043/api/annotations/42
 
-# Remove a label entirely (definition + annotation rows). Prompts for
-# confirmation unless --yes. Run from the stack root; no sudo needed.
+# Remove a label entirely (definition + annotation rows + vocabulary +
+# labelled column). Prompts for confirmation unless --yes. Run from the stack
+# root; no sudo needed. Also available to admins in the UI: the Delete button
+# on /admin/labels (always confirms with a deletion plan).
 ./scripts/admin/remove_label.py "My Label Name" --yes
 
 # Bulk-set a label's values from a CSV/Excel table (admin backdoor).

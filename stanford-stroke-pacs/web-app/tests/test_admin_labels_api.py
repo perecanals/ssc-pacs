@@ -1,9 +1,10 @@
-"""Admin label-edit-permissions API.
+"""Admin label-edit-permissions + label-deletion API.
 
-GET /api/admin/label-definitions, PUT …/{id}/permissions. Mirrors
-test_admin_users_api.py — the same admin gate, unknown-id 404, unknown-name 422,
-and a roundtrip that proves the change takes effect through another user's
-session rather than merely persisting.
+GET /api/admin/label-definitions, PUT …/{id}/permissions, GET
+…/{id}/deletion-plan, DELETE …/{id}. Mirrors test_admin_users_api.py — the same
+admin gate, unknown-id 404, unknown-name 422, and a roundtrip that proves the
+change takes effect through another user's session rather than merely
+persisting.
 """
 
 import pytest
@@ -118,3 +119,97 @@ class TestSetLabelPermissions:
             "/api/annotations",
             json={"level": "patient", "patient_id": PATIENT, "label": name, "value": "c"},
         ).status_code == 201
+
+
+class TestDeleteLabelDefinition:
+    def test_requires_admin(self, label, client):
+        login_as(client, USER_LVO)
+        assert (
+            client.delete(f"/api/admin/label-definitions/{label['id']}").status_code
+            == 403
+        )
+        assert (
+            client.get(
+                f"/api/admin/label-definitions/{label['id']}/deletion-plan"
+            ).status_code
+            == 403
+        )
+
+    def test_requires_login(self, client):
+        assert client.delete("/api/admin/label-definitions/1").status_code == 401
+
+    def test_unknown_label_404(self, logged_in_client):
+        assert (
+            logged_in_client.delete(
+                "/api/admin/label-definitions/99999999"
+            ).status_code
+            == 404
+        )
+        assert (
+            logged_in_client.get(
+                "/api/admin/label-definitions/99999999/deletion-plan"
+            ).status_code
+            == 404
+        )
+
+    def test_plan_reports_annotation_count(self, label, logged_in_client):
+        logged_in_client.post(
+            "/api/annotations",
+            json={
+                "level": "patient",
+                "patient_id": PATIENT,
+                "label": label["name"],
+                "value": "x",
+            },
+        )
+        plan = logged_in_client.get(
+            f"/api/admin/label-definitions/{label['id']}/deletion-plan"
+        ).json()
+        assert plan["name"] == label["name"]
+        assert plan["level"] == "patient"
+        assert plan["n_annotations"] == 1
+        assert plan["labelled_table"] == "patient_labelled"
+
+    def test_delete_removes_definition_annotations_and_vocabulary(
+        self, logged_in_client, db_conn
+    ):
+        create = logged_in_client.post(
+            "/api/label-definitions",
+            json={
+                "name": "doomed_label",
+                "level": "patient",
+                "datatype": "select",
+                "options": ["a", "b"],
+            },
+        )
+        assert create.status_code == 201, create.text
+        label_id = create.json()["id"]
+        logged_in_client.post(
+            "/api/annotations",
+            json={
+                "level": "patient",
+                "patient_id": PATIENT,
+                "label": "doomed_label",
+                "value": "a",
+            },
+        )
+
+        resp = logged_in_client.delete(f"/api/admin/label-definitions/{label_id}")
+        assert resp.status_code == 200
+        assert resp.json()["n_annotations_deleted"] == 1
+
+        names = [
+            r["name"]
+            for r in logged_in_client.get("/api/admin/label-definitions").json()
+        ]
+        assert "doomed_label" not in names
+        assert logged_in_client.get("/api/labels/doomed_label/values").json() == []
+        with db_conn.cursor() as cur:
+            cur.execute("SELECT COUNT(*) FROM annotations WHERE label = 'doomed_label'")
+            assert cur.fetchone()[0] == 0
+            # The labelled-mirror column is gone too.
+            cur.execute(
+                "SELECT column_name FROM information_schema.columns "
+                "WHERE table_name = 'patient_labelled' AND column_name = 'doomed_label'"
+            )
+            assert cur.fetchone() is None

@@ -11,6 +11,7 @@ import psycopg2.extras
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse, Response
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
+from psycopg2 import sql
 from pydantic import BaseModel
 
 import dataset_access
@@ -18,6 +19,7 @@ from auth import require_admin
 from cache_manager import disk_usage_at
 from config import DICOM_DATA_ROOT, STORAGE_MODE
 from db import DB_CONFIG, get_conn
+from labelled_table_sync import get_level_config, sanitize_label_column
 from metrics import REGISTRY as METRICS_REGISTRY
 from metrics import refresh_cold_storage_gauges
 from orthanc_client import orthanc_system_check
@@ -300,5 +302,76 @@ def set_label_permissions(
             row = labels_routes.serialize_label_def_row(row)
         conn.commit()
         return row
+    finally:
+        conn.close()
+
+
+@router.get("/api/admin/label-definitions/{label_id}/deletion-plan")
+def label_deletion_plan(label_id: int, admin: str = Depends(require_admin)):
+    """What deleting this label would remove — feeds the confirmation dialog
+    on /admin/labels. Mirror of scripts/admin/remove_label.py's preview."""
+    conn = get_conn()
+    try:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute(
+                "SELECT name, level FROM label_definitions WHERE id = %s",
+                (label_id,),
+            )
+            row = cur.fetchone()
+            if row is None:
+                raise HTTPException(
+                    status_code=404, detail="Label definition not found"
+                )
+            cur.execute(
+                "SELECT COUNT(*) AS n FROM annotations WHERE label = %s",
+                (row["name"],),
+            )
+            n_annotations = cur.fetchone()["n"]
+        return {
+            "name": row["name"],
+            "level": row["level"],
+            "n_annotations": n_annotations,
+            "labelled_table": get_level_config(row["level"]).labelled_table,
+            "column": sanitize_label_column(row["name"]),
+        }
+    finally:
+        conn.close()
+
+
+@router.delete("/api/admin/label-definitions/{label_id}")
+def delete_label_definition(label_id: int, admin: str = Depends(require_admin)):
+    """Remove a label entirely: its annotations (captured in annotations_history
+    by the trigger), its vocabulary, its definition, and its labelled-table
+    column. Web equivalent of scripts/admin/remove_label.py, in one transaction.
+    """
+    conn = get_conn()
+    try:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute(
+                "SELECT name, level FROM label_definitions WHERE id = %s",
+                (label_id,),
+            )
+            row = cur.fetchone()
+            if row is None:
+                raise HTTPException(
+                    status_code=404, detail="Label definition not found"
+                )
+            name, level = row["name"], row["level"]
+            cur.execute("DELETE FROM annotations WHERE label = %s", (name,))
+            n_annotations = cur.rowcount
+            cur.execute(
+                "DELETE FROM label_value_options WHERE label = %s", (name,)
+            )
+            cur.execute(
+                "DELETE FROM label_definitions WHERE id = %s", (label_id,)
+            )
+            cur.execute(
+                sql.SQL("ALTER TABLE {} DROP COLUMN IF EXISTS {}").format(
+                    sql.Identifier(get_level_config(level).labelled_table),
+                    sql.Identifier(sanitize_label_column(name)),
+                )
+            )
+        conn.commit()
+        return {"ok": True, "name": name, "n_annotations_deleted": n_annotations}
     finally:
         conn.close()

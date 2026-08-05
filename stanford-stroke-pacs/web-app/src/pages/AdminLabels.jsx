@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Navigate } from "react-router-dom";
-import { apiGet, apiPut } from "../api/client";
+import { apiDelete, apiGet, apiPut } from "../api/client";
 import { useAuth } from "../context/AuthContext";
 import TopBar from "../components/TopBar";
 import { groupByInstrument } from "../utils/table";
@@ -15,6 +15,11 @@ export default function AdminLabels() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [savingId, setSavingId] = useState(null);
+  // Deletion goes through a plan-then-confirm dialog, always — mirror of
+  // scripts/admin/remove_label.py and of DeleteEntityModal for studies/series.
+  const [deleteTarget, setDeleteTarget] = useState(null); // label row
+  const [deletePlan, setDeletePlan] = useState(null);
+  const [deleteBusy, setDeleteBusy] = useState(false);
 
   useEffect(() => {
     if (authLoading || !isAdmin) return undefined;
@@ -112,6 +117,43 @@ export default function AdminLabels() {
     save(label.id, policy, []);
   };
 
+  const startDelete = useCallback((label) => {
+    setDeleteTarget(label);
+    setDeletePlan(null);
+    setError("");
+    apiGet(
+      `/api/admin/label-definitions/${encodeURIComponent(label.id)}/deletion-plan`,
+    )
+      .then(setDeletePlan)
+      .catch(() => {
+        setDeleteTarget(null);
+        setError(`Could not load the deletion plan for ${label.name}.`);
+      });
+  }, []);
+
+  const confirmDelete = useCallback(async () => {
+    if (!deleteTarget || deleteBusy) return;
+    setDeleteBusy(true);
+    setError("");
+    try {
+      const res = await apiDelete(
+        `/api/admin/label-definitions/${encodeURIComponent(deleteTarget.id)}`,
+      );
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        setError(err.detail || `Could not delete ${deleteTarget.name}.`);
+      } else {
+        setLabels((prev) => prev.filter((l) => l.id !== deleteTarget.id));
+        setDeleteTarget(null);
+        setDeletePlan(null);
+      }
+    } catch {
+      setError(`Could not delete ${deleteTarget.name}.`);
+    } finally {
+      setDeleteBusy(false);
+    }
+  }, [deleteTarget, deleteBusy]);
+
   const toggleUser = (label, username) => {
     const next = label.edit_users.includes(username)
       ? label.edit_users.filter((u) => u !== username)
@@ -154,6 +196,7 @@ export default function AdminLabels() {
                   <th className="admin-labels__th">Level</th>
                   <th className="admin-labels__th">Owner</th>
                   <th className="admin-labels__th">Who can edit values</th>
+                  <th className="admin-labels__th" />
                 </tr>
               </thead>
               {groups.map((g) => (
@@ -161,7 +204,7 @@ export default function AdminLabels() {
                   <tr>
                     <th
                       className="admin-labels__instrument-header"
-                      colSpan={4}
+                      colSpan={5}
                       scope="colgroup"
                     >
                       {g.name}{" "}
@@ -216,11 +259,72 @@ export default function AdminLabels() {
                           </div>
                         )}
                       </td>
+                      <td className="admin-labels__td admin-labels__td--actions">
+                        <button
+                          type="button"
+                          className="admin-labels__delete-btn"
+                          onClick={() => startDelete(l)}
+                          aria-label={`Delete label ${l.name}`}
+                        >
+                          Delete
+                        </button>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
               ))}
             </table>
+          </div>
+        )}
+
+        {deleteTarget && (
+          <div
+            className="admin-labels__confirm-overlay"
+            onClick={(e) =>
+              e.target === e.currentTarget &&
+              !deleteBusy &&
+              setDeleteTarget(null)
+            }
+          >
+            <div className="admin-labels__confirm">
+              <div className="admin-labels__confirm-title">
+                Delete label —{" "}
+                <span className="admin-labels__name">{deleteTarget.name}</span>
+              </div>
+              {!deletePlan ? (
+                <p className="admin-labels__confirm-text">Loading plan…</p>
+              ) : (
+                <p className="admin-labels__confirm-text">
+                  Permanently removes this {deletePlan.level}-level label: its
+                  definition, its{" "}
+                  <strong>
+                    {deletePlan.n_annotations} annotation
+                    {deletePlan.n_annotations === 1 ? "" : "s"}
+                  </strong>{" "}
+                  (kept in history only), and its column in{" "}
+                  <code>{deletePlan.labelled_table}</code>. This cannot be
+                  undone from the UI.
+                </p>
+              )}
+              <div className="admin-labels__confirm-actions">
+                <button
+                  type="button"
+                  className="btn-outline"
+                  onClick={() => setDeleteTarget(null)}
+                  disabled={deleteBusy}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  className="admin-labels__delete-btn admin-labels__delete-btn--solid"
+                  onClick={confirmDelete}
+                  disabled={deleteBusy || !deletePlan}
+                >
+                  {deleteBusy ? "Deleting…" : "Delete label"}
+                </button>
+              </div>
+            </div>
           </div>
         )}
       </main>

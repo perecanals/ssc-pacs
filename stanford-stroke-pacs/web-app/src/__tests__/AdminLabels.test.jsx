@@ -16,7 +16,7 @@ vi.mock("../api/client", () => ({
   getLastApiActivityAt: vi.fn(() => Date.now()),
 }));
 
-import { apiGet, apiPut } from "../api/client";
+import { apiDelete, apiGet, apiPut } from "../api/client";
 import { AuthProvider } from "../context/AuthContext";
 import AdminLabels from "../pages/AdminLabels";
 
@@ -57,12 +57,22 @@ const USERS = [
   { username: "alice", is_admin: false, allowed_datasets: ["lvo"] },
 ];
 
-function mockApi({ me }) {
+function mockApi({ me, deletionPlan }) {
   apiGet.mockImplementation((path) => {
     if (path === "/api/me") return Promise.resolve(me);
     if (path === "/api/admin/label-definitions")
       return Promise.resolve(LABELS.map((l) => ({ ...l })));
     if (path === "/api/admin/users") return Promise.resolve(USERS);
+    if (path.endsWith("/deletion-plan"))
+      return Promise.resolve(
+        deletionPlan || {
+          name: "open_label",
+          level: "patient",
+          n_annotations: 4,
+          labelled_table: "patient_labelled",
+          column: "open_label",
+        },
+      );
     return Promise.resolve({});
   });
 }
@@ -120,7 +130,9 @@ describe("AdminLabels page", () => {
       .getAllByRole("columnheader")
       .map((th) => th.textContent.trim())
       .filter(
-        (t) => !["Label", "Level", "Owner", "Who can edit values"].includes(t),
+        // "" is the unlabelled actions column (the per-row Delete button).
+        (t) =>
+          !["Label", "Level", "Owner", "Who can edit values", ""].includes(t),
       );
     expect(headers).toEqual([
       "crisp2_blo_aspects (1)",
@@ -202,5 +214,46 @@ describe("AdminLabels page", () => {
     expect(screen.getByLabelText("Who can edit open_label")).toHaveValue(
       "everyone",
     );
+  });
+
+  it("deleting a label always confirms first, showing the plan", async () => {
+    mockApi({ me: ADMIN });
+    renderAdminLabels();
+    await waitFor(() => {
+      expect(screen.getByText("open_label")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByLabelText("Delete label open_label"));
+    // Nothing deleted yet — the dialog with the plan is showing.
+    expect(apiDelete).not.toHaveBeenCalled();
+    await waitFor(() => {
+      expect(screen.getByText(/4 annotations/)).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByText("Delete label"));
+    await waitFor(() => {
+      expect(apiDelete).toHaveBeenCalledWith("/api/admin/label-definitions/1");
+    });
+    // Row removed from the table.
+    await waitFor(() => {
+      expect(screen.queryByText("open_label")).not.toBeInTheDocument();
+    });
+  });
+
+  it("cancelling the delete dialog leaves the label untouched", async () => {
+    mockApi({ me: ADMIN });
+    renderAdminLabels();
+    await waitFor(() => {
+      expect(screen.getByText("open_label")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByLabelText("Delete label open_label"));
+    await waitFor(() => {
+      expect(screen.getByText(/4 annotations/)).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByText("Cancel"));
+
+    expect(apiDelete).not.toHaveBeenCalled();
+    expect(screen.getByText("open_label")).toBeInTheDocument();
   });
 });
