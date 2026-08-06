@@ -1,5 +1,29 @@
 # Changelog
 
+## v1.21 — 2026-08-06
+
+- **Feature**: "Second Screen" opens the OHIF preview as a fullscreen popup on
+  the other monitor and then routes every subsequent study/series click there,
+  keeping the data table interactive on the main screen. Chromium-only (Window
+  Management API) and shown only while a second display is attached; the first
+  use raises Chrome's one-time window-management permission prompt. The popup
+  is a fresh browsing context, so it re-downloads the study — the existing
+  in-place "Fullscreen" remains the no-reload option.
+- **Feature**: a per-row `Pane` action (study/series rows, main table and both
+  subtables) forces the embedded preview pane open for that row even while the
+  second-screen popup is capturing row clicks.
+- **Fix**: the reverse proxy strips `Cross-Origin-Opener-Policy` from Orthanc's
+  responses. Its `same-origin` value severed the popup's opener relationship,
+  which is what made second-screen routing fall back to the pane. Costs
+  `crossOriginIsolated` in a top-level OHIF tab, which nothing here relies on.
+- **Feature**: `m`/`n` step a maximum-intensity-projection slab up/down through
+  preset thicknesses in OHIF, converting the active pane to a volume viewport
+  in place on the first press and applying the level as soon as the volume is
+  renderable.
+- **Fix**: OHIF dialogs are fitted to small viewports, avoiding the upstream
+  ManagedDialog crash that blacked out the preview pane when a clipped dialog
+  (e.g. "Rendering Presets") mounted inside it. No migration.
+
 ## v1.20 — 2026-08-06
 
 - **Feature**: drag-and-drop column reordering in the data-table subtables
