@@ -236,6 +236,18 @@ Live tuning per browser, no restart: `localStorage.sscTrackpadPxPerSlice`
 overrides the threshold; `localStorage.sscTrackpadShimOff = '1'` disables the
 damping (arrows stay). Persist the tuned value in `config.toml`.
 
+The same injection point carries a small CSS patch (`ssc-dialog-fit`,
+independent of the trackpad kill switch): OHIF 3.11's dialog layer crashes
+when a centered dialog mounts clipped by the viewport (its reposition helper
+dereferences an absent default position — upstream bug, still on OHIF
+master). The ~500px "Rendering Presets" dialog inside the ~400px-tall
+preview-pane iframe is exactly that case; the uncaught error unmounted the
+whole viewer, blacking out the pane until the series was reselected.
+Media-scoped rules (viewports under 660px tall or 480px wide) cap dialogs to
+the viewport — unclipped at mount, so the crashing branch never runs — and
+shrink the preset grid so its title, search and Cancel stay visible while
+the grid scrolls. Full-size tabs are untouched.
+
 #### DICOMweb URL relativization
 
 Orthanc's DICOMweb plugin emits **absolute** URLs in its JSON responses —

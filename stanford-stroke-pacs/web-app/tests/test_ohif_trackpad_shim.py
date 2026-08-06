@@ -59,9 +59,15 @@ class TestInjectWheelShim:
         once = proxy.inject_wheel_shim(ENTRY_HTML)
         assert proxy.inject_wheel_shim(once) == once
 
-    def test_zero_threshold_disables(self, monkeypatch):
+    def test_zero_threshold_disables_script_but_not_dialog_fit(
+        self, monkeypatch
+    ):
+        # The threshold kill switch governs the input script only; the
+        # dialog-fit CSS prevents a viewer crash and must stay injected.
         monkeypatch.setattr(proxy, "OHIF_TRACKPAD_PX_PER_SLICE", 0)
-        assert proxy.inject_wheel_shim(ENTRY_HTML) == ENTRY_HTML
+        out = proxy.inject_wheel_shim(ENTRY_HTML)
+        assert proxy._OHIF_SHIM_MARKER not in out
+        assert proxy._OHIF_DIALOG_FIT_MARKER in out
 
     def test_threshold_was_rendered_into_the_script(self):
         # The placeholder must be substituted at import; a leftover would make
@@ -73,6 +79,24 @@ class TestInjectWheelShim:
         # handler passes them through untouched.
         assert b"ArrowDown" in proxy._OHIF_WHEEL_SHIM
         assert proxy._OHIF_WHEEL_SHIM.count(b"sscSynthetic") >= 2
+
+    def test_dialog_fit_css_is_injected_with_the_shim(self):
+        # OHIF 3.11's ManagedDialog crashes (and unmounts the viewer) when a
+        # dialog without a defaultPosition mounts clipped — the ~500px
+        # Rendering Presets dialog inside the ~400px preview-pane iframe.
+        # The CSS keeps dialogs inside small viewports so the crashing
+        # branch never runs; big windows are untouched via the media scope.
+        out = proxy.inject_wheel_shim(ENTRY_HTML)
+        assert proxy._OHIF_DIALOG_FIT_MARKER in out
+        assert out.index(proxy._OHIF_DIALOG_FIT_MARKER) < out.index(b"</head>")
+        for token in (
+            b"@media (max-height: 659px)",
+            b'div[role="dialog"].fixed',
+            b"max-height: 94vh",
+            b"h-\\[500px\\]",
+            b"@media (max-width: 479px)",
+        ):
+            assert token in proxy._OHIF_DIALOG_FIT
 
 
 # ---------------------------------------------------------------------------
@@ -137,6 +161,7 @@ class TestProxyInjection:
         assert isinstance(resp, Response)
         assert not isinstance(resp, StreamingResponse)
         assert proxy._OHIF_SHIM_MARKER in out
+        assert proxy._OHIF_DIALOG_FIT_MARKER in out
         assert resp.headers["content-length"] == str(len(out))
 
     async def test_gzipped_entry_document_is_decoded_then_injected(

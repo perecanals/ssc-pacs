@@ -77,7 +77,22 @@ def is_immutable_ohif_asset(path: str) -> bool:
 # capture phase (unless typing in a field) and turns each press into a
 # synthetic one-detent wheel on the last-clicked viewport, so "click the
 # image, then arrows" always works and OHIF's own binding can't double-step.
+#
+# Dialog-fit (the <style> injected alongside): OHIF 3.11's ManagedDialog
+# crashes when a dialog carrying no defaultPosition mounts clipped by the
+# viewport — its reposition helper dereferences defaultPosition.y/.x
+# (upstream bug, still on OHIF master). The embedded preview pane hits
+# exactly that: the ~500px-tall "Rendering Presets" dialog opens inside a
+# ~400px-tall iframe, the uncaught TypeError unmounts OHIF's whole React
+# tree, and the pane stays black until the series is reselected. The
+# media-scoped rules keep centered dialogs inside small viewports (unclipped
+# at mount ⇒ the crashing branch never runs — that is the actual fix, and
+# the `div[role="dialog"].fixed` selector is structural, matching every
+# Radix dialog); the `h-\\[500px\\]` rule is ergonomics on top, shrinking the
+# preset grid so title, search and Cancel stay visible and only the grid
+# scrolls. Viewports ≥660px tall and ≥480px wide are untouched.
 _OHIF_SHIM_MARKER = b"ssc-trackpad-shim"
+_OHIF_DIALOG_FIT_MARKER = b"ssc-dialog-fit"
 
 _OHIF_WHEEL_SHIM = """\
 <script id="ssc-trackpad-shim">/* injected by web-app routes/proxy.py */
@@ -131,22 +146,40 @@ _OHIF_WHEEL_SHIM = """\
     "__PX_PER_SLICE__", str(OHIF_TRACKPAD_PX_PER_SLICE)
 ).encode()
 
+_OHIF_DIALOG_FIT = b"""\
+<style id="ssc-dialog-fit">/* injected by web-app routes/proxy.py */
+@media (max-height: 659px) {
+  div[role="dialog"].fixed { max-height: 94vh; overflow-y: auto; }
+  div.h-\\[500px\\] { height: clamp(180px, calc(100vh - 130px), 500px) !important; }
+}
+@media (max-width: 479px) {
+  div[role="dialog"].fixed { max-width: 96vw; }
+}
+</style>"""
+
 
 def inject_wheel_shim(body: bytes) -> bytes:
-    """Insert the trackpad shim into an OHIF entry document.
+    """Insert the input shim + dialog-fit CSS into an OHIF entry document.
 
     Before </head>, so the capture listener is registered before OHIF's
     deferred bundle runs (capture-phase ordering would save us regardless;
-    this keeps the intent obvious). No-op when damping is disabled or the
-    shim is already present.
+    this keeps the intent obvious). The script honours the damping kill
+    switch (threshold <= 0); the dialog-fit CSS is unconditional — it
+    prevents a viewer crash, not an input preference. Each part is a no-op
+    when already present.
     """
-    if OHIF_TRACKPAD_PX_PER_SLICE <= 0 or _OHIF_SHIM_MARKER in body:
+    blob = b""
+    if OHIF_TRACKPAD_PX_PER_SLICE > 0 and _OHIF_SHIM_MARKER not in body:
+        blob += _OHIF_WHEEL_SHIM
+    if _OHIF_DIALOG_FIT_MARKER not in body:
+        blob += _OHIF_DIALOG_FIT
+    if not blob:
         return body
     for anchor in (b"</head>", b"</body>"):
         idx = body.find(anchor)
         if idx != -1:
-            return body[:idx] + _OHIF_WHEEL_SHIM + body[idx:]
-    return body + _OHIF_WHEEL_SHIM
+            return body[:idx] + blob + body[idx:]
+    return body + blob
 
 
 async def dicomweb_dataset_guard(
