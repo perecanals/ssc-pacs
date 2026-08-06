@@ -236,3 +236,21 @@ class TestProxyInjection:
         )
         assert isinstance(resp, StreamingResponse)
         assert proxy._OHIF_SHIM_MARKER not in out
+
+    @pytest.mark.parametrize("path", ["/ohif/viewer", "/ohif/app.bundle.css"])
+    async def test_coop_header_is_stripped(self, monkeypatch, path):
+        # Orthanc serves OHIF with COOP: same-origin; forwarding it severs the
+        # second-screen popup's opener handle (window.closed reads true), so
+        # the proxy must drop it on both the buffered-HTML and streaming paths.
+        body = ENTRY_HTML if path.endswith("viewer") else b"body{}"
+        ctype = "text/html" if path.endswith("viewer") else "text/css"
+        resp, _ = await _run_proxy(
+            monkeypatch, path, body, ctype,
+            extra_headers={
+                "cross-origin-opener-policy": "same-origin",
+                "cross-origin-embedder-policy": "require-corp",
+            },
+        )
+        assert "cross-origin-opener-policy" not in resp.headers
+        # COEP is deliberately kept — it doesn't affect the opener handle.
+        assert resp.headers["cross-origin-embedder-policy"] == "require-corp"

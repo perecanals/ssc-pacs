@@ -506,6 +506,21 @@ _DROP_REQUEST_HEADERS = _HOP_BY_HOP | {
     "content-length",
 }
 
+# Upstream response headers to drop in addition to hop-by-hop:
+#   cross-origin-opener-policy[-report-only]: Orthanc serves the OHIF build
+#   with COOP: same-origin, but the app pages on this origin carry no COOP.
+#   Navigating the second-screen popup to a mismatched-COOP document makes
+#   the browser sever the opener relationship — window.closed reads true and
+#   location.replace() goes nowhere — which breaks routing row clicks to the
+#   popup. Cost of stripping: a top-level OHIF document is no longer
+#   crossOriginIsolated (no SharedArrayBuffer). The embedded preview pane
+#   never was (isolation is decided by its /app top-level page), and OHIF
+#   demonstrably runs fine without it there.
+_DROP_RESPONSE_HEADERS = _HOP_BY_HOP | {
+    "cross-origin-opener-policy",
+    "cross-origin-opener-policy-report-only",
+}
+
 _CLIENT: httpx.AsyncClient | None = None
 
 
@@ -546,7 +561,7 @@ def _filtered_response_headers(upstream: httpx.Response) -> dict[str, str]:
     return {
         k: v
         for k, v in upstream.headers.items()
-        if k.lower() not in _HOP_BY_HOP
+        if k.lower() not in _DROP_RESPONSE_HEADERS
     }
 
 

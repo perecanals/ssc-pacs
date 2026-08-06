@@ -284,6 +284,20 @@ against the web-app origin and it flows through the authenticated proxy like
 every other request. Frames/bulkdata responses (multipart, non-JSON) stream
 through untouched.
 
+#### COOP header stripping (second-screen popup)
+
+Orthanc serves the OHIF build with `Cross-Origin-Opener-Policy: same-origin`,
+while the web-app pages carry no COOP. Navigating a popup to a
+mismatched-COOP document makes the browser sever the opener relationship —
+the opener's `window.closed` reads `true` and `location.replace()` goes
+nowhere — which broke the frontend's "Second Screen" viewer window (row
+clicks could no longer be routed to it). The proxy drops
+`Cross-Origin-Opener-Policy[-Report-Only]` from every proxied response
+(`_DROP_RESPONSE_HEADERS` in `routes/proxy.py`). Cost: a top-level OHIF
+document loses `crossOriginIsolated` (no SharedArrayBuffer); the embedded
+preview pane never had it — isolation is decided by its `/app` top-level
+page — and OHIF demonstrably runs fine without it.
+
 #### DICOMweb series-metadata warm hold (cold storage)
 
 In `cold_path_cache` mode the proxy holds a
