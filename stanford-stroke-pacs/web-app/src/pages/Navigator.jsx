@@ -2,6 +2,7 @@ import { useState, useCallback, useEffect, useRef } from "react";
 import { getStorageMode, resolveOhifViewerUrl } from "../api/warmOhif";
 import { useAuth } from "../context/AuthContext";
 import useSessionStatePersistence from "../hooks/useSessionStatePersistence";
+import useSecondScreenViewer from "../hooks/useSecondScreenViewer";
 import TopBar from "../components/TopBar";
 import Sidebar from "../components/Sidebar";
 import DataTable from "../components/DataTable";
@@ -98,6 +99,19 @@ export default function Navigator() {
     previewPaneRef.current?.requestFullscreen?.()?.catch(() => {});
   }, []);
 
+  const secondScreen = useSecondScreenViewer();
+
+  const handleOpenSecondScreen = useCallback(async () => {
+    const opened = await secondScreen.open(previewUrl);
+    if (opened) {
+      setPreviewOpen(false);
+      // The popup owns the viewer now. Drop the pane's hidden iframe so it
+      // neither holds a superseded study in memory nor re-downloads the next
+      // one in the background as row clicks re-route to the popup.
+      setPreviewUrl("");
+    }
+  }, [secondScreen, previewUrl]);
+
   // Never leave the browser fullscreen on a pane that has been collapsed or
   // whose selection is gone — the user would be staring at a blank screen with
   // no visible way back.
@@ -166,6 +180,42 @@ export default function Navigator() {
       previewRequestRef.current = requestId;
 
       setPreviewSelection(selection);
+
+      // While the second-screen popup is live, row clicks re-point it instead
+      // of opening the pane. Same request-guard discipline as the pane path;
+      // progress/errors surface in the footer chip via secondScreen.status.
+      if (secondScreen.isLive()) {
+        setPreviewOpen(false);
+        setPreviewError("");
+        secondScreen.setStatus("Checking storage…");
+        try {
+          const mode = await getStorageMode();
+          if (previewRequestRef.current !== requestId) return;
+          secondScreen.setStatus(
+            mode === "cold_path_cache"
+              ? "Warming imaging cache…"
+              : "Resolving OHIF preview…",
+          );
+          const url = await resolveOhifViewerUrl(
+            selection.studyinstanceuid,
+            selection.seriesinstanceuid || null,
+          );
+          if (previewRequestRef.current !== requestId) return;
+          // navigate() is false only when the popup died mid-flight (the
+          // liveness poll clears `active` within a second) or the URL is
+          // empty — don't surprise the user with a pane; the next click
+          // routes normally.
+          secondScreen.navigate(url);
+          secondScreen.setStatus("");
+        } catch (e) {
+          if (previewRequestRef.current !== requestId) return;
+          secondScreen.setStatus(
+            e?.message || "Could not resolve the OHIF preview for this row.",
+          );
+        }
+        return;
+      }
+
       setPreviewOpen(true);
       setPreviewLoading(true);
       setPreviewError("");
@@ -203,7 +253,7 @@ export default function Navigator() {
         }
       }
     },
-    [previewError, previewOpen, previewSelection, previewUrl],
+    [previewError, previewOpen, previewSelection, previewUrl, secondScreen],
   );
 
   // Gate rendering until the session restore resolves so the DataTable
@@ -244,6 +294,9 @@ export default function Navigator() {
               previewUrl={previewUrl}
               onPreviewClose={() => setPreviewOpen(false)}
               onPreviewFullscreen={handlePreviewFullscreen}
+              onOpenSecondScreen={handleOpenSecondScreen}
+              secondScreenActive={secondScreen.active}
+              secondScreenStatus={secondScreen.status}
               onLabelsMutated={handleLabelsMutated}
             />
             <PreviewPane

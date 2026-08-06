@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
 import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 
@@ -82,5 +82,77 @@ describe("DataTable pane tabs", () => {
     expect(
       screen.getByRole("link", { name: /open in new tab/i }),
     ).toHaveAttribute("href", PREVIEW_URL);
+  });
+
+  describe("Second Screen tab", () => {
+    // jsdom has neither getScreenDetails nor screen.isExtended; these tests
+    // install both to simulate Chromium with an extended desktop. The popup
+    // open/navigate logic itself lives in useSecondScreenViewer (tested in
+    // hooks/__tests__); DataTable only gates and forwards.
+    function installWindowManagement() {
+      Object.defineProperty(window.screen, "isExtended", {
+        value: true,
+        configurable: true,
+      });
+      window.getScreenDetails = vi.fn();
+    }
+
+    afterEach(() => {
+      delete window.getScreenDetails;
+      delete window.screen.isExtended;
+    });
+
+    it("is hidden when the Window Management API is absent (non-Chromium)", async () => {
+      renderTable({ onOpenSecondScreen: vi.fn() });
+      await screen.findByRole("link", { name: /open in new tab/i });
+      expect(
+        screen.queryByRole("button", { name: /second screen/i }),
+      ).toBeNull();
+    });
+
+    it("calls onOpenSecondScreen when clicked", async () => {
+      installWindowManagement();
+      const onOpenSecondScreen = vi.fn();
+      renderTable({ onOpenSecondScreen });
+
+      fireEvent.click(
+        await screen.findByRole("button", { name: /second screen/i }),
+      );
+      expect(onOpenSecondScreen).toHaveBeenCalledTimes(1);
+    });
+
+    it("shows a focus chip instead of the pane tabs while the popup is live", async () => {
+      installWindowManagement();
+      const onOpenSecondScreen = vi.fn();
+      renderTable({
+        previewOpen: false,
+        secondScreenActive: true,
+        onOpenSecondScreen,
+      });
+
+      const chip = await screen.findByRole("button", {
+        name: /second screen/i,
+      });
+      // Pane is collapsed: its own tabs are gone, only the chip remains.
+      expect(
+        screen.queryByRole("link", { name: /open in new tab/i }),
+      ).toBeNull();
+      fireEvent.click(chip);
+      expect(onOpenSecondScreen).toHaveBeenCalledTimes(1);
+    });
+
+    it("surfaces routing status text in the chip", async () => {
+      installWindowManagement();
+      renderTable({
+        previewOpen: false,
+        secondScreenActive: true,
+        secondScreenStatus: "Warming imaging cache…",
+        onOpenSecondScreen: vi.fn(),
+      });
+
+      expect(
+        await screen.findByRole("button", { name: /warming imaging cache/i }),
+      ).toBeInTheDocument();
+    });
   });
 });

@@ -308,13 +308,34 @@ The Navigator page is decomposed into focused React components:
   in use pops an in-modal confirmation (usage counts from
   `GET /api/labels/{name}/value-usage`)
 - `PreviewPane` — lower OHIF iframe container with inline loading/error states.
-  Its "Open in New Tab" / "Collapse" controls are not overlaid on the iframe;
-  they render in the `DataTable` footer as dark-navy tabs (default `#1a2256`,
-  hover `#090C29`) centered in a flex slot between the Refresh buttons and the
-  row count, visually stemming from the pane's top edge. A mirror flex slot
-  keeps the count centered. State is threaded from `Navigator.jsx` into
-  `DataTable` via the `previewOpen` / `previewUrl` / `onPreviewClose` props.
+  Its "Fullscreen" / "Second Screen" / "Open in New Tab" / "Collapse" controls
+  are not overlaid on the iframe; they render in the `DataTable` footer as
+  dark-navy tabs (default `#1a2256`, hover `#090C29`) centered in a flex slot
+  between the Refresh buttons and the row count, visually stemming from the
+  pane's top edge. A mirror flex slot keeps the count centered. State is
+  threaded from `Navigator.jsx` into `DataTable` via the `previewOpen` /
+  `previewUrl` / `onPreviewClose` / `onPreviewFullscreen` props.
   The sidebar toggle (`.sidebar__toggle`) shares the same navy palette/shape.
+  - **Fullscreen** calls `requestFullscreen()` on the pane element
+    (`usePaneFullscreen`), which keeps the OHIF iframe mounted — no reload, no
+    re-download. The pane carries its own Exit affordance while fullscreen.
+  - **Second Screen** (`utils/secondScreen.js` + `hooks/useSecondScreenViewer`)
+    opens the same viewer URL as a fullscreen popup on the display the app
+    window is *not* on, via the Window Management API, then collapses the pane
+    so the data table stays interactive. Chromium-only and shown only while
+    `screen.isExtended` is true (more than one display attached); other
+    browsers and single-monitor setups never see the button. First click
+    triggers Chrome's one-time "window management" permission prompt, and
+    being a fresh browsing context it re-downloads the study — the accepted
+    cost of a truly independent viewer window.
+  - While the popup is live, `Navigator.handlePreviewSelect` routes row clicks
+    to it instead of the pane: the popup is re-pointed at the resolved viewer
+    URL (`location.replace`; same-URL clicks only refocus, avoiding an OHIF
+    reload) and the pane stays collapsed with its iframe dropped. A footer
+    chip replaces the pane tabs meanwhile — it shows warm/resolve progress or
+    errors and refocuses the popup on click. `useSecondScreenViewer` polls
+    `window.closed` (1 s) since closing a popup fires no opener event; once
+    closed, clicks fall back to the pane.
 - `AuthContext` — React context providing `currentUser`, `login()`, `logout()`,
   and automatic 401 interception
 

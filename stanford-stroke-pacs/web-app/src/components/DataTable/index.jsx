@@ -39,6 +39,7 @@ import ChildRows, { DownloadIcon, TrashIcon } from "./ChildRows";
 import WarmButton from "./WarmButton";
 import CopyPathButtons from "./CopyPathButtons";
 import { getStorageMode } from "../../api/warmOhif";
+import { canUseSecondScreen } from "../../utils/secondScreen";
 import "./DataTable.css";
 
 function DataTableInner({
@@ -52,6 +53,9 @@ function DataTableInner({
   previewUrl,
   onPreviewClose,
   onPreviewFullscreen,
+  onOpenSecondScreen,
+  secondScreenActive,
+  secondScreenStatus,
   onLabelsMutated,
   serverPrefs,
 }) {
@@ -912,6 +916,19 @@ function DataTableInner({
                   Fullscreen <span aria-hidden="true">⤢</span>
                 </button>
               )}
+              {previewUrl && onOpenSecondScreen && canUseSecondScreen() && (
+                // Chromium + >1 display only (see utils/secondScreen.js).
+                // Opens a fresh browsing context, so OHIF re-downloads the
+                // study — the price of keeping the table interactive here
+                // while the viewer fills the other monitor.
+                <button
+                  type="button"
+                  onClick={onOpenSecondScreen}
+                  className="dt__pane-tab"
+                >
+                  Second Screen <span aria-hidden="true">⧉</span>
+                </button>
+              )}
               {previewUrl && (
                 <a
                   href={previewUrl}
@@ -928,6 +945,25 @@ function DataTableInner({
                 className="dt__pane-tab"
               >
                 Collapse
+              </button>
+            </div>
+          )}
+          {!previewOpen && secondScreenActive && (
+            // While the popup is live, row clicks route there instead of the
+            // pane; this chip shows warm/resolve progress (or an error) and
+            // clicking it refocuses the viewer window.
+            <div className="dt__pane-tabs">
+              <button
+                type="button"
+                onClick={onOpenSecondScreen}
+                className="dt__pane-tab"
+                title="Row clicks open in the second-screen viewer. Click to focus it."
+              >
+                {secondScreenStatus || (
+                  <>
+                    Second Screen <span aria-hidden="true">⧉</span>
+                  </>
+                )}
               </button>
             </div>
           )}
@@ -1015,6 +1051,9 @@ DataTableInner.propTypes = {
   previewUrl: PropTypes.string,
   onPreviewClose: PropTypes.func,
   onPreviewFullscreen: PropTypes.func,
+  onOpenSecondScreen: PropTypes.func,
+  secondScreenActive: PropTypes.bool,
+  secondScreenStatus: PropTypes.string,
   onLabelsMutated: PropTypes.func,
   serverPrefs: PropTypes.object.isRequired,
 };
@@ -1060,5 +1099,8 @@ DataTable.propTypes = {
   previewUrl: PropTypes.string,
   onPreviewClose: PropTypes.func,
   onPreviewFullscreen: PropTypes.func,
+  onOpenSecondScreen: PropTypes.func,
+  secondScreenActive: PropTypes.bool,
+  secondScreenStatus: PropTypes.string,
   onLabelsMutated: PropTypes.func,
 };
