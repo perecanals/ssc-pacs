@@ -197,3 +197,60 @@ describe("usePreferencePersistence — pruning prefs that name dead columns", ()
     expect(apiFetch).not.toHaveBeenCalled();
   });
 });
+
+// Subtable column order rides in the same per-level blob as
+// prefs.subtableColumnOrder ({ level: key[] }, full-key namespace).
+describe("usePreferencePersistence — subtable column order", () => {
+  beforeEach(() => apiFetch.mockClear());
+
+  const LIVE = {
+    key: "builtin:study:studydate",
+    sourceKey: "studydate",
+    builtin: true,
+  };
+  const DEAD = "builtin:study:femoral_sheath_time";
+
+  it("a change to subtableOrder alone triggers a save carrying it", async () => {
+    const { rerender } = renderPersistence();
+    rerender({ subtableOrder: { study: [LIVE.key] } });
+
+    await waitFor(() => expect(apiFetch).toHaveBeenCalledTimes(1), {
+      timeout: 3000,
+    });
+    const body = JSON.parse(apiFetch.mock.calls[0][1].body);
+    expect(body.prefs.subtableColumnOrder).toEqual({ study: [LIVE.key] });
+  });
+
+  it("self-heals dead keys and drops levels that prune to empty", async () => {
+    renderPersistence({
+      allCols: [LIVE],
+      catalogReady: true,
+      subtableOrder: { study: [LIVE.key, DEAD], series: [DEAD] },
+    });
+    await waitFor(() => expect(apiFetch).toHaveBeenCalled(), { timeout: 3000 });
+    const body = JSON.parse(apiFetch.mock.calls.at(-1)[1].body);
+    expect(body.prefs.subtableColumnOrder).toEqual({ study: [LIVE.key] });
+  });
+
+  it("does not prune before the catalog has loaded", async () => {
+    const { rerender } = renderPersistence({
+      allCols: [],
+      catalogReady: false,
+      subtableOrder: { study: [LIVE.key, DEAD] },
+    });
+    await new Promise((r) => setTimeout(r, 600));
+    expect(apiFetch).not.toHaveBeenCalled();
+
+    rerender({
+      allCols: [],
+      catalogReady: false,
+      subtableOrder: { study: [LIVE.key, DEAD] },
+      sortDir: "desc",
+    });
+    await waitFor(() => expect(apiFetch).toHaveBeenCalled(), { timeout: 3000 });
+    const body = JSON.parse(apiFetch.mock.calls.at(-1)[1].body);
+    expect(body.prefs.subtableColumnOrder).toEqual({
+      study: [LIVE.key, DEAD],
+    });
+  });
+});

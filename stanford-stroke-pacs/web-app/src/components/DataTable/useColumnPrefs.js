@@ -9,6 +9,19 @@ import {
 const sanitizeKeys = (keys) =>
   Array.from(new Set(Array.isArray(keys) ? keys : []));
 
+// Saved subtable order: a { level: key[] } map. Keep only known levels with
+// non-empty sanitized key arrays.
+const sanitizeSubtableOrder = (raw) => {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+  const out = {};
+  for (const [lvl, keys] of Object.entries(raw)) {
+    if (LEVEL_RANK[lvl] === undefined) continue;
+    const clean = sanitizeKeys(keys);
+    if (clean.length) out[lvl] = clean;
+  }
+  return out;
+};
+
 // Column visibility/order state for the DataTable, seeded from the saved
 // server prefs and merged with the label-definition catalog as it loads.
 export default function useColumnPrefs(
@@ -135,6 +148,9 @@ export default function useColumnPrefs(
   const [columnOrder, setColumnOrder] = useState(() =>
     sanitizeKeys(initialPrefs.columnOrder),
   );
+  const [subtableOrder, setSubtableOrder] = useState(() =>
+    sanitizeSubtableOrder(initialPrefs.subtableColumnOrder),
+  );
 
   const visibleCols = useMemo(() => {
     if (columnOrder.length === 0) return unorderedVisibleCols;
@@ -163,11 +179,58 @@ export default function useColumnPrefs(
     [visibleCols],
   );
 
+  // Columns of a subtable (child/grandchild) level: visible builtins in
+  // catalog order, then that level's label columns in main-table order —
+  // unless the user saved a subtable order for the level, which then sorts
+  // the whole set (stale keys append in default order, like visibleCols).
+  const subtableColsForLevel = useCallback(
+    (targetLevel) => {
+      const builtins = allCols.filter(
+        (c) =>
+          c.builtin && visibleKeys.includes(c.key) && c.level === targetLevel,
+      );
+      const labels = visibleCols.filter(
+        (c) => !c.builtin && c.level === targetLevel,
+      );
+      const cols = [...builtins, ...labels];
+      const order = subtableOrder[targetLevel];
+      if (!order || order.length === 0) return cols;
+      const orderMap = new Map(order.map((k, i) => [k, i]));
+      return cols.sort(
+        (a, b) =>
+          (orderMap.get(a.key) ?? Infinity) - (orderMap.get(b.key) ?? Infinity),
+      );
+    },
+    [allCols, visibleCols, visibleKeys, subtableOrder],
+  );
+
+  const reorderSubtable = useCallback(
+    (targetLevel, fromKey, toKey, side) => {
+      if (fromKey === toKey) return;
+      setSubtableOrder((prev) => {
+        const keys = subtableColsForLevel(targetLevel).map((c) => c.key);
+        const fromIdx = keys.indexOf(fromKey);
+        if (fromIdx === -1) return prev;
+        keys.splice(fromIdx, 1);
+        let insertIdx = keys.indexOf(toKey);
+        if (insertIdx === -1) {
+          keys.push(fromKey);
+        } else {
+          if (side === "after") insertIdx += 1;
+          keys.splice(insertIdx, 0, fromKey);
+        }
+        return { ...prev, [targetLevel]: keys };
+      });
+    },
+    [subtableColsForLevel],
+  );
+
   const resetColumns = useCallback(() => {
     setVisibleKeys(
       Array.from(new Set([...defaultBuiltinKeys, ...defaultLabelKeys])),
     );
     setColumnOrder([]);
+    setSubtableOrder({});
   }, [defaultBuiltinKeys, defaultLabelKeys]);
 
   return {
@@ -175,10 +238,13 @@ export default function useColumnPrefs(
     visibleCols,
     visibleKeys,
     columnOrder,
+    subtableOrder,
     prefsUpgraded,
     toggle,
     setKeysVisible,
     reorder,
+    reorderSubtable,
+    subtableColsForLevel,
     resetColumns,
   };
 }

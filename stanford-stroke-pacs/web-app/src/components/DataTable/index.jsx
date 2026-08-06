@@ -124,10 +124,13 @@ function DataTableInner({
     visibleCols,
     visibleKeys,
     columnOrder,
+    subtableOrder,
     prefsUpgraded,
     toggle,
     setKeysVisible,
     reorder,
+    reorderSubtable,
+    subtableColsForLevel,
     resetColumns,
   } = useColumnPrefs(labelDefs, builtinCols, level, serverPrefs);
 
@@ -212,6 +215,7 @@ function DataTableInner({
     level,
     visibleKeys,
     columnOrder,
+    subtableOrder,
     sortBy,
     sortDir,
     columnFilters,
@@ -261,6 +265,26 @@ function DataTableInner({
   const grandChildConfig = childConfig?.expandable
     ? LEVEL_CONFIG[childConfig.childLevel]
     : null;
+
+  // Drag-to-reorder for the subtable headers. One useDragColumns instance per
+  // sublevel, hoisted here (not in ChildRows) so a drag applies to the level
+  // and works across every expanded row's subtable; the per-instance dragColKey
+  // ref also keeps cross-table drops (main/child/grandchild) inert.
+  const reorderChildCols = useCallback(
+    (fromKey, toKey, side) => {
+      if (childConfig) reorderSubtable(config.childLevel, fromKey, toKey, side);
+    },
+    [childConfig, config.childLevel, reorderSubtable],
+  );
+  const reorderGrandChildCols = useCallback(
+    (fromKey, toKey, side) => {
+      if (grandChildConfig)
+        reorderSubtable(childConfig.childLevel, fromKey, toKey, side);
+    },
+    [grandChildConfig, childConfig, reorderSubtable],
+  );
+  const childDrag = useDragColumns(reorderChildCols);
+  const grandChildDrag = useDragColumns(reorderGrandChildCols);
 
   // Rows currently on screen that carry a decompress control. Each level/UID is
   // warmed at its own granularity: patient main rows (aggregate over studies),
@@ -592,19 +616,9 @@ function DataTableInner({
     return null;
   };
 
-  const colsForLevel = (targetLevel) => {
-    const builtins = allCols.filter(
-      (c) =>
-        c.builtin && visibleKeys.includes(c.key) && c.level === targetLevel,
-    );
-    const labels = visibleCols.filter(
-      (c) => !c.builtin && c.level === targetLevel,
-    );
-    return [...builtins, ...labels];
-  };
-  const childCols = childConfig ? colsForLevel(config.childLevel) : [];
+  const childCols = childConfig ? subtableColsForLevel(config.childLevel) : [];
   const grandChildCols = grandChildConfig
-    ? colsForLevel(childConfig.childLevel)
+    ? subtableColsForLevel(childConfig.childLevel)
     : [];
   const mainTableCols = visibleCols.filter((c) =>
     c.builtin ? c.level === level : LEVEL_RANK[c.level] <= LEVEL_RANK[level],
@@ -830,6 +844,8 @@ function DataTableInner({
                         childConfig={childConfig}
                         childCols={childCols}
                         childIsExpandable={childIsExpandable}
+                        childDrag={childDrag}
+                        grandChildDrag={grandChildDrag}
                         parentColSpan={parentColSpan}
                         grandExpanded={grandExpanded}
                         grandChildRows={grandChildRows}

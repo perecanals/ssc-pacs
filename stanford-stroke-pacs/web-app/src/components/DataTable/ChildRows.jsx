@@ -47,6 +47,7 @@ function GrandChildTable({
   grandChildren,
   grandChildCols,
   grandChildConfig,
+  grandChildDrag,
   gcColSpan,
   activeRowKey,
   isAdmin,
@@ -82,7 +83,29 @@ function GrandChildTable({
                 {grandChildCols.map((c) => (
                   <th
                     key={c.key}
-                    className={`dt__gc-th${isNarrowCol(c) ? " dt__gc-th--narrow" : ""}`}
+                    draggable
+                    onDragStart={(e) =>
+                      grandChildDrag.handleDragStart(c.key, e)
+                    }
+                    onDragOver={(e) => grandChildDrag.handleDragOver(c.key, e)}
+                    onDragLeave={grandChildDrag.handleDragLeave}
+                    onDrop={(e) => grandChildDrag.handleDrop(c.key, e)}
+                    onDragEnd={grandChildDrag.handleDragEnd}
+                    className={`dt__gc-th${isNarrowCol(c) ? " dt__gc-th--narrow" : ""}${
+                      grandChildDrag.dragColKey.current === c.key
+                        ? " dt__gc-th--dragging"
+                        : ""
+                    }${
+                      grandChildDrag.dragOverKey === c.key &&
+                      grandChildDrag.dropSide === "before"
+                        ? " dt__gc-th--drop-before"
+                        : ""
+                    }${
+                      grandChildDrag.dragOverKey === c.key &&
+                      grandChildDrag.dropSide === "after"
+                        ? " dt__gc-th--drop-after"
+                        : ""
+                    }`}
                   >
                     {c.label}
                   </th>
@@ -223,6 +246,7 @@ GrandChildTable.propTypes = {
   grandChildren: PropTypes.array,
   grandChildCols: PropTypes.array.isRequired,
   grandChildConfig: PropTypes.object.isRequired,
+  grandChildDrag: PropTypes.object.isRequired,
   gcColSpan: PropTypes.number.isRequired,
   activeRowKey: PropTypes.string,
   isAdmin: PropTypes.bool,
@@ -243,6 +267,8 @@ export default function ChildRows({
   childConfig,
   childCols,
   childIsExpandable,
+  childDrag,
+  grandChildDrag,
   parentColSpan,
   grandExpanded,
   grandChildRows,
@@ -284,7 +310,27 @@ export default function ChildRows({
           {childCols.map((c) => (
             <th
               key={c.key}
-              className={`dt__child-th${isNarrowCol(c) ? " dt__child-th--narrow" : ""}`}
+              draggable
+              onDragStart={(e) => childDrag.handleDragStart(c.key, e)}
+              onDragOver={(e) => childDrag.handleDragOver(c.key, e)}
+              onDragLeave={childDrag.handleDragLeave}
+              onDrop={(e) => childDrag.handleDrop(c.key, e)}
+              onDragEnd={childDrag.handleDragEnd}
+              className={`dt__child-th${isNarrowCol(c) ? " dt__child-th--narrow" : ""}${
+                childDrag.dragColKey.current === c.key
+                  ? " dt__child-th--dragging"
+                  : ""
+              }${
+                childDrag.dragOverKey === c.key &&
+                childDrag.dropSide === "before"
+                  ? " dt__child-th--drop-before"
+                  : ""
+              }${
+                childDrag.dragOverKey === c.key &&
+                childDrag.dropSide === "after"
+                  ? " dt__child-th--drop-after"
+                  : ""
+              }`}
             >
               {c.label}
             </th>
@@ -455,6 +501,7 @@ export default function ChildRows({
                   grandChildren={grandChildRows[gcKey]}
                   grandChildCols={grandChildCols}
                   grandChildConfig={grandChildConfig}
+                  grandChildDrag={grandChildDrag}
                   gcColSpan={gcColSpan}
                   activeRowKey={activeRowKey}
                   isAdmin={isAdmin}
@@ -501,6 +548,8 @@ ChildRows.propTypes = {
   childConfig: PropTypes.object.isRequired,
   childCols: PropTypes.array.isRequired,
   childIsExpandable: PropTypes.bool.isRequired,
+  childDrag: PropTypes.object.isRequired,
+  grandChildDrag: PropTypes.object.isRequired,
   parentColSpan: PropTypes.number.isRequired,
   grandExpanded: PropTypes.object.isRequired,
   grandChildRows: PropTypes.object.isRequired,

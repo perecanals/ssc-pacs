@@ -1,5 +1,13 @@
 # Changelog
 
+## v1.20 — 2026-08-06
+
+- **Feature**: drag-and-drop column reordering in the data-table subtables
+  (studies under a patient, series under a study), matching the main table.
+  Order is saved per user and per sublevel (`subtableColumnOrder` in the
+  existing preferences blob) and can interleave builtin and label columns;
+  "Reset View" restores the default. No migration.
+
 ## v1.19 — 2026-08-05
 
 - **Feature**: admins can delete a whole instrument (every label in the group)

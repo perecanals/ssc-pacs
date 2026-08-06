@@ -7,6 +7,7 @@ export default function usePreferencePersistence({
   level,
   visibleKeys,
   columnOrder,
+  subtableOrder = {},
   sortBy,
   sortDir,
   columnFilters,
@@ -51,9 +52,18 @@ export default function usePreferencePersistence({
   const pruneKeys = (keys) =>
     knownColumnKeys ? keys.filter((k) => knownColumnKeys.has(k)) : keys;
 
+  // subtableColumnOrder is a { level: key[] } map in the full-key namespace;
+  // prune each level's array and drop levels that prune to empty.
+  const prunedSubtableOrder = Object.fromEntries(
+    Object.entries(subtableOrder)
+      .map(([lvl, keys]) => [lvl, pruneKeys(keys)])
+      .filter(([, keys]) => keys.length > 0),
+  );
+
   latestPrefs.current = {
     visibleKeys: pruneKeys(visibleKeys),
     columnOrder: pruneKeys(columnOrder),
+    subtableColumnOrder: prunedSubtableOrder,
     sortBy,
     sortDir,
     columnFilters: Object.fromEntries(
@@ -74,10 +84,14 @@ export default function usePreferencePersistence({
   // pruned before then), which is what makes it flip and re-fire the effect.
   const activeFilterCount =
     Object.values(columnFilters).filter(hasFilterValue).length;
+  const subtableKeyCount = (m) =>
+    Object.values(m).reduce((n, keys) => n + keys.length, 0);
   const prefsPruned =
     latestPrefs.current.visibleKeys.length !== visibleKeys.length ||
     latestPrefs.current.columnOrder.length !== columnOrder.length ||
-    Object.keys(latestPrefs.current.columnFilters).length !== activeFilterCount;
+    Object.keys(latestPrefs.current.columnFilters).length !==
+      activeFilterCount ||
+    subtableKeyCount(prunedSubtableOrder) !== subtableKeyCount(subtableOrder);
 
   const scheduleSave = useDebouncedServerSave({
     enabled: !!currentUser,
@@ -103,6 +117,7 @@ export default function usePreferencePersistence({
     level,
     visibleKeys,
     columnOrder,
+    subtableOrder,
     sortBy,
     sortDir,
     columnFilters,

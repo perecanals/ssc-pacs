@@ -193,7 +193,15 @@ The Navigator page is decomposed into focused React components:
     remain visible during horizontal scrolling.
   - **Drag-and-drop column reordering**: Column headers are draggable via
     the native HTML5 Drag and Drop API. Drop indicators show where the
-    column will land.
+    column will land. Subtable (child/grandchild) headers are draggable
+    too, each with its own `useDragColumns` instance hoisted into
+    `DataTableInner` — a reorder applies to the whole sublevel (every
+    expanded row's subtable updates together), and a drag started in one
+    table dropped on another is inert. Subtable order is saved per
+    sublevel as `subtableColumnOrder` (`{ study: [...], series: [...] }`)
+    in the same per-level preferences blob; with no saved order, subtable
+    builtins render in catalog order followed by that level's label
+    columns, and a saved order can interleave the two.
   - **Scroll-limited subtables**: Series-level sub-tables (both direct
     study→series and patient→study→series) are capped at ~280px height with
     vertical scroll. Sub-tables stay `width: 100%` (so the row background
@@ -225,8 +233,9 @@ The Navigator page is decomposed into focused React components:
   - **Cross-level label filtering**: When a sidebar label filter is active,
     the `label_level` parameter is sent to the backend so filtering works
     across the hierarchy (e.g. filtering patients by a series-level label).
-  - **Server-persisted table state**: Column visibility, column order, sort,
-    filters, and frozen-column state are persisted per user and per level in
+  - **Server-persisted table state**: Column visibility, column order
+    (main table and per-sublevel subtable order), sort, filters, and
+    frozen-column state are persisted per user and per level in
     the `user_preferences` table. Preferences are loaded on mount and saved
     via a debounced PUT on changes (with immediate flush on unmount/tab
     close). A "Reset View" button in the top bar restores all table

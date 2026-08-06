@@ -489,6 +489,24 @@
   padding-block: 0.32em;
 }
 
+/* Drag-to-reorder affordances for subtable headers (mirrors .dt__th--*). */
+.dt__child-th[draggable="true"],
+.dt__gc-th[draggable="true"] {
+  cursor: grab;
+}
+.dt__child-th--dragging,
+.dt__gc-th--dragging {
+  @apply opacity-40;
+}
+.dt__child-th--drop-before,
+.dt__gc-th--drop-before {
+  box-shadow: inset 3px 0 0 0 var(--color-primary);
+}
+.dt__child-th--drop-after,
+.dt__gc-th--drop-after {
+  box-shadow: inset -3px 0 0 0 var(--color-primary);
+}
+
 .dt__gc-row {
   @apply hover:bg-grandchild-row-hover transition-colors duration-100;
 }
