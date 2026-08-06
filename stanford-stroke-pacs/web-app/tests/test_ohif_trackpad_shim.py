@@ -83,15 +83,19 @@ class TestInjectWheelShim:
         assert proxy._OHIF_WHEEL_SHIM.count(b"sscSynthetic") >= 2
 
     def test_shim_covers_mip_cycling(self):
-        # 'm' cycles a MIP slab (mm steps) across the volume viewports; from
-        # a stack layout the active pane is first converted in place to a
-        # volume viewport (OHIF's stack->orthographic orientation-menu move).
+        # 'm'/'n' step a MIP slab up/down (mm steps) across the volume
+        # viewports; from a stack layout the active pane is first converted
+        # in place (OHIF's stack->orthographic orientation-menu move), and
+        # the requested level is polled onto the volume once it is renderable
+        # instead of blocking on the download.
         for token in (
             b"MAXIMUM_INTENSITY_BLEND",
             b"setDisplaySetsForViewports",
             b"'acquisition'",
             b"isReconstructable",
             b"[1.25, 2.5, 5, 10, 20, 30]",
+            b"e.key === 'n'",
+            b"(loading...)",
             b"sscMipShimOff",
             b"sscMipSlabSteps",
         ):

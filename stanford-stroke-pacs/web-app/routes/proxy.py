@@ -78,17 +78,21 @@ def is_immutable_ohif_asset(path: str) -> bool:
 # synthetic one-detent wheel on the last-clicked viewport, so "click the
 # image, then arrows" always works and OHIF's own binding can't double-step.
 #
-# MIP ('m'): each press steps a maximum-intensity-projection slab through
-# preset thicknesses (mm) on every volume viewport, then back to normal.
-# From the plain stack view the first press converts the active pane in
-# place to a volume viewport in acquisition orientation (same image, same
-# layout — the stack->orthographic move OHIF's own orientation menu makes)
-# and applies the first step once the volume is up; in MPR all three panes
-# slab together. Drives the globals the OHIF cornerstone extension exposes
-# (window.cornerstone / window.commandsManager / window.services) — nothing
-# in the plugin is patched. 'm' is unbound in OHIF's stock hotkeys, and
-# stopPropagation keeps it that way. Live tuning:
-# localStorage.sscMipSlabSteps = '1.25,2.5,5,10,20,30' (thicknesses) /
+# MIP ('m' up / 'n' down): the keys step a maximum-intensity-projection
+# slab through preset thicknesses (mm) on every volume viewport; below the
+# first step (and past the last) is normal composite. From the plain stack
+# view the first 'm' converts the active pane in place to a volume viewport
+# in acquisition orientation (same image, same layout — the
+# stack->orthographic move OHIF's own orientation menu makes); in MPR all
+# three panes slab together. The keys record the *requested* level
+# immediately — while a large volume is still streaming the HUD shows
+# "(loading...)" and the level lands the moment the volume is renderable,
+# so nobody has to wait out the download to press keys. Drives the globals
+# the OHIF cornerstone extension exposes (window.cornerstone /
+# window.commandsManager / window.services) — nothing in the plugin is
+# patched. 'm' is unbound in OHIF's stock hotkeys; 'n' shadows the
+# labelmap-interpolate binding (segmentation tooling, unused here). Live
+# tuning: localStorage.sscMipSlabSteps = '1.25,2.5,5,10,20,30' /
 # sscMipShimOff = '1' (kill switch for the MIP handler).
 #
 # Dialog-fit (the <style> injected alongside): OHIF 3.11's ManagedDialog
@@ -154,9 +158,10 @@ _OHIF_WHEEL_SHIM = """\
     evt.sscSynthetic = true;
     (vp.querySelector('canvas') || vp).dispatchEvent(evt);
   }, true);
-  /* ---- 'm': cycle a MIP slab through preset thicknesses (mm) ---- */
+  /* ---- 'm'/'n': step a MIP slab up/down through preset thicknesses ---- */
   var MIP_STEPS = [1.25, 2.5, 5, 10, 20, 30];
-  var mipIdx = -1, mipBusy = false, hudEl = null, hudTimer = 0;
+  var mipIdx = -1, mipConverting = false, mipPoll = 0;
+  var hudEl = null, hudTimer = 0;
   function hud(text) {
     if (!document.body) return;
     if (!hudEl) {
@@ -182,40 +187,63 @@ _OHIF_WHEEL_SHIM = """\
     }
     return out.length ? out : MIP_STEPS;
   }
-  function volumeViewports() {
+  function orthoViewports(needActors) {
     var cs = window.cornerstone, out = [];
     if (!cs || !cs.getRenderingEngines) return out;
     (cs.getRenderingEngines() || []).forEach(function (eng) {
       (eng.getViewports() || []).forEach(function (vp) {
-        // Orthographic = MPR volume viewport (3D and stack viewports don't
-        // slab); actors present = the volume is actually mounted.
+        // Orthographic = volume viewport (3D and stack viewports don't
+        // slab). Actors only exist once the volume is mounted and
+        // renderable; callers that just need the pane's type pass false.
         if (vp.type === 'orthographic' &&
             typeof vp.setSlabThickness === 'function' &&
-            vp.getActors && vp.getActors().length) out.push(vp);
+            (!needActors || (vp.getActors && vp.getActors().length)))
+          out.push(vp);
       });
     });
     return out;
   }
-  function applyMip(vps, mm) {
-    var bm = window.cornerstone.Enums.BlendModes;
-    vps.forEach(function (vp) {
-      vp.setBlendMode(bm.MAXIMUM_INTENSITY_BLEND);
-      vp.setSlabThickness(mm);
-      vp.render();
-    });
-    hud('MIP ' + mm + ' mm');
+  function mipLabel() {
+    var steps = mipSteps();
+    return mipIdx < 0 ? 'MIP off'
+      : 'MIP ' + steps[Math.min(mipIdx, steps.length - 1)] + ' mm';
   }
-  function resetMip(vps) {
+  function applyMipState() {
+    var vps = orthoViewports(true);
+    if (!vps.length) return false;
     var bm = window.cornerstone.Enums.BlendModes;
+    var steps = mipSteps();
     vps.forEach(function (vp) {
-      vp.setBlendMode(bm.COMPOSITE);
-      if (vp.resetSlabThickness) vp.resetSlabThickness();
+      if (mipIdx < 0) {
+        vp.setBlendMode(bm.COMPOSITE);
+        if (vp.resetSlabThickness) vp.resetSlabThickness();
+      } else {
+        vp.setBlendMode(bm.MAXIMUM_INTENSITY_BLEND);
+        vp.setSlabThickness(steps[Math.min(mipIdx, steps.length - 1)]);
+      }
       vp.render();
     });
-    hud('MIP off');
+    mipConverting = false;
+    return true;
+  }
+  function scheduleMipApply() {
+    // Apply now if a volume is renderable; otherwise poll — large volumes
+    // stream for a while, and the requested level (still adjustable with
+    // further m/n presses meanwhile) lands the moment rendering works.
+    clearTimeout(mipPoll);
+    if (applyMipState()) { hud(mipLabel()); return; }
+    hud(mipLabel() + ' (loading...)');
+    var tries = 600;  // x 500 ms = 5 min
+    (function tick() {
+      if (applyMipState()) { hud(mipLabel()); return; }
+      if (--tries <= 0) { mipConverting = false; return; }
+      mipPoll = setTimeout(tick, 500);
+    })();
   }
   window.addEventListener('keydown', function (e) {
-    if (e.key !== 'm' && e.key !== 'M') return;
+    var isUp = e.key === 'm' || e.key === 'M';
+    var isDown = e.key === 'n' || e.key === 'N';
+    if (!isUp && !isDown) return;
     if (e.ctrlKey || e.metaKey || e.altKey) return;
     var a = document.activeElement, tag = a && a.tagName;
     if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' ||
@@ -223,16 +251,20 @@ _OHIF_WHEEL_SHIM = """\
     if (localStorage.getItem('sscMipShimOff') === '1') return;
     if (!window.cornerstone || !window.cornerstone.Enums) return;
     e.preventDefault();
-    e.stopPropagation();
-    if (mipBusy) return;
+    e.stopPropagation();  // 'n' shadows OHIF's labelmap-interpolate binding
     var steps = mipSteps();
-    var vps = volumeViewports();
-    if (!vps.length) {
-      // Stack layout (or volumes not mounted yet): convert the active pane
-      // in place to a volume viewport in acquisition orientation — same
-      // image, same single-pane layout — then apply the first step once its
-      // volume carries actors. This is exactly what OHIF's own per-viewport
-      // orientation menu does for a stack viewport.
+    if (isDown) {
+      // Step down from wherever we are; below the first step means off.
+      // From off, stay off — never convert the pane for a step-down.
+      if (mipIdx < 0) { hud('MIP off'); return; }
+      mipIdx -= 1;
+      scheduleMipApply();
+      return;
+    }
+    if (!orthoViewports(false).length && !mipConverting) {
+      // Stack layout: convert the active pane in place to a volume viewport
+      // in acquisition orientation — same image, same single-pane layout —
+      // exactly what OHIF's own per-viewport orientation menu does.
       var cm = window.commandsManager, svc = window.services;
       var grid = svc && svc.viewportGridService;
       var dss = svc && svc.displaySetService;
@@ -244,7 +276,7 @@ _OHIF_WHEEL_SHIM = """\
         return !!(ds && ds.isReconstructable);
       });
       if (!recon) { hud('MIP unavailable'); return; }
-      mipBusy = true;
+      mipConverting = true;
       mipIdx = 0;
       try {
         cm.run('setDisplaySetsForViewports', {viewportsToUpdate: [{
@@ -257,26 +289,18 @@ _OHIF_WHEEL_SHIM = """\
           displaySetOptions: uids.map(function () { return {}; })
         }]});
       } catch (err) {
-        mipBusy = false; mipIdx = -1;
+        mipConverting = false; mipIdx = -1;
         hud('MIP unavailable');
         return;
       }
-      var tries = 40;  // 40 x 200 ms: cold volumes take a few seconds
-      (function waitVps() {
-        var got = volumeViewports();
-        if (got.length) { mipBusy = false; applyMip(got, steps[0]); return; }
-        if (--tries <= 0) {
-          mipBusy = false; mipIdx = -1;
-          hud('MIP unavailable');
-          return;
-        }
-        setTimeout(waitVps, 200);
-      })();
+      scheduleMipApply();
       return;
     }
+    // Volume pane exists (or conversion is in flight): step up, wrapping
+    // past the last step back to off.
     mipIdx += 1;
-    if (mipIdx >= steps.length) { mipIdx = -1; resetMip(vps); return; }
-    applyMip(vps, steps[mipIdx]);
+    if (mipIdx >= steps.length) mipIdx = -1;
+    scheduleMipApply();
   }, true);
 })();
 </script>""".replace(

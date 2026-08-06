@@ -232,19 +232,24 @@ up/down hotkeys drop keys depending on focus, so the shim owns those keys
 one-detent wheel on the last-clicked viewport — click the image, then arrows
 just work.
 
-It also adds an `m` hotkey for MIP: each press steps a maximum-intensity
-slab through 1.25 / 2.5 / 5 / 10 / 20 / 30 mm on every volume viewport, then back
-to normal (composite blend, thin slice). In the plain stack view the first
-press converts the active pane in place to a volume viewport in acquisition
+It also adds MIP hotkeys: `m` steps a maximum-intensity slab up through
+1.25 / 2.5 / 5 / 10 / 20 / 30 mm on every volume viewport (past the last
+step wraps back to normal), and `n` steps it down (below the first step is
+normal — composite blend, thin slice). In the plain stack view the first
+`m` converts the active pane in place to a volume viewport in acquisition
 orientation — same image, same single-pane layout, the exact
-stack→orthographic move OHIF's own per-viewport orientation menu makes —
-and applies 1.25 mm once the volume is mounted (the pane stays a volume
-viewport afterwards; reselect the series to get a true stack viewport
-back). In MPR all three panes slab together. Non-reconstructable series
-show a transient "MIP unavailable" notice. The handler drives the globals
-the OHIF cornerstone extension exposes (`window.cornerstone`,
-`window.commandsManager`, `window.services`), so again nothing in the
-plugin is patched. `m` is unbound in OHIF's stock hotkeys.
+stack→orthographic move OHIF's own per-viewport orientation menu makes
+(the pane stays a volume viewport afterwards; reselect the series to get a
+true stack viewport back). In MPR all three panes slab together. The keys
+record the requested level immediately: while a large volume is still
+streaming the HUD shows "(loading...)" and the level is applied the moment
+the volume is renderable — the slab can only project slices that have
+arrived, so the image sharpens as the download completes.
+Non-reconstructable series show a transient "MIP unavailable" notice. The
+handler drives the globals the OHIF cornerstone extension exposes
+(`window.cornerstone`, `window.commandsManager`, `window.services`), so
+again nothing in the plugin is patched. `m` is unbound in OHIF's stock
+hotkeys; `n` shadows a segmentation-labelmap binding unused here.
 
 Live tuning per browser, no restart: `localStorage.sscTrackpadPxPerSlice`
 overrides the threshold; `localStorage.sscTrackpadShimOff = '1'` disables the
