@@ -33,26 +33,6 @@ export default function useSecondScreenViewer() {
     return () => clearInterval(timer);
   }, [active]);
 
-  // Opens the popup on the other display, or just focuses it when one is
-  // already live. Resolves true when a live popup exists afterwards.
-  const open = useCallback(
-    async (url) => {
-      if (isLive()) {
-        winRef.current.focus();
-        return true;
-      }
-      if (!url) return false;
-      const win = await openOnSecondScreen(url);
-      if (!win) return false;
-      winRef.current = win;
-      urlRef.current = url;
-      setActive(true);
-      setStatus("");
-      return true;
-    },
-    [isLive],
-  );
-
   // Re-points the live popup at a new viewer URL. replace() keeps its history
   // flat; a same-URL call only focuses, so re-clicking the current row does
   // not force OHIF to reload the study. Returns false when there is no live
@@ -68,6 +48,28 @@ export default function useSecondScreenViewer() {
       return true;
     },
     [isLive],
+  );
+
+  // Opens the popup on the other display. When one is already live it is
+  // re-pointed at `url` instead (so "Second Screen" from a force-opened pane
+  // moves that study over, rather than just raising a stale window).
+  // Resolves true when a live popup exists afterwards.
+  const open = useCallback(
+    async (url) => {
+      if (isLive()) {
+        if (!navigate(url)) winRef.current.focus();
+        return true;
+      }
+      if (!url) return false;
+      const win = await openOnSecondScreen(url);
+      if (!win) return false;
+      winRef.current = win;
+      urlRef.current = url;
+      setActive(true);
+      setStatus("");
+      return true;
+    },
+    [isLive, navigate],
   );
 
   return useMemo(

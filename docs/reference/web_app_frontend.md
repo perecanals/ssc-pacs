@@ -331,11 +331,18 @@ The Navigator page is decomposed into focused React components:
   - While the popup is live, `Navigator.handlePreviewSelect` routes row clicks
     to it instead of the pane: the popup is re-pointed at the resolved viewer
     URL (`location.replace`; same-URL clicks only refocus, avoiding an OHIF
-    reload) and the pane stays collapsed with its iframe dropped. A footer
-    chip replaces the pane tabs meanwhile — it shows warm/resolve progress or
-    errors and refocuses the popup on click. `useSecondScreenViewer` polls
-    `window.closed` (1 s) since closing a popup fires no opener event; once
-    closed, clicks fall back to the pane.
+    reload) and the pane stays collapsed with its iframe dropped. The footer
+    stays empty meanwhile except during a routed click, when a transient chip
+    reports warm/resolve progress (or an error) and refocuses the popup on
+    click. `useSecondScreenViewer` polls `window.closed` (1 s) since closing a
+    popup fires no opener event; once closed, clicks fall back to the pane.
+    Pressing "Second Screen" again with a live popup re-points it at the pane's
+    current study rather than raising a stale window.
+  - **Pane** (per-row action, next to OHIF at study/series level and in both
+    subtables) forces the embedded pane open for that row: it overrides
+    second-screen routing (`forcePane` on the selection object) and never
+    toggles an already-open pane shut, unlike a row click. It is the escape
+    hatch for comparing one study in the pane while the popup holds another.
 - `AuthContext` — React context providing `currentUser`, `login()`, `logout()`,
   and automatic 401 interception
 
@@ -350,9 +357,9 @@ The Navigator page is decomposed into focused React components:
 `Dataset` is a built-in column at all three levels (default-visible). The
 `Study Import Labels` column (Patient) and the `Import ID` / `Import Label`
 columns (Study and Series) ship **hidden by default** — available in the column
-selector. Study- and series-level rows include an OHIF action button; the
-Actions column is hidden entirely at the patient level since patients have no
-direct OHIF action.
+selector. Study- and series-level rows include `Pane` (force the preview pane
+open for that row) and `OHIF` action buttons; the Actions column is hidden
+entirely at the patient level since patients have no direct OHIF action.
 
 ### The "Auto" columns (machine-derived classification)
 

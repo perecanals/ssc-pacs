@@ -57,6 +57,7 @@ function GrandChildTable({
   onWarmSeries,
   onGrandChildRowClick,
   onResolveOhifLink,
+  onOpenInPane,
   onDicomDownload,
   onRequestDelete,
   onMutated,
@@ -165,6 +166,15 @@ function GrandChildTable({
                       onClick={(e) => e.stopPropagation()}
                     >
                       <div className="dt__actions-inner dt__actions-inner--tight">
+                        {gc.studyinstanceuid && onOpenInPane && (
+                          <button
+                            onClick={() => onOpenInPane(gc, "series")}
+                            className="dt__gc-link-btn"
+                            title="Open in the preview pane (even when the second-screen viewer is open)"
+                          >
+                            Pane
+                          </button>
+                        )}
                         {gc.studyinstanceuid && (
                           <button
                             onClick={() =>
@@ -256,6 +266,7 @@ GrandChildTable.propTypes = {
   onWarmSeries: PropTypes.func,
   onGrandChildRowClick: PropTypes.func.isRequired,
   onResolveOhifLink: PropTypes.func.isRequired,
+  onOpenInPane: PropTypes.func,
   onDicomDownload: PropTypes.func.isRequired,
   onRequestDelete: PropTypes.func,
   onMutated: PropTypes.func.isRequired,
@@ -286,6 +297,7 @@ export default function ChildRows({
   onChildRowClick,
   onGrandChildRowClick,
   onResolveOhifLink,
+  onOpenInPane,
   onDicomDownload,
   onRequestDelete,
   onMutated,
@@ -406,6 +418,15 @@ export default function ChildRows({
                   onClick={(e) => e.stopPropagation()}
                 >
                   <div className="dt__actions-inner">
+                    {child.studyinstanceuid && onOpenInPane && (
+                      <button
+                        onClick={() => onOpenInPane(child, childLevel)}
+                        className="link-btn"
+                        title="Open in the preview pane (even when the second-screen viewer is open)"
+                      >
+                        Pane
+                      </button>
+                    )}
                     {child.studyinstanceuid && (
                       <button
                         onClick={() =>
@@ -511,6 +532,7 @@ export default function ChildRows({
                   onWarmSeries={onWarmSeries}
                   onGrandChildRowClick={onGrandChildRowClick}
                   onResolveOhifLink={onResolveOhifLink}
+                  onOpenInPane={onOpenInPane}
                   onDicomDownload={onDicomDownload}
                   onRequestDelete={onRequestDelete}
                   onMutated={onMutated}
@@ -567,6 +589,7 @@ ChildRows.propTypes = {
   onChildRowClick: PropTypes.func.isRequired,
   onGrandChildRowClick: PropTypes.func.isRequired,
   onResolveOhifLink: PropTypes.func.isRequired,
+  onOpenInPane: PropTypes.func,
   onDicomDownload: PropTypes.func.isRequired,
   onRequestDelete: PropTypes.func,
   onMutated: PropTypes.func.isRequired,

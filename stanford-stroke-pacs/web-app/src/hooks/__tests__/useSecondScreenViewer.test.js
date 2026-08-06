@@ -25,7 +25,7 @@ describe("useSecondScreenViewer", () => {
     vi.useRealTimers();
   });
 
-  it("open() activates on success and focuses instead of reopening", async () => {
+  it("open() activates on success and re-points instead of reopening", async () => {
     const popup = makePopup();
     openOnSecondScreen.mockResolvedValue(popup);
     const { result } = renderHook(() => useSecondScreenViewer());
@@ -36,11 +36,28 @@ describe("useSecondScreenViewer", () => {
     expect(result.current.active).toBe(true);
     expect(result.current.isLive()).toBe(true);
 
-    // Second open() with a live popup must not spawn another window.
+    // Second open() with a live popup must not spawn another window; it
+    // re-points the existing one (the pane -> second-screen handoff).
     await act(async () => {
       expect(await result.current.open("/ohif/viewer?a=2")).toBe(true);
     });
     expect(openOnSecondScreen).toHaveBeenCalledTimes(1);
+    expect(popup.location.replace).toHaveBeenCalledWith("/ohif/viewer?a=2");
+    expect(popup.focus).toHaveBeenCalled();
+  });
+
+  it("open() with no URL just focuses a live popup", async () => {
+    const popup = makePopup();
+    openOnSecondScreen.mockResolvedValue(popup);
+    const { result } = renderHook(() => useSecondScreenViewer());
+    await act(async () => {
+      await result.current.open("/ohif/viewer?a=1");
+    });
+
+    await act(async () => {
+      expect(await result.current.open("")).toBe(true);
+    });
+    expect(popup.location.replace).not.toHaveBeenCalled();
     expect(popup.focus).toHaveBeenCalled();
   });
 

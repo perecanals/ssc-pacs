@@ -512,7 +512,10 @@ function DataTableInner({
     ...(row.inherited_annotations || []),
   ];
 
-  const selectPreview = (row, srcLvl) => {
+  // forcePane: an explicit "Pane" action rather than a row click. It opens the
+  // embedded pane even while the second-screen popup is live (which otherwise
+  // swallows every selection), and never toggles an already-open pane shut.
+  const selectPreview = (row, srcLvl, { forcePane = false } = {}) => {
     if (!onPreviewSelect || !row?.studyinstanceuid) return;
     const isSeries = srcLvl === "series";
     onPreviewSelect({
@@ -526,8 +529,12 @@ function DataTableInner({
       description: isSeries
         ? row.seriesdescription || null
         : row.studydescription || null,
+      forcePane,
     });
   };
+
+  const openInPane = (row, rowLevel) =>
+    selectPreview(row, rowLevel, { forcePane: true });
 
   const renderCellValue = (row, col) => {
     if (col.builtin) {
@@ -559,6 +566,15 @@ function DataTableInner({
       const isSeries = rowLevel === "series";
       return (
         <>
+          {onPreviewSelect && (
+            <button
+              onClick={() => openInPane(row, rowLevel)}
+              className="link-btn"
+              title="Open in the preview pane (even when the second-screen viewer is open)"
+            >
+              Pane
+            </button>
+          )}
           <button
             onClick={() =>
               handleOhifLink(uid, isSeries ? row.seriesinstanceuid : null)
@@ -866,6 +882,7 @@ function DataTableInner({
                         onWarmSeries={warmSeries}
                         onChildRowClick={handleChildRowClick}
                         onGrandChildRowClick={handleGrandChildRowClick}
+                        onOpenInPane={onPreviewSelect ? openInPane : undefined}
                         onResolveOhifLink={handleOhifLink}
                         onDicomDownload={handleDicomDownload}
                         onRequestDelete={requestDelete}
@@ -948,22 +965,19 @@ function DataTableInner({
               </button>
             </div>
           )}
-          {!previewOpen && secondScreenActive && (
-            // While the popup is live, row clicks route there instead of the
-            // pane; this chip shows warm/resolve progress (or an error) and
-            // clicking it refocuses the viewer window.
+          {!previewOpen && secondScreenActive && secondScreenStatus && (
+            // Transient only: while the popup is live it owns the viewer, so
+            // the footer stays empty except during a routed click, when this
+            // reports warm/resolve progress (or an error). Clicking focuses
+            // the viewer window.
             <div className="dt__pane-tabs">
               <button
                 type="button"
                 onClick={onOpenSecondScreen}
                 className="dt__pane-tab"
-                title="Row clicks open in the second-screen viewer. Click to focus it."
+                title="Opening in the second-screen viewer. Click to focus it."
               >
-                {secondScreenStatus || (
-                  <>
-                    Second Screen <span aria-hidden="true">⧉</span>
-                  </>
-                )}
+                {secondScreenStatus}
               </button>
             </div>
           )}

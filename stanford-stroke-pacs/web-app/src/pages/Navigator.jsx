@@ -156,14 +156,19 @@ export default function Navigator() {
     async (selection) => {
       if (!selection?.studyinstanceuid) return;
 
-      if (previewSelection?.rowKey === selection.rowKey) {
-        if (selection.sourceLevel === "study") {
+      // A row's "Pane" button (forcePane) always lands in the pane: it
+      // overrides second-screen routing and never toggles an open pane shut.
+      // Plain row clicks keep their toggle behavior.
+      const toSecondScreen = !selection.forcePane && secondScreen.isLive();
+
+      if (!toSecondScreen && previewSelection?.rowKey === selection.rowKey) {
+        if (selection.sourceLevel === "study" && !selection.forcePane) {
           setPreviewSelection(selection);
           return;
         }
 
         setPreviewSelection(selection);
-        if (previewOpen) {
+        if (previewOpen && !selection.forcePane) {
           previewRequestRef.current += 1;
           setPreviewLoading(false);
           setPreviewError("");
@@ -184,7 +189,7 @@ export default function Navigator() {
       // While the second-screen popup is live, row clicks re-point it instead
       // of opening the pane. Same request-guard discipline as the pane path;
       // progress/errors surface in the footer chip via secondScreen.status.
-      if (secondScreen.isLive()) {
+      if (toSecondScreen) {
         setPreviewOpen(false);
         setPreviewError("");
         secondScreen.setStatus("Checking storage…");

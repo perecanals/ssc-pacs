@@ -121,38 +121,41 @@ describe("DataTable pane tabs", () => {
       expect(onOpenSecondScreen).toHaveBeenCalledTimes(1);
     });
 
-    it("shows a focus chip instead of the pane tabs while the popup is live", async () => {
+    it("leaves the footer empty while the popup is live and idle", async () => {
+      installWindowManagement();
+      renderTable({
+        previewOpen: false,
+        secondScreenActive: true,
+        onOpenSecondScreen: vi.fn(),
+      });
+
+      // The popup owns the viewer: no lingering Second Screen button, and the
+      // pane's own tabs are gone with the pane collapsed.
+      await waitFor(() => {
+        expect(
+          screen.queryByRole("button", { name: /second screen/i }),
+        ).toBeNull();
+      });
+      expect(
+        screen.queryByRole("link", { name: /open in new tab/i }),
+      ).toBeNull();
+    });
+
+    it("surfaces routing status transiently, and focuses the popup on click", async () => {
       installWindowManagement();
       const onOpenSecondScreen = vi.fn();
       renderTable({
         previewOpen: false,
         secondScreenActive: true,
+        secondScreenStatus: "Warming imaging cache…",
         onOpenSecondScreen,
       });
 
       const chip = await screen.findByRole("button", {
-        name: /second screen/i,
+        name: /warming imaging cache/i,
       });
-      // Pane is collapsed: its own tabs are gone, only the chip remains.
-      expect(
-        screen.queryByRole("link", { name: /open in new tab/i }),
-      ).toBeNull();
       fireEvent.click(chip);
       expect(onOpenSecondScreen).toHaveBeenCalledTimes(1);
-    });
-
-    it("surfaces routing status text in the chip", async () => {
-      installWindowManagement();
-      renderTable({
-        previewOpen: false,
-        secondScreenActive: true,
-        secondScreenStatus: "Warming imaging cache…",
-        onOpenSecondScreen: vi.fn(),
-      });
-
-      expect(
-        await screen.findByRole("button", { name: /warming imaging cache/i }),
-      ).toBeInTheDocument();
     });
   });
 });
