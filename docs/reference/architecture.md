@@ -232,9 +232,25 @@ up/down hotkeys drop keys depending on focus, so the shim owns those keys
 one-detent wheel on the last-clicked viewport — click the image, then arrows
 just work.
 
+It also adds an `m` hotkey for MIP: each press steps a maximum-intensity
+slab through 1.25 / 2.5 / 5 / 10 / 20 / 30 mm on every volume viewport, then back
+to normal (composite blend, thin slice). In the plain stack view the first
+press converts the active pane in place to a volume viewport in acquisition
+orientation — same image, same single-pane layout, the exact
+stack→orthographic move OHIF's own per-viewport orientation menu makes —
+and applies 1.25 mm once the volume is mounted (the pane stays a volume
+viewport afterwards; reselect the series to get a true stack viewport
+back). In MPR all three panes slab together. Non-reconstructable series
+show a transient "MIP unavailable" notice. The handler drives the globals
+the OHIF cornerstone extension exposes (`window.cornerstone`,
+`window.commandsManager`, `window.services`), so again nothing in the
+plugin is patched. `m` is unbound in OHIF's stock hotkeys.
+
 Live tuning per browser, no restart: `localStorage.sscTrackpadPxPerSlice`
 overrides the threshold; `localStorage.sscTrackpadShimOff = '1'` disables the
-damping (arrows stay). Persist the tuned value in `config.toml`.
+damping (arrows stay); `localStorage.sscMipSlabSteps = '1.25,2.5,5,10,20,30'`
+overrides the MIP steps and `sscMipShimOff = '1'` disables the MIP handler.
+Persist a tuned trackpad value in `config.toml`.
 
 The same injection point carries a small CSS patch (`ssc-dialog-fit`,
 independent of the trackpad kill switch): OHIF 3.11's dialog layer crashes

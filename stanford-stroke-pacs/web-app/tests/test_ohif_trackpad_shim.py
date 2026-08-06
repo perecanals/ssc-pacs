@@ -13,6 +13,8 @@ Postgres is required.
 from __future__ import annotations
 
 import gzip
+import shutil
+import subprocess
 import sys
 from pathlib import Path
 
@@ -80,6 +82,21 @@ class TestInjectWheelShim:
         assert b"ArrowDown" in proxy._OHIF_WHEEL_SHIM
         assert proxy._OHIF_WHEEL_SHIM.count(b"sscSynthetic") >= 2
 
+    def test_shim_covers_mip_cycling(self):
+        # 'm' cycles a MIP slab (mm steps) across the volume viewports; from
+        # a stack layout the active pane is first converted in place to a
+        # volume viewport (OHIF's stack->orthographic orientation-menu move).
+        for token in (
+            b"MAXIMUM_INTENSITY_BLEND",
+            b"setDisplaySetsForViewports",
+            b"'acquisition'",
+            b"isReconstructable",
+            b"[1.25, 2.5, 5, 10, 20, 30]",
+            b"sscMipShimOff",
+            b"sscMipSlabSteps",
+        ):
+            assert token in proxy._OHIF_WHEEL_SHIM
+
     def test_dialog_fit_css_is_injected_with_the_shim(self):
         # OHIF 3.11's ManagedDialog crashes (and unmounts the viewer) when a
         # dialog without a defaultPosition mounts clipped — the ~500px
@@ -97,6 +114,21 @@ class TestInjectWheelShim:
             b"@media (max-width: 479px)",
         ):
             assert token in proxy._OHIF_DIALOG_FIT
+
+    def test_shim_javascript_parses(self, tmp_path):
+        # A syntax error would kill the whole inline script — damping, arrows,
+        # and MIP all silently gone. Gate on node when available.
+        node = shutil.which("node")
+        if node is None:
+            pytest.skip("node not on PATH")
+        script = proxy._OHIF_WHEEL_SHIM.decode()
+        body = script.split(">", 1)[1].rsplit("</script>", 1)[0]
+        js = tmp_path / "shim.js"
+        js.write_text(body)
+        result = subprocess.run(
+            [node, "--check", str(js)], capture_output=True, text=True
+        )
+        assert result.returncode == 0, result.stderr
 
 
 # ---------------------------------------------------------------------------
