@@ -1,5 +1,15 @@
 # Changelog
 
+## v1.22 — 2026-08-07
+
+- **Feature**: OHIF's top-left back arrow + logo (which navigated to an
+  unserved study-list route) are replaced by a mode-aware button: it exits
+  fullscreen back to the pane, collapses the pane, or closes the new-tab /
+  second-screen viewer window (direct-URL tabs are sent to `/app/` instead).
+- **Fix**: the footer "Open in New Tab" link opens via `window.open` so the
+  tab keeps its opener and the viewer's Close button can close it. No
+  migration.
+
 ## v1.21 — 2026-08-06
 
 - **Feature**: "Second Screen" opens the OHIF preview as a fullscreen popup on
