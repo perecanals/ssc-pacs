@@ -99,6 +99,8 @@ export default function Navigator() {
     previewPaneRef.current?.requestFullscreen?.()?.catch(() => {});
   }, []);
 
+  const handlePreviewCollapse = useCallback(() => setPreviewOpen(false), []);
+
   const secondScreen = useSecondScreenViewer();
 
   const handleOpenSecondScreen = useCallback(async () => {
@@ -297,7 +299,7 @@ export default function Navigator() {
               toolbarPortalTarget={toolbarHostEl}
               previewOpen={previewOpen}
               previewUrl={previewUrl}
-              onPreviewClose={() => setPreviewOpen(false)}
+              onPreviewClose={handlePreviewCollapse}
               onPreviewFullscreen={handlePreviewFullscreen}
               onOpenSecondScreen={handleOpenSecondScreen}
               secondScreenActive={secondScreen.active}
@@ -313,6 +315,7 @@ export default function Navigator() {
               isOpen={previewOpen}
               height={previewHeight}
               onHeightChange={setPreviewHeight}
+              onCollapse={handlePreviewCollapse}
               paneRef={previewPaneRef}
             />
           </div>

@@ -269,6 +269,37 @@ the viewport — unclipped at mount, so the crashing branch never runs — and
 shrink the preset grid so its title, search and Cancel stay visible while
 the grid scrolls. Full-size tabs are untouched.
 
+#### OHIF worklist-return replacement (top-left Close button)
+
+OHIF's header has one clickable block top-left — back arrow + logo, a single
+div with `data-cy="return-to-work-list"` — whose click navigates to OHIF's
+study-list route, which this deployment does not serve; users ended up
+wedged on a broken page. `inject_viewer_close()` in `routes/proxy.py` (same
+entry-document injection point as the shim, but unconditional — no kill
+switch) hides and disables that control in every mode with CSS
+(`visibility: hidden`, not `display: none`, so the 48px header keeps its
+layout), then fills the freed spot per context:
+
+- **Embedded pane / fullscreen pane**: the injected script bails when the
+  document is framed (`window.parent !== window`); the React overlay in
+  `PreviewPane.jsx` renders the control instead — "← Collapse" (collapses
+  the pane via `onCollapse` from `Navigator`) or "← Exit fullscreen (Esc)"
+  while fullscreen (replacing the former top-right exit button).
+- **Top-level document** (new tab, second-screen popup, direct URL): the
+  script mounts a fixed "← Close" button that calls `window.close()`. That
+  works wherever the window was script-opened — the footer "Open in New
+  Tab" click (which goes through `window.open` precisely to keep the
+  opener; anchors imply `noopener` on `target=_blank`), the per-row OHIF
+  action, and the second-screen popup (whose opener survives because the
+  proxy strips COOP; the opener's 1 s `window.closed` poll then resets its
+  state). Windows that cannot self-close — direct URLs, middle-clicked
+  links — fall back to `location.assign('/app/')` after 200 ms.
+
+The `data-cy` selector is an upstream test hook — stable in OHIF 3.11, but
+re-verify it against the served bundle on OHIF upgrades (grep the bundle for
+`return-to-work-list`; if it ever disappears, the failure mode is benign:
+the broken control reappears underneath the overlay).
+
 #### OHIF hotkey defaults (`d` → MPR), and user-editable bindings
 
 OHIF ships its own per-user hotkey editor — the top-right menu → **Preferences**

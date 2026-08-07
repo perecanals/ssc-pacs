@@ -316,9 +316,18 @@ The Navigator page is decomposed into focused React components:
   threaded from `Navigator.jsx` into `DataTable` via the `previewOpen` /
   `previewUrl` / `onPreviewClose` / `onPreviewFullscreen` props.
   The sidebar toggle (`.sidebar__toggle`) shares the same navy palette/shape.
+  - The pane overlays one control on the iframe: a top-left navy button
+    sitting where OHIF's worklist-return control (back arrow + logo) used to
+    be — the proxy hides that control because its route isn't served here
+    (`inject_viewer_close()`, see architecture.md). It reads "← Collapse" in
+    pane mode (`onCollapse` from `Navigator`) and "← Exit fullscreen (Esc)"
+    while fullscreen. In new-tab / second-screen contexts the injected script
+    renders the equivalent "← Close" instead; the footer "Open in New Tab"
+    link opens via `window.open` so that tab keeps its opener and can close
+    itself.
   - **Fullscreen** calls `requestFullscreen()` on the pane element
     (`usePaneFullscreen`), which keeps the OHIF iframe mounted — no reload, no
-    re-download. The pane carries its own Exit affordance while fullscreen.
+    re-download.
   - **Second Screen / New Window** (`utils/secondScreen.js` +
     `hooks/useSecondScreenViewer`) detaches the viewer into its own window and
     collapses the pane, so the data table stays interactive. The button is
@@ -439,6 +448,10 @@ the column with the matching `introducedIn`. Adding a column *without*
   collapses it
 - the embedded preview currently uses an `iframe`, so switching to a different
   study or series causes a full OHIF reload inside the pane
+- OHIF's own top-left worklist-return control (back arrow + logo) is hidden and
+  disabled by proxy-injected CSS in every mode, embedded pane included — its
+  study-list route isn't served here (see architecture.md, "OHIF
+  worklist-return replacement")
 
 Orthanc Explorer and OHIF links on the landing page are dynamically built from
 `window.location.hostname + ":8042"`.

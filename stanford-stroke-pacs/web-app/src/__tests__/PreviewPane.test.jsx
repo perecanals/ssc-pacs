@@ -91,24 +91,42 @@ describe("PreviewPane", () => {
     expect(after).toBe(before); // same DOM node, not merely an equal one
   });
 
-  it("shows an exit control only while fullscreen", () => {
-    const { paneRef } = renderPane();
+  it("shows a Collapse control in pane mode that calls onCollapse", () => {
+    const onCollapse = vi.fn();
+    renderPane({ onCollapse });
     expect(
       screen.queryByRole("button", { name: /exit fullscreen/i }),
     ).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: /collapse/i }));
+    expect(onCollapse).toHaveBeenCalledTimes(1);
+    expect(document.exitFullscreen).not.toHaveBeenCalled();
+  });
+
+  it("shows no viewer control in pane mode without onCollapse", () => {
+    renderPane();
+    expect(screen.queryByRole("button", { name: /collapse/i })).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: /exit fullscreen/i }),
+    ).toBeNull();
+  });
+
+  it("relabels to an exit control while fullscreen", () => {
+    const onCollapse = vi.fn();
+    const { paneRef } = renderPane({ onCollapse });
 
     act(() => {
       paneRef.current.requestFullscreen();
     });
-    expect(
-      screen.getByRole("button", { name: /exit fullscreen/i }),
-    ).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /collapse/i })).toBeNull();
 
     fireEvent.click(screen.getByRole("button", { name: /exit fullscreen/i }));
     expect(document.exitFullscreen).toHaveBeenCalled();
+    expect(onCollapse).not.toHaveBeenCalled();
+    // Back in pane mode the same spot offers Collapse again.
     expect(
-      screen.queryByRole("button", { name: /exit fullscreen/i }),
-    ).toBeNull();
+      screen.getByRole("button", { name: /collapse/i }),
+    ).toBeInTheDocument();
   });
 
   it("hides the resize handle while fullscreen", () => {

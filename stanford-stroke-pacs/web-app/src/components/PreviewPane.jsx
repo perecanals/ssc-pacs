@@ -12,6 +12,7 @@ export default function PreviewPane({
   isOpen,
   height,
   onHeightChange,
+  onCollapse,
   paneRef,
 }) {
   const { resizing, handleProps } = usePaneResize({
@@ -53,17 +54,27 @@ export default function PreviewPane({
         />
       )}
 
-      {isFullscreen && (
-        // The DataTable footer (and its Exit affordance) is not visible while
-        // fullscreen, so the pane carries its own. Esc also works — the browser
-        // handles it above the page, which matters because keydown never
-        // reaches us when focus is inside the cross-origin iframe.
+      {(isFullscreen || onCollapse) && (
+        // Sits over the top-left spot where OHIF's worklist-return control
+        // (back arrow + logo) used to be — the injected CSS hides that control
+        // because its route isn't served here (routes/proxy.py,
+        // inject_viewer_close). Fullscreen exits back to the pane (Esc also
+        // works — the browser handles it above the page, which matters because
+        // keydown never reaches us when focus is inside the iframe); pane mode
+        // collapses.
         <button
           type="button"
-          onClick={exit}
-          className="preview-pane__exit-fullscreen"
+          onClick={isFullscreen ? exit : onCollapse}
+          className="preview-pane__viewer-close"
         >
-          Exit fullscreen <span aria-hidden="true">(Esc)</span>
+          <span aria-hidden="true">←</span>{" "}
+          {isFullscreen ? (
+            <>
+              Exit fullscreen <span aria-hidden="true">(Esc)</span>
+            </>
+          ) : (
+            "Collapse"
+          )}
         </button>
       )}
 
@@ -102,5 +113,6 @@ PreviewPane.propTypes = {
   isOpen: PropTypes.bool,
   height: PropTypes.number,
   onHeightChange: PropTypes.func,
+  onCollapse: PropTypes.func,
   paneRef: PropTypes.object,
 };

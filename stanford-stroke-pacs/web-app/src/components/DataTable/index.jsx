@@ -955,10 +955,19 @@ function DataTableInner({
                 </button>
               )}
               {previewUrl && (
+                // Plain click opens via window.open so the tab keeps its
+                // opener and the viewer's injected Close button can
+                // window.close() it — anchors imply noopener on target=_blank.
+                // Middle-click still uses the href; that tab is opener-less
+                // and the Close button navigates it to /app/ instead.
                 <a
                   href={previewUrl}
                   target="_blank"
                   rel="noopener noreferrer"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    window.open(previewUrl, "_blank");
+                  }}
                   className="dt__pane-tab"
                 >
                   Open in New Tab <span aria-hidden="true">↗</span>

@@ -1,9 +1,11 @@
-"""Tests for the OHIF trackpad-scroll shim injected by the reverse proxy.
+"""Tests for the OHIF rewrites injected by the reverse proxy.
 
 Cornerstone3D scrolls one slice per wheel event regardless of delta size, so
 trackpads (dozens of small-delta events per swipe) overshoot wildly. The proxy
-injects a damping script into the OHIF entry documents in transit; these tests
-cover the injection helper and the _proxy branch that applies it. Assets and
+injects a damping script into the OHIF entry documents in transit; entry docs
+also take the worklist-return replacement (broken-control CSS + top-level
+Close button) and app-config.js the extra hotkey defaults. These tests cover
+the injection helpers and the _proxy branch that applies them. Assets and
 non-OHIF responses must keep streaming byte-identically.
 
 DB-free by construction: nothing here uses the `client` fixture, so no
@@ -129,6 +131,64 @@ class TestInjectWheelShim:
         script = proxy._OHIF_WHEEL_SHIM.decode()
         body = script.split(">", 1)[1].rsplit("</script>", 1)[0]
         js = tmp_path / "shim.js"
+        js.write_text(body)
+        result = subprocess.run(
+            [node, "--check", str(js)], capture_output=True, text=True
+        )
+        assert result.returncode == 0, result.stderr
+
+
+class TestInjectViewerClose:
+    def test_injects_before_head_close(self):
+        out = proxy.inject_viewer_close(ENTRY_HTML)
+        assert proxy._OHIF_CLOSE_MARKER in out
+        assert out.index(proxy._OHIF_CLOSE_MARKER) < out.index(b"</head>")
+
+    def test_falls_back_to_body_close(self):
+        out = proxy.inject_viewer_close(b"<html><body>x</body></html>")
+        assert out.index(proxy._OHIF_CLOSE_MARKER) < out.index(b"</body>")
+
+    def test_appends_without_anchors(self):
+        out = proxy.inject_viewer_close(b"stub")
+        assert out.startswith(b"stub")
+        assert proxy._OHIF_CLOSE_MARKER in out
+
+    def test_idempotent(self):
+        once = proxy.inject_viewer_close(ENTRY_HTML)
+        assert proxy.inject_viewer_close(once) == once
+
+    def test_hides_the_worklist_return_control(self):
+        # OHIF's back arrow + logo are one clickable div whose onClick
+        # navigates to the unserved study-list route; the CSS must neutralize
+        # it in every mode (embedded pane included) without collapsing the
+        # header layout. The data-cy selector is an upstream test hook —
+        # re-verify it against the bundle on OHIF upgrades.
+        for token in (
+            b'[data-cy="return-to-work-list"]',
+            b"visibility: hidden",
+            b"pointer-events: none",
+        ):
+            assert token in proxy._OHIF_VIEWER_CLOSE
+
+    def test_close_button_is_top_level_only(self):
+        # Embedded panes get their replacement control from PreviewPane.jsx;
+        # the injected button must bail when the document is framed.
+        assert b"window.parent !== window" in proxy._OHIF_VIEWER_CLOSE
+
+    def test_close_falls_back_for_openerless_windows(self):
+        # Direct URLs / middle-clicked links cannot self-close; the button
+        # must route them to the app landing page instead.
+        for token in (b"window.close()", b"window.closed", b"'/app/'"):
+            assert token in proxy._OHIF_VIEWER_CLOSE
+
+    def test_close_script_javascript_parses(self, tmp_path):
+        node = shutil.which("node")
+        if node is None:
+            pytest.skip("node not on PATH")
+        # The blob is <style> then <script>; isolate the script body.
+        script = proxy._OHIF_VIEWER_CLOSE.decode().split("<script", 1)[1]
+        body = script.split(">", 1)[1].rsplit("</script>", 1)[0]
+        js = tmp_path / "viewer_close.js"
         js.write_text(body)
         result = subprocess.run(
             [node, "--check", str(js)], capture_output=True, text=True
@@ -329,7 +389,20 @@ class TestProxyInjection:
         assert not isinstance(resp, StreamingResponse)
         assert proxy._OHIF_SHIM_MARKER in out
         assert proxy._OHIF_DIALOG_FIT_MARKER in out
+        assert proxy._OHIF_CLOSE_MARKER in out
         assert resp.headers["content-length"] == str(len(out))
+
+    async def test_viewer_close_injects_even_with_shim_disabled(
+        self, monkeypatch
+    ):
+        # The trackpad kill switch must not take the worklist-return
+        # replacement down with it — they are independent injections.
+        monkeypatch.setattr(proxy, "OHIF_TRACKPAD_PX_PER_SLICE", 0)
+        _, out = await _run_proxy(
+            monkeypatch, "/ohif/viewer", ENTRY_HTML, "text/html"
+        )
+        assert proxy._OHIF_SHIM_MARKER not in out
+        assert proxy._OHIF_CLOSE_MARKER in out
 
     async def test_gzipped_entry_document_is_decoded_then_injected(
         self, monkeypatch
@@ -400,6 +473,7 @@ class TestProxyInjection:
         )
         assert isinstance(resp, StreamingResponse)
         assert proxy._OHIF_SHIM_MARKER not in out
+        assert proxy._OHIF_CLOSE_MARKER not in out
 
     async def test_non_200_is_not_injected(self, monkeypatch):
         resp, out = await _run_proxy(

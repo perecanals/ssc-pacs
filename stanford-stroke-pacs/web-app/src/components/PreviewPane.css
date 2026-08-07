@@ -25,10 +25,14 @@
   @apply h-full max-h-none rounded-none border-0;
 }
 
-.preview-pane__exit-fullscreen {
-  @apply absolute top-2 right-2 z-20 px-2.5 py-1 rounded
-         text-xs bg-surface/90 text-text border border-border
-         hover:bg-surface focus-visible:outline-2 focus-visible:outline-primary;
+/* Covers the top-left spot of OHIF's hidden worklist-return control (see
+   routes/proxy.py inject_viewer_close); OHIF-navy like .dt__pane-tab so it
+   blends with the viewer header. top-2 clears the resize handle's 8px strip;
+   z-20 wins over it where they touch. */
+.preview-pane__viewer-close {
+  @apply absolute top-2 left-2 z-20 px-2.5 py-1 rounded
+         text-xs font-semibold bg-[#1a2256] text-white
+         hover:bg-[#090C29] focus-visible:outline-2 focus-visible:outline-primary;
 }
 
 /* Invisible drag strip along the pane's top edge; shows a primary-colored

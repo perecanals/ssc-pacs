@@ -84,6 +84,20 @@ describe("DataTable pane tabs", () => {
     ).toHaveAttribute("href", PREVIEW_URL);
   });
 
+  it("opens the new tab via window.open so it keeps its opener", async () => {
+    // Anchors imply noopener on target=_blank, which would strand the tab
+    // with a Close button that cannot close it; the click handler must go
+    // through window.open instead of the default navigation.
+    const openSpy = vi.spyOn(window, "open").mockReturnValue(null);
+    renderTable();
+
+    const link = await screen.findByRole("link", { name: /open in new tab/i });
+    const notPrevented = fireEvent.click(link);
+    expect(openSpy).toHaveBeenCalledWith(PREVIEW_URL, "_blank");
+    expect(notPrevented).toBe(false); // default navigation was prevented
+    openSpy.mockRestore();
+  });
+
   describe("Second Screen tab", () => {
     // jsdom has neither getScreenDetails nor screen.isExtended; these tests
     // install both to simulate Chromium with an extended desktop. The popup

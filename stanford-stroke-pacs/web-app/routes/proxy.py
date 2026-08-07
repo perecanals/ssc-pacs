@@ -454,6 +454,75 @@ def inject_wheel_shim(body: bytes) -> bytes:
     return body + blob
 
 
+# ---------------------------------------------------------------------------
+# OHIF worklist-return replacement (entry documents)
+# ---------------------------------------------------------------------------
+# OHIF's header has a single clickable block (back arrow + logo, one div with
+# data-cy="return-to-work-list") whose onClick navigates to OHIF's study-list
+# route — which this deployment does not serve, leaving the viewer wedged on a
+# broken page. The CSS below hides and disables that control in every mode
+# (visibility, not display, so the 48px header keeps its layout). The script
+# then puts a "Close" button in the freed top-left spot, but only when the
+# document is top-level (new tab, second-screen popup, direct URL): in the
+# embedded preview pane the React overlay in PreviewPane.jsx owns the
+# replacement control instead. Closing works wherever the window was opened by
+# script (the footer New Tab click, the row OHIF action, the second-screen
+# popup — COOP is stripped above precisely so the opener survives); windows
+# that cannot self-close (direct URL, middle-clicked link) fall back to the
+# app landing page.
+_OHIF_CLOSE_MARKER = b"ssc-viewer-close"
+
+_OHIF_VIEWER_CLOSE = b"""\
+<style id="ssc-viewer-close-style">/* injected by web-app routes/proxy.py */
+[data-cy="return-to-work-list"] { visibility: hidden; pointer-events: none; }
+#ssc-viewer-close-btn {
+  position: fixed; top: 8px; left: 8px; z-index: 99999;
+  background: #1a2256; color: #fff; border: 0; border-radius: 4px;
+  padding: 6px 12px; font: 600 12px sans-serif; cursor: pointer;
+}
+#ssc-viewer-close-btn:hover { background: #090C29; }
+</style>
+<script id="ssc-viewer-close">/* injected by web-app routes/proxy.py */
+(function () {
+  'use strict';
+  if (window.parent !== window) return;
+  function mount() {
+    var btn = document.createElement('button');
+    btn.id = 'ssc-viewer-close-btn';
+    btn.type = 'button';
+    btn.title = 'Close this viewer window';
+    btn.textContent = '\\u2190 Close';
+    btn.addEventListener('click', function () {
+      window.close();
+      setTimeout(function () {
+        if (!window.closed) window.location.assign('/app/');
+      }, 200);
+    });
+    document.body.appendChild(btn);
+  }
+  if (document.body) mount();
+  else document.addEventListener('DOMContentLoaded', mount);
+})();
+</script>"""
+
+
+def inject_viewer_close(body: bytes) -> bytes:
+    """Insert the worklist-return replacement into an OHIF entry document.
+
+    The CSS neutralizes OHIF's broken return-to-work-list control in every
+    mode; the script adds the top-level-only Close button (see the block
+    comment above). Unconditional — unlike the trackpad shim there is no
+    preference to honour — and a no-op when already present.
+    """
+    if _OHIF_CLOSE_MARKER in body:
+        return body
+    for anchor in (b"</head>", b"</body>"):
+        idx = body.find(anchor)
+        if idx != -1:
+            return body[:idx] + _OHIF_VIEWER_CLOSE + body[idx:]
+    return body + _OHIF_VIEWER_CLOSE
+
+
 async def dicomweb_dataset_guard(
     request: Request,
     user: str = Depends(get_current_user),
@@ -712,18 +781,21 @@ async def _proxy(request: Request) -> Response:
     )
     if is_entry_doc or is_app_config:
         # The two small, deliberately uncached OHIF files: the entry documents
-        # (/ohif/, /ohif/viewer) take the input shim, app-config.js takes the
-        # extra hotkey defaults. Buffer and rewrite in transit — aread()
-        # decodes any content-encoding, so that header and the stale
-        # content-length must go; Response recomputes the length. Everything
-        # else streams below untouched.
+        # (/ohif/, /ohif/viewer) take the input shim and the worklist-return
+        # replacement, app-config.js takes the extra hotkey defaults. Buffer
+        # and rewrite in transit — aread() decodes any content-encoding, so
+        # that header and the stale content-length must go; Response
+        # recomputes the length. Everything else streams below untouched.
         try:
             raw = await upstream.aread()
         finally:
             await upstream.aclose()
         headers.pop("content-encoding", None)
         headers.pop("content-length", None)
-        rewrite = inject_wheel_shim if is_entry_doc else inject_extra_hotkeys
+        if is_entry_doc:
+            raw = inject_viewer_close(inject_wheel_shim(raw))
+        else:
+            raw = inject_extra_hotkeys(raw)
         if is_app_config:
             # Orthanc sends no validators, and Chrome's memory cache may
             # reuse a validator-less script within a session — which would
@@ -731,7 +803,7 @@ async def _proxy(request: Request) -> Response:
             # the file is ~6 KB, refetching it is free.
             headers["cache-control"] = "no-store"
         return Response(
-            content=rewrite(raw),
+            content=raw,
             status_code=upstream.status_code,
             headers=headers,
         )
