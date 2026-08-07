@@ -23,6 +23,10 @@
 - **Fix**: OHIF dialogs are fitted to small viewports, avoiding the upstream
   ManagedDialog crash that blacked out the preview pane when a clipped dialog
   (e.g. "Rendering Presets") mounted inside it. No migration.
+- **Feature** (added post-tag): `d` toggles the MPR layout in OHIF — a real
+  OHIF hotkey (injected into the defaults via the proxy), so it appears in
+  the viewer's Preferences → Hotkeys editor and each user can rebind it
+  there.
 
 ## v1.20 — 2026-08-06
 

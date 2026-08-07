@@ -13,6 +13,7 @@ Postgres is required.
 from __future__ import annotations
 
 import gzip
+import json
 import shutil
 import subprocess
 import sys
@@ -135,6 +136,136 @@ class TestInjectWheelShim:
         assert result.returncode == 0, result.stderr
 
 
+APP_CONFIG_JS = b"window.config = {\n  hotkeys: [\n    " \
+    b"{ commandName: 'invertViewport', label: 'Invert', keys: ['i'] },\n  ],\n};\n"
+
+
+class TestInjectExtraHotkeys:
+    def test_appends_after_the_config_assignment(self):
+        out = proxy.inject_extra_hotkeys(APP_CONFIG_JS)
+        assert out.startswith(APP_CONFIG_JS)
+        assert proxy._OHIF_HOTKEYS_MARKER in out
+
+    def test_idempotent(self):
+        once = proxy.inject_extra_hotkeys(APP_CONFIG_JS)
+        assert proxy.inject_extra_hotkeys(once) == once
+
+    def test_binds_d_to_the_mpr_hanging_protocol(self):
+        # Same command the toolbar's MPR button runs, so OHIF's Preferences
+        # dialog lists it and users can rebind the key.
+        for token in (
+            b"'toggleHangingProtocol'",
+            b"protocolId: 'mpr'",
+            b"keys: ['d']",
+            b"isEditable: true",
+            b"'ohif.hotkeyBindings'",
+            b"sscExtraHotkeysOff",
+        ):
+            assert token in proxy._OHIF_EXTRA_HOTKEYS
+
+    def test_javascript_parses(self, tmp_path):
+        node = shutil.which("node")
+        if node is None:
+            pytest.skip("node not on PATH")
+        js = tmp_path / "hotkeys.js"
+        js.write_text(proxy._OHIF_EXTRA_HOTKEYS.decode())
+        result = subprocess.run(
+            [node, "--check", str(js)], capture_output=True, text=True
+        )
+        assert result.returncode == 0, result.stderr
+
+    # OHIF 3.11 rebuilds the customization scopes from the extension modules
+    # on every mode entry and reads 'ohif.hotkeyBindings' in the same
+    # synchronous block, so the injected JS wraps getCustomization itself
+    # (installed via a window.services property hook — the OHIF cornerstone
+    # extension assigns that global during init, before the first mode
+    # entry). These tests execute the payload under node against a stand-in
+    # services object assigned *after* the hook installs, mirroring the real
+    # ordering.
+
+    _NODE_STUB = (
+        "var __ls = {};\n"
+        "var localStorage = { getItem: k => __ls[k] ?? null };\n"
+        "var window = {};\n"
+    )
+
+    _NODE_SERVICES = (
+        "window.services = { customizationService: {\n"
+        "  getCustomization: function (id) {\n"
+        "    if (id !== 'ohif.hotkeyBindings') return { other: true };\n"
+        "    return [\n"
+        "      { commandName: 'invertViewport', label: 'Invert',"
+        " keys: ['i'] },\n"
+        "      { commandName: 'toggleHangingProtocol',"
+        " commandOptions: { protocolId: 'mpr' }, label: 'Old MPR',"
+        " keys: ['q'] },\n"
+        "    ];\n"
+        "  },\n"
+        "} };\n"
+    )
+
+    def _run_node(self, tmp_path, script: str) -> str:
+        node = shutil.which("node")
+        if node is None:
+            pytest.skip("node not on PATH")
+        js = tmp_path / "harness.js"
+        js.write_text(script)
+        return subprocess.run(
+            [node, str(js)], capture_output=True, text=True, check=True
+        ).stdout
+
+    def test_wrapper_appends_the_binding_on_read(self, tmp_path):
+        out = self._run_node(
+            tmp_path,
+            self._NODE_STUB
+            + proxy._OHIF_EXTRA_HOTKEYS.decode()
+            + self._NODE_SERVICES
+            + "console.log(JSON.stringify("
+            "window.services.customizationService"
+            ".getCustomization('ohif.hotkeyBindings')));\n"
+            "process.exit(0);\n"
+        )
+        hotkeys = json.loads(out)
+        mpr = [h for h in hotkeys if h["commandName"] == "toggleHangingProtocol"]
+        assert mpr == [{
+            "commandName": "toggleHangingProtocol",
+            "commandOptions": {"protocolId": "mpr"},
+            "label": "MPR",
+            "keys": ["d"],
+            "isEditable": True,
+        }]  # exactly one: the stale same-command entry was replaced
+        assert hotkeys[-1] == mpr[0]  # appended last, so its key binding wins
+        assert {h["commandName"] for h in hotkeys} >= {"invertViewport"}
+
+    def test_wrapper_leaves_other_customizations_alone(self, tmp_path):
+        out = self._run_node(
+            tmp_path,
+            self._NODE_STUB
+            + proxy._OHIF_EXTRA_HOTKEYS.decode()
+            + self._NODE_SERVICES
+            + "console.log(JSON.stringify("
+            "window.services.customizationService"
+            ".getCustomization('ohif.anythingElse')));\n"
+            "process.exit(0);\n"
+        )
+        assert json.loads(out) == {"other": True}
+
+    def test_wrapper_honours_the_kill_switch(self, tmp_path):
+        out = self._run_node(
+            tmp_path,
+            self._NODE_STUB
+            + proxy._OHIF_EXTRA_HOTKEYS.decode()
+            + self._NODE_SERVICES
+            + "__ls.sscExtraHotkeysOff = '1';\n"
+            "console.log(JSON.stringify("
+            "window.services.customizationService"
+            ".getCustomization('ohif.hotkeyBindings')"
+            ".map(h => h.keys)));\n"
+            "process.exit(0);\n"
+        )
+        assert json.loads(out) == [["i"], ["q"]]  # untouched stock list
+
+
 # ---------------------------------------------------------------------------
 # _proxy branch, via httpx.MockTransport against the module-level client
 # (_get_client reads _CLIENT at call time, so monkeypatching suffices).
@@ -214,6 +345,47 @@ class TestProxyInjection:
         assert b"</head>" in out  # decoded, not raw gzip bytes
         assert "content-encoding" not in resp.headers
         assert resp.headers["content-length"] == str(len(out))
+
+    async def test_app_config_gets_extra_hotkeys(self, monkeypatch):
+        resp, out = await _run_proxy(
+            monkeypatch,
+            "/ohif/app-config.js",
+            APP_CONFIG_JS,
+            "application/javascript",
+        )
+        assert isinstance(resp, Response)
+        assert not isinstance(resp, StreamingResponse)
+        assert out.startswith(APP_CONFIG_JS)
+        assert proxy._OHIF_HOTKEYS_MARKER in out
+        assert resp.headers["content-length"] == str(len(out))
+        # A stale cached copy would keep serving a pre-injection config.
+        assert resp.headers["cache-control"] == "no-store"
+
+    async def test_gzipped_app_config_is_decoded_then_injected(
+        self, monkeypatch
+    ):
+        resp, out = await _run_proxy(
+            monkeypatch,
+            "/ohif/app-config.js",
+            gzip.compress(APP_CONFIG_JS),
+            "application/javascript",
+            extra_headers={"content-encoding": "gzip"},
+        )
+        assert out.startswith(APP_CONFIG_JS)  # decoded, not raw gzip bytes
+        assert proxy._OHIF_HOTKEYS_MARKER in out
+        assert "content-encoding" not in resp.headers
+
+    async def test_other_ohif_javascript_streams_untouched(self, monkeypatch):
+        # Only app-config.js is rewritten — the 15 MiB bundle must not be
+        # buffered, and its content-hashed name keeps it immutably cached.
+        resp, out = await _run_proxy(
+            monkeypatch,
+            "/ohif/app.bundle.b34f32c50e70ee27ad26.js",
+            b"console.log(1)",
+            "application/javascript",
+        )
+        assert isinstance(resp, StreamingResponse)
+        assert out == b"console.log(1)"
 
     async def test_asset_streams_untouched(self, monkeypatch):
         resp, out = await _run_proxy(

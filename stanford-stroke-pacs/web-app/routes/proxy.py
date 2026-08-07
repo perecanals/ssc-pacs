@@ -307,6 +307,117 @@ _OHIF_WHEEL_SHIM = """\
     "__PX_PER_SLICE__", str(OHIF_TRACKPAD_PX_PER_SLICE)
 ).encode()
 
+# ---------------------------------------------------------------------------
+# Extra OHIF hotkey defaults (app-config.js)
+# ---------------------------------------------------------------------------
+# OHIF ships a per-user hotkey editor (Preferences in the top-right menu;
+# bindings persist in localStorage `user-preferred-keys`, hashed by
+# commandName + commandOptions), but it only lists the *default* bindings.
+# In OHIF 3.11 those no longer come from `window.config.hotkeys` (dead
+# legacy — the list in the plugin's app-config.js is ignored): on every mode
+# entry the CustomizationService rebuilds its 'default' and 'mode' scopes
+# from the extension modules and the mode route immediately reads
+# `getCustomization('ohif.hotkeyBindings')` into
+# `hotkeysManager.setDefaultHotKeys` — one synchronous block, so nothing
+# appended to any scope beforehand survives to the read.
+#
+# The one durable seam is the read itself: wrap
+# `customizationService.getCustomization` and append our definitions to the
+# 'ohif.hotkeyBindings' result. The wrapper is installed via a property hook
+# on `window.services`, which the OHIF cornerstone extension assigns during
+# extension init — strictly before the first mode entry — so this is
+# race-free, with a short poll as a belt-and-braces fallback. The payload is
+# appended to app-config.js (served from inside libOrthancOHIF.so, so not
+# editable on disk; deliberately excluded from the immutable cache policy;
+# runs before the app bundle, so the hook precedes the assignment).
+#
+# 'd' -> MPR: the same command the toolbar's MPR button runs
+# (`toggleHangingProtocol` with protocolId 'mpr' — a toggle, so a second
+# press returns to the previous layout). A hotkey has no enablement
+# evaluator, so on a non-reconstructable series OHIF shows its own "The
+# hanging protocol could not be applied" toast. 'd' is unbound in OHIF's
+# stock bindings; if an upgrade ever claims it, our entry is appended last,
+# so its binding wins.
+#
+# These are *defaults*: the entry shows up in the Preferences hotkey editor,
+# and a user who rebinds it there keeps their key (stored preferences are
+# looked up by command, not by key). Kill switch:
+# localStorage.sscExtraHotkeysOff = '1'.
+_OHIF_APP_CONFIG_PATH = "/ohif/app-config.js"
+_OHIF_HOTKEYS_MARKER = b"ssc-extra-hotkeys"
+
+_OHIF_EXTRA_HOTKEYS = b"""
+/* ssc-extra-hotkeys: injected by web-app routes/proxy.py */
+(function () {
+  'use strict';
+  var EXTRAS = [
+    {
+      commandName: 'toggleHangingProtocol',
+      commandOptions: { protocolId: 'mpr' },
+      label: 'MPR',
+      keys: ['d'],
+      isEditable: true
+    }
+  ];
+  function sameCommand(a, b) {
+    return a.commandName === b.commandName &&
+      JSON.stringify(a.commandOptions || {}) ===
+      JSON.stringify(b.commandOptions || {});
+  }
+  function withExtras(bindings) {
+    if (!Array.isArray(bindings)) return bindings;
+    var out = bindings.filter(function (h) {
+      return !EXTRAS.some(function (def) { return sameCommand(h, def); });
+    });
+    return out.concat(EXTRAS);
+  }
+  var patched = false;
+  function patch(services) {
+    if (patched || !services || !services.customizationService) return;
+    var svc = services.customizationService;
+    if (typeof svc.getCustomization !== 'function') return;
+    var orig = svc.getCustomization.bind(svc);
+    svc.getCustomization = function (id) {
+      var value = orig.apply(null, arguments);
+      if (id !== 'ohif.hotkeyBindings') return value;
+      if (localStorage.getItem('sscExtraHotkeysOff') === '1') return value;
+      return withExtras(value);
+    };
+    patched = true;
+  }
+  // window.services is assigned once, during OHIF's cornerstone extension
+  // init - before the first mode entry reads the hotkey bindings. Hook the
+  // assignment so the wrapper is in place the moment the service exists.
+  var current = window.services;
+  try {
+    Object.defineProperty(window, 'services', {
+      configurable: true,
+      get: function () { return current; },
+      set: function (v) { current = v; patch(v); }
+    });
+  } catch (err) { /* fall through to the poll */ }
+  patch(current);
+  var tries = 600;  // x 500 ms = 5 min, same budget as the MIP poll
+  var poll = setInterval(function () {
+    patch(current || window.services);
+    if (patched || --tries <= 0) clearInterval(poll);
+  }, 500);
+})();
+"""
+
+
+def inject_extra_hotkeys(body: bytes) -> bytes:
+    """Append the extra hotkey defaults to OHIF's app-config.js.
+
+    Appended, not spliced: app-config.js assigns `window.config` at top level,
+    so running last is what guarantees the object exists. No-op when already
+    present.
+    """
+    if _OHIF_HOTKEYS_MARKER in body:
+        return body
+    return body + _OHIF_EXTRA_HOTKEYS
+
+
 _OHIF_DIALOG_FIT = b"""\
 <style id="ssc-dialog-fit">/* injected by web-app routes/proxy.py */
 @media (max-height: 659px) {
@@ -590,23 +701,37 @@ async def _proxy(request: Request) -> Response:
     headers = _filtered_response_headers(upstream)
     if upstream.status_code == 200 and is_immutable_ohif_asset(request.url.path):
         headers["cache-control"] = _IMMUTABLE_CACHE_CONTROL
-    if (
+    is_entry_doc = (
         upstream.status_code == 200
         and request.url.path.startswith("/ohif")
         and upstream.headers.get("content-type", "").lower().startswith("text/html")
-    ):
-        # Entry documents only (/ohif/, /ohif/viewer — a few KB, deliberately
-        # uncached): buffer and inject the trackpad shim. aread() decodes any
-        # content-encoding, so that header and the stale content-length must
-        # go; Response recomputes the length. Assets stream below untouched.
+    )
+    is_app_config = (
+        upstream.status_code == 200
+        and request.url.path == _OHIF_APP_CONFIG_PATH
+    )
+    if is_entry_doc or is_app_config:
+        # The two small, deliberately uncached OHIF files: the entry documents
+        # (/ohif/, /ohif/viewer) take the input shim, app-config.js takes the
+        # extra hotkey defaults. Buffer and rewrite in transit — aread()
+        # decodes any content-encoding, so that header and the stale
+        # content-length must go; Response recomputes the length. Everything
+        # else streams below untouched.
         try:
-            html = await upstream.aread()
+            raw = await upstream.aread()
         finally:
             await upstream.aclose()
         headers.pop("content-encoding", None)
         headers.pop("content-length", None)
+        rewrite = inject_wheel_shim if is_entry_doc else inject_extra_hotkeys
+        if is_app_config:
+            # Orthanc sends no validators, and Chrome's memory cache may
+            # reuse a validator-less script within a session — which would
+            # keep serving a pre-injection copy after a deploy. Forbid reuse;
+            # the file is ~6 KB, refetching it is free.
+            headers["cache-control"] = "no-store"
         return Response(
-            content=inject_wheel_shim(html),
+            content=rewrite(raw),
             status_code=upstream.status_code,
             headers=headers,
         )

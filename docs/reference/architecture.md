@@ -269,6 +269,45 @@ the viewport — unclipped at mount, so the crashing branch never runs — and
 shrink the preset grid so its title, search and Cancel stay visible while
 the grid scrolls. Full-size tabs are untouched.
 
+#### OHIF hotkey defaults (`d` → MPR), and user-editable bindings
+
+OHIF ships its own per-user hotkey editor — the top-right menu → **Preferences**
+→ Hotkeys — and bindings persist in that browser's `localStorage`
+(`user-preferred-keys`, hashed by command + options; an older
+`hotkey-definitions` key is migrated on first load). It lists the *default*
+bindings, which in OHIF 3.11 do **not** come from the `hotkeys:` list in
+`app-config.js` — that config key is dead legacy (the plugin still ships it,
+ignored). The real defaults live in the CustomizationService under
+`'ohif.hotkeyBindings'`, and on **every mode entry** the service rebuilds its
+`default` and `mode` scopes from the extension modules and the mode route
+immediately reads `getCustomization('ohif.hotkeyBindings')` into the hotkeys
+manager — one synchronous block, so nothing pre-seeded into any scope
+survives to that read.
+
+The durable seam is the read itself: `inject_extra_hotkeys()` in
+`routes/proxy.py` appends a script to `app-config.js` in transit (the file is
+served from inside `libOrthancOHIF.so`, so not editable on disk; deliberately
+uncached; runs before the app bundle) that hooks the `window.services`
+assignment — made once by OHIF's cornerstone extension during init, before
+the first mode entry — and wraps `customizationService.getCustomization` to
+append our definitions to every `'ohif.hotkeyBindings'` result. Today that
+adds one: **`d` → MPR**, the same `toggleHangingProtocol` /
+`protocolId: 'mpr'` command as the toolbar's MPR button, so a second press
+returns to the previous layout (verified headlessly against the live viewer:
+`default → mpr → default`). Our entries are appended last, so if an upstream
+upgrade ever claims the same key, our binding wins. Kill switch:
+`localStorage.sscExtraHotkeysOff = '1'`.
+
+Two consequences worth knowing. Because these are *defaults*, the entry
+appears in the Preferences editor and a user who rebinds MPR there keeps
+their own key — the stored preference is looked up by command, not by key —
+and "Reset to defaults" restores `d`. And because a hotkey has no enablement
+evaluator (the toolbar button has one), pressing `d` on a
+non-reconstructable series raises OHIF's own "The hanging protocol could not
+be applied" toast rather than doing nothing. This is the opposite trade-off
+from the `m`/`n` MIP keys above, which are owned by the shim — reliable and
+guarded, but not rebindable.
+
 #### DICOMweb URL relativization
 
 Orthanc's DICOMweb plugin emits **absolute** URLs in its JSON responses —

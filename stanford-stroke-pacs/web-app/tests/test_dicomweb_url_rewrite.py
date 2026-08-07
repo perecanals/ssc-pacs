@@ -112,9 +112,11 @@ class TestProxyJsonRewrite:
         assert body == payload
 
     async def test_non_dicomweb_json_is_untouched(self, monkeypatch):
+        # Any /ohif JSON except app-config.js, which the proxy rewrites for
+        # its own reason (hotkey defaults — test_ohif_trackpad_shim.py).
         payload = b'{"routerBasename": "/ohif"}'
         resp, body = await _run_proxy(
-            monkeypatch, "/ohif/app-config.js", payload, "application/json"
+            monkeypatch, "/ohif/manifest.json", payload, "application/json"
         )
         assert isinstance(resp, StreamingResponse)
         assert body == payload
