@@ -88,7 +88,7 @@ describe("DataTable pane tabs", () => {
     // jsdom has neither getScreenDetails nor screen.isExtended; these tests
     // install both to simulate Chromium with an extended desktop. The popup
     // open/navigate logic itself lives in useSecondScreenViewer (tested in
-    // hooks/__tests__); DataTable only gates and forwards.
+    // hooks/__tests__); DataTable only labels and forwards.
     function installWindowManagement() {
       Object.defineProperty(window.screen, "isExtended", {
         value: true,
@@ -102,15 +102,21 @@ describe("DataTable pane tabs", () => {
       delete window.screen.isExtended;
     });
 
-    it("is hidden when the Window Management API is absent (non-Chromium)", async () => {
-      renderTable({ onOpenSecondScreen: vi.fn() });
-      await screen.findByRole("link", { name: /open in new tab/i });
+    it("offers a plain New Window without a second display", async () => {
+      // Single monitor, or a browser with no Window Management API: the
+      // feature stays available, only the placement is lost.
+      const onOpenSecondScreen = vi.fn();
+      renderTable({ onOpenSecondScreen });
+
+      const btn = await screen.findByRole("button", { name: /new window/i });
       expect(
         screen.queryByRole("button", { name: /second screen/i }),
       ).toBeNull();
+      fireEvent.click(btn);
+      expect(onOpenSecondScreen).toHaveBeenCalledTimes(1);
     });
 
-    it("calls onOpenSecondScreen when clicked", async () => {
+    it("labels it Second Screen when another display is attached", async () => {
       installWindowManagement();
       const onOpenSecondScreen = vi.fn();
       renderTable({ onOpenSecondScreen });
@@ -119,6 +125,12 @@ describe("DataTable pane tabs", () => {
         await screen.findByRole("button", { name: /second screen/i }),
       );
       expect(onOpenSecondScreen).toHaveBeenCalledTimes(1);
+    });
+
+    it("is omitted when no handler is wired", async () => {
+      renderTable();
+      await screen.findByRole("link", { name: /open in new tab/i });
+      expect(screen.queryByRole("button", { name: /new window/i })).toBeNull();
     });
 
     it("leaves the footer empty while the popup is live and idle", async () => {

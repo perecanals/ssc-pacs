@@ -49,12 +49,12 @@ vi.mock("../api/warmOhif", () => ({
   resolveOhifViewerUrl: (...a) => resolveOhifViewerUrl(...a),
 }));
 
-const openOnSecondScreen = vi.fn();
+const openViewerWindow = vi.fn();
 vi.mock("../utils/secondScreen", async (importOriginal) => ({
   ...(await importOriginal()),
-  // Keep the real canUseSecondScreen so the button stays gated on the
+  // Keep the real hasSecondScreen so the button is labelled from the
   // simulated Window Management API below.
-  openOnSecondScreen: (...a) => openOnSecondScreen(...a),
+  openViewerWindow: (...a) => openViewerWindow(...a),
 }));
 
 import { AuthProvider } from "../context/AuthContext";
@@ -80,7 +80,7 @@ describe("Pane action (force the pane open)", () => {
   beforeEach(() => {
     resolveOhifViewerUrl.mockReset();
     resolveOhifViewerUrl.mockResolvedValue("/ohif/viewer?StudyInstanceUIDs=1");
-    openOnSecondScreen.mockReset();
+    openViewerWindow.mockReset();
   });
 
   afterEach(() => {
@@ -111,7 +111,7 @@ describe("Pane action (force the pane open)", () => {
       focus: vi.fn(),
       location: { replace: vi.fn() },
     };
-    openOnSecondScreen.mockResolvedValue(popup);
+    openViewerWindow.mockResolvedValue(popup);
     await renderSeriesLevel();
 
     // Route the row to the popup first (row click -> pane -> Second Screen).
@@ -119,7 +119,7 @@ describe("Pane action (force the pane open)", () => {
     fireEvent.click(
       await screen.findByRole("button", { name: /second screen/i }),
     );
-    await waitFor(() => expect(openOnSecondScreen).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(openViewerWindow).toHaveBeenCalledTimes(1));
     // Popup owns the viewer now: the pane is collapsed and its iframe dropped.
     await waitFor(() => expect(paneIframe()).toBeNull());
 

@@ -1,9 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { renderHook, act, waitFor } from "@testing-library/react";
 
-const openOnSecondScreen = vi.fn();
+const openViewerWindow = vi.fn();
 vi.mock("../../utils/secondScreen", () => ({
-  openOnSecondScreen: (...a) => openOnSecondScreen(...a),
+  openViewerWindow: (...a) => openViewerWindow(...a),
 }));
 
 import useSecondScreenViewer from "../useSecondScreenViewer";
@@ -18,7 +18,7 @@ function makePopup() {
 
 describe("useSecondScreenViewer", () => {
   beforeEach(() => {
-    openOnSecondScreen.mockReset();
+    openViewerWindow.mockReset();
   });
 
   afterEach(() => {
@@ -27,7 +27,7 @@ describe("useSecondScreenViewer", () => {
 
   it("open() activates on success and re-points instead of reopening", async () => {
     const popup = makePopup();
-    openOnSecondScreen.mockResolvedValue(popup);
+    openViewerWindow.mockResolvedValue(popup);
     const { result } = renderHook(() => useSecondScreenViewer());
 
     await act(async () => {
@@ -41,14 +41,14 @@ describe("useSecondScreenViewer", () => {
     await act(async () => {
       expect(await result.current.open("/ohif/viewer?a=2")).toBe(true);
     });
-    expect(openOnSecondScreen).toHaveBeenCalledTimes(1);
+    expect(openViewerWindow).toHaveBeenCalledTimes(1);
     expect(popup.location.replace).toHaveBeenCalledWith("/ohif/viewer?a=2");
     expect(popup.focus).toHaveBeenCalled();
   });
 
   it("open() with no URL just focuses a live popup", async () => {
     const popup = makePopup();
-    openOnSecondScreen.mockResolvedValue(popup);
+    openViewerWindow.mockResolvedValue(popup);
     const { result } = renderHook(() => useSecondScreenViewer());
     await act(async () => {
       await result.current.open("/ohif/viewer?a=1");
@@ -62,7 +62,7 @@ describe("useSecondScreenViewer", () => {
   });
 
   it("open() stays inactive when the popup is blocked or denied", async () => {
-    openOnSecondScreen.mockResolvedValue(null);
+    openViewerWindow.mockResolvedValue(null);
     const { result } = renderHook(() => useSecondScreenViewer());
 
     await act(async () => {
@@ -74,7 +74,7 @@ describe("useSecondScreenViewer", () => {
 
   it("navigate() replaces only on a new URL and always focuses", async () => {
     const popup = makePopup();
-    openOnSecondScreen.mockResolvedValue(popup);
+    openViewerWindow.mockResolvedValue(popup);
     const { result } = renderHook(() => useSecondScreenViewer());
     await act(async () => {
       await result.current.open("/ohif/viewer?a=1");
@@ -101,7 +101,7 @@ describe("useSecondScreenViewer", () => {
 
   it("navigate() refuses when the popup is closed or the URL empty", async () => {
     const popup = makePopup();
-    openOnSecondScreen.mockResolvedValue(popup);
+    openViewerWindow.mockResolvedValue(popup);
     const { result } = renderHook(() => useSecondScreenViewer());
     await act(async () => {
       await result.current.open("/ohif/viewer?a=1");
@@ -116,7 +116,7 @@ describe("useSecondScreenViewer", () => {
   it("polls the popup and deactivates once the user closes it", async () => {
     vi.useFakeTimers();
     const popup = makePopup();
-    openOnSecondScreen.mockResolvedValue(popup);
+    openViewerWindow.mockResolvedValue(popup);
     const { result } = renderHook(() => useSecondScreenViewer());
     await act(async () => {
       await result.current.open("/ohif/viewer?a=1");

@@ -39,7 +39,7 @@ import ChildRows, { DownloadIcon, TrashIcon } from "./ChildRows";
 import WarmButton from "./WarmButton";
 import CopyPathButtons from "./CopyPathButtons";
 import { getStorageMode } from "../../api/warmOhif";
-import { canUseSecondScreen } from "../../utils/secondScreen";
+import { hasSecondScreen } from "../../utils/secondScreen";
 import "./DataTable.css";
 
 function DataTableInner({
@@ -933,17 +933,25 @@ function DataTableInner({
                   Fullscreen <span aria-hidden="true">⤢</span>
                 </button>
               )}
-              {previewUrl && onOpenSecondScreen && canUseSecondScreen() && (
-                // Chromium + >1 display only (see utils/secondScreen.js).
-                // Opens a fresh browsing context, so OHIF re-downloads the
-                // study — the price of keeping the table interactive here
-                // while the viewer fills the other monitor.
+              {previewUrl && onOpenSecondScreen && (
+                // Detaches the viewer into its own window, which then takes
+                // over row clicks. Fullscreen on the other display when there
+                // is one, otherwise a movable window on this screen — the
+                // label says which. Being a fresh browsing context it
+                // re-downloads the study; that is the price of keeping the
+                // table interactive alongside it.
                 <button
                   type="button"
                   onClick={onOpenSecondScreen}
                   className="dt__pane-tab"
+                  title={
+                    hasSecondScreen()
+                      ? "Open the viewer fullscreen on your other display; row clicks then go there"
+                      : "Open the viewer in its own window; row clicks then go there"
+                  }
                 >
-                  Second Screen <span aria-hidden="true">⧉</span>
+                  {hasSecondScreen() ? "Second Screen" : "New Window"}{" "}
+                  <span aria-hidden="true">⧉</span>
                 </button>
               )}
               {previewUrl && (
@@ -975,7 +983,7 @@ function DataTableInner({
                 type="button"
                 onClick={onOpenSecondScreen}
                 className="dt__pane-tab"
-                title="Opening in the second-screen viewer. Click to focus it."
+                title="Opening in the detached viewer window. Click to focus it."
               >
                 {secondScreenStatus}
               </button>

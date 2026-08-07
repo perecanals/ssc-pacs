@@ -319,15 +319,23 @@ The Navigator page is decomposed into focused React components:
   - **Fullscreen** calls `requestFullscreen()` on the pane element
     (`usePaneFullscreen`), which keeps the OHIF iframe mounted — no reload, no
     re-download. The pane carries its own Exit affordance while fullscreen.
-  - **Second Screen** (`utils/secondScreen.js` + `hooks/useSecondScreenViewer`)
-    opens the same viewer URL as a fullscreen popup on the display the app
-    window is *not* on, via the Window Management API, then collapses the pane
-    so the data table stays interactive. Chromium-only and shown only while
-    `screen.isExtended` is true (more than one display attached); other
-    browsers and single-monitor setups never see the button. First click
-    triggers Chrome's one-time "window management" permission prompt, and
-    being a fresh browsing context it re-downloads the study — the accepted
-    cost of a truly independent viewer window.
+  - **Second Screen / New Window** (`utils/secondScreen.js` +
+    `hooks/useSecondScreenViewer`) detaches the viewer into its own window and
+    collapses the pane, so the data table stays interactive. The button is
+    always offered; only the *placement* is a progressive enhancement, and the
+    label states which one applies:
+    - **Second Screen** — Chromium with `screen.isExtended` true (a second
+      display attached): the Window Management API places the window
+      fullscreen on the display the app is *not* on. First click triggers
+      Chrome's one-time "window management" permission prompt.
+    - **New Window** — single display, or a browser without the API
+      (Firefox/Safari): a plain popup at 80% of the available screen, centered
+      and movable, so it can be arranged beside the table rather than burying
+      it. A denied permission also falls back to this rather than failing.
+
+    Being a fresh browsing context it re-downloads the study either way — the
+    accepted cost of a truly independent viewer window; in-place "Fullscreen"
+    remains the no-reload option.
   - While the popup is live, `Navigator.handlePreviewSelect` routes row clicks
     to it instead of the pane: the popup is re-pointed at the resolved viewer
     URL (`location.replace`; same-URL clicks only refocus, avoiding an OHIF

@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { openOnSecondScreen } from "../utils/secondScreen";
+import { openViewerWindow } from "../utils/secondScreen";
 
-// Owns the second-screen popup window for the OHIF viewer: opening it,
-// re-pointing it at new studies, and noticing when the user closes it. While
-// the popup is live, Navigator routes row-click previews here instead of the
-// preview pane, so the data table stays interactive on the main monitor.
+// Owns the detached popup window for the OHIF viewer: opening it, re-pointing
+// it at new studies, and noticing when the user closes it. While the popup is
+// live, Navigator routes row-click previews here instead of the preview pane,
+// so the data table stays interactive. Placement (fullscreen on a second
+// display vs. a plain window on this one) is decided in utils/secondScreen.js;
+// everything here is identical either way.
 export default function useSecondScreenViewer() {
   const winRef = useRef(null);
   // Last URL the popup was pointed at — lets navigate() skip the reload when a
@@ -61,7 +63,7 @@ export default function useSecondScreenViewer() {
         return true;
       }
       if (!url) return false;
-      const win = await openOnSecondScreen(url);
+      const win = await openViewerWindow(url);
       if (!win) return false;
       winRef.current = win;
       urlRef.current = url;
