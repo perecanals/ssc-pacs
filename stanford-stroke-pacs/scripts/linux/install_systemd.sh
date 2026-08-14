@@ -60,10 +60,65 @@ fi
 UVICORN_BIN="${UVICORN_BIN:-$(dirname "$PYTHON_BIN")/uvicorn}"
 WEBAPP_PORT="${WEBAPP_PORT:-$(config_get web-app port 8043)}"
 
+# --- data-mount ordering -------------------------------------------------
+# The data filesystems mount late (fstab `nofail`, LUKS unlocked from a
+# keyfile), i.e. after local-fs.target — so anything that starts early can
+# capture the empty stub directory underneath the mountpoint. Docker is the
+# worst case because it resolves a bind mount once, at container start: a
+# too-early ssc-orthanc keeps an empty /dicom-data for its whole lifetime and
+# serves HTTP 500 for every frame. RequiresMountsFor= orders the units after
+# the right .mount units; see deploy/systemd/docker-ssc-data-mounts.conf.in.
+#
+# The mountpoints are derived from config.toml (the SSOT for the data roots),
+# never hardcoded. Override in deploy.env when the disks are not mounted at
+# install time — the paths cannot be resolved then:
+#   DATA_MOUNTS="/media/pacs-ssd-1"
+#   BACKUP_MOUNTS="/DATA2"
+mount_point_of() {
+  local p="$1" m=""
+  [[ -n "$p" ]] || return 0
+  # Walk up to the nearest existing ancestor so a fresh install (tree not
+  # created yet) still resolves to the filesystem that will hold it.
+  while [[ -n "$p" && "$p" != "/" && ! -e "$p" ]]; do p="$(dirname "$p")"; done
+  # `stat -c` is GNU coreutils; on a macOS --dry-run preview this yields
+  # nothing and the directive is simply omitted.
+  m="$(stat -c %m "$p" 2>/dev/null || true)"
+  # "/" never needs a dependency — it is mounted before any unit runs.
+  [[ -n "$m" && "$m" != "/" ]] && printf '%s' "$m"
+}
+
+# Emit a single deduplicated `RequiresMountsFor=` directive, or nothing at all
+# when every path already lives on the root filesystem.
+mounts_line() {
+  local p m
+  local -a found=()
+  for p in "$@"; do
+    m="$(mount_point_of "$p")"
+    [[ -n "$m" ]] && found+=("$m")
+  done
+  if ((${#found[@]} == 0)); then return 0; fi
+  printf 'RequiresMountsFor=%s' "$(printf '%s\n' "${found[@]}" | sort -u | paste -sd' ' -)"
+}
+
+if [[ -n "${DATA_MOUNTS:-}" ]]; then
+  DATA_MOUNTS_LINE="RequiresMountsFor=$DATA_MOUNTS"
+else
+  DATA_MOUNTS_LINE="$(mounts_line \
+    "$(config_get storage dicom_data_root '')" \
+    "$(config_get storage cold_archive_root '')")"
+fi
+if [[ -n "${BACKUP_MOUNTS:-}" ]]; then
+  BACKUP_MOUNTS_LINE="RequiresMountsFor=$BACKUP_MOUNTS"
+else
+  BACKUP_MOUNTS_LINE="$(mounts_line "$(config_get backup backup_root '')")"
+fi
+
 echo "==> Resolved deployment identity"
 printf '  %-13s %s\n' REPO_ROOT "$REPO_ROOT" DEPLOY_USER "$DEPLOY_USER" \
   DEPLOY_GROUP "$DEPLOY_GROUP" PYTHON_BIN "$PYTHON_BIN" UVICORN_BIN "$UVICORN_BIN" \
-  WEBAPP_PORT "$WEBAPP_PORT"
+  WEBAPP_PORT "$WEBAPP_PORT" \
+  DATA_MOUNTS "${DATA_MOUNTS_LINE:-(none — data roots are on /)}" \
+  BACKUP_MOUNTS "${BACKUP_MOUNTS_LINE:-(none — backup root is on /)}"
 
 # Warn (don't fail) on missing binaries so --dry-run still works off-host.
 [[ -x "$UVICORN_BIN" ]] || echo "  !! UVICORN_BIN not executable here: $UVICORN_BIN" >&2
@@ -77,14 +132,25 @@ render() {
       -e "s|__PYTHON_BIN__|$PYTHON_BIN|g" \
       -e "s|__UVICORN_BIN__|$UVICORN_BIN|g" \
       -e "s|__WEBAPP_PORT__|$WEBAPP_PORT|g" \
+      -e "s|__DATA_MOUNTS_LINE__|$DATA_MOUNTS_LINE|g" \
+      -e "s|__BACKUP_MOUNTS_LINE__|$BACKUP_MOUNTS_LINE|g" \
       "$1"
 }
+
+# The Docker drop-in is not a unit: it installs into a .d directory rather than
+# $DST, so the flat loops below skip it and handle it separately.
+DOCKER_DROPIN_SRC="$SRC/docker-ssc-data-mounts.conf.in"
+DOCKER_DROPIN_DIR="$DST/docker.service.d"
+DOCKER_DROPIN_DST="$DOCKER_DROPIN_DIR/10-ssc-data-mounts.conf"
 
 # ssc-postgres.service.in is provisioned separately: its tokens (__PG_BIN__,
 # __PGDATA__, __PG_OS_USER__…) are cluster identity, not deploy identity, and
 # are resolved by scripts/linux/provision_postgres.sh against the actual
 # cluster. Skipping it here also keeps the token guard below honest.
-skip_template() { [[ "$(basename "$1")" == ssc-postgres.service.in ]]; }
+skip_template() {
+  local b; b="$(basename "$1")"
+  [[ "$b" == ssc-postgres.service.in || "$b" == docker-ssc-data-mounts.conf.in ]]
+}
 
 if [[ "$DRY_RUN" == yes ]]; then
   out="$(mktemp -d)"
@@ -92,8 +158,10 @@ if [[ "$DRY_RUN" == yes ]]; then
     skip_template "$f" && continue
     render "$f" > "$out/$(basename "${f%.in}")"
   done
-  echo "==> Rendered $(ls -1 "$out" | wc -l | tr -d ' ') units into $out"
+  render "$DOCKER_DROPIN_SRC" > "$out/10-ssc-data-mounts.conf"
+  echo "==> Rendered $(ls -1 "$out" | wc -l | tr -d ' ') files into $out"
   echo "--- ssc-web-app.service ---"; cat "$out/ssc-web-app.service"
+  echo "--- docker.service.d/10-ssc-data-mounts.conf ---"; cat "$out/10-ssc-data-mounts.conf"
   # Surface any token that survived substitution.
   if grep -rl '__[A-Z_]*__' "$out" >/dev/null 2>&1; then
     echo "  !! unsubstituted tokens remain:" >&2; grep -rn '__[A-Z_]*__' "$out" >&2
@@ -110,7 +178,23 @@ for f in "$SRC"/*.in; do
   render "$f" > "$DST/$name"
   chmod 644 "$DST/$name"
 done
-if grep -rl '__[A-Z_]*__' "$DST"/ssc-*.service "$DST"/*-*.service "$DST"/*.timer >/dev/null 2>&1; then
+
+# Docker's bind mounts must resolve after the data filesystems are mounted, or
+# ssc-orthanc serves 500s for every frame until it is restarted by hand.
+if [[ -n "$DATA_MOUNTS_LINE" ]]; then
+  install -d -m 755 "$DOCKER_DROPIN_DIR"
+  render "$DOCKER_DROPIN_SRC" > "$DOCKER_DROPIN_DST"
+  chmod 644 "$DOCKER_DROPIN_DST"
+  echo "  installed $DOCKER_DROPIN_DST ($DATA_MOUNTS_LINE)"
+else
+  # Data roots live on / — there is no late mount to wait for. Drop any
+  # stale copy so a re-run after moving the data off a separate disk is clean.
+  rm -f "$DOCKER_DROPIN_DST"
+  echo "  skipping the Docker mount drop-in (data roots are on /)"
+fi
+
+if grep -rl '__[A-Z_]*__' "$DST"/ssc-*.service "$DST"/*-*.service "$DST"/*.timer \
+     "$DOCKER_DROPIN_DST" >/dev/null 2>&1; then
   echo "  !! unsubstituted tokens remain in installed units — aborting" >&2
   exit 1
 fi

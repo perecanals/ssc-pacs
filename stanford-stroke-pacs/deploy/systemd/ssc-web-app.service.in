@@ -6,6 +6,10 @@ Description=SSC Web App (FastAPI)
 # or managed by a distro unit — there Restart=on-failure covers the race.
 After=network.target ssc-postgres.service
 Wants=ssc-postgres.service
+# Warm/evict read and write the data roots, so the web app must not start
+# before they are mounted (they mount late — `nofail` + LUKS). Rendered from
+# config.toml's [storage] roots; empty when they live on the root filesystem.
+__DATA_MOUNTS_LINE__
 
 [Service]
 Type=simple

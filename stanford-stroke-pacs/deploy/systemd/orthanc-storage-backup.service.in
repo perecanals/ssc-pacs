@@ -4,6 +4,9 @@ Documentation=file:__DOCS_ROOT__/operations/backup_strategy.md
 Wants=network-online.target
 After=network-online.target docker.service
 Requires=docker.service
+# Without the backup filesystem mounted this would write the archive to the
+# stub directory on the root disk. Rendered from config.toml's [backup] root.
+__BACKUP_MOUNTS_LINE__
 
 [Service]
 Type=oneshot

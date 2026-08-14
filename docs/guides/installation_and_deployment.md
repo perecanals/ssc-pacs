@@ -386,6 +386,27 @@ This replaces the old `sudo cp deploy/systemd/ssc-web-app.service …` step (and
 separate backup-timer copy in §9) — one command installs everything. The dormant
 `cold-archive-mirror.timer` is left disabled by default.
 
+**Boot ordering.** When the data or backup roots live on their own filesystem,
+the installer also derives their mountpoints from `config.toml` and renders
+`RequiresMountsFor=` into the units that touch them — plus a `docker.service`
+drop-in at `/etc/systemd/system/docker.service.d/10-ssc-data-mounts.conf`. This
+matters because a `nofail` (or LUKS-unlocked) volume mounts *after* Docker
+starts, and Docker resolves a bind mount only once: an `ssc-orthanc` that starts
+first keeps an empty `/dicom-data` for its whole lifetime and answers HTTP 500
+for every frame while everything else looks healthy. Verify and re-run whenever
+the data moves to another filesystem:
+
+```bash
+systemctl show docker -p RequiresMountsFor
+systemctl show ssc-web-app -p RequiresMountsFor
+```
+
+Note the trade-off: with the drop-in in place, a genuinely missing data volume
+stops Docker (and any other container on the host) from starting at all — the
+intended failure mode, since a visibly-down PACS beats one silently serving 500s.
+If the disks aren't mounted when you run the installer their mountpoints can't be
+derived, so set `DATA_MOUNTS`/`BACKUP_MOUNTS` in `deploy.env` instead.
+
 ### Step 9. Index the DICOM tree into Orthanc
 
 **The shipped `orthanc.json` does NOT scan continuously**: its `Indexer` block

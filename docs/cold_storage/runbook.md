@@ -423,6 +423,55 @@ the DataTable never see a raw cold error.
 
 ---
 
+## No images anywhere after a reboot (stale bind mount)
+
+**Symptom:** every series fails to load, for every user, right after a host
+reboot. Study/series lists, labels, and login all work — only pixel data is
+missing. `GET /dicom-web/.../frames/1` returns **HTTP 500**, and the Orthanc
+log repeats:
+
+```
+The specified path does not point to a regular file: The path does not point
+to a regular file: /dicom-data/<patient>/<study>/<series>/DICOM/IM-....dcm
+```
+
+**Cause:** not cold storage — the container lost sight of the DICOM tree. The
+data filesystem mounts late (fstab `nofail`, LUKS unlocked from a keyfile), so
+it can land *after* Docker has already started `ssc-orthanc`. Docker resolves a
+bind mount exactly once, at container start, so the container captured the
+empty stub directory underneath the mountpoint and keeps that view for its
+whole lifetime. The files are fine on the host; the container simply cannot see
+them.
+
+Confirm in one command — the host and the container disagree:
+
+```bash
+ls "$(python3 -c "import tomllib;print(tomllib.load(open('config.toml','rb'))['storage']['dicom_data_root'])")" | wc -l
+docker exec ssc-orthanc sh -c 'ls /dicom-data | wc -l'    # 0 == stale mount
+```
+
+**Fix:** re-resolve the bind mount.
+
+```bash
+docker restart ssc-orthanc
+```
+
+**Prevention** (already installed): `scripts/linux/install_systemd.sh` writes a
+`docker.service` drop-in — `/etc/systemd/system/docker.service.d/10-ssc-data-mounts.conf`
+— with `RequiresMountsFor=` pointing at the mountpoint of the `[storage]` roots,
+plus the same directive on `ssc-web-app` and the cold-storage units. Re-run the
+installer after moving the data to a different filesystem:
+
+```bash
+sudo scripts/linux/install_systemd.sh
+systemctl show docker -p RequiresMountsFor      # verify
+```
+
+If the disks are not mounted when you run the installer, the mountpoints cannot
+be derived — set `DATA_MOUNTS` / `BACKUP_MOUNTS` in `deploy.env` instead.
+
+---
+
 ## Repairing a poisoned DICOMweb metadata cache (OHIF spins forever)
 
 **Symptom:** OHIF hangs on the loading logo for a series, and

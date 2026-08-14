@@ -1,5 +1,23 @@
 # Changelog
 
+## v1.23 — 2026-08-14
+
+- **Fix**: a host reboot could leave every image unloadable — Orthanc returned
+  HTTP 500 (`path does not point to a regular file`) for every frame while
+  study lists and labels worked fine. The data volume mounts late (`nofail` +
+  LUKS keyfile), so Docker started `ssc-orthanc` first and bind-mounted the
+  empty directory *underneath* the mountpoint; Docker resolves a bind mount
+  only once, so the container kept that empty view until restarted by hand.
+- **Fix**: `install_systemd.sh` now derives the data/backup mountpoints from
+  `config.toml` and renders `RequiresMountsFor=` into `ssc-web-app`, the
+  cold-storage units, and the backup units, plus a new `docker.service`
+  drop-in (`/etc/systemd/system/docker.service.d/10-ssc-data-mounts.conf`).
+  This also stops the backup timers from writing to the OS disk when
+  `[backup].backup_root` is not mounted. Override with `DATA_MOUNTS` /
+  `BACKUP_MOUNTS` in `deploy.env` when the disks are absent at install time.
+  **Re-run `sudo scripts/linux/install_systemd.sh` to pick this up.** No
+  migration.
+
 ## v1.22 — 2026-08-07
 
 - **Feature**: OHIF's top-left back arrow + logo (which navigated to an

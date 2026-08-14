@@ -3,6 +3,9 @@ Description=PACS — cold-storage health probe (stuck warming, orphan dirs, disk
 Documentation=file:__DOCS_ROOT__/cold_storage/runbook.md
 Wants=network-online.target
 After=network-online.target
+# Probing disk-free and orphan dirs against an unmounted root would report
+# nonsense (and page on it). Rendered from config.toml's [storage] roots.
+__DATA_MOUNTS_LINE__
 
 [Service]
 Type=oneshot

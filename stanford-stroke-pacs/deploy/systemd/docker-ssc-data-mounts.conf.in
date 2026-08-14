@@ -1,0 +1,22 @@
+# Installed as /etc/systemd/system/docker.service.d/10-ssc-data-mounts.conf by
+# scripts/linux/install_systemd.sh — edit the template, not the installed copy.
+#
+# Why this exists. The PACS data filesystems mount late: the fstab entry carries
+# `nofail`, and the device is a LUKS volume unlocked from a keyfile, so the mount
+# lands a few seconds *after* Docker is already running. Docker resolves a bind
+# mount exactly once, when the container starts — so an ssc-orthanc that wins
+# that race captures the empty stub directory underneath the mountpoint and
+# keeps that view for the life of the container. The host sees the DICOM tree;
+# the container sees nothing. Orthanc then answers every frame request with
+# HTTP 500 ("The specified path does not point to a regular file") while every
+# metadata endpoint keeps working, and only `docker restart ssc-orthanc` clears
+# it. Seen in production on 2026-08-14: container up at 10:10:04, mount at
+# 10:10:12.
+#
+# RequiresMountsFor= pulls in the matching .mount units and orders Docker after
+# them. Trade-off: if a data filesystem is genuinely absent, Docker does not
+# start at all, which also holds back any unrelated containers on the host.
+# That is the intended failure mode — a loudly absent PACS is far easier to
+# diagnose than one that is up and serving 500s for every image.
+[Unit]
+__DATA_MOUNTS_LINE__
