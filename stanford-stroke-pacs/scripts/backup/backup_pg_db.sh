@@ -6,7 +6,8 @@
 # Reads connection details from BACKUP_ENV_FILE (default: <stack>/.env resolved
 # from the script location). Required keys:
 #   DB_HOST, DB_PORT, DB_USER, DB_PASSWORD
-# Optional override: BACKUP_ROOT (default: config.toml [backup].backup_root, else /DATA2/ssc-pacs-backups).
+# Optional override: BACKUP_ROOT (default: config.toml [backup].backup_root —
+# required, there is no built-in fallback; the script exits if it is unset).
 # Optional override: RETENTION_DAYS (default: config.toml [backup].retention_days, else 60).
 #
 # Output layout:

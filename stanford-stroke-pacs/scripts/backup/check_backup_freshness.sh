@@ -7,14 +7,14 @@
 #
 # By default checks PostgreSQL backups for orthanc_db and stanford-stroke,
 # plus the Orthanc storage-volume backup (orthanc_storage), under BACKUP_ROOT
-# (default /DATA2/ssc-pacs-backups).
+# (config.toml [backup].backup_root).
 #
 # Pass --include-cold-archive to additionally check the cold-archive
 # mirror destination. On the dev host this flag is NOT passed (Tier 2
 # is dormant); production cutover enables it.
 #
 # Env overrides:
-#   BACKUP_ROOT       (default: config.toml [backup].backup_root, else /DATA2/ssc-pacs-backups)
+#   BACKUP_ROOT       (default: config.toml [backup].backup_root — required, no built-in fallback)
 #   MAX_AGE_HOURS     (default: config.toml [backup].max_age_hours, else 36)
 #   COLD_MIRROR_DEST  (required if --include-cold-archive)
 #   COLD_MIRROR_MAX_AGE_HOURS (default 36)

@@ -13,7 +13,7 @@
 #
 # Optional env overrides:
 #   BACKUP_ENV_FILE          (default: <stack>/.env resolved from the script location; sourced if present)
-#   BACKUP_ROOT              (default: config.toml [backup].backup_root, else /DATA2/ssc-pacs-backups)
+#   BACKUP_ROOT              (default: config.toml [backup].backup_root — required, no built-in fallback)
 #   RETENTION_DAYS           (default: config.toml [backup].retention_days, else 60)
 #   ORTHANC_STORAGE_VOLUME   (default stanford-stroke-pacs_ssc-orthanc-storage)
 #   BACKUP_HELPER_IMAGE      (default python:3.12-slim)

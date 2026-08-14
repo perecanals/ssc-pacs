@@ -72,8 +72,8 @@ WEBAPP_PORT="${WEBAPP_PORT:-$(config_get web-app port 8043)}"
 # The mountpoints are derived from config.toml (the SSOT for the data roots),
 # never hardcoded. Override in deploy.env when the disks are not mounted at
 # install time — the paths cannot be resolved then:
-#   DATA_MOUNTS="/media/pacs-ssd-1"
-#   BACKUP_MOUNTS="/DATA2"
+#   DATA_MOUNTS="/mnt/pacs-data"
+#   BACKUP_MOUNTS="/mnt/pacs-backups"
 mount_point_of() {
   local p="$1" m=""
   [[ -n "$p" ]] || return 0
