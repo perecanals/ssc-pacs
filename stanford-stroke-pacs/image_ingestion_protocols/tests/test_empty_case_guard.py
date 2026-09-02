@@ -14,13 +14,10 @@ No DB: create_series_table takes postgres_engine=None.
 Run with: pytest tests/test_empty_case_guard.py
 """
 
-import os
-
 import pytest
+from test_image_ingestion_grouping import _write_dcm
 
 from image_ingestion_protocol import ImageIngestionProtocol
-
-from test_image_ingestion_grouping import _write_dcm
 
 
 def _protocol(case_dir):
