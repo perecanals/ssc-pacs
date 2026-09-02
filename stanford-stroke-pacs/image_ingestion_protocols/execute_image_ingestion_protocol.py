@@ -79,7 +79,7 @@ _SRC_DIR_MARKER = "Source directory: "
 _COMPLETED_MARKER = "Successfully completed processing case "
 
 
-def determine_resume_skip_set(logs_dir, current_log_path, src_dir, nhc_list, logger=None):
+def determine_resume_skip_set(logs_dir, current_log_path, src_dir, patient_ids, logger=None):
     """Success-based resume: the set of cases a prior run already completed.
 
     Scans every prior run log whose 'Source directory:' header matches src_dir
@@ -92,7 +92,7 @@ def determine_resume_skip_set(logs_dir, current_log_path, src_dir, nhc_list, log
         if logger is not None:
             logger.info(msg)
 
-    known = set(nhc_list)
+    known = set(patient_ids)
     completed = set()
     matched_logs = []
     current = os.path.abspath(current_log_path) if current_log_path else None
@@ -509,7 +509,7 @@ def _stamp_series_cache_state(postgres_engine, logger, hot_rows, cleaned_uids):
         raw_conn.close()
 
 
-def process_index_job(postgres_engine, logger, nhc, to_index, cleanup_enabled):
+def process_index_job(postgres_engine, logger, patient_id, to_index, cleanup_enabled):
     """Index + clean up + stamp one already-committed case. Returns a result dict.
 
     Runs on the background indexing worker thread (or synchronously when
@@ -525,7 +525,7 @@ def process_index_job(postgres_engine, logger, nhc, to_index, cleanup_enabled):
     error_log and the run counters are deliberately NOT touched here — the
     main thread owns them (single writer) and applies this result dict.
     """
-    result = {"nhc": nhc, "status": "ok",
+    result = {"patient_id": patient_id, "status": "ok",
               "indexing_error": None, "indexing_traceback": None,
               "error": None, "traceback": None}
     try:
@@ -535,7 +535,7 @@ def process_index_job(postgres_engine, logger, nhc, to_index, cleanup_enabled):
                 postgres_engine, logger, sorted(to_index))
         except Exception as e:
             logger.error(
-                f"Orthanc indexing failed for case {nhc} (data is "
+                f"Orthanc indexing failed for case {patient_id} (data is "
                 f"safe on disk/DB; the end-of-run sanity pass will "
                 f"retry): {e}"
             )
@@ -554,7 +554,7 @@ def process_index_job(postgres_engine, logger, nhc, to_index, cleanup_enabled):
                     cleaned_uids=outcome["cleaned"])
             except Exception as e:
                 logger.error(
-                    f"Loose cleanup failed for case {nhc} "
+                    f"Loose cleanup failed for case {patient_id} "
                     f"(non-fatal; loose files remain on disk; run "
                     f"scripts/cold_storage/rebuild_cache_state.py "
                     f"to reconcile cache state): {e}"
@@ -573,17 +573,17 @@ def process_index_job(postgres_engine, logger, nhc, to_index, cleanup_enabled):
                     cleaned_uids=[])
             except Exception as e:
                 logger.error(
-                    f"Cache-state stamping failed for case {nhc} "
+                    f"Cache-state stamping failed for case {patient_id} "
                     f"(non-fatal; run scripts/cold_storage/"
                     f"rebuild_cache_state.py to reconcile): {e}"
                 )
 
-        logger.info(f"Successfully completed processing case {nhc}")
+        logger.info(f"Successfully completed processing case {patient_id}")
     except Exception as e:
         result["status"] = "worker_error"
         result["error"] = str(e)
         result["traceback"] = traceback.format_exc().splitlines()
-        logger.error(f"Indexing worker failed for case {nhc}: {e}")
+        logger.error(f"Indexing worker failed for case {patient_id}: {e}")
     return result
 
 
@@ -718,12 +718,12 @@ if __name__ == "__main__":
         (and its JSON file) and of the run counters."""
         global processed_cases, failed_cases, indexing_failed_cases
         try:
-            pending_index_cases.remove(res["nhc"])
+            pending_index_cases.remove(res["patient_id"])
         except ValueError:
             pass
         if res["status"] == "worker_error":
-            logger.error(f"Failed to process case {res['nhc']}: {res['error']}")
-            error_log[str(res["nhc"])] = {
+            logger.error(f"Failed to process case {res['patient_id']}: {res['error']}")
+            error_log[str(res["patient_id"])] = {
                 "error": res["error"],
                 "traceback": res["traceback"],
             }
@@ -733,7 +733,7 @@ if __name__ == "__main__":
             return
         processed_cases += 1
         if res["indexing_error"]:
-            error_log[f"{res['nhc']}#indexing"] = {
+            error_log[f"{res['patient_id']}#indexing"] = {
                 "error": res["indexing_error"],
                 "type": "indexing_error",
                 "traceback": res["indexing_traceback"],
@@ -751,29 +751,29 @@ if __name__ == "__main__":
             _handle_index_result(res)
 
     try:
-        nhc_list = sorted(
-            nhc for nhc in os.listdir(src_dir)
-            if not nhc.startswith(".") and os.path.isdir(os.path.join(src_dir, nhc))
+        patient_ids = sorted(
+            patient_id for patient_id in os.listdir(src_dir)
+            if not patient_id.startswith(".") and os.path.isdir(os.path.join(src_dir, patient_id))
         )
-        total_cases = len(nhc_list)
+        total_cases = len(patient_ids)
         logger.info(f"Found {total_cases} cases to process")
 
         logs_dir = os.path.dirname(log_filepath)
         skip_cases = set()
         if resume_enabled:
             skip_cases = determine_resume_skip_set(
-                logs_dir, log_filepath, src_dir, nhc_list, logger
+                logs_dir, log_filepath, src_dir, patient_ids, logger
             )
-            if len(skip_cases) >= len(nhc_list):
+            if len(skip_cases) >= len(patient_ids):
                 logger.info(
                     "Resume: prior run(s) already completed all cases for this "
                     "source directory; nothing to do (use --no-resume to re-run)"
                 )
             elif skip_cases:
-                first = next(n for n in nhc_list if n not in skip_cases)
+                first = next(n for n in patient_ids if n not in skip_cases)
                 logger.info(
                     f"Resume: skipping {len(skip_cases)} case(s) completed in "
-                    f"prior run(s); {len(nhc_list) - len(skip_cases)} to process, "
+                    f"prior run(s); {len(patient_ids) - len(skip_cases)} to process, "
                     f"starting with {first}"
                 )
             else:
@@ -782,14 +782,14 @@ if __name__ == "__main__":
         else:
             logger.info("Resume disabled (--no-resume); processing all cases")
 
-        for nhc in nhc_list:
-            if nhc in skip_cases:
-                logger.info(f"Skipping case {nhc} - completed in a prior run (resume)")
+        for patient_id in patient_ids:
+            if patient_id in skip_cases:
+                logger.info(f"Skipping case {patient_id} - completed in a prior run (resume)")
                 resumed_skipped += 1
                 continue
-            case_dir = os.path.join(src_dir, nhc)
+            case_dir = os.path.join(src_dir, patient_id)
             if len(os.listdir(case_dir)) > 0:
-                logger.info(f"Processing case {nhc}")
+                logger.info(f"Processing case {patient_id}")
                 try:
                     result = execute_image_ingestion_protocol(
                         case_dir,
@@ -827,7 +827,7 @@ if __name__ == "__main__":
                         logger.info(
                             f"Resume boundary: re-indexing "
                             f"{len(skipped_existing)} already-ingested series "
-                            f"for case {nhc}"
+                            f"for case {patient_id}"
                         )
                         to_index = skipped_existing
                         synced_series_ids.update(skipped_existing)
@@ -837,9 +837,9 @@ if __name__ == "__main__":
                     # to_index — because the worker owns the success-marker
                     # log line (the resume contract). put() blocks while a
                     # job is already waiting (pipeline depth 1).
-                    pending_index_cases.append(nhc)
+                    pending_index_cases.append(patient_id)
                     index_job_q.put({
-                        "nhc": nhc,
+                        "patient_id": patient_id,
                         "to_index": sorted(to_index),
                         "cleanup_enabled": config["cleanup_loose_after_indexing"],
                     })
@@ -848,8 +848,8 @@ if __name__ == "__main__":
                     else:
                         _handle_index_result(index_result_q.get())
                 except Exception as e:
-                    logger.error(f"Failed to process case {nhc}: {e}")
-                    error_log[str(nhc)] = {
+                    logger.error(f"Failed to process case {patient_id}: {e}")
+                    error_log[str(patient_id)] = {
                         "error": str(e),
                         "traceback": traceback.format_exc().splitlines()
                     }
@@ -857,7 +857,7 @@ if __name__ == "__main__":
                         json.dump(error_log, f, indent=4)
                     failed_cases += 1
             else:
-                logger.info(f"Skipping case {nhc} - empty directory")
+                logger.info(f"Skipping case {patient_id} - empty directory")
                 skipped_cases += 1
 
         # Drain the indexing pipeline before the batch-level sync and sanity

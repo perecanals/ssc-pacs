@@ -15,7 +15,7 @@ import pytest
 import execute_image_ingestion_protocol as executor
 from execute_image_ingestion_protocol import _COMPLETED_MARKER, process_index_job
 
-RESULT_KEYS = {"nhc", "status", "indexing_error", "indexing_traceback",
+RESULT_KEYS = {"patient_id", "status", "indexing_error", "indexing_traceback",
                "error", "traceback"}
 
 
@@ -40,8 +40,8 @@ class _CapturingLogger:
     def error(self, msg, *a):
         self._record("error", msg)
 
-    def marker_logged(self, nhc):
-        return any(m == f"{_COMPLETED_MARKER}{nhc}"
+    def marker_logged(self, patient_id):
+        return any(m == f"{_COMPLETED_MARKER}{patient_id}"
                    for _lvl, m in self.messages)
 
 
