@@ -15,6 +15,18 @@ ORTHANC_URL="${ORTHANC_URL:-http://localhost:8042}"
 ORTHANC_USER="${ORTHANC_ADMIN_USER:-$(env_get ORTHANC_ADMIN_USER)}"
 ORTHANC_PASSWORD="${ORTHANC_ADMIN_PASSWORD:-$(env_get ORTHANC_ADMIN_PASSWORD)}"
 
+# Feed the service-account credential to curl on stdin (`-K -`) rather than as
+# a `-u` argument: argv is world-readable through `ps`, so any local user could
+# read the Orthanc password for as long as a check ran. curl unescapes \\ and \"
+# inside a double-quoted config value, so both are escaped on the way in; every
+# other character (@ ! $ : spaces) is literal and needs no handling.
+orthanc_curl() {
+    local cred="${ORTHANC_USER}:${ORTHANC_PASSWORD}"
+    cred="${cred//\\/\\\\}"   # backslashes first, or the next line's escapes get doubled
+    cred="${cred//\"/\\\"}"
+    printf 'user = "%s"\n' "$cred" | curl -K - "$@"
+}
+
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -82,13 +94,13 @@ fi
 # ── 4. Orthanc API ──────────────────────────────────────────────────
 echo -e "\n${BOLD}[4/5] Orthanc API${NC}"
 if [[ "$STATE" == "running" ]]; then
-    HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -u "${ORTHANC_USER}:${ORTHANC_PASSWORD}" \
+    HTTP_CODE=$(orthanc_curl -s -o /dev/null -w "%{http_code}" \
         --max-time 5 "${ORTHANC_URL}/system" 2>/dev/null || echo "000")
 
     if [[ "$HTTP_CODE" == "200" ]]; then
         pass "REST API responding (HTTP ${HTTP_CODE})"
 
-        SYS=$(curl -s -u "${ORTHANC_USER}:${ORTHANC_PASSWORD}" --max-time 5 "${ORTHANC_URL}/system")
+        SYS=$(orthanc_curl -s --max-time 5 "${ORTHANC_URL}/system")
         VERSION=$(echo "$SYS" | python3 -c "import sys,json; print(json.load(sys.stdin)['Version'])" 2>/dev/null || echo "?")
         DB_PLUGIN=$(echo "$SYS" | python3 -c "import sys,json; d=json.load(sys.stdin); print('PostgreSQL' if 'PostgreSQL' in d.get('DatabaseBackendPlugin','') else 'SQLite')" 2>/dev/null || echo "?")
         STORAGE=$(echo "$SYS" | python3 -c "import sys,json; d=json.load(sys.stdin); print('Indexer' if 'Indexer' in d.get('StorageAreaPlugin','') else 'Filesystem')" 2>/dev/null || echo "?")
@@ -97,7 +109,7 @@ if [[ "$STATE" == "running" ]]; then
         info "DB Index: ${DB_PLUGIN}"
         info "Storage:  ${STORAGE}"
 
-        STATS_JSON=$(curl -s -u "${ORTHANC_USER}:${ORTHANC_PASSWORD}" --max-time 5 "${ORTHANC_URL}/statistics" 2>/dev/null)
+        STATS_JSON=$(orthanc_curl -s --max-time 5 "${ORTHANC_URL}/statistics" 2>/dev/null)
         if [[ -n "$STATS_JSON" ]]; then
             PATIENTS=$(echo "$STATS_JSON"  | python3 -c "import sys,json; print(json.load(sys.stdin)['CountPatients'])" 2>/dev/null || echo "?")
             STUDIES=$(echo "$STATS_JSON"   | python3 -c "import sys,json; print(json.load(sys.stdin)['CountStudies'])" 2>/dev/null || echo "?")
@@ -136,7 +148,7 @@ fi
 echo -e "\n${BOLD}[5/5] Plugin Endpoints${NC}"
 if [[ "$STATE" == "running" && "$HTTP_CODE" == "200" ]]; then
     for ENDPOINT in "/ui/app/" "/ohif/" "/dicom-web/studies?limit=1" "/app/explorer.html"; do
-        CODE=$(curl -s -o /dev/null -w "%{http_code}" -u "${ORTHANC_USER}:${ORTHANC_PASSWORD}" \
+        CODE=$(orthanc_curl -s -o /dev/null -w "%{http_code}" \
             --max-time 10 "${ORTHANC_URL}${ENDPOINT}" 2>/dev/null || true)
         if [[ -z "$CODE" ]]; then
             CODE="000"
