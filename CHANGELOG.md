@@ -1,5 +1,21 @@
 # Changelog
 
+## v1.24 — 2026-08-15
+
+- **Fix**: ingestion aborted a whole case when any one series had no usable
+  acquisition date. `_parse_datetime` returns `pd.NaT` by design in that case,
+  but `_normalize_for_sql` only collapsed `pd.Timestamp` nulls — and `pd.NaT`
+  is a `NaTType`, not a `pd.Timestamp`, so it slipped through to psycopg2,
+  which (since `NaTType` subclasses `datetime`) bound it as the literal
+  `'NaT'::timestamp`. Postgres rejected it with `InvalidDatetimeFormat` and
+  rolled back the case. Hit 11 of 49 cases in the 2026-08-15 `crisp2_tici_extra`
+  batch, all of them carrying a Horos/OsiriX `OsiriX Annotations SR` series.
+  Null sentinels (`NaN`, `pd.NaT`, `np.datetime64("NaT")`, `pd.NA`) now collapse
+  to SQL `NULL` before any type dispatch, and numpy arrays coerce like lists.
+  Undated series land with `acquisitiondatetime = NULL` rather than blocking
+  the case. Re-run the protocol to pick up cases that failed this way; it is
+  idempotent. No migration.
+
 ## v1.23 — 2026-08-14
 
 - **Fix**: a host reboot could leave every image unloadable — Orthanc returned

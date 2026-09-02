@@ -380,6 +380,12 @@ timestamp compared against the anchor is built by
 `AcquisitionDateTime` → `AcquisitionDate`+`AcquisitionTime` → `StudyDate`+`StudyTime`.
 `acquisitiondatetime_source` records which was used (`acquisition` | `study`). The
 ~16% of series with no acquisition tag fall to the `StudyDate` **encounter** day.
+A series carrying *none* of those tags — Horos/OsiriX `OsiriX Annotations SR`
+objects are the usual case — gets `acquisitiondatetime = NULL` and
+`acquisitiondatetime_source = NULL` rather than a fabricated date. Both series
+and study sorts use `na_position="last"`, so an undated series never becomes the
+row a study inherits its own timestamp from unless *every* series in that study
+is undated.
 `ContentDate`/`SeriesDate` are deliberately *not* used: for a derived series
 (RAPID/MIP/MPR) they are the day the derivative was *computed* — often months
 after the scan — which mis-dates the study and fabricates spurious episodes.
@@ -618,6 +624,15 @@ That's it — the protocol picks up the same values automatically.
 - **Per-step inside a case:** individual steps (compression, NIFTI
   conversion, verification) catch exceptions per series where possible and
   log them without aborting the whole case.
+- **Null sentinels:** `_upsert_dataframe` runs every cell through
+  `_normalize_for_sql`, which collapses `None`, `NaN`, `pd.NaT`,
+  `np.datetime64("NaT")` and `pd.NA` to SQL `NULL` **before** any type
+  dispatch. This ordering is load-bearing: `pd.NaT` is a `NaTType`, not a
+  `pd.Timestamp`, so an `isinstance(..., pd.Timestamp)` check misses it, and
+  because `NaTType` subclasses `datetime`, psycopg2 binds it as the literal
+  `'NaT'::timestamp` — which Postgres rejects with `InvalidDatetimeFormat`,
+  rolling back the entire case over one undated series. (Fired on 11 cases in
+  the 2026-08-15 batch; see the acquisition-clock note above.)
 - **Database writes:** `update_postgres_tables` runs inside a transaction.
   If it raises, the upsert is rolled back but the files on disk from the
   copy step remain. Simply re-running the protocol with default settings
