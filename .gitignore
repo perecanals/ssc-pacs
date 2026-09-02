@@ -3,6 +3,8 @@
 **/.env
 orthanc_users.json
 **/orthanc_users.json
+data_exports
+ingestion_mount
 
 # Python
 __pycache__/
