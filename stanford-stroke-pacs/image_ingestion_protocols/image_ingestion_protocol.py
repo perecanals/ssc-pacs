@@ -118,6 +118,22 @@ class ImageIngestionProtocol:
             f"in {time.perf_counter() - step_started:.2f}s"
         )
         if self.case_series_table is None or self.case_series_table.empty:
+            # A directory holding files we could not read is a failure, not an
+            # empty case. Reporting success there silently drops the whole case
+            # from the batch: the summary counts it as processed and nothing
+            # lands in the DB. That is exactly what a flaky source mount looks
+            # like (src_dir is frequently a network mount — sshfs/SMB), where a
+            # transient error makes a full case read as empty for one run and
+            # fine the next.
+            candidates = getattr(self, "scan_candidate_files", 0)
+            if candidates:
+                unreadable = getattr(self, "scan_unreadable_files", 0)
+                raise RuntimeError(
+                    f"Found {candidates} file(s) under case_dir ({self.case_dir}) "
+                    f"but built 0 series ({unreadable} unreadable). Refusing to "
+                    "report this case as successfully ingested — check that the "
+                    "source mount is healthy and re-run."
+                )
             print(f"No readable DICOM series found under case_dir ({self.case_dir})")
             return {"studyinstanceuids": [], "seriesinstanceuids": [],
                     "skipped_existing_seriesinstanceuids": []}
@@ -499,6 +515,13 @@ class ImageIngestionProtocol:
         # multi-row ON CONFLICT cannot raise a CardinalityViolation
         # (see _upsert_dataframe).
         buckets = {}  # series_uid -> dict(paths, headers, study_uids, series_numbers, dirs)
+        # Counted so the caller can tell "this case really is empty" apart from
+        # "we saw files and could not read one of them" — the latter is a
+        # transport/permission failure, not an empty case, and must never be
+        # reported as a successful ingestion. See the guard in
+        # execute_image_ingestion_protocol.
+        self.scan_candidate_files = 0
+        self.scan_unreadable_files = 0
         for root, _, files in os.walk(self.case_dir):
             for filename in sorted(files):
                 if filename.startswith("."):
@@ -506,9 +529,11 @@ class ImageIngestionProtocol:
                 filepath = os.path.join(root, filename)
                 if not os.path.isfile(filepath):
                     continue
+                self.scan_candidate_files += 1
                 try:
                     dcm = pydicom.dcmread(filepath, stop_before_pixels=True)
                 except Exception as exc:
+                    self.scan_unreadable_files += 1
                     print(f"Skipping unreadable file {filepath}: {exc}")
                     continue
 
@@ -1412,16 +1437,45 @@ class ImageIngestionProtocol:
 
     @staticmethod
     def _normalize_for_sql(value):
-        if value is None:
-            return None
-        if isinstance(value, pd.Timestamp):
-            return None if pd.isna(value) else value.to_pydatetime()
-        if isinstance(value, np.generic):
-            return value.item()
-        if isinstance(value, float) and pd.isna(value):
-            return None
+        """Coerce one pandas/numpy cell into something psycopg2 can bind.
+
+        Every null-ish sentinel must collapse to None *before* any isinstance
+        dispatch. pd.NaT is why: it is a NaTType, not a pd.Timestamp, so an
+        `isinstance(value, pd.Timestamp)` check misses it entirely — and since
+        NaTType subclasses datetime, psycopg2 cheerfully adapts it to the
+        literal 'NaT', which Postgres rejects with InvalidDatetimeFormat and
+        which rolls back the whole case. `_parse_datetime` returns pd.NaT by
+        design for a series with no usable date tags (Horos/OsiriX annotation
+        SR objects carry none), so this is normal input, not bad input.
+
+        np.datetime64('NaT'), pd.NA and NaN reach SQL the same way and are
+        handled by the same guard.
+        """
+        # Sequences first: pd.isna() on one returns an elementwise array, whose
+        # truth value is ambiguous.
         if isinstance(value, list):
             return [ImageIngestionProtocol._normalize_for_sql(item) for item in value]
+        if isinstance(value, np.ndarray):
+            return [
+                ImageIngestionProtocol._normalize_for_sql(item)
+                for item in value.tolist()
+            ]
+        if value is None:
+            return None
+
+        # Scalar null sentinels: NaN, pd.NaT, np.datetime64('NaT'), pd.NA.
+        try:
+            if pd.isna(value):
+                return None
+        except (TypeError, ValueError):
+            pass  # exotic/non-scalar type — fall through to the dispatch below
+
+        if isinstance(value, pd.Timestamp):
+            return value.to_pydatetime()
+        if isinstance(value, np.datetime64):
+            return pd.Timestamp(value).to_pydatetime()
+        if isinstance(value, np.generic):
+            return value.item()
         return value
 
     def _upsert_dataframe(self, table_name, key_column, dataframe, connection):

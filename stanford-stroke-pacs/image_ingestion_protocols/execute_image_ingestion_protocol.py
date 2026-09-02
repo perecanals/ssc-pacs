@@ -596,6 +596,25 @@ def _indexing_worker(job_q, result_q, postgres_engine, logger):
         result_q.put(process_index_job(postgres_engine, logger, **job))
 
 
+def build_db_url(user, password, host, port, database):
+    """Build the SQLAlchemy URL structurally (never by string interpolation).
+
+    A password containing URL metacharacters (``@``, ``!``, ``/``, ``#``, ...)
+    would otherwise be misparsed as the host or database name, e.g.
+    ``could not translate host name "!@localhost"``.
+    """
+    from sqlalchemy.engine import URL
+
+    return URL.create(
+        "postgresql+psycopg2",
+        username=user,
+        password=password,
+        host=host,
+        port=int(port) if port else None,
+        database=database,
+    )
+
+
 if __name__ == "__main__":
     from dotenv import load_dotenv
     from sqlalchemy import create_engine
@@ -640,7 +659,7 @@ if __name__ == "__main__":
     DB_PORT = os.getenv("DB_PORT", "5432")
 
     postgres_engine = create_engine(
-        f"postgresql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{config['database']}"
+        build_db_url(DB_USER, DB_PASSWORD, DB_HOST, DB_PORT, config["database"])
     )
     run_import_id = ImageIngestionProtocol.get_next_import_id(postgres_engine)
 
