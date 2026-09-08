@@ -87,6 +87,11 @@ Safety properties:
   `pg_hba.conf` is born without any `trust` entries (initdb's stock default
   includes passwordless `trust` replication lines — that is how any local user
   could `pg_basebackup` an entire cluster credential-free).
+- Pins `port = <DB_PORT>` in the new cluster's `postgresql.conf` when `.env`
+  names a port other than 5432, so a host whose 5432 already belongs to another
+  cluster (e.g. a distro PostgreSQL serving other projects) gets a second,
+  independent cluster instead of a bind failure. Fresh-cluster case only; an
+  adopted cluster keeps whatever port it has.
 - Detects a **stale socket** in the socket directory before starting: `/tmp` is
   sticky, so only the socket's owner can unlink it — a `postgres`-owned
   postmaster cannot clear another user's leftover `/tmp/.s.PGSQL.<port>` and
