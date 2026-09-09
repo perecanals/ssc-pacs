@@ -101,6 +101,10 @@ fix is to **re-register** the series with the patched indexer's scoped scan,
 in bounded passes:
 
 ```bash
+# psql endpoint + credentials from .env (never rely on libpq's localhost:5432 default)
+set -a; . .env; set +a
+export PGHOST="$DB_HOST" PGPORT="$DB_PORT" PGUSER="$DB_USER" PGPASSWORD="$DB_PASSWORD"
+
 # Confirm the archive/dir the series expects
 psql -d stanford-stroke -c \
   "SELECT dicom_dir_path, dicom_archive_path FROM image_series

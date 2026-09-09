@@ -53,7 +53,7 @@ ls -lh "$BR/stanford-stroke/" "$BR/orthanc_db/" "$BR/orthanc_storage/"
 
 # 3. Confirm the PG client major matches the server major
 #    ("$DB_USER" comes from .env, sourced below)
-psql -h localhost -U "$DB_USER" -d postgres -c 'SHOW server_version;'
+psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d postgres -c 'SHOW server_version;'
 pg_dump --version    # must be >= server_version
 ```
 
@@ -65,7 +65,7 @@ Always source `.env` for credentials rather than typing the password:
 
 ```bash
 set -a; . /opt/ssc-pacs/ssc-pacs/stanford-stroke-pacs/.env; set +a
-export PGPASSWORD="$DB_PASSWORD"
+export PGHOST="$DB_HOST" PGPORT="$DB_PORT" PGPASSWORD="$DB_PASSWORD"   # endpoint from .env, never libpq's 5432 default
 ```
 
 ---
@@ -78,17 +78,17 @@ This is the **fatal-loss** DB — annotations, users, label defs, preferences.
 
 ```bash
 DEST=stanford_stroke_restore_test_$(date -u +%Y%m%d_%H%M)
-createdb -h "$DB_HOST" -U "$DB_USER" "$DEST"
+createdb -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" "$DEST"
 
 pg_restore \
-    -h "$DB_HOST" -U "$DB_USER" \
+    -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" \
     -d "$DEST" \
     --no-owner --no-privileges \
     --jobs=4 \
     "$BR/stanford-stroke/latest.dump"
 
 # Spot-check
-psql -h "$DB_HOST" -U "$DB_USER" -d "$DEST" -c "
+psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DEST" -c "
   SELECT 'image_series'  AS t, count(*) FROM image_series
   UNION ALL SELECT 'annotations',     count(*) FROM annotations
   UNION ALL SELECT 'users',           count(*) FROM users
@@ -111,7 +111,7 @@ Then promote the scratch DB. Two options:
 **Option A — rename swap (fast, atomic, no superuser DDL replay):**
 
 ```bash
-psql -h "$DB_HOST" -U "$DB_USER" -d postgres -c "
+psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d postgres -c "
   ALTER DATABASE \"stanford-stroke\" RENAME TO \"stanford-stroke-broken-$(date -u +%Y%m%dT%H%M)\";
   ALTER DATABASE \"$DEST\" RENAME TO \"stanford-stroke\";
 "
@@ -120,10 +120,10 @@ psql -h "$DB_HOST" -U "$DB_USER" -d postgres -c "
 **Option B — drop + restore in place:**
 
 ```bash
-psql -h "$DB_HOST" -U "$DB_USER" -d postgres -c \
+psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d postgres -c \
     'ALTER DATABASE "stanford-stroke" RENAME TO "stanford-stroke-broken-tmp";'
-createdb -h "$DB_HOST" -U "$DB_USER" stanford-stroke
-pg_restore -h "$DB_HOST" -U "$DB_USER" -d stanford-stroke \
+createdb -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" stanford-stroke
+pg_restore -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d stanford-stroke \
     --no-owner --no-privileges --jobs=4 \
     "$BR/stanford-stroke/latest.dump"
 ```
@@ -150,7 +150,7 @@ Once you've confirmed the app is healthy for at least 24 h, drop the
 broken DB:
 
 ```bash
-psql -h "$DB_HOST" -U "$DB_USER" -d postgres \
+psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d postgres \
     -c 'DROP DATABASE "stanford-stroke-broken-...";'
 ```
 
@@ -168,17 +168,17 @@ counts). Prefer the dump. Note there is **no continuous re-scan** on startup
 
 ```bash
 DEST=orthanc_db_restore_test_$(date -u +%Y%m%d_%H%M)
-createdb -h "$DB_HOST" -U "$DB_USER" "$DEST"
+createdb -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" "$DEST"
 
 pg_restore \
-    -h "$DB_HOST" -U "$DB_USER" \
+    -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" \
     -d "$DEST" \
     --no-owner --no-privileges \
     --jobs=4 \
     "$BR/orthanc_db/latest.dump"
 
 # Spot-check (Orthanc tables: resources, attachedfiles, metadata, etc.)
-psql -h "$DB_HOST" -U "$DB_USER" -d "$DEST" -c "
+psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DEST" -c "
   SELECT relname, n_live_tup
   FROM pg_stat_user_tables
   ORDER BY n_live_tup DESC LIMIT 10;"
@@ -193,7 +193,7 @@ cd /opt/ssc-pacs/ssc-pacs/stanford-stroke-pacs
 # fails the ${DICOM_MOUNT_SOURCE:?} guard.
 scripts/orthanc/dc.sh down
 
-psql -h "$DB_HOST" -U "$DB_USER" -d postgres -c "
+psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d postgres -c "
   ALTER DATABASE orthanc_db RENAME TO orthanc_db_broken_$(date -u +%Y%m%dT%H%M);
   ALTER DATABASE \"$DEST\" RENAME TO orthanc_db;
 "
@@ -302,20 +302,20 @@ production DB during a drill.
 
 ```bash
 DEST=ws01_drill_$(date +%s)
-createdb -h "$DB_HOST" -U "$DB_USER" "$DEST"
-pg_restore -h "$DB_HOST" -U "$DB_USER" -d "$DEST" \
+createdb -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" "$DEST"
+pg_restore -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DEST" \
     --no-owner --no-privileges --jobs=4 \
     "$BR/stanford-stroke/latest.dump"
 
 # Compare against production
 for tbl in image_series annotations users label_definitions; do
-    prod=$(psql -h "$DB_HOST" -U "$DB_USER" -d stanford-stroke -tAc "SELECT count(*) FROM $tbl")
-    drill=$(psql -h "$DB_HOST" -U "$DB_USER" -d "$DEST"          -tAc "SELECT count(*) FROM $tbl")
+    prod=$(psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d stanford-stroke -tAc "SELECT count(*) FROM $tbl")
+    drill=$(psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DEST"          -tAc "SELECT count(*) FROM $tbl")
     printf "%-20s prod=%s drill=%s\n" "$tbl" "$prod" "$drill"
 done
 
 # Tear down the drill DB
-dropdb -h "$DB_HOST" -U "$DB_USER" "$DEST"
+dropdb -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" "$DEST"
 ```
 
 ---

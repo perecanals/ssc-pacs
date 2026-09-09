@@ -112,7 +112,8 @@ applied to prod via `alembic stamp` — no DDL re-runs.
 ```bash
 cd stanford-stroke-pacs
 conda activate ssc-pacs
-set -a; . ../.env; set +a   # DB_USER / DB_PASSWORD for the psql/pg_dump calls below
+set -a; . .env; set +a      # endpoint + credentials for the psql/pg_dump calls below
+export PGHOST="$DB_HOST" PGPORT="$DB_PORT" PGUSER="$DB_USER" PGPASSWORD="$DB_PASSWORD"
 
 # 1. Generate a new revision file (manually edit it — the project doesn't
 #    use SQLAlchemy models, so --autogenerate will be empty).
@@ -123,9 +124,9 @@ alembic revision -m "add foo column to bar"
 #    - downgrade() — best-effort reverse (or `op.execute("-- irreversible")`)
 
 # 3. Test on a scratch DB:
-psql -h localhost -U "$DB_USER" -d postgres \
+psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d postgres \
     -c "DROP DATABASE IF EXISTS stanford_stroke_scratch;"
-psql -h localhost -U "$DB_USER" -d postgres \
+psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d postgres \
     -c "CREATE DATABASE stanford_stroke_scratch;"
 DB_NAME=stanford_stroke_scratch alembic upgrade head
 DB_NAME=stanford_stroke_scratch alembic downgrade -1   # if reversible

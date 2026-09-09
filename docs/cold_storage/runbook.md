@@ -29,6 +29,10 @@ end-to-end in OHIF. Steady state (as of 2026-07-08):
   with every ingestion run. Read them live:
 
 ```bash
+# psql endpoint + credentials from .env (never rely on libpq's localhost:5432 default)
+set -a; . .env; set +a
+export PGHOST="$DB_HOST" PGPORT="$DB_PORT" PGUSER="$DB_USER" PGPASSWORD="$DB_PASSWORD"
+
 # Archive coverage (archived vs total series)
 psql -d stanford-stroke -c "
   SELECT COUNT(*) FILTER (WHERE dicom_archive_path IS NOT NULL) AS archived,
@@ -39,7 +43,6 @@ psql -d stanford-stroke -c "
   SELECT COUNT(*) FROM series_cache_state WHERE status = 'hot';"
 
 # Orthanc's view of the index (series / studies / instances / disk)
-source .env
 curl -s -u "${ORTHANC_ADMIN_USER}:${ORTHANC_ADMIN_PASSWORD}" \
   http://localhost:8042/statistics | python3 -m json.tool
 ```
@@ -107,7 +110,7 @@ python scripts/cold_storage/archive_all_series.py
 # Full run; workers=4 is a reasonable starting point
 python scripts/cold_storage/archive_all_series.py --execute --workers 4
 
-# Verify coverage
+# Verify coverage (psql endpoint + credentials exported from .env as above)
 psql -d stanford-stroke -c "
   SELECT COUNT(*) FILTER (WHERE dicom_archive_path IS NOT NULL) AS archived,
          COUNT(*) AS total FROM image_series;"
@@ -297,6 +300,7 @@ curl -X POST -b cookies.txt http://localhost:8043/api/studies/$SUID/warm
 To inspect the rows directly (cache state is now per-series):
 
 ```bash
+# (psql endpoint + credentials exported from .env as above)
 psql -d stanford-stroke -c "
   SELECT seriesinstanceuid, status, warming_started_at,
          now() - warming_started_at AS age, error_message
@@ -308,6 +312,7 @@ To force-clear a row (rare; only if the watchdog is somehow not firing
 and you cannot trigger a warm):
 
 ```bash
+# (psql endpoint + credentials exported from .env as above)
 psql -d stanford-stroke -c "
   UPDATE series_cache_state
   SET status = 'cold', warming_started_at = NULL, error_message = NULL

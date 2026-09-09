@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **Never run `sudo` commands yourself** — there is no terminal to enter the password, so they always fail. Ask the user to run them (suggest the `! <command>` prefix so the output lands in the session).
 
-**Never put a password (or other secret) on a command line** — it lands in shell history and the session transcript. Don't `grep`/`cat` secrets out of `.env` into visible output either. Source them instead so the value never appears: `set -a; . stanford-stroke-pacs/.env; set +a` then use `$DB_PASSWORD`/`$PGPASSWORD` (psql reads `PGPASSWORD` from the environment). For a one-off, wrap the same form in a subshell so the caller's environment stays clean: `( set -a; . stanford-stroke-pacs/.env; set +a; psql ... )`. Never load `.env` through `env $(... | xargs)` — `xargs` does its own quote processing, so it strips the single quotes `rotate_db_password.py` writes and then re-splits the value on whitespace, mangling or outright failing on any password containing a space or a quote.
+**Never put a password (or other secret) on a command line** — it lands in shell history and the session transcript. Don't `grep`/`cat` secrets out of `.env` into visible output either. Source them instead so the value never appears: `set -a; . stanford-stroke-pacs/.env; set +a` then use `$DB_PASSWORD`/`$PGPASSWORD` (psql reads `PGPASSWORD` from the environment). Export the **endpoint** the same way — `export PGHOST="$DB_HOST" PGPORT="$DB_PORT" PGUSER="$DB_USER" PGPASSWORD="$DB_PASSWORD"` — and never rely on libpq's `localhost:5432` default: `.env` is the single source of truth for the port, and a host may run an unrelated cluster on 5432. For a one-off, wrap the same form in a subshell so the caller's environment stays clean: `( set -a; . stanford-stroke-pacs/.env; set +a; psql ... )`. Never load `.env` through `env $(... | xargs)` — `xargs` does its own quote processing, so it strips the single quotes `rotate_db_password.py` writes and then re-splits the value on whitespace, mangling or outright failing on any password containing a space or a quote.
 
 ## Versioning and commits
 
@@ -184,6 +184,7 @@ YAML keys, ingestion steps, and per-mode behavior: `docs/reference/image_ingesti
 
 Production runs `cold_path_cache` (migration from `legacy` complete, validated in OHIF). Cache state is keyed **per series** in `series_cache_state` (study/patient status is a derived aggregate; warm/evict are index-neutral). Verify live coverage rather than trusting a figure here:
 ```bash
+set -a; . stanford-stroke-pacs/.env; set +a; export PGHOST="$DB_HOST" PGPORT="$DB_PORT" PGUSER="$DB_USER" PGPASSWORD="$DB_PASSWORD"
 psql -d stanford-stroke -c "SELECT count(*) FILTER (WHERE dicom_archive_path IS NOT NULL) archived, count(*) total FROM image_series;"
 ```
 Depends on the `ssc-orthanc:patched-indexer` image + `"RemoveMissingFiles": false`. Design, runbook, and current status: `docs/cold_storage/`.
