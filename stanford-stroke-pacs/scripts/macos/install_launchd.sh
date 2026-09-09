@@ -54,6 +54,10 @@ if [[ -z "${BREW_PREFIX:-}" ]]; then
 fi
 CONDA_ENV_BIN="${CONDA_ENV_BIN:-$BREW_PREFIX/Caskroom/miniconda/base/envs/ssc-pacs/bin}"
 PGDATA="${PGDATA:-$BREW_PREFIX/var/postgresql@16}"
+# The Postgres endpoint port comes from .env (DB_PORT), not libpq's 5432
+# default — read the one key rather than sourcing the secret file.
+DB_PORT="$(sed -n 's/^DB_PORT=//p' "$STACK_DIR/.env" 2>/dev/null | tail -1 | tr -d '"'"'")"
+DB_PORT="${DB_PORT:-5432}"
 # shellcheck source=../_lib.sh
 . "$SCRIPT_DIR/../_lib.sh"
 WEBAPP_PORT="${WEBAPP_PORT:-$(config_get web-app port 8043)}"
@@ -130,7 +134,7 @@ for d in "${DAEMONS[@]}"; do
   fi
   if [[ "$d" == com.ssc.postgres ]]; then
     ready=no
-    for _ in $(seq 1 30); do "$BREW_PREFIX/bin/pg_isready" -q && { ready=yes; break; }; sleep 1; done
+    for _ in $(seq 1 30); do "$BREW_PREFIX/bin/pg_isready" -q -p "$DB_PORT" && { ready=yes; break; }; sleep 1; done
     if [[ "$ready" == yes ]]; then echo "  postgres ready"; else
       echo "  !! postgres did NOT become ready — check $HOME_DIR/Library/Logs/com.ssc.postgres.err"; fails+=(postgres-not-ready)
     fi

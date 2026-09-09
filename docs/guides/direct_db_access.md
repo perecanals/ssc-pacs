@@ -27,19 +27,21 @@ rejected by the server), and the web-app auth tables are excluded. Details:
 
 ## 2. SSH tunnel
 
-PostgreSQL listens on `localhost` only — it is never exposed to the network.
-Reach it by forwarding a local port over SSH (same pattern as the web-app
-tunnels in `scripts/connectivity/`, just for port 5432):
+PostgreSQL listens on `localhost` only — it is never exposed to the network —
+on the port the server's `.env` sets as `DB_PORT` (ask the maintainer; it is
+not always 5432, since a host may run another cluster there). Reach it by
+forwarding a local port over SSH (same pattern as the web-app tunnels in
+`scripts/connectivity/`, just for the database port):
 
 ```bash
-ssh -N -L 5432:localhost:5432 \
+ssh -N -L 5432:localhost:<server DB_PORT> \
     -o ServerAliveInterval=60 -o ServerAliveCountMax=3 \
     <ssh-user>@<server-ip>
 ```
 
 Leave that window open while you work; close it to disconnect. If your own
 machine already runs PostgreSQL on 5432, forward a different local port
-(e.g. `-L 55432:localhost:5432`) and put that port in your `.env` below.
+(e.g. `-L 55432:localhost:<server DB_PORT>`) and put that local port in your `.env` below.
 
 ## 3. Your own `.env` file
 

@@ -321,6 +321,17 @@ else
     # default pg_hba would allow credential-free pg_basebackup to any local user).
     doit sudo -u "$PG_OS_USER" "$PG_BIN/initdb" -D "$PGDATA" \
         --auth-local=peer --auth-host=scram-sha-256
+    # initdb always writes port 5432, but the endpoint comes from .env: on a
+    # host where 5432 already belongs to another cluster (a distro Postgres
+    # serving other projects) the new postmaster would fail to bind. Pin the
+    # port from DB_PORT so the cluster listens exactly where .env says.
+    if [[ "$DB_PORT" != 5432 ]]; then
+        echo "  + set port = $DB_PORT in $PGDATA/postgresql.conf"
+        if [[ "$MODE" == execute ]]; then
+            printf '\n# SSC PACS: endpoint port from .env DB_PORT\nport = %s\n' "$DB_PORT" \
+                | sudo -u "$PG_OS_USER" tee -a "$PGDATA/postgresql.conf" >/dev/null
+        fi
+    fi
 fi
 
 # Render + install the unit. Refuse to clobber a unit we did not write.

@@ -280,6 +280,10 @@ CREATE DATABASE "stanford-stroke" OWNER "<DB_USER>";
 ./init_orthanc_db.sh        # creates PG_ORTHANC_USER + PG_ORTHANC_DB, grants privileges
 ```
 
+On PostgreSQL ≥ 16 a `CREATEROLE` user that creates a role gets `ADMIN` on it
+but not `SET`, and `CREATE DATABASE … OWNER` needs `SET ROLE`; the script grants
+itself `SET` membership on `PG_ORTHANC_USER` first (a no-op for a superuser).
+
 Optionally tighten the runtime role afterwards: `ALTER ROLE "<DB_USER>" NOCREATEDB NOCREATEROLE;`
 
 **3c. Create the schema in `stanford-stroke`.** Alembic is the single source of

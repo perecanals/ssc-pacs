@@ -47,6 +47,10 @@ fi
 DEPLOY_USER="${SUDO_USER:-$(id -un)}"
 # shellcheck source=/dev/null
 [[ -f "$STACK_DIR/deploy.env" ]] && source "$STACK_DIR/deploy.env"
+# The Postgres endpoint port comes from .env (DB_PORT), not libpq's 5432
+# default — read the one key rather than sourcing the secret file.
+DB_PORT="$(sed -n 's/^DB_PORT=//p' "$STACK_DIR/.env" 2>/dev/null | tail -1 | tr -d '"'"'")"
+DB_PORT="${DB_PORT:-5432}"
 
 # Canonical daemon order — mirror install_launchd.sh (single source of truth).
 DAEMONS=(
@@ -107,6 +111,6 @@ if [[ "$DRY_RUN" == yes ]]; then
 else
   sudo -u "$DEPLOY_USER" colima status 2>&1 | sed 's/^/  colima: /' || echo "  colima: not running"
   if nc -z localhost 8043 2>/dev/null; then echo "  web app :8043 STILL LISTENING"; else echo "  web app :8043 down"; fi
-  if pg_isready -q 2>/dev/null; then echo "  postgres STILL accepting connections"; else echo "  postgres down"; fi
+  if pg_isready -q -p "$DB_PORT" 2>/dev/null; then echo "  postgres STILL accepting connections"; else echo "  postgres down"; fi
 fi
 echo "Done. Bring it back with scripts/macos/start_stack.sh (or reboot, unless --retire)."

@@ -78,6 +78,10 @@ response reports what was removed (`files_removed`, `indexer_purged`).
 ## Verifying a delete
 
 ```bash
+# psql endpoint + credentials from .env (never rely on libpq's localhost:5432 default)
+set -a; . .env; set +a
+export PGHOST="$DB_HOST" PGPORT="$DB_PORT" PGUSER="$DB_USER" PGPASSWORD="$DB_PASSWORD"
+
 # Orthanc no longer knows the study:
 curl -s -u "$ORTHANC_ADMIN_USER:$ORTHANC_ADMIN_PASSWORD" \
   -X POST "$ORTHANC_URL/tools/lookup" -d '<studyUID>'   # → [] (empty)

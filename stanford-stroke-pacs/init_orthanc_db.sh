@@ -42,6 +42,13 @@ SELECT format('CREATE ROLE %I WITH LOGIN PASSWORD %L', :'orthanc_user', :'orthan
 WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolname = :'orthanc_user')
 \gexec
 
+-- PostgreSQL >= 16: creating a role grants the creator ADMIN on it but NOT
+-- SET, and `CREATE DATABASE ... OWNER x` requires being able to SET ROLE x.
+-- Grant ourselves SET membership (no-op for a superuser / on PG <= 15).
+SELECT format('GRANT %I TO CURRENT_USER WITH SET TRUE', :'orthanc_user')
+WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolname = CURRENT_USER AND rolsuper)
+\gexec
+
 SELECT format('CREATE DATABASE %I OWNER %I', :'orthanc_db', :'orthanc_user')
 WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = :'orthanc_db')
 \gexec

@@ -40,8 +40,8 @@ cd "$STACK_DIR"
 docker compose down -v
 
 echo "Dropping Orthanc database and role from PostgreSQL..."
-PGPASSWORD="$DB_PASSWORD" psql -U "$DB_USER" -h localhost -d postgres -c "DROP DATABASE IF EXISTS ${PG_ORTHANC_DB};"
-PGPASSWORD="$DB_PASSWORD" psql -U "$DB_USER" -h localhost -d postgres -c "DROP ROLE IF EXISTS ${PG_ORTHANC_USER};"
+PGPASSWORD="$DB_PASSWORD" psql -U "$DB_USER" -h "$DB_HOST" -p "$DB_PORT" -d postgres -c "DROP DATABASE IF EXISTS ${PG_ORTHANC_DB};"
+PGPASSWORD="$DB_PASSWORD" psql -U "$DB_USER" -h "$DB_HOST" -p "$DB_PORT" -d postgres -c "DROP ROLE IF EXISTS ${PG_ORTHANC_USER};"
 
 echo "Removing Orthanc variables from .env..."
 sed -i '/^# === Orthanc PACS Configuration ===/,$d' "$ENV_FILE"

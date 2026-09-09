@@ -44,7 +44,10 @@ not enough if you want to skip reindexing (§2).
 ./scripts/backup/backup_pg_db.sh stanford-stroke
 ./scripts/backup/backup_pg_db.sh orthanc_db
 
-# On the target host, after creating empty DBs and the Orthanc role:
+# On the target host (endpoint + credentials from the target's .env — never
+# libpq's 5432 default), create the empty DBs and the Orthanc role, then restore:
+set -a; . .env; set +a
+export PGHOST="$DB_HOST" PGPORT="$DB_PORT" PGUSER="$DB_USER" PGPASSWORD="$DB_PASSWORD"
 createdb stanford-stroke
 ./init_orthanc_db.sh                      # creates orthanc_db + role (reads ./.env automatically)
 pg_restore --no-owner -d stanford-stroke  <latest>/stanford-stroke.dump
