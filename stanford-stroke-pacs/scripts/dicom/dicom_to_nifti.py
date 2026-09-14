@@ -63,14 +63,14 @@ def default_nifti_out(dicom_dir: Path) -> Path:
     return dicom_dir.parent / "NIFTI" / "image.nii.gz"
 
 
-def convert_from_dir(dicom_dir: Path, out: Path) -> Path:
+def convert_from_dir(dicom_dir: Path, out: Path, series_uid: str | None = None) -> Path:
     if not dicom_dir.is_dir():
         raise SystemExit(f"DICOM directory does not exist: {dicom_dir}")
     if not any(dicom_dir.iterdir()):
         raise SystemExit(f"DICOM directory is empty: {dicom_dir}")
     out.parent.mkdir(parents=True, exist_ok=True)
     print(f"Converting {dicom_dir} -> {out}")
-    convert_dicom_to_nifti(str(dicom_dir), str(out))
+    convert_dicom_to_nifti(str(dicom_dir), str(out), series_uid=series_uid)
     if not out.is_file():
         raise SystemExit(f"Conversion appeared to succeed but output is missing: {out}")
     print(f"Wrote {out} ({out.stat().st_size:,} bytes)")
@@ -132,6 +132,7 @@ def main() -> int:
     grp.add_argument("--archive", type=Path, help="Path to a tar.zst archive")
     grp.add_argument("--series-uid", type=str, help="SeriesInstanceUID (looks up dicom_dir_path)")
     ap.add_argument("--out", type=Path, help="Output .nii.gz path")
+    ap.add_argument("--dicom-series-uid", help="Select this DICOM series explicitly when using --dir")
     ap.add_argument(
         "--warm-if-cold",
         action="store_true",
@@ -144,7 +145,7 @@ def main() -> int:
 
     if args.dir:
         out = args.out or default_nifti_out(args.dir.resolve())
-        convert_from_dir(args.dir.resolve(), out.resolve())
+        convert_from_dir(args.dir.resolve(), out.resolve(), args.dicom_series_uid)
         return 0
     if args.archive:
         convert_from_archive(args.archive.resolve(), args.out.resolve())

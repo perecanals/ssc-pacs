@@ -42,6 +42,7 @@ CREATE TABLE IF NOT EXISTS users (
     username             TEXT PRIMARY KEY,
     password_hash        TEXT NOT NULL,
     is_admin             BOOLEAN NOT NULL DEFAULT FALSE,
+    is_staff             BOOLEAN NOT NULL DEFAULT FALSE,
     created_at           TIMESTAMPTZ DEFAULT now(),
     must_change_password BOOLEAN NOT NULL DEFAULT FALSE,
     password_changed_at  TIMESTAMPTZ,
@@ -130,7 +131,7 @@ def cmd_list(_args: argparse.Namespace) -> None:
     try:
         with conn.cursor() as cur:
             cur.execute(
-                "SELECT username, is_admin, created_at, allowed_datasets "
+                "SELECT username, is_admin, created_at, allowed_datasets, is_staff "
                 "FROM users ORDER BY username"
             )
             rows = cur.fetchall()
@@ -141,16 +142,16 @@ def cmd_list(_args: argparse.Namespace) -> None:
         print("No users found.")
         return
 
-    print(f"{'Username':<20} {'Admin':<8} {'Created':<18} {'Datasets'}")
+    print(f"{'Username':<20} {'Role':<8} {'Created':<18} {'Datasets'}")
     print("-" * 72)
-    for username, is_admin, created_at, allowed_datasets in rows:
-        admin_str = "yes" if is_admin else "no"
+    for username, is_admin, created_at, allowed_datasets, is_staff in rows:
+        role = "admin" if is_admin else "staff" if is_staff else "user"
         date_str = created_at.strftime("%Y-%m-%d %H:%M") if created_at else "?"
         if is_admin:
             ds_str = "(admin: all)"
         else:
             ds_str = ", ".join(sorted(allowed_datasets or [])) or "(none)"
-        print(f"{username:<20} {admin_str:<8} {date_str:<18} {ds_str}")
+        print(f"{username:<20} {role:<8} {date_str:<18} {ds_str}")
 
 
 def _user_exists(username: str) -> bool:
@@ -342,6 +343,27 @@ def cmd_set_datasets(args: argparse.Namespace) -> None:
         print("The user now sees NO data in the web app.")
 
 
+# -- Staff role ----------------------------------------------------------------
+
+def cmd_set_staff(args: argparse.Namespace) -> None:
+    for username in args.usernames:
+        _refuse_service_account(username)
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT username, is_admin FROM users WHERE username=ANY(%s) FOR UPDATE", (args.usernames,))
+            rows = dict(cur.fetchall())
+            if set(rows) != set(args.usernames):
+                raise SystemExit("One or more users do not exist; no roles changed")
+            if any(rows.values()):
+                raise SystemExit("Existing admins already have export access; set-staff does not change admin roles")
+            cur.execute("UPDATE users SET is_staff=%s WHERE username=ANY(%s)", (not args.remove, args.usernames))
+        conn.commit()
+    finally:
+        conn.close()
+    print(f"Role set to {'user' if args.remove else 'staff'}: {', '.join(args.usernames)}. Dataset grants and passwords unchanged.")
+
+
 # -- Entrypoint ----------------------------------------------------------------
 
 def main() -> None:
@@ -356,6 +378,9 @@ def main() -> None:
     sub = parser.add_subparsers(dest="command")
 
     sub.add_parser("list", help="List all users")
+    p_staff = sub.add_parser("set-staff", help="Grant staff export privileges without changing dataset grants")
+    p_staff.add_argument("usernames", nargs="+")
+    p_staff.add_argument("--remove", action="store_true", help="Return staff members to ordinary user access")
 
     p_add = sub.add_parser("add", help="Add a new user")
     p_add.add_argument("username")
@@ -413,6 +438,7 @@ def main() -> None:
         "passwd": cmd_passwd,
         "remove": cmd_remove,
         "set-datasets": cmd_set_datasets,
+        "set-staff": cmd_set_staff,
     }
 
     ensure_table()

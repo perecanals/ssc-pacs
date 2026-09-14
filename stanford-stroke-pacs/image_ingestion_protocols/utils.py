@@ -223,14 +223,19 @@ def should_create_nifti(series_type):
     return series_type in NIFTI_SERIES_TYPES
 
 
-def convert_dicom_to_nifti(input_path, output_path):
+def convert_dicom_to_nifti(input_path, output_path, series_uid=None):
     """Convert a DICOM series directory to a NIfTI file.
 
     Live: consumed by scripts/dicom/dicom_to_nifti.py — keep name/signature
     stable.
     """
     reader = sitk.ImageSeriesReader()
-    dicom_names = reader.GetGDCMSeriesFileNames(input_path)
+    series_ids = reader.GetGDCMSeriesIDs(input_path) or []
+    if series_uid is not None and series_uid not in series_ids:
+        raise ValueError("Requested DICOM series was not found in the input directory")
+    if series_uid is None and len(series_ids) != 1:
+        raise ValueError("Input must contain exactly one DICOM series, or specify its UID")
+    dicom_names = reader.GetGDCMSeriesFileNames(input_path, series_uid or series_ids[0])
     reader.SetFileNames(dicom_names)
     image = reader.Execute()
     # image = sitk.PermuteAxes(image, [2, 1, 0])

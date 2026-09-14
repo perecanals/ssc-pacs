@@ -49,6 +49,7 @@ EXPECTED_ROUTES = {
     ("GET", "/api/ohif-link/{studyinstanceuid}"),
     ("GET", "/api/series/{seriesinstanceuid}/dicom-zip"),
     ("GET", "/api/series/{seriesinstanceuid}/paths"),
+    ("GET", "/api/series/{seriesinstanceuid}/nifti"),
     ("GET", "/api/storage-mode"),
     ("POST", "/api/studies/{studyinstanceuid}/warm"),
     ("POST", "/api/studies/{studyinstanceuid}/evict"),

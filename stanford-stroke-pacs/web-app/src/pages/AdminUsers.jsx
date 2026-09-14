@@ -81,8 +81,8 @@ export default function AdminUsers() {
         <header className="admin-users__header">
           <h1 className="admin-users__title">User Dataset Access</h1>
           <p className="admin-users__subtitle">
-            Grant each user access to imaging datasets. Users without any
-            grants see no data; admins always see everything.
+            Grant each user access to imaging datasets. Users without any grants
+            see no data; admins always see everything.
           </p>
         </header>
 
@@ -95,9 +95,14 @@ export default function AdminUsers() {
             <table className="admin-users__table">
               <thead>
                 <tr>
-                  <th className="admin-users__th admin-users__th--user">User</th>
+                  <th className="admin-users__th admin-users__th--user">
+                    User
+                  </th>
                   {datasets.map((ds) => (
-                    <th key={ds} className="admin-users__th admin-users__th--dataset">
+                    <th
+                      key={ds}
+                      className="admin-users__th admin-users__th--dataset"
+                    >
                       {ds}
                     </th>
                   ))}
@@ -108,13 +113,20 @@ export default function AdminUsers() {
                   <tr
                     key={u.username}
                     className={`admin-users__row${
-                      savingUser === u.username ? " admin-users__row--saving" : ""
+                      savingUser === u.username
+                        ? " admin-users__row--saving"
+                        : ""
                     }`}
                   >
                     <td className="admin-users__td admin-users__td--user">
-                      <span className="admin-users__username">{u.username}</span>
+                      <span className="admin-users__username">
+                        {u.username}
+                      </span>
                       {u.is_admin && (
                         <span className="admin-users__admin-pill">admin</span>
+                      )}
+                      {!u.is_admin && u.is_staff && (
+                        <span className="admin-users__admin-pill">staff</span>
                       )}
                     </td>
                     {u.is_admin ? (
@@ -126,7 +138,10 @@ export default function AdminUsers() {
                       </td>
                     ) : (
                       datasets.map((ds) => (
-                        <td key={ds} className="admin-users__td admin-users__td--check">
+                        <td
+                          key={ds}
+                          className="admin-users__td admin-users__td--check"
+                        >
                           <input
                             type="checkbox"
                             className="admin-users__checkbox"

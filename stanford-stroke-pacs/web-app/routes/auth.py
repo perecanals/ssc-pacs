@@ -76,6 +76,7 @@ def me(username: str | None = Depends(get_optional_user)):
         return {
             "username": None,
             "is_admin": False,
+            "is_staff": False,
             "must_change_password": False,
             "allowed_datasets": [],
             "session_timeout_seconds": SESSION_TIMEOUT_SECONDS,
@@ -84,7 +85,7 @@ def me(username: str | None = Depends(get_optional_user)):
     try:
         with conn.cursor() as cur:
             cur.execute(
-                "SELECT is_admin, must_change_password, allowed_datasets "
+                "SELECT is_admin, must_change_password, allowed_datasets, is_staff "
                 "FROM users WHERE username = %s",
                 (username,),
             )
@@ -97,6 +98,7 @@ def me(username: str | None = Depends(get_optional_user)):
     return {
         "username": username,
         "is_admin": is_admin,
+        "is_staff": bool(row and row[3]),
         "must_change_password": must_change,
         "allowed_datasets": allowed_datasets,
         "session_timeout_seconds": SESSION_TIMEOUT_SECONDS,

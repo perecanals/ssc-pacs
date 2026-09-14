@@ -14,6 +14,40 @@ Paths shown as `<dicom_data_root>` / `<cold_archive_root>` are the
 
 ---
 
+## Web-app downloads
+
+In Navigator, admins and staff see **Download DICOM as zip** and **NIfTI**
+buttons beside each series, including expanded child rows. Staff must also have
+access to that series' patient dataset. Normal users receive 403; out-of-scope
+series receive 404 before files or conversion tools are accessed. These actions
+are independent of the optional Data Exports table module.
+
+`GET /api/series/{uid}/dicom-zip` streams the series ZIP.
+`GET /api/series/{uid}/nifti` returns a compressed `.nii.gz` volume using the
+existing ingestion SimpleITK/GDCM conversion function via
+`scripts/dicom/dicom_to_nifti.py`. The web route explicitly selects the requested
+DICOM SeriesInstanceUID. It runs the converter as a subprocess with an argument
+list (no shell interpolation), a five-minute timeout and two ITK threads.
+Unconvertible/non-image series return 422; timeouts return 504, with ZIP suggested
+as a fallback. Conversion preserves the source geometry; it does not resample,
+skull-strip or perform clinical processing.
+
+Both routes prefer an existing cold archive, extracting it into a private
+request directory; otherwise they read the loose DICOM directory. They do not
+warm Orthanc, change cache state or write NIfTI alongside canonical source files.
+Two imaging downloads may run at once; further requests return 429. Temporary
+files and concurrency slots are released after completion, client disconnects,
+or preparation/conversion failures.
+Reserve enough host temporary disk for two extracted series and conversion
+outputs. These limits are independent of Data Exports' CSV/XLSX worker limits.
+
+Download names sanitize path separators/control characters and use an ASCII
+HTTP-header fallback plus encoded UTF-8 `filename*`. The frontend prefers the
+encoded name, supporting Unicode descriptions without header-encoding failures.
+Imaging downloads use authenticated fetch/blob delivery and thus need browser
+memory for the downloaded file. Requests appear in normal HTTP logs; the Data
+Exports report/configuration audit applies to table exports, not imaging files.
+
 ## DICOM → NIFTI
 
 NIFTIs are **not** generated during ingestion in `cold_path_cache` mode — the
@@ -33,6 +67,9 @@ python scripts/dicom/dicom_to_nifti.py \
     --dir <dicom_data_root>/<patient-id>/1.2.../AX_T2_FLAIR/1.2.../DICOM \
     --out /tmp/ax_t2_flair.nii.gz
 ```
+
+For a directory containing multiple DICOM series, pass `--dicom-series-uid <UID>`
+to select one. Without it, ambiguous or empty directories fail explicitly.
 
 If `--out` is omitted, the script writes to the canonical sibling location
 `{dicom_dir.parent}/NIFTI/image.nii.gz`.

@@ -1,7 +1,6 @@
-"""Tests for DICOM zip download authorization (admin-only).
+"""DICOM ZIP authorization for anonymous, regular, and admin users.
 
-Bulk DICOM export is a privilege, not a public read like the browsing
-endpoints — `GET /api/series/{uid}/dicom-zip` is gated by `require_admin`.
+Staff downloads and dataset restrictions are covered in test_imaging_downloads.
 """
 
 import bcrypt
@@ -20,8 +19,8 @@ def test_dicom_download_requires_login(client):
     assert resp.status_code == 401
 
 
-def test_dicom_download_forbidden_for_non_admin(client):
-    """A logged-in but non-admin user is rejected with 403."""
+def test_dicom_download_forbidden_for_regular_user(client):
+    """A logged-in user without staff or admin access receives 403."""
     user, pw = "downloader_nonadmin", "nonadminpass789"
     conn = get_conn()
     try:
