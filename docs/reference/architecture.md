@@ -411,6 +411,17 @@ Credential rotation lives in dedicated siblings:
 - `scripts/admin/rotate_db_password.py rotate` runs `ALTER ROLE` on the live DB
   and rewrites `DB_PASSWORD` in `.env`; `check` verifies `.env` authenticates.
 
+### Staff export privileges
+
+Alembic `0022_staff_role` adds `users.is_staff` (default false); a check constraint
+keeps staff and admin flags mutually exclusive. `require_staff` permits either
+role, while `require_admin` remains unchanged. Staff can download series as
+DICOM ZIP or NIfTI and use [Data Exports](data_explorer.md), within their existing
+dataset grants. They cannot manage users, delete imaging data, use the admin copy-path
+endpoint, or log directly into Orthanc. `manage_users.py set-staff` grants/revokes
+this capability independently of dataset grants and passwords. API role checks
+read the database rather than trusting a role embedded in the login token.
+
 ### 5.4 Dataset-level authorization (per-user cohort access)
 
 Beyond authentication, every non-admin user carries a **dataset scope**:

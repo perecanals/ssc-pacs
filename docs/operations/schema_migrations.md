@@ -232,6 +232,18 @@ no manual steps required.
 - Catastrophic failure: restore from the backup taken before rollout
   (see `operations/restore_runbook.md`).
 
-Data Explorer metadata is introduced by `0021_data_explorer`; it has no research
+Data Exports metadata is introduced by `0021_data_explorer`; it has no research
 table changes. Keep this shipped revision when disabling/removing the module.
-See [Data Explorer operations](data_explorer.md).
+See [Data Exports operations](data_explorer.md).
+
+`0022_staff_role` adds `users.is_staff` (default false) and the
+`users_distinct_roles` check constraint. It changes no existing grants or
+passwords. Assign accounts separately with `manage_users.py set-staff`.
+Downgrading to `0021_data_explorer` removes staff assignments and the column;
+first stop/revert code that reads `is_staff`. Disabling Data Exports alone does
+not require this downgrade: staff also use the imaging download routes.
+
+`0023_export_names` adds a required `explorer_exports.name` with a 1–120 character,
+nonblank constraint and no default for new rows. Existing history receives
+`Export <UUID>` names; history and artifacts are retained. Downgrading removes
+names, so stop or revert code that requires them before downgrading.

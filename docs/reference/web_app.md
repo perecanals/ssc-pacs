@@ -1,4 +1,4 @@
-# Stanford Stroke Center Web App App
+# Stanford Stroke Center Web App
 
 **Purpose:** Product-level reference for the web app — why it exists, features, and UI model. For stack-wide architecture see [`architecture.md`](architecture.md). For SQL schemas and tables see [`data_stores.md`](data_stores.md). For deep React/component behavior see [`web_app_frontend.md`](web_app_frontend.md).
 
@@ -19,6 +19,8 @@ it provides a workflow-oriented interface for:
 - creating and editing annotations at patient, study, and series level
 - filtering across hierarchy levels using those annotations
 - previewing images in OHIF while staying inside the annotation workflow
+- building named CSV/Excel exports through the optional [Data Exports](data_explorer.md) module
+- downloading series as DICOM ZIP or NIfTI (staff/admin, within dataset grants)
 
 In short:
 

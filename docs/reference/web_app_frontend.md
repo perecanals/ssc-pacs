@@ -47,22 +47,23 @@ Authorization model:
   (`users.allowed_datasets`): browsing endpoints filter rows to in-scope
   patients, entity-id endpoints 404 on out-of-scope ids, and the DICOMweb
   proxy 403s out-of-scope studies (see `reference/architecture.md` §5.4)
-- DICOM zip download (`GET /api/series/{uid}/dicom-zip`) is **admin-only**
-  (`Depends(require_admin)`) — bulk export is a privilege, not a general
-  read; the DataTable download button is hidden for non-admins
+- DICOM ZIP (`GET /api/series/{uid}/dicom-zip`) and NIfTI
+  (`GET /api/series/{uid}/nifti`) downloads require **staff or admin** status
+  and dataset access. `ImagingDownloadButtons` appears at each series level.
+  Copy-path and delete controls remain admin-only.
 - proxied OHIF/DICOMweb routes require a valid JWT plus dataset access to
   the requested study
 - `created_by` is always taken from the authenticated user, never from client
   input
 
-`users.is_admin` is consulted by the `require_admin` dependency
-(`web-app/auth.py`) used by `/api/admin/*` endpoints and the DICOM zip
-download. It also gates the "Orthanc Explorer", "OHIF Viewer", and
-"User Access" Landing cards and the DataTable DICOM download button on the
-frontend — non-admins do not see them. `/api/me` returns
-`{"username": ..., "is_admin": bool, "allowed_datasets": [...]}` so the React
-`AuthContext` can apply admin-only UI affordances (it exposes
-`allowedDatasets` alongside `isAdmin`).
+`users.is_admin` gates administration and direct Orthanc access. The separate
+`users.is_staff` flag grants imaging downloads and [Data Exports](data_explorer.md)
+without granting administrative privileges. `/api/me` returns `is_admin`,
+`is_staff` and `allowed_datasets`; `AuthContext` exposes `isAdmin`, `isStaff`
+and `allowedDatasets`. Server checks use current database values on each request.
+The Data Exports card opens `/data-exports`; `/admin/data-explorer` remains a
+redirect for old bookmarks. Backend/config/package identifiers remain
+`data-explorer` to preserve deployment compatibility.
 
 ---
 
@@ -72,12 +73,14 @@ The web app frontend is a React single-page application built with Vite and
 Tailwind CSS. Source code lives in `web-app/src/`; the production build is in
 `web-app/dist/`. Component styles are in co-located `.css` files.
 
-The app defines five routes (`App.jsx`):
+The app defines these routes (`App.jsx`):
 
 - `/login` — login page (`Login.jsx`)
 - `/change-password` — forced/self-service password change (`ChangePassword.jsx`)
 - `/` — Landing page with card links to Web App, Orthanc Explorer 2, and OHIF
 - `/app` — Web App annotation browser
+- `/data-exports` — staff/admin Data Exports builder and history; the legacy
+  `/admin/data-explorer` route redirects here
 - `/admin` — admin-only user dataset-access page (`AdminUsers.jsx`): a
   users × datasets checkbox grid backed by `GET /api/admin/users` and
   `PUT /api/admin/users/{username}/datasets`, with optimistic updates that
@@ -98,6 +101,13 @@ The app defines five routes (`App.jsx`):
   (`GET /api/admin/instruments/deletion-plan?name=…` →
   `DELETE /api/admin/instruments?name=…`; query parameter because instrument
   names are free text).
+
+Data Exports lives in `src/modules/data-explorer/`. `DataExplorer.jsx` owns the
+builder and request state; `Conditions.jsx`, `ConditionValue.jsx`, and
+`ExistingValues.jsx` handle nested filters and value selection. `ExportHistory.jsx`
+renders past runs, and `Codebook.jsx` shows label definitions. API requests share
+`api.js`. See [Data Exports operations](../operations/data_explorer.md) for module
+integration points and removal.
 
 The Navigator page (`Navigator.jsx`) provides three hierarchical levels:
 **Patients**, **Studies**, and **Series**. The level switcher lives in the

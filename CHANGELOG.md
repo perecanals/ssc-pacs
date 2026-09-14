@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+Staff can export permitted datasets through Data Exports and download DICOM ZIP or NIfTI; Alembic `0022_staff_role` adds the role without changing dataset grants.
+Data Exports adds instrument selection, nested filters, a codebook, and named exports that can be reopened for editing; `0023_export_names` adds required names while preserving history.
+Downloads support Unicode filenames and release temporary files on failed transfers. Export setup failures are recorded in history.
+
 ## v1.25 — 2026-09-14
 
 Admin Data Explorer adds research-table browsing, a visual/SQL query builder, shared reports and background CSV/Excel exports.
