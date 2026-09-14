@@ -16,6 +16,7 @@ from slowapi.errors import RateLimitExceeded
 import auth as _auth
 from auth import create_jwt, decode_jwt
 from config import STORAGE_MODE, WARM_WORKERS, effective_config_summary
+from data_explorer import api as explorer_api
 from db import audit_user_var, close_pool, get_conn, init_pool
 from logging_config import configure_logging, request_id_ctx, user_ctx
 from metrics import http_request_duration_seconds, http_requests_total
@@ -114,6 +115,7 @@ async def lifespan(application: FastAPI):
         max_workers=WARM_WORKERS,
         thread_name_prefix="warm",
     )
+    explorer_api.start(application)
     ev_task: asyncio.Task | None = None
     if STORAGE_MODE == "cold_path_cache":
         # A fresh process has an empty warm executor and holds no warm locks, so
@@ -142,6 +144,7 @@ async def lifespan(application: FastAPI):
                 await ev_task
             except asyncio.CancelledError:
                 pass
+        explorer_api.stop(application)
         await proxy.shutdown_client()
         # Wait for in-flight extractions — they hold a DB pool connection.
         application.state.warm_executor.shutdown(wait=True)
@@ -194,6 +197,8 @@ async def sliding_jwt(request, call_next):
     if (
         path.startswith("/assets/")
         or path in ("/api/me", "/api/login", "/api/logout")
+        or (path in ("/api/data-explorer/exports", "/api/data-explorer/reports")
+            and request.method == "GET" and request.headers.get("x-explorer-poll") == "1")
         or proxy.is_immutable_ohif_asset(path)
     ):
         return response
@@ -340,4 +345,5 @@ app.include_router(labels.router)
 app.include_router(admin.router)
 app.include_router(data_admin.router)
 app.include_router(proxy.router)
+app.include_router(explorer_api.router)
 app.include_router(static.router)
