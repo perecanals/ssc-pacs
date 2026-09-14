@@ -467,6 +467,11 @@ make lint
 `backend-tests`, `ingestion-tests`, `frontend-tests` (eslint + vitest),
 `frontend-build`. The `mypy` job is advisory (non-blocking).
 
+Backend CI installs only `web-app/requirements.txt` and
+`web-app/requirements-dev.txt`. Declare test dependencies there rather than
+relying on packages from the host ingestion environment; NumPy is required by
+the synthetic DICOM and NIfTI fidelity tests.
+
 **Pre-commit hooks:** Installed by `make install-dev`. Runs ruff and prettier
 on `web-app/` files automatically before each `git commit`.
 
