@@ -125,9 +125,3 @@ scripts/linux/provision_postgres.sh --check          # read-only invariant audit
 scripts/linux/provision_postgres.sh                  # dry-run the provisioning plan
 sudo scripts/linux/provision_postgres.sh --execute   # apply
 ```
-
-### Data Explorer credentials
-
-`admin/manage_explorer_db.py provision|check` manages the dedicated research-only
-web export login (`sscpacs-readonly`). See
-[Data Explorer operations](../../docs/operations/data_explorer.md).

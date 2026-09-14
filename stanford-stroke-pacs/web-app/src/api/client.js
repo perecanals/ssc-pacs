@@ -25,7 +25,7 @@ export function getLastApiActivityAt() {
 }
 
 export async function apiFetch(path, options = {}) {
-  const { suppressAuthEvent, trackActivity = true, ...rest } = options;
+  const { suppressAuthEvent, ...rest } = options;
   const res = await fetch(`${API}${path}`, {
     credentials: "same-origin",
     ...rest,
@@ -36,7 +36,7 @@ export async function apiFetch(path, options = {}) {
   });
   // A completed request (even a failed one) proves the user is active and
   // the backend token just slid — keep the idle clock in lockstep with it.
-  if (trackActivity && slidesSession(path)) {
+  if (slidesSession(path)) {
     markApiActivity();
   }
   // Wrong-credential 401s on endpoints like /api/auth/change-password are

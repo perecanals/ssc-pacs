@@ -231,7 +231,3 @@ no manual steps required.
   schema, so reinstating them is safe.
 - Catastrophic failure: restore from the backup taken before rollout
   (see `operations/restore_runbook.md`).
-
-Data Explorer metadata is introduced by `0021_data_explorer`; it has no research
-table changes. Keep this shipped revision when disabling/removing the module.
-See [Data Explorer operations](data_explorer.md).

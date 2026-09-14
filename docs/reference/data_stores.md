@@ -325,10 +325,3 @@ Connection settings are read from `.env`:
 
 - Operator procedures for cold storage: [`../cold_storage/runbook.md`](../cold_storage/runbook.md)
 - Design rationale: [`../cold_storage/design.md`](../cold_storage/design.md)
-
-## Data Explorer metadata
-
-Alembic `0021_data_explorer` adds `explorer_reports` (shared configurations),
-`explorer_exports` (immutable requests plus lifecycle state), and
-`explorer_downloads` (delivery-request audit). These tables are excluded from
-the research catalog and reader grants. See [Data Explorer](data_explorer.md).

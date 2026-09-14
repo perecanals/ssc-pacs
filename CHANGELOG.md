@@ -1,11 +1,5 @@
 # Changelog
 
-## v1.25 — 2026-09-14
-
-Admin Data Explorer adds research-table browsing, a visual/SQL query builder, shared reports and background CSV/Excel exports.
-A separate read-only database login protects research data; export configuration, SQL and download requests are audited.
-Alembic `0021_data_explorer` adds module metadata. Enablement, limits and clean removal are documented under Data Explorer operations.
-
 ## v1.24 — 2026-08-15
 
 - **Fix**: ingestion aborted a whole case when any one series had no usable

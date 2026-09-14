@@ -82,17 +82,3 @@ clinical_episode_date_column = "stroke_date"
 # step slices. 0 disables the shim. Tune live via
 # localStorage.sscTrackpadPxPerSlice; see architecture.md §5.1.
 ohif_trackpad_px_per_slice = 50
-
-# Optional admin research-table browser/exporter. Requires dedicated credentials
-# EXPLORER_DB_USER / EXPLORER_DB_PASSWORD in .env; see docs/operations/data_explorer.md.
-[data-explorer]
-enabled = false
-# Required absolute, app-owned mode-0700 directory when enabled.
-spool_dir = ""
-queue_limit = 10
-timeout_seconds = 1800
-preview_timeout_seconds = 15
-artifact_bytes = 5368709120
-spool_bytes = 10737418240
-reserve_bytes = 21474836480
-retention_hours = 24

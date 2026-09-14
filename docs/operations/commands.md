@@ -651,10 +651,3 @@ git push --tags
 That's the whole procedure — no other tooling. `git describe --tags` may show
 production a few commits past the last tag (e.g. `v1.2-3-g<sha>`); that is
 expected. (`CHANGELOG.md` is created at the v1.0 audit→main merge.)
-
-## Data Explorer reader
-
-From the stack root, `python scripts/admin/manage_explorer_db.py provision`
-creates/rotates the dedicated `sscpacs-readonly` login and saves credentials
-without displaying them. Use `python scripts/admin/manage_explorer_db.py check`
-to verify grants. See [Data Explorer operations](data_explorer.md) before enabling.
