@@ -22,6 +22,7 @@ def _collect_routes(app):
 EXPECTED_ROUTES = {
     ("GET", "/api/data-explorer/capabilities"),
     ("GET", "/api/data-explorer/catalog"),
+    ("GET", "/api/data-explorer/values"),
     ("POST", "/api/data-explorer/preview"),
     ("GET", "/api/data-explorer/reports"),
     ("POST", "/api/data-explorer/reports"),

@@ -1,21 +1,31 @@
 """Strict PostgreSQL SELECT validation and parameterized visual query builder."""
+
+import re
+from datetime import UTC, date, datetime
+
 from pglast import ast, parse_sql
 from pglast.stream import RawStream
 from pglast.visitors import Visitor
 
 from data_explorer.policy import RELATIONSHIPS
 
-FUNCTIONS = set("count sum avg min max lower upper length char_length trim btrim ltrim rtrim "
-                "abs round ceil ceiling floor date_part date_trunc to_char concat concat_ws "
-                "replace substring array_length cardinality array_to_string jsonb_extract_path_text "
-                "jsonb_typeof string_agg array_agg bool_and bool_or row_number rank dense_rank".split())
-TYPES = set("text varchar bpchar bool int2 int4 int8 numeric float4 float8 date timestamp timestamptz "
-            "interval time timetz uuid json jsonb".split())
-NODES = set("SelectStmt ResTarget ColumnRef A_Star RangeVar Alias JoinExpr RangeSubselect "
-            "A_Expr A_Const String Integer Float Boolean BitString BoolExpr NullTest BooleanTest "
-            "FuncCall CoalesceExpr MinMaxExpr CaseExpr CaseWhen TypeCast TypeName SortBy "
-            "WithClause CommonTableExpr SubLink A_ArrayExpr RowExpr WindowDef "
-            "GroupingSet A_Indirection A_Indices List".split())
+FUNCTIONS = set(
+    "count sum avg min max lower upper length char_length trim btrim ltrim rtrim "
+    "abs round ceil ceiling floor date_part date_trunc to_char concat concat_ws "
+    "replace substring array_length cardinality array_to_string jsonb_extract_path_text "
+    "jsonb_typeof string_agg array_agg bool_and bool_or row_number rank dense_rank".split()
+)
+TYPES = set(
+    "text varchar bpchar bool int2 int4 int8 numeric float4 float8 date timestamp timestamptz "
+    "interval time timetz uuid json jsonb".split()
+)
+NODES = set(
+    "SelectStmt ResTarget ColumnRef A_Star RangeVar Alias JoinExpr RangeSubselect "
+    "A_Expr A_Const String Integer Float Boolean BitString BoolExpr NullTest BooleanTest "
+    "FuncCall CoalesceExpr MinMaxExpr CaseExpr CaseWhen TypeCast TypeName SortBy "
+    "WithClause CommonTableExpr SubLink A_ArrayExpr RowExpr WindowDef "
+    "GroupingSet A_Indirection A_Indices List".split()
+)
 OPERATORS = set("= <> != < > <= >= + - * / % ~~ ~~* !~~ !~~* @> <@ && -> ->> #> #>> ? ?| ?& ||".split())
 
 
@@ -81,6 +91,7 @@ def validate_sql(source: str, tables: set[str]) -> str:
             else:
                 for field in node:
                     scope(getattr(node, field), visible)
+
     Qualify()(parsed)
     scope(parsed)
     return RawStream()(parsed)
@@ -88,6 +99,32 @@ def validate_sql(source: str, tables: set[str]) -> str:
 
 def quote(name):
     return '"' + name.replace('"', '""') + '"'
+
+
+def temporal_value(value, dtype):
+    """Use unambiguous ISO values in both preview and export; UTC for timestamptz."""
+    timestamp = re.fullmatch(r"timestamp(?:\(\d+\))? (with|without) time zone", dtype)
+    if dtype != "date" and not timestamp:
+        return value
+    text = str(value).strip()
+    if dtype == "date":
+        try:
+            if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", text):
+                raise ValueError()
+            return date.fromisoformat(text).isoformat()
+        except ValueError:
+            raise ValueError("Enter a valid date as YYYY-MM-DD, for example 2026-09-14") from None
+    try:
+        if not re.fullmatch(r"\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d{1,6})?)?(?:Z|[+-]\d{2}:\d{2})?", text):
+            raise ValueError()
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        raise ValueError("Enter a valid timestamp as YYYY-MM-DD HH:mm:ss, for example 2026-09-14 14:30:00") from None
+    if timestamp[1] == "with":
+        return parsed.replace(tzinfo=parsed.tzinfo or UTC).astimezone(UTC).isoformat()
+    if parsed.tzinfo:
+        raise ValueError("This timestamp column stores no timezone; enter YYYY-MM-DD HH:mm:ss without an offset")
+    return parsed.isoformat(sep=" ")
 
 
 def build_query(config, catalog):
@@ -137,13 +174,23 @@ def build_query(config, catalog):
         if "rules" in group:
             if group.get("op", "and") not in ("and", "or") or len(group["rules"]) > 50:
                 raise ValueError("Invalid filter group")
+            if not isinstance(group.get("negated", False), bool):
+                raise ValueError("Group negation must be a boolean")
             terms = [filters(rule, depth + 1) for rule in group["rules"]]
-            return "(" + f" {group.get('op', 'and').upper()} ".join(terms) + ")" if terms else "TRUE"
+            expression = "(" + f" {group.get('op', 'and').upper()} ".join(terms) + ")" if terms else "TRUE"
+            return f"NOT ({expression})" if group.get("negated") else expression
         expr, dtype = column(group.get("column"))
         op = group.get("op")
         if op in ("is_null", "not_null"):
             return f"{expr} IS {'NOT ' if op == 'not_null' else ''}NULL"
         value = group.get("value")
+        if op == "in":
+            if not isinstance(value, list) or not 1 <= len(value) <= 1000:
+                raise ValueError("Choose 1–1,000 values for an IN condition")
+            if any(v is None or isinstance(v, (dict, list)) for v in value):
+                raise ValueError("IN condition values must be scalars; use is empty for NULL")
+            params.extend(temporal_value(v, dtype) for v in value)
+            return f"{expr} IN ({', '.join('%s' for _ in value)})"
         if isinstance(value, (dict, list)) or value is None:
             raise ValueError("Filter value must be a scalar")
         if op == "contains" and dtype.endswith("[]"):
@@ -157,7 +204,7 @@ def build_query(config, catalog):
         operators = {"eq": "=", "ne": "<>", "lt": "<", "le": "<=", "gt": ">", "ge": ">="}
         if op not in operators:
             raise ValueError("Unsupported filter operator")
-        params.append(value)
+        params.append(temporal_value(value, dtype))
         return f"{expr} {operators[op]} %s"
 
     where = filters(config.get("filters", {"rules": []}))

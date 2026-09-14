@@ -1,4 +1,5 @@
 """Module settings; credentials stay in .env, operational knobs in config.toml."""
+
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
@@ -27,8 +28,15 @@ def load_settings():
         raise RuntimeError("[data-explorer] enabled must be a boolean")
     if settings.enabled and (not settings.spool_dir or not Path(settings.spool_dir).is_absolute()):
         raise RuntimeError("[data-explorer] spool_dir must be an absolute private directory")
-    for key in ("queue_limit", "timeout_seconds", "preview_timeout_seconds", "artifact_bytes",
-                "spool_bytes", "reserve_bytes", "retention_hours"):
+    for key in (
+        "queue_limit",
+        "timeout_seconds",
+        "preview_timeout_seconds",
+        "artifact_bytes",
+        "spool_bytes",
+        "reserve_bytes",
+        "retention_hours",
+    ):
         if type(getattr(settings, key)) is not int or getattr(settings, key) <= 0:
             raise RuntimeError(f"[data-explorer] {key} must be a positive integer")
     return settings

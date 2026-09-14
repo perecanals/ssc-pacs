@@ -1,1 +1,1 @@
-"""Optional admin research-data explorer. No imports or startup side effects."""
+"""Optional staff/admin Data Exports module."""

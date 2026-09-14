@@ -1,4 +1,4 @@
-import { Routes, Route } from "react-router-dom";
+import { Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider } from "./context/AuthContext";
 import Landing from "./pages/Landing";
 import Navigator from "./pages/Navigator";
@@ -47,12 +47,16 @@ export default function App() {
           }
         />
         <Route
-          path="/admin/data-explorer"
+          path="/data-exports"
           element={
             <ProtectedRoute>
               <DataExplorer />
             </ProtectedRoute>
           }
+        />
+        <Route
+          path="/admin/data-explorer"
+          element={<Navigate to="/data-exports" replace />}
         />
         <Route
           path="/admin/labels"

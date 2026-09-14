@@ -1,12 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import PropTypes from "prop-types";
 import { Navigate } from "react-router-dom";
 import { useAuth } from "../../context/AuthContext";
-import { apiFetch } from "../../api/client";
+import { request } from "./api";
+import Conditions from "./Conditions";
+import ExportHistory from "./ExportHistory";
+import InstrumentTag from "./InstrumentTag";
+import Codebook from "./Codebook";
 import TopBar from "../../components/TopBar";
 import "./DataExplorer.css";
 
-const ROOT = "/api/data-explorer";
 const blank = (table = "") => ({
   table,
   joins: [],
@@ -14,153 +16,13 @@ const blank = (table = "") => ({
   filters: { op: "and", rules: [] },
   sort: [],
 });
-const operators = {
-  eq: "equals",
-  ne: "does not equal",
-  contains: "contains",
-  lt: "less than",
-  le: "at most",
-  gt: "greater than",
-  ge: "at least",
-  is_null: "is empty (NULL)",
-  not_null: "is not empty",
-};
-async function request(path, method = "GET", body, background = false) {
-  const res = await apiFetch(ROOT + path, {
-    method,
-    trackActivity: !background,
-    ...(background ? { headers: { "X-Explorer-Poll": "1" } } : {}),
-    ...(body ? { body: JSON.stringify(body) } : {}),
-  });
-  const data = await res.json();
-  if (!res.ok)
-    throw new Error(
-      typeof data.detail === "string"
-        ? data.detail
-        : "Please check the query settings.",
-    );
-  return data;
-}
-
-function Filters({ group, columns, onChange, depth = 0 }) {
-  const update = (index, value) =>
-    onChange({
-      ...group,
-      rules: group.rules.map((r, i) => (i === index ? value : r)),
-    });
-  return (
-    <fieldset className="explorer__filters">
-      <legend>
-        Match{" "}
-        <select
-          aria-label="Filter combination"
-          value={group.op}
-          onChange={(e) => onChange({ ...group, op: e.target.value })}
-        >
-          <option value="and">all conditions</option>
-          <option value="or">any condition</option>
-        </select>
-      </legend>
-      {group.rules.map((rule, i) => (
-        <div className="explorer__filter" key={i}>
-          {rule.rules ? (
-            <Filters
-              group={rule}
-              columns={columns}
-              depth={depth + 1}
-              onChange={(r) => update(i, r)}
-            />
-          ) : (
-            <>
-              <select
-                aria-label="Filter column"
-                value={rule.column}
-                onChange={(e) => update(i, { ...rule, column: e.target.value })}
-              >
-                {columns.map((c) => (
-                  <option key={c.ref}>{c.ref}</option>
-                ))}
-              </select>
-              <select
-                aria-label="Filter operator"
-                value={rule.op}
-                onChange={(e) => update(i, { ...rule, op: e.target.value })}
-              >
-                {Object.entries(operators).map(([key, label]) => (
-                  <option key={key} value={key}>
-                    {label}
-                  </option>
-                ))}
-              </select>
-              {!["is_null", "not_null"].includes(rule.op) && (
-                <input
-                  aria-label="Filter value"
-                  placeholder={
-                    columns.find((c) => c.ref === rule.column)?.type || "Value"
-                  }
-                  value={rule.value ?? ""}
-                  onChange={(e) =>
-                    update(i, { ...rule, value: e.target.value })
-                  }
-                />
-              )}
-            </>
-          )}
-          <button
-            className="btn-outline"
-            aria-label="Remove condition"
-            onClick={() =>
-              onChange({
-                ...group,
-                rules: group.rules.filter((_, j) => i !== j),
-              })
-            }
-          >
-            Remove
-          </button>
-        </div>
-      ))}
-      <button
-        className="btn-outline"
-        disabled={!columns.length}
-        onClick={() =>
-          onChange({
-            ...group,
-            rules: [
-              ...group.rules,
-              { column: columns[0].ref, op: "eq", value: "" },
-            ],
-          })
-        }
-      >
-        Add condition
-      </button>{" "}
-      {depth < 3 && (
-        <button
-          className="btn-outline"
-          onClick={() =>
-            onChange({
-              ...group,
-              rules: [...group.rules, { op: "or", rules: [] }],
-            })
-          }
-        >
-          Add group
-        </button>
-      )}
-    </fieldset>
-  );
-}
-Filters.propTypes = {
-  group: PropTypes.object.isRequired,
-  columns: PropTypes.array.isRequired,
-  onChange: PropTypes.func.isRequired,
-  depth: PropTypes.number,
-};
-
 export default function DataExplorer() {
-  const { isAdmin, loading } = useAuth();
+  const { isAdmin, isStaff, loading } = useAuth();
+  const canExport = isAdmin || isStaff;
+  const allDatasets = isAdmin ? "All datasets" : "All permitted datasets";
   const [catalog, setCatalog] = useState([]);
+  const [datasets, setDatasets] = useState([]);
+  const [dataset, setDataset] = useState(null);
   const [retentionHours, setRetentionHours] = useState(24);
   const [relationships, setRelationships] = useState([]);
   const [builder, setBuilder] = useState(blank());
@@ -168,10 +30,12 @@ export default function DataExplorer() {
   const [sql, setSql] = useState("");
   const [search, setSearch] = useState("");
   const [columnSearch, setColumnSearch] = useState("");
+  const [instrumentFilter, setInstrumentFilter] = useState("all");
   const [preview, setPreview] = useState(null);
   const [reports, setReports] = useState([]);
   const [reportId, setReportId] = useState("");
   const [reportName, setReportName] = useState("");
+  const [editingExport, setEditingExport] = useState(null);
   const [jobs, setJobs] = useState([]);
   const [historyOffset, setHistoryOffset] = useState(0);
   const [detail, setDetail] = useState(null);
@@ -180,13 +44,41 @@ export default function DataExplorer() {
   const [busy, setBusy] = useState(false);
   const [tab, setTab] = useState("query");
   const revision = useRef(0);
-  const config = { mode, builder, sql };
+  const refreshRevision = useRef(0);
+  const draggedColumn = useRef(null);
+  const [dropTarget, setDropTarget] = useState(null);
+  const config = { mode, builder, sql, dataset };
   const activeTables = [builder.table, ...builder.joins];
   const columns = catalog
     .filter((t) => activeTables.includes(t.name))
     .flatMap((t) =>
       t.columns.map((c) => ({ ...c, ref: `${t.name}.${c.name}` })),
     );
+  const columnByRef = new Map(columns.map((column) => [column.ref, column]));
+  const instruments = [
+    ...new Set(
+      columns
+        .filter((c) => c.label_name && c.instrument)
+        .map((c) => c.instrument),
+    ),
+  ].sort((a, b) => a.localeCompare(b));
+  const visibleColumns = columns.filter((c) => {
+    const matchesInstrument =
+      instrumentFilter === "all" ||
+      (instrumentFilter === "metadata" && !c.label_name) ||
+      (instrumentFilter === "unassigned" && c.label_name && !c.instrument) ||
+      (instrumentFilter.startsWith("instrument:") &&
+        c.label_name &&
+        c.instrument === instrumentFilter.slice(11));
+    return (
+      matchesInstrument &&
+      [c.ref, c.label_name, c.instrument]
+        .filter(Boolean)
+        .some((text) => text.toLowerCase().includes(columnSearch.toLowerCase()))
+    );
+  });
+  const visibleRefs = new Set(visibleColumns.map((c) => c.ref));
+  const combinedSelection = [...new Set([...builder.columns, ...visibleRefs])];
   const related = catalog.filter(
     (t) =>
       !activeTables.includes(t.name) &&
@@ -198,27 +90,31 @@ export default function DataExplorer() {
   );
   const refresh = useCallback(
     async (background = false) => {
+      const version = ++refreshRevision.current;
       const [r, j] = await Promise.all([
         request("/reports", "GET", undefined, background),
         request(
-          `/exports?offset=${historyOffset}`,
+          `/exports?offset=${historyOffset}${dataset ? `&dataset=${encodeURIComponent(dataset)}` : ""}`,
           "GET",
           undefined,
           background,
         ),
       ]);
-      setReports(r);
-      setJobs(j);
+      if (version === refreshRevision.current) {
+        setReports(r);
+        setJobs(j);
+      }
     },
-    [historyOffset],
+    [historyOffset, dataset],
   );
   useEffect(() => {
-    if (!isAdmin) return;
+    if (!canExport) return;
     let alive = true;
     request("/catalog")
       .then((data) => {
         if (!alive) return;
         setCatalog(data.tables);
+        setDatasets(data.datasets || []);
         setRetentionHours(data.limits?.retention_hours ?? 24);
         setRelationships(data.relationships);
         const first =
@@ -228,6 +124,7 @@ export default function DataExplorer() {
           setBuilder({
             ...blank(first.name),
             columns: first.columns
+              .filter((c) => !c.label_name)
               .slice(0, 8)
               .map((c) => `${first.name}.${c.name}`),
           });
@@ -238,19 +135,22 @@ export default function DataExplorer() {
     return () => {
       alive = false;
     };
-  }, [isAdmin]);
+  }, [canExport]);
   useEffect(() => {
-    if (isAdmin) refresh().catch((e) => setError(e.message));
-  }, [isAdmin, refresh]);
+    if (canExport) refresh().catch((e) => setError(e.message));
+  }, [canExport, refresh]);
   useEffect(() => {
-    if (!isAdmin || !jobs.some((j) => ["queued", "running"].includes(j.status)))
+    if (
+      !canExport ||
+      !jobs.some((j) => ["queued", "running"].includes(j.status))
+    )
       return;
     const timer = setInterval(
       () => refresh(true).catch((e) => setError(e.message)),
       5000,
     );
     return () => clearInterval(timer);
-  }, [isAdmin, jobs, refresh]);
+  }, [canExport, jobs, refresh]);
 
   const run = async (action) => {
     setBusy(true);
@@ -265,13 +165,23 @@ export default function DataExplorer() {
     }
   };
   const change = (next) => {
+    if (
+      next.table !== builder.table ||
+      next.joins.join() !== builder.joins.join()
+    )
+      setInstrumentFilter("all");
     revision.current += 1;
     setBuilder(next);
     setPreview(null);
   };
   const load = (c) => {
+    draggedColumn.current = null;
+    setDropTarget(null);
+    setInstrumentFilter("all");
     revision.current += 1;
     setMode(c.mode);
+    setDataset(c.dataset || null);
+    setHistoryOffset(0);
     setBuilder(c.builder || blank());
     setSql(c.sql || "");
     setPreview(null);
@@ -286,7 +196,14 @@ export default function DataExplorer() {
     });
   const exportFile = (format) =>
     run(async () => {
-      await request("/exports", "POST", { ...config, format });
+      if (!reportName.trim()) throw new Error("Export name is required.");
+      await request("/exports", "POST", {
+        ...config,
+        format,
+        name: reportName.trim(),
+        source_export_id: editingExport?.id || null,
+      });
+      setEditingExport(null);
       setNotice(
         "Export queued. You can continue working and download it from Export history when ready.",
       );
@@ -303,7 +220,7 @@ export default function DataExplorer() {
       );
       setReportId(row.id);
       await refresh();
-      setNotice("Shared report saved.");
+      setNotice("Report saved.");
     });
   const reorder = (index, delta) => {
     const selected = [...builder.columns];
@@ -314,22 +231,27 @@ export default function DataExplorer() {
     change({ ...builder, columns: selected });
   };
   if (loading) return null;
-  if (!isAdmin) return <Navigate to="/" replace />;
+  if (!canExport) return <Navigate to="/" replace />;
   return (
     <div className="explorer">
       <TopBar />
       <main className="explorer__main">
         <header className="explorer__header">
           <div>
-            <h1>Data Explorer</h1>
+            <h1>Data Exports</h1>
             <p>
               Browse research tables and build reusable exports. Research data
               is read-only.
             </p>
           </div>
-          <span className="explorer__badge">Admin · Read only</span>
+          <div className="explorer__actions">
+            <Codebook tables={catalog} initialTable={builder.table} />
+            <span className="explorer__badge">
+              {isAdmin ? "Admin" : "Staff"} · Read only
+            </span>
+          </div>
         </header>
-        <nav className="explorer__tabs" aria-label="Data Explorer sections">
+        <nav className="explorer__tabs" aria-label="Data Exports sections">
           <button
             className={tab === "query" ? "active" : ""}
             onClick={() => setTab("query")}
@@ -343,6 +265,42 @@ export default function DataExplorer() {
             Export history
           </button>
         </nav>
+        <section className="explorer__dataset-scope" aria-label="Dataset scope">
+          <label>
+            Dataset
+            <select
+              aria-label="Dataset"
+              value={dataset || ""}
+              disabled={busy}
+              onChange={(event) => {
+                revision.current += 1;
+                setDataset(event.target.value || null);
+                setPreview(null);
+                setHistoryOffset(0);
+                setDetail(null);
+              }}
+            >
+              <option value="">{allDatasets}</option>
+              {dataset && !datasets.includes(dataset) && (
+                <option value={dataset}>
+                  {dataset} (not currently listed)
+                </option>
+              )}
+              {datasets.map((name) => (
+                <option key={name} value={name}>
+                  {name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <div>
+            <strong>Viewing: {dataset || allDatasets}</strong>
+            <p>
+              Applies to value choices, previews and exports in both builder and
+              SQL modes. History shows exports created for the selected dataset.
+            </p>
+          </div>
+        </section>
         {error && (
           <div className="explorer__error" role="alert">
             {error}
@@ -357,13 +315,14 @@ export default function DataExplorer() {
           <>
             <section className="explorer__reports">
               <label>
-                Shared reports
+                {isAdmin ? "Saved reports" : "My reports"}
                 <select
-                  aria-label="Shared reports"
+                  aria-label={isAdmin ? "Saved reports" : "My reports"}
                   value={reportId}
                   onChange={(e) => {
                     const report = reports.find((r) => r.id === e.target.value);
                     setReportId(e.target.value);
+                    setEditingExport(null);
                     setReportName(report?.name || "");
                     if (report) load(report.configuration);
                   }}
@@ -377,8 +336,10 @@ export default function DataExplorer() {
                 </select>
               </label>
               <label>
-                Report name
+                Export name
                 <input
+                  required
+                  aria-describedby="export-name-hint"
                   value={reportName}
                   onChange={(e) => setReportName(e.target.value)}
                   maxLength={120}
@@ -406,7 +367,7 @@ export default function DataExplorer() {
                     onClick={() => {
                       if (
                         window.confirm(
-                          "Delete this shared report? Export history will be retained.",
+                          "Delete this report? Export history will be retained.",
                         )
                       )
                         run(async () => {
@@ -421,7 +382,18 @@ export default function DataExplorer() {
                   </button>
                 </>
               )}
+              <p id="export-name-hint" className="explorer__muted">
+                Required for CSV and Excel exports. Also used when saving a
+                report.
+              </p>
             </section>
+            {editingExport && (
+              <div className="explorer__notice" role="status">
+                Editing export: <strong>{editingExport.name}</strong>. Change
+                the name, dataset, columns or conditions, then export again to
+                create a new history entry. The original export stays available.
+              </div>
+            )}
             <div className="explorer__layout">
               <aside className="explorer__sidebar">
                 <h2>Research tables</h2>
@@ -442,6 +414,7 @@ export default function DataExplorer() {
                         change({
                           ...blank(t.name),
                           columns: t.columns
+                            .filter((c) => !c.label_name)
                             .slice(0, 8)
                             .map((c) => `${t.name}.${c.name}`),
                         })
@@ -468,7 +441,7 @@ export default function DataExplorer() {
                   <button
                     className={mode === "sql" ? "active" : "btn-outline"}
                     onClick={() => {
-                      if (preview) setSql(preview.sql);
+                      if (preview) setSql(preview.base_sql || preview.sql);
                       revision.current += 1;
                       setMode("sql");
                       setPreview(null);
@@ -531,50 +504,179 @@ export default function DataExplorer() {
                       <summary>
                         Columns ({builder.columns.length} selected)
                       </summary>
-                      <input
-                        aria-label="Search columns"
-                        placeholder="Search columns…"
-                        value={columnSearch}
-                        onChange={(e) => setColumnSearch(e.target.value)}
-                      />
+                      <div className="explorer__actions">
+                        <input
+                          aria-label="Search columns"
+                          placeholder="Search columns or labels…"
+                          value={columnSearch}
+                          onChange={(e) => setColumnSearch(e.target.value)}
+                        />
+                        <label>
+                          Instrument{" "}
+                          <select
+                            aria-label="Column instrument"
+                            value={instrumentFilter}
+                            onChange={(e) =>
+                              setInstrumentFilter(e.target.value)
+                            }
+                          >
+                            <option value="all">All columns</option>
+                            <option value="metadata">Table metadata</option>
+                            {instruments.map((name) => (
+                              <option key={name} value={`instrument:${name}`}>
+                                {name}
+                              </option>
+                            ))}
+                            <option value="unassigned">
+                              Unassigned labels
+                            </option>
+                          </select>
+                        </label>
+                        <button
+                          className="btn-outline"
+                          disabled={
+                            !visibleColumns.length ||
+                            combinedSelection.length > 500
+                          }
+                          title="Select the shown columns; maximum 500 total"
+                          onClick={() =>
+                            change({ ...builder, columns: combinedSelection })
+                          }
+                        >
+                          Select shown ({visibleColumns.length})
+                        </button>
+                        <button
+                          className="btn-outline"
+                          disabled={
+                            !builder.columns.some((ref) => visibleRefs.has(ref))
+                          }
+                          onClick={() =>
+                            change({
+                              ...builder,
+                              columns: builder.columns.filter(
+                                (ref) => !visibleRefs.has(ref),
+                              ),
+                            })
+                          }
+                        >
+                          Deselect shown
+                        </button>
+                      </div>
+                      <p className="explorer__muted">
+                        Filter by instrument to select its labels together.
+                        Existing selections remain when you change the filter.
+                        Instrument groups apply to label columns in labelled
+                        tables.
+                      </p>
+                      <p className="explorer__muted">
+                        Drag anywhere on a row in the right-hand list to reorder
+                        selected columns, or use the arrow buttons. Use × to
+                        remove a column.
+                      </p>
                       <div className="explorer__column-layout">
                         <div className="explorer__columns">
-                          {columns
-                            .filter((c) =>
-                              c.ref
-                                .toLowerCase()
-                                .includes(columnSearch.toLowerCase()),
-                            )
-                            .map((c) => (
-                              <label
-                                key={c.ref}
-                                title={c.description || c.type}
-                              >
-                                <input
-                                  type="checkbox"
-                                  checked={builder.columns.includes(c.ref)}
-                                  onChange={(e) =>
-                                    change({
-                                      ...builder,
-                                      columns: e.target.checked
-                                        ? [...builder.columns, c.ref]
-                                        : builder.columns.filter(
-                                            (v) => v !== c.ref,
-                                          ),
-                                    })
-                                  }
-                                />
-                                <span>
+                          {!visibleColumns.length && (
+                            <p>No columns match this instrument and search.</p>
+                          )}
+                          {visibleColumns.map((c) => (
+                            <label
+                              key={c.ref}
+                              title={[
+                                c.ref,
+                                c.label_name,
+                                c.instrument,
+                                c.description,
+                              ]
+                                .filter(Boolean)
+                                .join("\n")}
+                            >
+                              <input
+                                type="checkbox"
+                                checked={builder.columns.includes(c.ref)}
+                                onChange={(e) =>
+                                  change({
+                                    ...builder,
+                                    columns: e.target.checked
+                                      ? [...builder.columns, c.ref]
+                                      : builder.columns.filter(
+                                          (v) => v !== c.ref,
+                                        ),
+                                  })
+                                }
+                              />
+                              <span className="explorer__column-text">
+                                <span className="explorer__column-name">
                                   {c.ref}
-                                  <small>{c.type}</small>
                                 </span>
-                              </label>
-                            ))}
+                                <span className="explorer__column-type">
+                                  {c.type}
+                                </span>
+                                {c.label_name && (
+                                  <InstrumentTag name={c.instrument} />
+                                )}
+                              </span>
+                            </label>
+                          ))}
                         </div>
-                        <ol className="explorer__selected">
+                        <ol
+                          className="explorer__selected"
+                          aria-label="Selected column order"
+                        >
                           {builder.columns.map((c, i) => (
-                            <li key={c}>
-                              <span>{c}</span>
+                            <li
+                              key={c}
+                              data-column-ref={c}
+                              data-drop-target={dropTarget === c}
+                              draggable
+                              onDragStart={(event) => {
+                                draggedColumn.current = c;
+                                event.dataTransfer.effectAllowed = "move";
+                                event.dataTransfer.setData("text/plain", c);
+                              }}
+                              onDragEnd={() => {
+                                draggedColumn.current = null;
+                                setDropTarget(null);
+                              }}
+                              onDragOver={(event) => {
+                                if (!draggedColumn.current) return;
+                                event.preventDefault();
+                                event.dataTransfer.dropEffect = "move";
+                                setDropTarget(c);
+                              }}
+                              onDrop={(event) => {
+                                event.preventDefault();
+                                const source = builder.columns.indexOf(
+                                  draggedColumn.current,
+                                );
+                                if (source >= 0 && source !== i) {
+                                  const selected = [...builder.columns];
+                                  const [moved] = selected.splice(source, 1);
+                                  selected.splice(i, 0, moved);
+                                  change({ ...builder, columns: selected });
+                                }
+                                draggedColumn.current = null;
+                                setDropTarget(null);
+                              }}
+                            >
+                              <span
+                                className="explorer__drag-handle"
+                                aria-hidden="true"
+                              >
+                                ⠿
+                              </span>
+                              <span className="explorer__column-text" title={c}>
+                                <span className="explorer__column-name">
+                                  {c}
+                                </span>
+                                <span className="explorer__column-type">
+                                  {columnByRef.get(c)?.type}
+                                </span>
+                                {columnByRef.get(c)?.label_name && (
+                                  <InstrumentTag
+                                    name={columnByRef.get(c).instrument}
+                                  />
+                                )}
+                              </span>
                               <button
                                 aria-label={`Move ${c} up`}
                                 disabled={i === 0}
@@ -589,14 +691,29 @@ export default function DataExplorer() {
                               >
                                 ↓
                               </button>
+                              <button
+                                aria-label={`Remove ${c}`}
+                                title="Remove column"
+                                onClick={() =>
+                                  change({
+                                    ...builder,
+                                    columns: builder.columns.filter(
+                                      (column) => column !== c,
+                                    ),
+                                  })
+                                }
+                              >
+                                ×
+                              </button>
                             </li>
                           ))}
                         </ol>
                       </div>
                     </details>
-                    <Filters
+                    <Conditions
                       group={builder.filters}
                       columns={columns}
+                      dataset={dataset}
                       onChange={(filters) => change({ ...builder, filters })}
                     />
                     <details>
@@ -699,14 +816,14 @@ export default function DataExplorer() {
                   </button>
                   <button
                     className="btn-outline"
-                    disabled={busy}
+                    disabled={busy || !reportName.trim()}
                     onClick={() => exportFile("csv")}
                   >
                     Export CSV
                   </button>
                   <button
                     className="btn-outline"
-                    disabled={busy}
+                    disabled={busy || !reportName.trim()}
                     onClick={() => exportFile("xlsx")}
                   >
                     Export Excel
@@ -793,154 +910,32 @@ export default function DataExplorer() {
             </div>
           </>
         ) : (
-          <section className="explorer__history">
-            <div className="explorer__actions">
-              <h2>Export history</h2>
-              <button
-                className="btn-outline"
-                disabled={busy}
-                onClick={() => run(refresh)}
-              >
-                Refresh
-              </button>
-            </div>
-            <p>
-              Shared audit history records who exported, when, and the exact
-              query configuration. A rerun reads current data.
-            </p>
-            <div className="explorer__results">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Requested</th>
-                    <th>User</th>
-                    <th>Format</th>
-                    <th>Status</th>
-                    <th>Rows written</th>
-                    <th>Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {jobs.map((j) => (
-                    <tr key={j.id}>
-                      <td>{new Date(j.created_at).toLocaleString()}</td>
-                      <td>{j.username}</td>
-                      <td>{j.format.toUpperCase()}</td>
-                      <td>
-                        {j.status}
-                        {j.error && <small>{j.error}</small>}
-                      </td>
-                      <td>{Number(j.row_count).toLocaleString()}</td>
-                      <td>
-                        <div className="explorer__actions">
-                          <button
-                            className="btn-outline"
-                            disabled={busy}
-                            onClick={() =>
-                              run(async () =>
-                                setDetail(await request(`/exports/${j.id}`)),
-                              )
-                            }
-                          >
-                            Details
-                          </button>
-                          <button
-                            className="btn-outline"
-                            onClick={() => {
-                              load(j.configuration);
-                              setReportId("");
-                              setReportName("");
-                            }}
-                          >
-                            Reuse configuration
-                          </button>
-                          {["running", "queued"].includes(j.status) && (
-                            <button
-                              className="btn-outline"
-                              disabled={busy}
-                              onClick={() =>
-                                run(async () => {
-                                  await request(
-                                    `/exports/${j.id}/cancel`,
-                                    "POST",
-                                  );
-                                  await refresh();
-                                })
-                              }
-                            >
-                              Cancel
-                            </button>
-                          )}
-                          {j.status === "completed" && (
-                            <a
-                              className="btn-outline"
-                              href={`${ROOT}/exports/${j.id}/download`}
-                            >
-                              Download
-                            </a>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            {!jobs.length && <p>No exports yet.</p>}
-            <div className="explorer__actions">
-              <button
-                className="btn-outline"
-                disabled={!historyOffset}
-                onClick={() =>
-                  setHistoryOffset(Math.max(0, historyOffset - 50))
-                }
-              >
-                Newer exports
-              </button>
-              <button
-                className="btn-outline"
-                disabled={jobs.length < 50}
-                onClick={() => setHistoryOffset(historyOffset + 50)}
-              >
-                Older exports
-              </button>
-            </div>
-            {detail && (
-              <section className="explorer__detail">
-                <div className="explorer__actions">
-                  <h3>Export details</h3>
-                  <button
-                    className="btn-outline"
-                    onClick={() => setDetail(null)}
-                  >
-                    Close details
-                  </button>
-                </div>
-                <p>
-                  {detail.username} · {detail.status} ·{" "}
-                  {detail.file_size == null
-                    ? "Size pending"
-                    : `${Number(detail.file_size).toLocaleString()} bytes`}
-                </p>
-                <pre className="explorer__sql-output">
-                  {detail.equivalent_sql}
-                </pre>
-                <details>
-                  <summary>Recorded configuration</summary>
-                  <pre>{JSON.stringify(detail.configuration, null, 2)}</pre>
-                </details>
-                <h4>Download requests</h4>
-                {detail.downloads.map((d, i) => (
-                  <p key={i}>
-                    {d.username} · {new Date(d.requested_at).toLocaleString()}
-                  </p>
-                ))}
-                {!detail.downloads.length && (
-                  <p>No download requests recorded.</p>
-                )}
-              </section>
-            )}
-          </section>
+          <ExportHistory
+            jobs={jobs}
+            detail={detail}
+            busy={busy}
+            historyOffset={historyOffset}
+            onPage={setHistoryOffset}
+            onRefresh={() => run(refresh)}
+            onDetails={(id) =>
+              run(async () => setDetail(await request(`/exports/${id}`)))
+            }
+            onCloseDetails={() => setDetail(null)}
+            onEdit={(job) => {
+              load(job.configuration);
+              setReportId("");
+              setReportName(job.name);
+              setEditingExport({ id: job.id, name: job.name });
+              setNotice("");
+              setError("");
+            }}
+            onCancel={(id) =>
+              run(async () => {
+                await request(`/exports/${id}/cancel`, "POST");
+                await refresh();
+              })
+            }
+          />
         )}
       </main>
     </div>

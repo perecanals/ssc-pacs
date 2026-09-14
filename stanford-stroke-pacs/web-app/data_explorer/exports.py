@@ -1,4 +1,5 @@
 """One bounded export worker, disk-backed artifacts, durable audit and restart recovery."""
+
 import csv
 import datetime
 import json
@@ -14,13 +15,22 @@ from uuid import UUID
 import psycopg2
 import xlsxwriter
 
+from auth import can_user_export
+from data_explorer.access import artifact_in_scope
 from data_explorer.database import query_connection, records
+from dataset_access import fetch_user_scope
 from db import get_conn
 
 logger = logging.getLogger(__name__)
 SHEET_ROWS = 1_048_576
-SERIALIZATION = {"version": 1, "null": "\\N", "dates": "ISO-8601 UTC", "arrays_json": True,
-                 "csv_formula_escape": "apostrophe", "xlsx_identifiers": "text"}
+SERIALIZATION = {
+    "version": 1,
+    "null": "\\N",
+    "dates": "ISO-8601 UTC",
+    "arrays_json": True,
+    "csv_formula_escape": "apostrophe",
+    "xlsx_identifiers": "text",
+}
 
 
 def text_value(value):
@@ -73,10 +83,12 @@ class ExportWorker:
             if not cur.fetchone()[0]:
                 self.owner.close()
                 self.owner = None
-                raise RuntimeError("Only one Data Explorer app process may own the export worker")
+                raise RuntimeError("Only one Data Exports app process may own the export worker")
         self.owner.commit()
-        records("UPDATE explorer_exports SET status='failed', finished_at=now(), error='Interrupted by app restart' "
-                "WHERE status IN ('queued','running')")
+        records(
+            "UPDATE explorer_exports SET status='failed', finished_at=now(), error='Interrupted by app restart' "
+            "WHERE status IN ('queued','running')"
+        )
         self.cleanup()
         self.thread = threading.Thread(target=self.loop, name="data-export", daemon=True)
         self.thread.start()
@@ -99,14 +111,17 @@ class ExportWorker:
         while not self.stop_event.is_set():
             try:
                 self.cleanup()
-                job = records("UPDATE explorer_exports SET status='running', started_at=now() "
-                              "WHERE id=(SELECT id FROM explorer_exports WHERE status='queued' "
-                              "ORDER BY created_at LIMIT 1) RETURNING *", one=True)
+                job = records(
+                    "UPDATE explorer_exports SET status='running', started_at=now() "
+                    "WHERE id=(SELECT id FROM explorer_exports WHERE status='queued' "
+                    "ORDER BY created_at LIMIT 1) RETURNING *",
+                    one=True,
+                )
                 if job:
                     self.run(job)
                     continue
             except Exception:
-                logger.error("Explorer worker operation failed", exc_info=False)
+                logger.error("Data Exports worker operation failed", exc_info=False)
             self.stop_event.wait(2)
 
     def cancel(self, job_id):
@@ -115,11 +130,14 @@ class ExportWorker:
                 self.connection.cancel()
 
     def cleanup(self):
-        expired = records("UPDATE explorer_exports SET status='expired' WHERE status='completed' "
-                          "AND expires_at<=now() RETURNING id")
+        expired = records(
+            "UPDATE explorer_exports SET status='expired' WHERE status='completed' AND expires_at<=now() RETURNING id"
+        )
         for job in expired:
             shutil.rmtree(self.root / str(job["id"]), ignore_errors=True)
-        live = {str(r["id"]) for r in records("SELECT id FROM explorer_exports WHERE status IN ('running','completed')")}
+        live = {
+            str(r["id"]) for r in records("SELECT id FROM explorer_exports WHERE status IN ('running','completed')")
+        }
         for entry in self.root.iterdir():
             try:
                 UUID(entry.name)
@@ -139,16 +157,17 @@ class ExportWorker:
     def run(self, job):
         job_id = str(job["id"])
         directory = self.root / job_id
-        directory.mkdir(mode=0o700)
         path = directory / ("export." + job["format"])
         conn = None
         timer = None
         count = 0
         started = time.monotonic()
         try:
-            principal = records("SELECT is_admin FROM users WHERE username=%s", (job["username"],), one=True)
-            if not principal or not principal["is_admin"]:
-                raise ValueError("Requesting user no longer has administrator access")
+            directory.mkdir(mode=0o700)
+            if not can_user_export(job["username"]):
+                raise ValueError("Requesting user no longer has staff or admin access")
+            if not artifact_in_scope(job, fetch_user_scope(job["username"])):
+                raise ValueError("Dataset access changed; create a new export")
             self.disk_guard(directory)
             conn = query_connection(self.settings.timeout_seconds)
             with self.lock:
@@ -164,10 +183,13 @@ class ExportWorker:
                 headers = [c.name for c in cur.description]
                 if len(headers) > 16384 and job["format"] == "xlsx":
                     raise ValueError("Excel supports at most 16,384 columns; use CSV")
+
                 def batches():
                     nonlocal batch, count
                     while batch:
-                        state = records("SELECT cancel_requested FROM explorer_exports WHERE id=%s", (job_id,), one=True)
+                        state = records(
+                            "SELECT cancel_requested FROM explorer_exports WHERE id=%s", (job_id,), one=True
+                        )
                         if self.stop_event.is_set() or state["cancel_requested"]:
                             raise Cancelled()
                         if time.monotonic() - started > self.settings.timeout_seconds:
@@ -177,6 +199,7 @@ class ExportWorker:
                         self.disk_guard(directory)
                         records("UPDATE explorer_exports SET row_count=%s WHERE id=%s", (count, job_id))
                         batch = cur.fetchmany(1000)
+
                 if job["format"] == "csv":
                     with path.open("w", encoding="utf-8-sig", newline="") as handle:
                         writer = csv.writer(handle)
@@ -189,10 +212,13 @@ class ExportWorker:
             self.disk_guard(directory)
             if time.monotonic() - started > self.settings.timeout_seconds:
                 raise ValueError("Export exceeded its execution deadline")
-            completed = records("UPDATE explorer_exports SET status='completed', finished_at=now(), "
-                                "expires_at=now() + %s * interval '1 hour', file_size=%s, row_count=%s "
-                                "WHERE id=%s AND NOT cancel_requested RETURNING id",
-                                (self.settings.retention_hours, path.stat().st_size, count, job_id), one=True)
+            completed = records(
+                "UPDATE explorer_exports SET status='completed', finished_at=now(), "
+                "expires_at=now() + %s * interval '1 hour', file_size=%s, row_count=%s "
+                "WHERE id=%s AND NOT cancel_requested RETURNING id",
+                (self.settings.retention_hours, path.stat().st_size, count, job_id),
+                one=True,
+            )
             if not completed:
                 raise Cancelled()
         except Exception as exc:
@@ -207,8 +233,10 @@ class ExportWorker:
                 message = "Query cancelled or execution deadline exceeded"
             else:
                 message = "Export failed; check configuration and query compatibility"
-            records("UPDATE explorer_exports SET status=%s, finished_at=now(), error=%s, row_count=%s WHERE id=%s",
-                    ("cancelled" if cancelled else "failed", message, count, job_id))
+            records(
+                "UPDATE explorer_exports SET status=%s, finished_at=now(), error=%s, row_count=%s WHERE id=%s",
+                ("cancelled" if cancelled else "failed", message, count, job_id),
+            )
         finally:
             if timer:
                 timer.cancel()
@@ -221,18 +249,17 @@ class ExportWorker:
 
     @staticmethod
     def write_excel(path, directory, headers, batches):
-        with xlsxwriter.Workbook(str(path), {"constant_memory": True, "tmpdir": str(directory),
-                                            "strings_to_formulas": False, "strings_to_urls": False}) as book:
-            sheet = None
-            index = SHEET_ROWS
-            for rows in [[headers]]:
-                # Create a header-only workbook even when the result is empty.
-                sheet = book.add_worksheet("Export 1")
-                for col, header in enumerate(rows[0]):
-                    if sheet.write_string(0, col, header) != 0:
-                        raise ValueError("Excel header limit exceeded; use CSV")
-                sheet.freeze_panes(1, 0)
-                index = 1
+        with xlsxwriter.Workbook(
+            str(path),
+            {"constant_memory": True, "tmpdir": str(directory), "strings_to_formulas": False, "strings_to_urls": False},
+        ) as book:
+            # Empty results still get a worksheet with a header row.
+            sheet = book.add_worksheet("Export 1")
+            for col, header in enumerate(headers):
+                if sheet.write_string(0, col, header) != 0:
+                    raise ValueError("Excel header limit exceeded; use CSV")
+            sheet.freeze_panes(1, 0)
+            index = 1
             sheets = 1
             for batch in batches:
                 for row in batch:
@@ -245,7 +272,7 @@ class ExportWorker:
                     for col, value in enumerate(row):
                         if isinstance(value, bool):
                             result = sheet.write_boolean(index, col, value)
-                        elif isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value) and len(str(value)) <= 15:
+                        elif isinstance(value, (int, float)) and math.isfinite(value) and len(str(value)) <= 15:
                             result = sheet.write_number(index, col, value)
                         else:
                             # Strings (including IDs), high-precision numbers,
