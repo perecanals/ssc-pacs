@@ -266,7 +266,10 @@ def client(seeded_db):
 
         from fastapi.testclient import TestClient
 
-        with TestClient(app_mod.app, raise_server_exceptions=False) as tc:
+        # The optional exporter must not start a production-configured worker
+        # against the scratch DB. Explorer tests explicitly enable their fixture.
+        from data_explorer.settings import Settings
+        with patch("data_explorer.api.load_settings", return_value=Settings()), TestClient(app_mod.app, raise_server_exceptions=False) as tc:
             yield tc
 
         # Restore originals so module-level state doesn't leak between tests.
