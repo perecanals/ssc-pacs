@@ -2,8 +2,10 @@
 
 The **Data Explorer** landing card opens `/admin/data-explorer`, an optional,
 admin-only research-table browser and export module. It uses the same login,
-top bar, theme and interaction conventions as Navigator. Every API endpoint
-checks current administrator status, including direct artifact downloads.
+top bar, theme and interaction conventions as Navigator. The workspace spans
+the page width with narrow outer margins, including on ultrawide displays.
+Every API endpoint checks current administrator status, including direct
+artifact downloads.
 Non-admin users cannot use this module, even when they have Navigator dataset
 grants. Future role support must add both table/column policies and dataset
 row restrictions before making any endpoint available to non-admin users.

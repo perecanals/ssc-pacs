@@ -5,9 +5,10 @@
   color: var(--color-text);
 }
 .explorer__main {
-  max-width: 1600px;
-  margin: 0 auto;
-  padding: 56px 24px 28px;
+  width: 100%;
+  min-height: 100vh;
+  box-sizing: border-box;
+  padding: 52px 16px 16px;
 }
 .explorer__header,
 .explorer__actions,
@@ -250,9 +251,6 @@
   border-radius: 6px;
 }
 @media (max-width: 900px) {
-  .explorer__main {
-    padding: 52px 16px 16px;
-  }
   .explorer__layout,
   .explorer__column-layout {
     grid-template-columns: 1fr;
