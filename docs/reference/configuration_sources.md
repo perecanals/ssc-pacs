@@ -106,11 +106,11 @@ full ordered sequence is in
 
 ## Optional Data Exports
 
-`config.toml [data-explorer]` owns enablement, spool path and resource limits.
-`.env EXPLORER_DB_USER/EXPLORER_DB_PASSWORD` supplies its separate read-only
+`config.toml [data-exports]` owns enablement, spool path and resource limits.
+`.env DATA_EXPORTS_DB_USER/DATA_EXPORTS_DB_PASSWORD` supplies its separate read-only
 login; endpoint/database settings come from the existing `DB_*` configuration.
-Provision with `scripts/admin/manage_explorer_db.py`; see
-[operations](../operations/data_explorer.md).
+Provision with `scripts/admin/manage_data_exports_db.py`; see
+[operations](../operations/data_exports.md).
 
 ## Related procedures (don't duplicate them here)
 

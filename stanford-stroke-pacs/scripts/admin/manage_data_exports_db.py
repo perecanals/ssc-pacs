@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Provision/check the dedicated Data Exports role; never print credentials.
 
-Run from the stack root: python scripts/admin/manage_explorer_db.py provision
-Updates only EXPLORER_DB_USER/PASSWORD in .env. Existing role must carry this
+Run from the stack root: python scripts/admin/manage_data_exports_db.py provision
+Updates only DATA_EXPORTS_DB_USER/PASSWORD in .env. Existing role must carry this
 script's ownership marker. Use provision again to rotate its password and sync
 SELECT grants after adding an approved research table. Use sync to update
 grants without rotating the credential.
@@ -20,17 +20,17 @@ from psycopg2 import sql
 
 STACK = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(STACK / "web-app"))
-from data_explorer.database import check_role
-from data_explorer.policy import READER_TABLES
+from data_exports.database import check_role
+from data_exports.policy import READER_TABLES
 from db import DB_CONFIG
 
-MARKER = "ssc-data-explorer dedicated reader"
+MARKER = "ssc-data-exports dedicated reader"
 
 
 def provision(*, rotate=True):
-    name = os.getenv("EXPLORER_DB_USER", "sscpacs-readonly")
+    name = os.getenv("DATA_EXPORTS_DB_USER", "sscpacs-readonly")
     if name == DB_CONFIG["user"]:
-        raise RuntimeError("Explorer role must differ from DB_USER")
+        raise RuntimeError("Data Exports role must differ from DB_USER")
     password = secrets.token_urlsafe(48) if rotate else None
     conn = psycopg2.connect(**DB_CONFIG)
     try:
@@ -38,7 +38,7 @@ def provision(*, rotate=True):
             cur.execute("SELECT shobj_description(oid,'pg_authid') FROM pg_roles WHERE rolname=%s", (name,))
             existing = cur.fetchone()
             if existing and existing[0] != MARKER:
-                raise RuntimeError("Existing role is not owned by this script; choose a new EXPLORER_DB_USER")
+                raise RuntimeError("Existing role is not owned by this script; choose a new DATA_EXPORTS_DB_USER")
             if not existing and not rotate:
                 raise RuntimeError("Role does not exist; run provision first")
             ident = sql.Identifier(name)
@@ -75,16 +75,16 @@ def provision(*, rotate=True):
         conn.close()
     if rotate:
         env = STACK / ".env"
-        set_key(str(env), "EXPLORER_DB_USER", name)
-        set_key(str(env), "EXPLORER_DB_PASSWORD", password)
+        set_key(str(env), "DATA_EXPORTS_DB_USER", name)
+        set_key(str(env), "DATA_EXPORTS_DB_PASSWORD", password)
         env.chmod(0o600)
-        os.environ["EXPLORER_DB_USER"] = name
-        os.environ["EXPLORER_DB_PASSWORD"] = password
+        os.environ["DATA_EXPORTS_DB_USER"] = name
+        os.environ["DATA_EXPORTS_DB_PASSWORD"] = password
     check_role()
     print(
-        "Explorer reader provisioned; credentials saved in .env (not displayed)."
+        "Data Exports reader provisioned; credentials saved in .env (not displayed)."
         if rotate
-        else "Explorer reader grants synchronized; credentials unchanged."
+        else "Data Exports reader grants synchronized; credentials unchanged."
     )
 
 
@@ -99,11 +99,11 @@ def main():
             provision(rotate=False)
         else:
             check_role()
-            print("Explorer role passes the read-only catalog checks.")
+            print("Data Exports role passes the read-only catalog checks.")
     except Exception:
         # DB exceptions can include credential-bearing SQL. Never print them.
         print(
-            "Explorer role operation failed. Check database privileges, role ownership and .env write access.",
+            "Data Exports role operation failed. Check database privileges, role ownership and .env write access.",
             file=sys.stderr,
         )
         return 1

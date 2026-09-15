@@ -54,7 +54,7 @@ export default function ConditionValue({
   };
   if (operator === "in")
     return (
-      <div className="explorer__condition-value">
+      <div className="data-exports__condition-value">
         {column?.ref && (
           <ExistingValues
             key={`${column.ref}:in:${dataset || ""}`}
@@ -71,8 +71,8 @@ export default function ConditionValue({
       </div>
     );
   return (
-    <div className="explorer__condition-value">
-      <div className="explorer__actions">
+    <div className="data-exports__condition-value">
+      <div className="data-exports__actions">
         <input
           ref={ref}
           aria-label="Filter value"
@@ -91,7 +91,7 @@ export default function ConditionValue({
         />
         {datetime && (
           <input
-            className="explorer__fraction"
+            className="data-exports__fraction"
             aria-label="Fractional seconds (optional)"
             title="Optional fractional seconds: up to six digits"
             placeholder="Fraction (optional)"

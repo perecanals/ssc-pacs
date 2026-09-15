@@ -59,15 +59,15 @@ const adminOnlyCards = [
 export default function Landing() {
   const { currentUser, isAdmin, isStaff, logout } = useAuth();
   const navigate = useNavigate();
-  const [explorerEnabled, setExplorerEnabled] = useState(false);
+  const [dataExportsEnabled, setDataExportsEnabled] = useState(false);
   useEffect(() => {
     if (isAdmin || isStaff)
-      apiGet("/api/data-explorer/capabilities")
-        .then((data) => setExplorerEnabled(data.enabled))
-        .catch(() => setExplorerEnabled(false));
+      apiGet("/api/data-exports/capabilities")
+        .then((data) => setDataExportsEnabled(data.enabled))
+        .catch(() => setDataExportsEnabled(false));
   }, [isAdmin, isStaff]);
-  const explorerCards =
-    (isAdmin || isStaff) && explorerEnabled
+  const dataExportsCards =
+    (isAdmin || isStaff) && dataExportsEnabled
       ? [
           {
             to: "/data-exports",
@@ -81,8 +81,8 @@ export default function Landing() {
         ]
       : [];
   const cards = isAdmin
-    ? [...baseCards, ...explorerCards, ...adminOnlyCards]
-    : [...baseCards, ...explorerCards];
+    ? [...baseCards, ...dataExportsCards, ...adminOnlyCards]
+    : [...baseCards, ...dataExportsCards];
   const containerClass =
     cards.length === 1 ? "landing__single" : "landing__grid";
 

@@ -6,7 +6,7 @@ import {
   within,
 } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import Codebook from "../modules/data-explorer/Codebook";
+import Codebook from "../modules/data-exports/Codebook";
 
 const originalShow = Object.getOwnPropertyDescriptor(
   HTMLDialogElement.prototype,

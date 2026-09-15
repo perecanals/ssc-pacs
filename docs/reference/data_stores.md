@@ -317,13 +317,15 @@ Populated by `annotations_audit_trg` trigger (PL/pgSQL). See [`../operations/ann
 
 ## Data Exports metadata
 
-Alembic `0021_data_explorer` adds `explorer_reports` (named configurations;
+Alembic `0021_data_explorer` introduces the metadata tables;
+`0024_data_exports_naming` gives them their current names:
+`data_exports_reports` (named configurations;
 staff see their own, admins see all),
-`explorer_exports` (immutable requests plus lifecycle state), and
-`explorer_downloads` (delivery-request audit). These tables are excluded from
-the research catalog and reader grants. See [Data Exports](data_explorer.md).
+`data_exports_jobs` (immutable requests plus lifecycle state), and
+`data_exports_downloads` (delivery-request audit). These tables are excluded from
+the research catalog and reader grants. See [Data Exports](data_exports.md).
 
-Alembic `0023_export_names` adds `explorer_exports.name` (required text, 1–120
+Alembic `0023_export_names` adds the name column, now `data_exports_jobs.name` (required text, 1–120
 characters, nonblank). An edited export creates a new row; its configuration
 records `source_export_id` when rerun from history. The source row remains
 unchanged. Names need not be unique.

@@ -234,7 +234,7 @@ no manual steps required.
 
 Data Exports metadata is introduced by `0021_data_explorer`; it has no research
 table changes. Keep this shipped revision when disabling/removing the module.
-See [Data Exports operations](data_explorer.md).
+See [Data Exports operations](data_exports.md).
 
 `0022_staff_role` adds `users.is_staff` (default false) and the
 `users_distinct_roles` check constraint. It changes no existing grants or
@@ -243,7 +243,13 @@ Downgrading to `0021_data_explorer` removes staff assignments and the column;
 first stop/revert code that reads `is_staff`. Disabling Data Exports alone does
 not require this downgrade: staff also use the imaging download routes.
 
-`0023_export_names` adds a required `explorer_exports.name` with a 1–120 character,
+`0023_export_names` adds a required `data_exports_jobs.name` with a 1–120 character,
 nonblank constraint and no default for new rows. Existing history receives
 `Export <UUID>` names; history and artifacts are retained. Downgrading removes
 names, so stop or revert code that requires them before downgrading.
+
+`0024_data_exports_naming` renames Data Exports tables and their constraints,
+indexes and audit sequence. Rows, identifiers, foreign keys and grants are
+preserved. Both upgrade and downgrade require a stopped export worker. Upgrade
+host configuration with `migrate_data_exports.py` before starting the renamed
+backend; see [Data Exports operations](data_exports.md#upgrade-existing-installations-to-the-new-naming).

@@ -11,14 +11,14 @@ import psycopg2
 import pytest
 from psycopg2 import sql
 
-from data_explorer import database
-from data_explorer.exports import ExportWorker
-from data_explorer.policy import READER_TABLES, TABLES
-from data_explorer.query import build_query, validate_sql
-from data_explorer.settings import Settings
+from data_exports import database
+from data_exports.exports import ExportWorker
+from data_exports.policy import READER_TABLES, TABLES
+from data_exports.query import build_query, validate_sql
+from data_exports.settings import Settings
 from tests.conftest import TEST_USER, USER_LVO, login_as
 
-ROOT = "/api/data-explorer"
+ROOT = "/api/data-exports"
 ID = "00000000-0000-0000-0000-000000000001"
 ENDPOINTS = [
     ("GET", "/capabilities"),
@@ -57,7 +57,7 @@ ENDPOINTS = [
         "SELECT * FROM label_definitions",
         "SELECT * FROM annotations",
         "SELECT * FROM clinical_data",
-        "SELECT * FROM explorer_exports",
+        "SELECT * FROM data_exports_jobs",
         "COPY patient_labelled TO STDOUT",
         "SELECT 'users'::regclass",
         "SELECT * FROM patient_labelled TABLESAMPLE SYSTEM(1)",
@@ -121,8 +121,8 @@ def test_disabled_module(logged_in_client):
     assert logged_in_client.get(ROOT + "/values", params={"column": "patient_labelled.patient_id"}).status_code == 404
 
 
-def test_existing_values_search_and_array_filter_roundtrip(explorer):
-    client, _ = explorer
+def test_existing_values_search_and_array_filter_roundtrip(data_exports):
+    client, _ = data_exports
     response = client.get(ROOT + "/values", params={"column": "patient_labelled.dataset", "operator": "contains"})
     assert response.status_code == 200
     assert response.json() == {"values": ["crisp2", "lvo"], "has_more": False}
@@ -157,8 +157,8 @@ def test_existing_values_search_and_array_filter_roundtrip(explorer):
         assert client.get(ROOT + "/values", params={"column": column}).status_code == 422
 
 
-def test_existing_values_limits_empty_strings_and_timestamps(explorer):
-    client, _ = explorer
+def test_existing_values_limits_empty_strings_and_timestamps(data_exports):
+    client, _ = data_exports
     database.records(
         "INSERT INTO patient_labelled (patient_id) SELECT 'choice-' || lpad(n::text, 3, '0') FROM generate_series(1, 110) n"
     )
@@ -187,10 +187,10 @@ def test_existing_values_limits_empty_strings_and_timestamps(explorer):
     assert len(response.json()["rows"]) > 0
 
 
-def test_existing_values_timeout_and_concurrency(explorer, monkeypatch):
-    from data_explorer import api
+def test_existing_values_timeout_and_concurrency(data_exports, monkeypatch):
+    from data_exports import api
 
-    client, _ = explorer
+    client, _ = data_exports
 
     def timeout(*args):
         raise psycopg2.errors.QueryCanceled()
@@ -207,8 +207,8 @@ def test_existing_values_timeout_and_concurrency(explorer, monkeypatch):
         api._preview_slots.release()
 
 
-def test_nested_boolean_conditions_preview_report_and_export(explorer):
-    client, worker = explorer
+def test_nested_boolean_conditions_preview_report_and_export(data_exports):
+    client, worker = data_exports
 
     def condition(value):
         return {"column": "patient_labelled.patient_id", "op": "eq", "value": value}
@@ -240,8 +240,8 @@ def test_nested_boolean_conditions_preview_report_and_export(explorer):
     assert client.post(ROOT + "/preview", json=config).status_code == 422
 
 
-def test_dataset_scope_applies_to_all_tables_values_and_export_history(explorer):
-    client, worker = explorer
+def test_dataset_scope_applies_to_all_tables_values_and_export_history(data_exports):
+    client, worker = data_exports
     database.records(
         "INSERT INTO image_series_labelled (patient_id, studyinstanceuid, seriesinstanceuid, series_type) "
         "VALUES ('P-0002', '2.2.2.2.2', '2.2.2.2.2.2', 'CTA')"
@@ -296,15 +296,15 @@ def test_dataset_scope_applies_to_all_tables_values_and_export_history(explorer)
         "SELECT patient_id FROM patient_labelled WHERE EXISTS (SELECT 1 FROM image_study_labelled s WHERE s.patient_id=patient_labelled.patient_id)",
     ],
 )
-def test_sql_dataset_scope_covers_aliases_ctes_subqueries_and_joins(explorer, query):
-    client, _ = explorer
+def test_sql_dataset_scope_covers_aliases_ctes_subqueries_and_joins(data_exports, query):
+    client, _ = data_exports
     response = client.post(ROOT + "/preview", json={"mode": "sql", "sql": query, "dataset": "crisp2"})
     assert response.status_code == 200, response.text
     assert response.json()["rows"] == [["P-0001"]]
 
 
-def test_in_conditions_preserve_values_and_dataset_in_reports_and_exports(explorer):
-    client, worker = explorer
+def test_in_conditions_preserve_values_and_dataset_in_reports_and_exports(data_exports):
+    client, worker = data_exports
     config = {
         "dataset": "crisp2",
         "builder": {
@@ -337,8 +337,8 @@ def test_in_conditions_preserve_values_and_dataset_in_reports_and_exports(explor
 
 
 @pytest.fixture()
-def explorer(logged_in_client, seeded_db, monkeypatch, tmp_path):
-    name = "test_explorer_" + uuid4().hex[:12]
+def data_exports(logged_in_client, seeded_db, monkeypatch, tmp_path):
+    name = "test_data_exports_" + uuid4().hex[:12]
     password = secrets.token_urlsafe(32)
     admin = psycopg2.connect(**seeded_db)
     admin.autocommit = True
@@ -354,19 +354,19 @@ def explorer(logged_in_client, seeded_db, monkeypatch, tmp_path):
         )
         for (table,) in cur.fetchall():
             cur.execute(sql.SQL("GRANT SELECT ON public.{} TO {}").format(sql.Identifier(table), sql.Identifier(name)))
-    monkeypatch.setenv("EXPLORER_DB_USER", name)
-    monkeypatch.setenv("EXPLORER_DB_PASSWORD", password)
+    monkeypatch.setenv("DATA_EXPORTS_DB_USER", name)
+    monkeypatch.setenv("DATA_EXPORTS_DB_PASSWORD", password)
     settings = Settings(enabled=True, spool_dir=str(tmp_path / "spool"), reserve_bytes=1)
     worker = ExportWorker(settings)
     worker.root.mkdir(mode=0o700)
-    (worker.root / ".ssc-explorer-spool").write_text("SSC Data Explorer temporary artifacts\n")
+    (worker.root / ".ssc-data-exports-spool").write_text("SSC Data Exports temporary artifacts\n")
     import app
 
-    monkeypatch.setattr(app.app.state, "explorer_settings", settings)
-    monkeypatch.setattr(app.app.state, "explorer_worker", worker)
-    monkeypatch.setattr(app.app.state, "explorer_error", None)
+    monkeypatch.setattr(app.app.state, "data_exports_settings", settings)
+    monkeypatch.setattr(app.app.state, "data_exports_worker", worker)
+    monkeypatch.setattr(app.app.state, "data_exports_error", None)
     with admin.cursor() as cur:
-        cur.execute("TRUNCATE explorer_downloads, explorer_exports, explorer_reports")
+        cur.execute("TRUNCATE data_exports_downloads, data_exports_jobs, data_exports_reports")
     yield logged_in_client, worker
     worker.stop()
     with admin.cursor() as cur:
@@ -384,17 +384,17 @@ def submit(client, query="SELECT * FROM patient_labelled ORDER BY patient_id", f
 
 
 def run_job(worker, job):
-    database.records("UPDATE explorer_exports SET status='running', started_at=now() WHERE id=%s", (job["id"],))
+    database.records("UPDATE data_exports_jobs SET status='running', started_at=now() WHERE id=%s", (job["id"],))
     worker.run(job)
-    return database.records("SELECT * FROM explorer_exports WHERE id=%s", (job["id"],), one=True)
+    return database.records("SELECT * FROM data_exports_jobs WHERE id=%s", (job["id"],), one=True)
 
 
-def test_role_cannot_write_or_read_sensitive_tables(explorer):
+def test_role_cannot_write_or_read_sensitive_tables(data_exports):
     database.check_role()
     for query in [
         "UPDATE public.patient_labelled SET patient_id=patient_id",
         "SELECT * FROM public.users",
-        "SELECT * FROM public.explorer_exports",
+        "SELECT * FROM public.data_exports_jobs",
     ]:
         with database.reader() as conn, conn.cursor() as cur:
             with pytest.raises(psycopg2.Error):
@@ -405,12 +405,12 @@ def test_role_cannot_write_or_read_sensitive_tables(explorer):
             cur.execute("DELETE FROM public.patient_labelled")
 
 
-def test_catalog_preview_join_and_shared_report(explorer):
-    client, _ = explorer
+def test_catalog_preview_join_and_shared_report(data_exports):
+    client, _ = data_exports
     catalog = client.get(ROOT + "/catalog").json()
     names = {t["name"] for t in catalog["tables"]}
     assert "patient_labelled" in names
-    assert not names & {"users", "clinical_data", "explorer_reports", "series_cache_state"}
+    assert not names & {"users", "clinical_data", "data_exports_reports", "series_cache_state"}
     config = {
         "mode": "builder",
         "builder": {
@@ -439,8 +439,8 @@ def test_catalog_preview_join_and_shared_report(explorer):
     assert client.delete(ROOT + "/reports/" + report["id"]).status_code == 200
 
 
-def test_direct_patient_series_relationship_without_study(explorer):
-    client, worker = explorer
+def test_direct_patient_series_relationship_without_study(data_exports):
+    client, worker = data_exports
     relation = ["patient_labelled", "patient_id", "image_series_labelled", "patient_id"]
     assert relation in client.get(ROOT + "/catalog").json()["relationships"]
     database.records(
@@ -472,8 +472,8 @@ def test_direct_patient_series_relationship_without_study(explorer):
     assert run_job(worker, job)["row_count"] == 2
 
 
-def test_adding_study_to_direct_patient_series_join_uses_series_study_uid(explorer):
-    client, _ = explorer
+def test_adding_study_to_direct_patient_series_join_uses_series_study_uid(data_exports):
+    client, _ = data_exports
     database.records(
         "INSERT INTO image_study_labelled (patient_id, studyinstanceuid) VALUES ('P-0001', 'unrelated-study')"
     )
@@ -496,8 +496,8 @@ def test_adding_study_to_direct_patient_series_join_uses_series_study_uid(explor
 
 
 @pytest.mark.parametrize("format", ["csv", "xlsx"])
-def test_export_fidelity_history_and_download_audit(explorer, format):
-    client, worker = explorer
+def test_export_fidelity_history_and_download_audit(data_exports, format):
+    client, worker = data_exports
     query = "SELECT '00123' AS id, '=2+2' AS formula, NULL AS missing, ARRAY['a','b'] AS tags, 1234567890123456789::numeric AS precise"
     job = submit(client, query, format)
     result = run_job(worker, job)
@@ -519,8 +519,8 @@ def test_export_fidelity_history_and_download_audit(explorer, format):
     assert detail["equivalent_sql"]
 
 
-def test_cancel_queue_limits_and_expiration(explorer):
-    client, worker = explorer
+def test_cancel_queue_limits_and_expiration(data_exports):
+    client, worker = data_exports
     worker.settings = replace(worker.settings, queue_limit=1)
     job = submit(client)
     assert (
@@ -530,15 +530,15 @@ def test_cancel_queue_limits_and_expiration(explorer):
     assert client.get(ROOT + f"/exports/{job['id']}").json()["status"] == "cancelled"
     job = submit(client)
     run_job(worker, job)
-    database.records("UPDATE explorer_exports SET expires_at=now()-interval '1 second' WHERE id=%s", (job["id"],))
+    database.records("UPDATE data_exports_jobs SET expires_at=now()-interval '1 second' WHERE id=%s", (job["id"],))
     worker.cleanup()
     assert not (worker.root / job["id"]).exists()
     assert client.get(ROOT + f"/exports/{job['id']}/download").status_code == 410
     assert client.get(ROOT + f"/exports/{job['id']}").json()["status"] == "expired"
 
 
-def test_output_directory_failure_marks_export_failed(explorer, monkeypatch):
-    client, worker = explorer
+def test_output_directory_failure_marks_export_failed(data_exports, monkeypatch):
+    client, worker = data_exports
     job = submit(client)
 
     def fail_mkdir(*args, **kwargs):
@@ -551,8 +551,8 @@ def test_output_directory_failure_marks_export_failed(explorer, monkeypatch):
     assert not (worker.root / job["id"]).exists()
 
 
-def test_disk_limit_and_audit_failure(explorer, monkeypatch):
-    client, worker = explorer
+def test_disk_limit_and_audit_failure(data_exports, monkeypatch):
+    client, worker = data_exports
     worker.settings = replace(worker.settings, artifact_bytes=1)
     result = run_job(worker, submit(client))
     assert result["status"] == "failed"
@@ -564,7 +564,7 @@ def test_disk_limit_and_audit_failure(explorer, monkeypatch):
     real = database.records
 
     def fail_audit(query, *args, **kwargs):
-        if query.startswith("INSERT INTO explorer_downloads"):
+        if query.startswith("INSERT INTO data_exports_downloads"):
             raise RuntimeError("audit unavailable")
         return real(query, *args, **kwargs)
 
@@ -572,8 +572,8 @@ def test_disk_limit_and_audit_failure(explorer, monkeypatch):
     assert client.get(ROOT + f"/exports/{job['id']}/download").status_code == 500
 
 
-def test_restart_recovery_and_single_owner(explorer):
-    client, worker = explorer
+def test_restart_recovery_and_single_owner(data_exports):
+    client, worker = data_exports
     job = submit(client)
     directory = worker.root / job["id"]
     directory.mkdir()
@@ -591,7 +591,7 @@ def test_restart_recovery_and_single_owner(explorer):
 
 
 def test_excel_multiple_sheets_and_oversized_cell(tmp_path, monkeypatch):
-    import data_explorer.exports as exports
+    import data_exports.exports as exports
 
     monkeypatch.setattr(exports, "SHEET_ROWS", 3)
     path = tmp_path / "test.xlsx"
@@ -602,10 +602,10 @@ def test_excel_multiple_sheets_and_oversized_cell(tmp_path, monkeypatch):
         ExportWorker.write_excel(path, tmp_path, ["text"], [[("x" * 32768,)]])
 
 
-def test_large_export_streams_with_bounded_memory(explorer):
+def test_large_export_streams_with_bounded_memory(data_exports):
     import tracemalloc
 
-    client, worker = explorer
+    client, worker = data_exports
     values = "(VALUES (0),(1),(2),(3),(4),(5),(6),(7),(8),(9))"
     query = "SELECT '000001' AS id FROM " + " CROSS JOIN ".join(f"{values} AS t{i}(n)" for i in range(6))
     job = submit(client, query)
@@ -620,16 +620,16 @@ def test_large_export_streams_with_bounded_memory(explorer):
     assert peak < 30 * 1024**2
 
 
-def test_polling_does_not_extend_login(explorer):
-    client, _ = explorer
-    response = client.get(ROOT + "/exports", headers={"X-Explorer-Poll": "1"})
+def test_polling_does_not_extend_login(data_exports):
+    client, _ = data_exports
+    response = client.get(ROOT + "/exports", headers={"X-Data-Exports-Poll": "1"})
     assert response.status_code == 200
     assert "set-cookie" not in response.headers
     assert "set-cookie" in client.get(ROOT + "/exports").headers
 
 
-def test_preview_invalid_filters_and_literal_percent(explorer):
-    client, worker = explorer
+def test_preview_invalid_filters_and_literal_percent(data_exports):
+    client, worker = data_exports
     assert client.post(ROOT + "/preview", json={"mode": "sql", "sql": "SELECT '100%' AS value"}).json()["rows"] == [
         ["100%"]
     ]
@@ -646,10 +646,10 @@ def test_preview_invalid_filters_and_literal_percent(explorer):
     assert client.post(ROOT + "/preview", json=malformed).status_code == 422
 
 
-def test_worker_cancels_running_job_and_rechecks_export_access(explorer, monkeypatch):
-    client, worker = explorer
+def test_worker_cancels_running_job_and_rechecks_export_access(data_exports, monkeypatch):
+    client, worker = data_exports
     job = submit(client)
-    database.records("UPDATE explorer_exports SET cancel_requested=true WHERE id=%s", (job["id"],))
+    database.records("UPDATE data_exports_jobs SET cancel_requested=true WHERE id=%s", (job["id"],))
     assert run_job(worker, job)["status"] == "cancelled"
     job = submit(client)
     job["username"] = USER_LVO
@@ -699,19 +699,19 @@ def test_temporal_conditions_are_unambiguous(dtype, value, expected):
     ],
 )
 def test_temporal_conditions_reject_ambiguous_or_invalid_values(dtype, value):
-    from data_explorer.query import temporal_value
+    from data_exports.query import temporal_value
 
     with pytest.raises(ValueError, match="date|timestamp|timezone"):
         temporal_value(value, dtype)
 
 
-def test_catalog_instruments_are_scoped_to_real_labelled_columns(explorer):
-    client, _ = explorer
+def test_catalog_instruments_are_scoped_to_real_labelled_columns(data_exports):
+    client, _ = data_exports
     for level, instrument in [("patient", "Intake"), ("study", "Follow-up"), ("series", None)]:
         response = client.post(
             "/api/label-definitions",
             json={
-                "name": f"explorer_instrument_{level}",
+                "name": f"data_exports_instrument_{level}",
                 "level": level,
                 "datatype": "select" if level == "series" else "text",
                 "instrument": instrument,
@@ -726,10 +726,10 @@ def test_catalog_instruments_are_scoped_to_real_labelled_columns(explorer):
         ("image_study_labelled", "study", "Follow-up"),
         ("image_series_labelled", "series", None),
     ]:
-        column = next(c for c in tables[table]["columns"] if c["name"] == f"label_explorer_instrument_{level}")
+        column = next(c for c in tables[table]["columns"] if c["name"] == f"label_data_exports_instrument_{level}")
         assert column["instrument"] == instrument
         assert column["label_level"] == level
-        assert column["label_name"] == f"explorer_instrument_{level}"
+        assert column["label_name"] == f"data_exports_instrument_{level}"
         assert column["label_datatype"] == ("select" if level == "series" else "text")
         assert column["label_description"] == f"Description of the {level} label.\nSecond line."
         assert all("instrument" not in c for c in tables[table]["columns"] if not c["name"].startswith("label_"))
@@ -740,8 +740,8 @@ def test_catalog_instruments_are_scoped_to_real_labelled_columns(explorer):
             cur.execute("SELECT * FROM public.image_study")
 
 
-def test_timestamp_preview_and_export_share_validated_value(explorer):
-    client, worker = explorer
+def test_timestamp_preview_and_export_share_validated_value(data_exports):
+    client, worker = data_exports
     config = {
         "mode": "builder",
         "builder": {
@@ -762,14 +762,14 @@ def test_timestamp_preview_and_export_share_validated_value(explorer):
     assert "YYYY-MM-DD HH:mm:ss" in response.json()["detail"]
 
 
-def test_reader_grant_sync_removes_old_tables_without_rotating_password(explorer, monkeypatch):
+def test_reader_grant_sync_removes_old_tables_without_rotating_password(data_exports, monkeypatch):
     import os
     import runpy
     from pathlib import Path
 
-    client, _ = explorer
-    role = os.environ["EXPLORER_DB_USER"]
-    script = Path(__file__).resolve().parents[2] / "scripts" / "admin" / "manage_explorer_db.py"
+    client, _ = data_exports
+    role = os.environ["DATA_EXPORTS_DB_USER"]
+    script = Path(__file__).resolve().parents[2] / "scripts" / "admin" / "manage_data_exports_db.py"
     commands = runpy.run_path(str(script))
     conn = database.get_conn()
     try:
@@ -795,10 +795,10 @@ def test_reader_grant_sync_removes_old_tables_without_rotating_password(explorer
 
 
 @pytest.fixture()
-def staff_explorer(explorer):
+def staff_data_exports(data_exports):
     from tests.conftest import USER_CRISP
 
-    client, worker = explorer
+    client, worker = data_exports
     database.records("UPDATE users SET is_staff=true WHERE username=%s", (USER_CRISP,))
     login_as(client, USER_CRISP)
     try:
@@ -820,8 +820,8 @@ def staff_explorer(explorer):
         "SELECT patient_id FROM patient_labelled WHERE patient_id IN (SELECT patient_id FROM image_study_labelled)",
     ],
 )
-def test_staff_queries_scope_every_table(staff_explorer, query):
-    client, _, user = staff_explorer
+def test_staff_queries_scope_every_table(staff_data_exports, query):
+    client, _, user = staff_data_exports
     assert client.get("/api/me").json()["is_staff"] is True
     assert client.get("/api/admin/users").status_code == 403
     assert client.get(ROOT + "/catalog").json()["datasets"] == ["crisp2"]
@@ -838,8 +838,8 @@ def test_staff_queries_scope_every_table(staff_explorer, query):
     assert client.post(ROOT + "/preview", json={"mode": "sql", "sql": query}).json()["rows"] == []
 
 
-def test_staff_scope_uses_canonical_patient_membership(staff_explorer):
-    client, _, _ = staff_explorer
+def test_staff_scope_uses_canonical_patient_membership(staff_data_exports):
+    client, _, _ = staff_data_exports
     # Simulate a labelled mirror whose cohort data has not yet refreshed.
     database.records("UPDATE patient_labelled SET dataset=ARRAY['crisp2'] WHERE patient_id='P-0002'")
     response = client.post(
@@ -849,8 +849,8 @@ def test_staff_scope_uses_canonical_patient_membership(staff_explorer):
     assert response.json()["rows"] == [["P-0001"]]
 
 
-def test_staff_reports_and_artifacts_are_private(staff_explorer):
-    client, worker, user = staff_explorer
+def test_staff_reports_and_artifacts_are_private(staff_data_exports):
+    client, worker, user = staff_data_exports
     config = {"mode": "sql", "sql": "SELECT patient_id FROM patient_labelled ORDER BY patient_id"}
     report = client.post(ROOT + "/reports", json={"name": "My cohort", "configuration": config}).json()
     job = submit(client, config["sql"])
@@ -884,8 +884,8 @@ def test_staff_reports_and_artifacts_are_private(staff_explorer):
 
 
 @pytest.mark.parametrize("revocation", ["is_staff=false", "allowed_datasets='{}'"])
-def test_queued_staff_export_rechecks_permissions(staff_explorer, revocation):
-    client, worker, user = staff_explorer
+def test_queued_staff_export_rechecks_permissions(staff_data_exports, revocation):
+    client, worker, user = staff_data_exports
     job = submit(client)
     database.records(f"UPDATE users SET {revocation} WHERE username=%s", (user,))
     assert run_job(worker, job)["status"] == "failed"
@@ -893,17 +893,17 @@ def test_queued_staff_export_rechecks_permissions(staff_explorer, revocation):
 
 
 @pytest.mark.parametrize("name", [None, "", "   ", "\t\n", "\u2003", "x" * 121])
-def test_export_requires_a_nonblank_name(explorer, name):
-    client, _ = explorer
+def test_export_requires_a_nonblank_name(data_exports, name):
+    client, _ = data_exports
     body = {"mode": "sql", "sql": "SELECT 1"}
     if name is not None:
         body["name"] = name
     assert client.post(ROOT + "/exports", json=body).status_code == 422
-    assert database.records("SELECT count(*) AS n FROM explorer_exports", one=True)["n"] == 0
+    assert database.records("SELECT count(*) AS n FROM data_exports_jobs", one=True)["n"] == 0
 
 
-def test_named_export_edit_preserves_original_and_uses_current_scope(staff_explorer):
-    client, worker, _ = staff_explorer
+def test_named_export_edit_preserves_original_and_uses_current_scope(staff_data_exports):
+    client, worker, _ = staff_data_exports
     body = {
         "name": "  CTA³ 测试  ",
         "mode": "sql",
@@ -943,10 +943,10 @@ def test_named_export_edit_preserves_original_and_uses_current_scope(staff_explo
 
 
 @pytest.mark.parametrize("table", ["patient", "label_definitions"])
-def test_reader_requires_internal_metadata_grants(explorer, table):
+def test_reader_requires_internal_metadata_grants(data_exports, table):
     import os
 
-    role = os.environ["EXPLORER_DB_USER"]
+    role = os.environ["DATA_EXPORTS_DB_USER"]
     conn = database.get_conn()
     try:
         with conn.cursor() as cur:
@@ -960,8 +960,8 @@ def test_reader_requires_internal_metadata_grants(explorer, table):
         database.check_role()
 
 
-def test_preview_compiles_from_one_catalog_snapshot(explorer, monkeypatch):
-    client, _ = explorer
+def test_preview_compiles_from_one_catalog_snapshot(data_exports, monkeypatch):
+    client, _ = data_exports
     original = database.catalog
     calls = []
 

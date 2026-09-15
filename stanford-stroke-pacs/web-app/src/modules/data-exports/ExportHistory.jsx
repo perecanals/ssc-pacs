@@ -14,8 +14,8 @@ export default function ExportHistory({
   onCancel,
 }) {
   return (
-    <section className="explorer__history">
-      <div className="explorer__actions">
+    <section className="data-exports__history">
+      <div className="data-exports__actions">
         <h2>Export history</h2>
         <button className="btn-outline" disabled={busy} onClick={onRefresh}>
           Refresh
@@ -25,7 +25,7 @@ export default function ExportHistory({
         Audit history records who exported, when, and the exact query
         configuration. A rerun reads current data.
       </p>
-      <div className="explorer__results">
+      <div className="data-exports__results">
         <table>
           <thead>
             <tr>
@@ -61,7 +61,7 @@ export default function ExportHistory({
                 </td>
                 <td>{Number(j.row_count).toLocaleString()}</td>
                 <td>
-                  <div className="explorer__actions">
+                  <div className="data-exports__actions">
                     <button
                       className="btn-outline"
                       disabled={busy}
@@ -101,7 +101,7 @@ export default function ExportHistory({
         </table>
       </div>
       {!jobs.length && <p>No exports yet.</p>}
-      <div className="explorer__actions">
+      <div className="data-exports__actions">
         <button
           className="btn-outline"
           disabled={!historyOffset}
@@ -118,8 +118,8 @@ export default function ExportHistory({
         </button>
       </div>
       {detail && (
-        <section className="explorer__detail">
-          <div className="explorer__actions">
+        <section className="data-exports__detail">
+          <div className="data-exports__actions">
             <h3>Export details: {detail.name}</h3>
             <button className="btn-outline" onClick={onCloseDetails}>
               Close details
@@ -131,7 +131,9 @@ export default function ExportHistory({
               ? "Size pending"
               : `${Number(detail.file_size).toLocaleString()} bytes`}
           </p>
-          <pre className="explorer__sql-output">{detail.equivalent_sql}</pre>
+          <pre className="data-exports__sql-output">
+            {detail.equivalent_sql}
+          </pre>
           <details>
             <summary>Recorded configuration</summary>
             <pre>{JSON.stringify(detail.configuration, null, 2)}</pre>

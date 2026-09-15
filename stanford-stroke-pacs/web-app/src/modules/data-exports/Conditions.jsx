@@ -27,7 +27,7 @@ export default function Conditions({
     });
   return (
     <fieldset
-      className="explorer__filters"
+      className="data-exports__filters"
       aria-label={depth ? "Nested condition group" : "Conditions"}
     >
       <legend>
@@ -41,7 +41,7 @@ export default function Conditions({
           <option value="or">OR — any condition</option>
         </select>
       </legend>
-      <label className="explorer__negate-group">
+      <label className="data-exports__negate-group">
         <input
           type="checkbox"
           checked={group.negated || false}
@@ -52,13 +52,13 @@ export default function Conditions({
         NOT — exclude matches to this group
       </label>
       {depth === 0 && (
-        <p className="explorer__muted">
+        <p className="data-exports__muted">
           Combine conditions with AND or OR. Add groups to nest logic, and use
           NOT to exclude a group’s matches.
         </p>
       )}
       {group.rules.map((rule, i) => (
-        <div className="explorer__filter" key={i}>
+        <div className="data-exports__filter" key={i}>
           {rule.rules ? (
             <Conditions
               group={rule}

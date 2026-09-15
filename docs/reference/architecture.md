@@ -416,7 +416,7 @@ Credential rotation lives in dedicated siblings:
 Alembic `0022_staff_role` adds `users.is_staff` (default false); a check constraint
 keeps staff and admin flags mutually exclusive. `require_staff` permits either
 role, while `require_admin` remains unchanged. Staff can download series as
-DICOM ZIP or NIfTI and use [Data Exports](data_explorer.md), within their existing
+DICOM ZIP or NIfTI and use [Data Exports](data_exports.md), within their existing
 dataset grants. They cannot manage users, delete imaging data, use the admin copy-path
 endpoint, or log directly into Orthanc. `manage_users.py set-staff` grants/revokes
 this capability independently of dataset grants and passwords. API role checks

@@ -40,7 +40,7 @@ export default function ExistingValues({
       try {
         const params = new URLSearchParams({ column, operator, search });
         if (dataset) params.set("dataset", dataset);
-        const response = await apiFetch(`/api/data-explorer/values?${params}`, {
+        const response = await apiFetch(`/api/data-exports/values?${params}`, {
           signal: controller.signal,
         });
         let data;
@@ -77,11 +77,11 @@ export default function ExistingValues({
   }, [open, column, operator, search, dataset]);
 
   return (
-    <div className="explorer__existing-values">
+    <div className="data-exports__existing-values">
       {multiple && (
         <>
           <div
-            className="explorer__chosen-values"
+            className="data-exports__chosen-values"
             aria-label="Selected filter values"
           >
             {selectedValues.map((value) => (
@@ -95,7 +95,7 @@ export default function ExistingValues({
               </button>
             ))}
           </div>
-          <div className="explorer__actions">
+          <div className="data-exports__actions">
             <input
               aria-label="Add filter value"
               placeholder="Add a value manually"
@@ -135,7 +135,7 @@ export default function ExistingValues({
         {open ? "Hide existing values" : "Choose existing value"}
       </button>
       {open && (
-        <div id={id} className="explorer__value-picker">
+        <div id={id} className="data-exports__value-picker">
           <input
             type="search"
             aria-label="Search existing values"
@@ -156,7 +156,7 @@ export default function ExistingValues({
             <>
               {multiple ? (
                 <div
-                  className="explorer__value-options"
+                  className="data-exports__value-options"
                   role="group"
                   aria-label="Existing values"
                 >

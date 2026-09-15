@@ -7,7 +7,7 @@ from pglast import ast, parse_sql
 from pglast.stream import RawStream
 from pglast.visitors import Visitor
 
-from data_explorer.policy import RELATIONSHIPS
+from data_exports.policy import RELATIONSHIPS
 
 FUNCTIONS = set(
     "count sum avg min max lower upper length char_length trim btrim ltrim rtrim "

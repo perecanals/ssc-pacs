@@ -1,9 +1,9 @@
 # Data Exports operations
 
-See the [reference](../reference/data_explorer.md) for workflows, authorization,
+See the [reference](../reference/data_exports.md) for workflows, authorization,
 SQL restrictions and file formats.
 
-## Setup and upgrades
+## Setup
 
 Install the pinned web-app requirements and build the frontend using the normal
 deployment procedure. The module uses `pglast` and `XlsxWriter`. From the stack
@@ -11,8 +11,8 @@ root (`stanford-stroke-pacs/`), apply migrations before enabling it:
 
 ```bash
 alembic upgrade head
-python scripts/admin/manage_explorer_db.py provision
-python scripts/admin/manage_explorer_db.py check
+python scripts/admin/manage_data_exports_db.py provision
+python scripts/admin/manage_data_exports_db.py check
 ```
 
 | Migration | Change |
@@ -20,19 +20,20 @@ python scripts/admin/manage_explorer_db.py check
 | `0021_data_explorer` | Reports, export jobs and download audit tables |
 | `0022_staff_role` | Staff flag on application users; admin/staff flags are mutually exclusive |
 | `0023_export_names` | Required export name; existing records receive `Export <UUID>` |
+| `0024_data_exports_naming` | Rename metadata tables, constraints, indexes and audit sequence; retain all rows |
 
 These migrations do not change research rows or delete history. Restart the
 backend after upgrades so routes match the schema.
 
 Provisioning creates the dedicated `sscpacs-readonly` PostgreSQL login, or uses
-`EXPLORER_DB_USER` if configured. It stores generated credentials in `.env`
+`DATA_EXPORTS_DB_USER` if configured. It stores generated credentials in `.env`
 (mode 0600) without displaying them. It refuses to modify a role without its
 ownership marker. Running `provision` again rotates the password; restart the
 app afterward to load it. For grant updates without rotation, use:
 
 ```bash
-python scripts/admin/manage_explorer_db.py sync
-python scripts/admin/manage_explorer_db.py check
+python scripts/admin/manage_data_exports_db.py sync
+python scripts/admin/manage_data_exports_db.py check
 ```
 
 The reader receives SELECT on the four export tables, plus `label_definitions`
@@ -51,9 +52,9 @@ are changed.
 Configure a private, absolute spool directory in the per-host `config.toml`:
 
 ```toml
-[data-explorer]
+[data-exports]
 enabled = true
-spool_dir = "/absolute/private/path/to/data-explorer"
+spool_dir = "/absolute/private/path/to/data-exports"
 ```
 
 The directory must be owned by the app user, mode 0700 and empty on first use.
@@ -65,6 +66,45 @@ After building and configuring, restart the service and refresh the browser:
 ```bash
 sudo systemctl restart ssc-web-app
 ```
+
+## Upgrade existing installations to the new naming
+
+Existing installations must rename their host configuration and spool before
+starting the updated backend. From the stack root, inspect the plan first:
+
+```bash
+python scripts/admin/migrate_data_exports.py
+```
+
+Then stop the service and apply the upgrade as the app user:
+
+```bash
+sudo systemctl stop ssc-web-app
+python scripts/admin/migrate_data_exports.py --execute
+cd web-app
+npm run build
+sudo systemctl start ssc-web-app
+```
+
+The script renames the module section to `[data-exports]`, the credential keys to
+`DATA_EXPORTS_DB_USER` / `DATA_EXPORTS_DB_PASSWORD`, and the reader ownership
+marker. It preserves passwords and grants. A spool folder named after the old
+module is renamed to `data-exports` in the same parent directory; custom spool
+names are retained. Existing artifacts move with it and keep their identifiers.
+The private spool marker becomes `.ssc-data-exports-spool`.
+
+The script defaults to a dry run, refuses conflicting settings or directories,
+and uses the worker's advisory lock to require that it is stopped. It restores
+filesystem changes on failure and can be rerun after a successful upgrade.
+At startup, Alembic `0024_data_exports_naming` renames the metadata tables without
+changing report configurations, job SQL, timestamps, names or download audits.
+Completed files remain downloadable until their normal expiration; interrupted
+jobs follow the existing restart-recovery behavior.
+
+Update external API callers to `/api/data-exports` and refresh browser tabs after
+the restart. There are no legacy route, configuration or credential aliases.
+Shipped migration identifiers and historical audit SQL retain their original
+names. Disabling the module does not replace this upgrade on an existing host.
 
 ## Staff accounts
 
@@ -89,7 +129,7 @@ One in-process worker runs exports; an advisory lock prevents multiple app
 processes from owning the queue. Use the repository's single-uvicorn-process
 deployment. Two shared slots serve previews and value lookups.
 
-Optional `[data-explorer]` settings:
+Optional `[data-exports]` settings:
 
 | Key | Default | Meaning |
 |---|---:|---|
@@ -124,7 +164,7 @@ disconnects.
 Use **Export history → Details** for status and configuration. Avoid logging row
 contents or raw database exceptions; these may contain identifiers or filters.
 If startup marks the module unavailable, check the service journal and run
-`manage_explorer_db.py check`. Synchronize grants before restarting when policy
+`manage_data_exports_db.py check`. Synchronize grants before restarting when policy
 changes. Missing internal grants can prevent dataset choices or label metadata.
 
 A frontend rebuild does not reload Python routes. If an expected endpoint is
@@ -134,12 +174,12 @@ when the Data Exports reader or worker fails to initialize.
 
 ## Extend or remove
 
-Backend code lives in `web-app/data_explorer/`; frontend code lives in
-`src/modules/data-explorer/`. `DataExplorer.jsx` coordinates state, `Conditions`
+Backend code lives in `web-app/data_exports/`; frontend code lives in
+`src/modules/data-exports/`. `DataExports.jsx` coordinates state, `Conditions`
 edits nested filters, and `ExportHistory` renders runs and details. Integration
-consists of API registration, worker lifecycle, the frontend route/redirect,
-landing card and background-poll session handling. API routes remain under
-`/api/data-explorer`; config and package identifiers retain their original names.
+consists of API registration, worker lifecycle, the frontend route, landing card
+and background-poll session handling. API routes use `/api/data-exports`;
+background polls use the `X-Data-Exports-Poll` header.
 
 Adding tables requires an explicit policy change, review of column exposure,
 relationship definitions, and grant synchronization. New roles must preserve

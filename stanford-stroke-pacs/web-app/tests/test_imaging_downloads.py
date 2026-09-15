@@ -13,7 +13,7 @@ from pydicom.dataset import FileDataset, FileMetaDataset
 from pydicom.uid import CTImageStorage, ExplicitVRLittleEndian, generate_uid
 
 import imaging_downloads as downloads
-from data_explorer import database
+from data_exports import database
 from tests.conftest import USER_CRISP, USER_LVO, USER_NONE, login_as
 
 UID = "1.2.3.4.5.6"

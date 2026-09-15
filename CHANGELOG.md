@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+Data Exports uses `data-exports` for routes/configuration and `data_exports` for Python/SQL identifiers.
+Alembic `0024_data_exports_naming` and the host upgrade script preserve existing reports, export history, files and credentials during the rename.
+
 Staff can export permitted datasets through Data Exports and download DICOM ZIP or NIfTI; Alembic `0022_staff_role` adds the role without changing dataset grants.
 Data Exports adds instrument selection, nested filters, a codebook, and named exports that can be reopened for editing; `0023_export_names` adds required names while preserving history.
 Downloads support Unicode filenames and release temporary files on failed transfers. Export setup failures are recorded in history.

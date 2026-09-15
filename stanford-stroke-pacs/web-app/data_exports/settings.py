@@ -22,12 +22,12 @@ class Settings:
 
 def load_settings():
     with _CONFIG_PATH.open("rb") as handle:
-        section = tomllib.load(handle).get("data-explorer", {})
+        section = tomllib.load(handle).get("data-exports", {})
     settings = Settings(**section)
     if not isinstance(settings.enabled, bool):
-        raise RuntimeError("[data-explorer] enabled must be a boolean")
+        raise RuntimeError("[data-exports] enabled must be a boolean")
     if settings.enabled and (not settings.spool_dir or not Path(settings.spool_dir).is_absolute()):
-        raise RuntimeError("[data-explorer] spool_dir must be an absolute private directory")
+        raise RuntimeError("[data-exports] spool_dir must be an absolute private directory")
     for key in (
         "queue_limit",
         "timeout_seconds",
@@ -38,5 +38,5 @@ def load_settings():
         "retention_hours",
     ):
         if type(getattr(settings, key)) is not int or getattr(settings, key) <= 0:
-            raise RuntimeError(f"[data-explorer] {key} must be a positive integer")
+            raise RuntimeError(f"[data-exports] {key} must be a positive integer")
     return settings

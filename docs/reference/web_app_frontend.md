@@ -57,13 +57,13 @@ Authorization model:
   input
 
 `users.is_admin` gates administration and direct Orthanc access. The separate
-`users.is_staff` flag grants imaging downloads and [Data Exports](data_explorer.md)
+`users.is_staff` flag grants imaging downloads and [Data Exports](data_exports.md)
 without granting administrative privileges. `/api/me` returns `is_admin`,
 `is_staff` and `allowed_datasets`; `AuthContext` exposes `isAdmin`, `isStaff`
 and `allowedDatasets`. Server checks use current database values on each request.
-The Data Exports card opens `/data-exports`; `/admin/data-explorer` remains a
-redirect for old bookmarks. Backend/config/package identifiers remain
-`data-explorer` to preserve deployment compatibility.
+The Data Exports card opens `/data-exports`; API requests use `/api/data-exports`.
+The frontend module and config section use `data-exports`, and the Python
+package uses `data_exports`.
 
 ---
 
@@ -79,8 +79,7 @@ The app defines these routes (`App.jsx`):
 - `/change-password` — forced/self-service password change (`ChangePassword.jsx`)
 - `/` — Landing page with card links to Web App, Orthanc Explorer 2, and OHIF
 - `/app` — Web App annotation browser
-- `/data-exports` — staff/admin Data Exports builder and history; the legacy
-  `/admin/data-explorer` route redirects here
+- `/data-exports` — staff/admin Data Exports builder and history
 - `/admin` — admin-only user dataset-access page (`AdminUsers.jsx`): a
   users × datasets checkbox grid backed by `GET /api/admin/users` and
   `PUT /api/admin/users/{username}/datasets`, with optimistic updates that
@@ -102,11 +101,11 @@ The app defines these routes (`App.jsx`):
   `DELETE /api/admin/instruments?name=…`; query parameter because instrument
   names are free text).
 
-Data Exports lives in `src/modules/data-explorer/`. `DataExplorer.jsx` owns the
+Data Exports lives in `src/modules/data-exports/`. `DataExports.jsx` owns the
 builder and request state; `Conditions.jsx`, `ConditionValue.jsx`, and
 `ExistingValues.jsx` handle nested filters and value selection. `ExportHistory.jsx`
 renders past runs, and `Codebook.jsx` shows label definitions. API requests share
-`api.js`. See [Data Exports operations](../operations/data_explorer.md) for module
+`api.js`. See [Data Exports operations](../operations/data_exports.md) for module
 integration points and removal.
 
 The Navigator page (`Navigator.jsx`) provides three hierarchical levels:

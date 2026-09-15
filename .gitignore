@@ -4,6 +4,8 @@
 orthanc_users.json
 **/orthanc_users.json
 data_exports
+# Keep the Python module visible while ignoring local export directories.
+!stanford-stroke-pacs/web-app/data_exports/
 ingestion_mount
 
 # Python

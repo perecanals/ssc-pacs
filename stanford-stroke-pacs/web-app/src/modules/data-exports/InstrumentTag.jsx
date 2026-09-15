@@ -17,7 +17,7 @@ export default function InstrumentTag({ name }) {
   for (const char of name || "") hash = (hash * 31 + char.codePointAt(0)) >>> 0;
   return (
     <span
-      className="explorer__column-instrument"
+      className="data-exports__column-instrument"
       style={{
         color: name ? COLORS[hash % COLORS.length] : "#6d28d9",
       }}

@@ -16,8 +16,8 @@ import psycopg2
 import xlsxwriter
 
 from auth import can_user_export
-from data_explorer.access import artifact_in_scope
-from data_explorer.database import query_connection, records
+from data_exports.access import artifact_in_scope
+from data_exports.database import query_connection, records
 from dataset_access import fetch_user_scope
 from db import get_conn
 
@@ -71,12 +71,12 @@ class ExportWorker:
     def start(self):
         self.root.mkdir(mode=0o700, parents=True, exist_ok=True)
         if self.root.is_symlink() or self.root.stat().st_uid != os.getuid() or self.root.stat().st_mode & 0o077:
-            raise RuntimeError("Explorer spool must be owned by the app user with mode 0700")
-        marker = self.root / ".ssc-explorer-spool"
+            raise RuntimeError("Data Exports spool must be owned by the app user with mode 0700")
+        marker = self.root / ".ssc-data-exports-spool"
         if not marker.exists():
             if any(self.root.iterdir()):
-                raise RuntimeError("Explorer spool must be an empty dedicated directory on first use")
-            marker.write_text("SSC Data Explorer temporary artifacts\n")
+                raise RuntimeError("Data Exports spool must be an empty dedicated directory on first use")
+            marker.write_text("SSC Data Exports temporary artifacts\n")
         self.owner = get_conn()
         with self.owner.cursor() as cur:
             cur.execute("SELECT pg_try_advisory_lock(782341, 21)")
@@ -86,7 +86,7 @@ class ExportWorker:
                 raise RuntimeError("Only one Data Exports app process may own the export worker")
         self.owner.commit()
         records(
-            "UPDATE explorer_exports SET status='failed', finished_at=now(), error='Interrupted by app restart' "
+            "UPDATE data_exports_jobs SET status='failed', finished_at=now(), error='Interrupted by app restart' "
             "WHERE status IN ('queued','running')"
         )
         self.cleanup()
@@ -112,8 +112,8 @@ class ExportWorker:
             try:
                 self.cleanup()
                 job = records(
-                    "UPDATE explorer_exports SET status='running', started_at=now() "
-                    "WHERE id=(SELECT id FROM explorer_exports WHERE status='queued' "
+                    "UPDATE data_exports_jobs SET status='running', started_at=now() "
+                    "WHERE id=(SELECT id FROM data_exports_jobs WHERE status='queued' "
                     "ORDER BY created_at LIMIT 1) RETURNING *",
                     one=True,
                 )
@@ -131,12 +131,12 @@ class ExportWorker:
 
     def cleanup(self):
         expired = records(
-            "UPDATE explorer_exports SET status='expired' WHERE status='completed' AND expires_at<=now() RETURNING id"
+            "UPDATE data_exports_jobs SET status='expired' WHERE status='completed' AND expires_at<=now() RETURNING id"
         )
         for job in expired:
             shutil.rmtree(self.root / str(job["id"]), ignore_errors=True)
         live = {
-            str(r["id"]) for r in records("SELECT id FROM explorer_exports WHERE status IN ('running','completed')")
+            str(r["id"]) for r in records("SELECT id FROM data_exports_jobs WHERE status IN ('running','completed')")
         }
         for entry in self.root.iterdir():
             try:
@@ -174,7 +174,7 @@ class ExportWorker:
                 self.connection, self.active_id = conn, job_id
             timer = threading.Timer(self.settings.timeout_seconds, self.cancel, args=(job_id,))
             timer.start()
-            with conn.cursor(name="explorer_export") as cur:
+            with conn.cursor(name="data_exports_export") as cur:
                 cur.itersize = 1000
                 # Immutable SQL was validated at submission. Parameters are
                 # passed only for the visual builder (raw SQL may contain %).
@@ -188,7 +188,7 @@ class ExportWorker:
                     nonlocal batch, count
                     while batch:
                         state = records(
-                            "SELECT cancel_requested FROM explorer_exports WHERE id=%s", (job_id,), one=True
+                            "SELECT cancel_requested FROM data_exports_jobs WHERE id=%s", (job_id,), one=True
                         )
                         if self.stop_event.is_set() or state["cancel_requested"]:
                             raise Cancelled()
@@ -197,7 +197,7 @@ class ExportWorker:
                         yield batch
                         count += len(batch)
                         self.disk_guard(directory)
-                        records("UPDATE explorer_exports SET row_count=%s WHERE id=%s", (count, job_id))
+                        records("UPDATE data_exports_jobs SET row_count=%s WHERE id=%s", (count, job_id))
                         batch = cur.fetchmany(1000)
 
                 if job["format"] == "csv":
@@ -213,7 +213,7 @@ class ExportWorker:
             if time.monotonic() - started > self.settings.timeout_seconds:
                 raise ValueError("Export exceeded its execution deadline")
             completed = records(
-                "UPDATE explorer_exports SET status='completed', finished_at=now(), "
+                "UPDATE data_exports_jobs SET status='completed', finished_at=now(), "
                 "expires_at=now() + %s * interval '1 hour', file_size=%s, row_count=%s "
                 "WHERE id=%s AND NOT cancel_requested RETURNING id",
                 (self.settings.retention_hours, path.stat().st_size, count, job_id),
@@ -223,7 +223,7 @@ class ExportWorker:
                 raise Cancelled()
         except Exception as exc:
             shutil.rmtree(directory, ignore_errors=True)
-            state = records("SELECT cancel_requested FROM explorer_exports WHERE id=%s", (job_id,), one=True)
+            state = records("SELECT cancel_requested FROM data_exports_jobs WHERE id=%s", (job_id,), one=True)
             cancelled = isinstance(exc, Cancelled) or state["cancel_requested"]
             if cancelled:
                 message = "Cancelled"
@@ -234,7 +234,7 @@ class ExportWorker:
             else:
                 message = "Export failed; check configuration and query compatibility"
             records(
-                "UPDATE explorer_exports SET status=%s, finished_at=now(), error=%s, row_count=%s WHERE id=%s",
+                "UPDATE data_exports_jobs SET status=%s, finished_at=now(), error=%s, row_count=%s WHERE id=%s",
                 ("cancelled" if cancelled else "failed", message, count, job_id),
             )
         finally:

@@ -225,12 +225,16 @@ python scripts/admin/rotate_db_password.py check        # verify .env authentica
 
 ### Data Exports reader
 
-From the stack root, `python scripts/admin/manage_explorer_db.py provision`
+For an existing installation, preview the naming upgrade with
+`python scripts/admin/migrate_data_exports.py`; stop the web app before applying
+`--execute`. See the [upgrade procedure](data_exports.md#upgrade-existing-installations-to-the-new-naming).
+
+From the stack root, `python scripts/admin/manage_data_exports_db.py provision`
 creates/rotates the dedicated `sscpacs-readonly` login and saves credentials
-without displaying them. Use `python scripts/admin/manage_explorer_db.py check`
-to verify grants, or `python scripts/admin/manage_explorer_db.py sync` to
+without displaying them. Use `python scripts/admin/manage_data_exports_db.py check`
+to verify grants, or `python scripts/admin/manage_data_exports_db.py sync` to
 synchronize the restricted catalog without changing credentials. See
-[Data Exports operations](data_explorer.md) before enabling.
+[Data Exports operations](data_exports.md) before enabling.
 
 ---
 

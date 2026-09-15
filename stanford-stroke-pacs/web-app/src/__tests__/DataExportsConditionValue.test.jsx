@@ -1,6 +1,6 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import ConditionValue from "../modules/data-explorer/ConditionValue";
+import ConditionValue from "../modules/data-exports/ConditionValue";
 
 describe("date and timestamp conditions", () => {
   it("offers a calendar with ISO date guidance", () => {
