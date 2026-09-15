@@ -6,8 +6,32 @@ SQL restrictions and file formats.
 ## Setup
 
 Install the pinned web-app requirements and build the frontend using the normal
-deployment procedure. The module uses `pglast` and `XlsxWriter`. From the stack
-root (`stanford-stroke-pacs/`), apply migrations before enabling it:
+deployment procedure. The module uses `pglast` and `XlsxWriter`.
+
+The `provision` and `sync` commands connect using `DB_USER` / `DB_PASSWORD`
+from the environment or `.env`. This provisioning account must be able to manage
+the reader role and grant the required database, schema and table access. It
+also needs `SET` privilege on `temp_file_limit`, because both commands set the
+reader's temporary-file limit with `ALTER ROLE`. A PostgreSQL superuser already
+has these privileges; for an otherwise authorized non-superuser provisioning
+account, a database administrator can grant the additional parameter privilege
+(replace `provisioning_role` with that account's role name):
+
+```sql
+GRANT SET ON PARAMETER temp_file_limit TO provisioning_role;
+```
+
+This grant supplements the account's role-management and object-grant privileges;
+it does not replace them. Grant it to the provisioning account, not to
+`sscpacs-readonly`: the reader inherits the configured limit at login and should
+not be able to raise it. See PostgreSQL's
+[parameter privileges](https://www.postgresql.org/docs/16/sql-grant.html) and
+[temporary-file limit](https://www.postgresql.org/docs/16/runtime-config-resource.html#GUC-TEMP-FILE-LIMIT)
+documentation. The `check` command uses the reader credentials and does not
+require provisioning privileges.
+
+From the stack root (`stanford-stroke-pacs/`), apply migrations and provision the
+reader before enabling the module:
 
 ```bash
 alembic upgrade head
