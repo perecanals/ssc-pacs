@@ -59,24 +59,24 @@ function CodebookDialog({ tables, initialTable, onClose }) {
   return (
     <dialog
       ref={dialog}
-      className="explorer__codebook"
+      className="data-exports__codebook"
       aria-labelledby={titleId}
       onCancel={(event) => {
         event.preventDefault();
         onClose();
       }}
     >
-      <div className="explorer__header">
+      <div className="data-exports__header">
         <h2 id={titleId}>Label codebook</h2>
         <button type="button" onClick={onClose} aria-label="Close codebook">
           Close ×
         </button>
       </div>
-      <p className="explorer__muted">
+      <p className="data-exports__muted">
         Descriptions from the annotation label definitions. Definitions are
         shared across datasets.
       </p>
-      <div className="explorer__actions">
+      <div className="data-exports__actions">
         <input
           ref={searchInput}
           type="search"
@@ -117,10 +117,10 @@ function CodebookDialog({ tables, initialTable, onClose }) {
           </select>
         </label>
       </div>
-      <p className="explorer__muted" role="status">
+      <p className="data-exports__muted" role="status">
         {rows.length} labels
       </p>
-      <div className="explorer__codebook-results">
+      <div className="data-exports__codebook-results">
         {rows.length ? (
           <table>
             <thead>
@@ -145,7 +145,7 @@ function CodebookDialog({ tables, initialTable, onClose }) {
                     {c.label_level}
                     <small>{c.label_datatype || c.type}</small>
                   </td>
-                  <td className="explorer__codebook-description">
+                  <td className="data-exports__codebook-description">
                     {c.description?.trim() || "No description provided."}
                   </td>
                 </tr>
@@ -172,7 +172,7 @@ export default function Codebook({ tables, initialTable }) {
     <>
       <button
         type="button"
-        className="btn-outline explorer__codebook-link"
+        className="btn-outline data-exports__codebook-link"
         aria-haspopup="dialog"
         disabled={!tables.length}
         onClick={() => setOpen(true)}

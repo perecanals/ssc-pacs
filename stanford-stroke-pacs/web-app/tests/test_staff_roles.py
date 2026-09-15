@@ -7,7 +7,7 @@ from pathlib import Path
 import psycopg2
 import pytest
 
-from data_explorer import database
+from data_exports import database
 from tests.conftest import TEST_USER, USER_CRISP, USER_LVO
 
 

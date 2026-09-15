@@ -19,7 +19,7 @@ it provides a workflow-oriented interface for:
 - creating and editing annotations at patient, study, and series level
 - filtering across hierarchy levels using those annotations
 - previewing images in OHIF while staying inside the annotation workflow
-- building named CSV/Excel exports through the optional [Data Exports](data_explorer.md) module
+- building named CSV/Excel exports through the optional [Data Exports](data_exports.md) module
 - downloading series as DICOM ZIP or NIfTI (staff/admin, within dataset grants)
 
 In short:

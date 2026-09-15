@@ -1,8 +1,7 @@
 # Data Exports
 
 Data Exports is the optional research-table browser at `/data-exports`. It uses
-Navigator's login, theme and full-width workspace. The old
-`/admin/data-explorer` URL redirects here.
+Navigator's login, theme and full-width workspace.
 
 Admins can query all datasets. Staff use their existing dataset grants and can
 manage only their own reports, export history and files. Admins can manage all
@@ -113,7 +112,7 @@ inactivity; after signing in again, users can find their jobs in history.
 
 ## Catalog and SQL
 
-`web-app/data_explorer/policy.py` exposes four tables:
+`web-app/data_exports/policy.py` exposes four tables:
 
 - `patient_labelled`
 - `image_study_labelled`
@@ -141,7 +140,7 @@ exclude rows without a matching patient. User conditions can narrow this scope.
 operators. Ordinary joins, non-recursive CTEs, subqueries, CASE, grouping,
 ordering, windows and approved aggregates are supported. Writes, SELECT INTO,
 locking, recursive queries, system catalogs and administrative commands are
-rejected. Exact allowlists live in `data_explorer/query.py`. Functions/types are
+rejected. Exact allowlists live in `data_exports/query.py`. Functions/types are
 qualified to `pg_catalog`, tables to `public`, and inheritance scans are disabled.
 
 After preview, switching to SQL copies the validated base query without baking
@@ -164,5 +163,5 @@ text for arrays/objects. A literal `\N` string looks the same as NULL; include
 fail the job explicitly rather than silently truncating results. Download names
 use an ASCII fallback and encoded UTF-8 filename for Unicode compatibility.
 
-See [operations](../operations/data_explorer.md) for setup, limits, recovery and
+See [operations](../operations/data_exports.md) for setup, limits, recovery and
 removal.

@@ -7,23 +7,23 @@ import psycopg2
 from psycopg2 import sql
 from psycopg2.extras import RealDictCursor
 
-from data_explorer.policy import METADATA_TABLES, READER_TABLES, TABLES
-from data_explorer.scope import scoped_table
+from data_exports.policy import METADATA_TABLES, READER_TABLES, TABLES
+from data_exports.scope import scoped_table
 from db import DB_CONFIG, get_conn, require_env
 from labelled_table_sync import LEVEL_CONFIGS, sanitize_label_column
 
 
 def query_connection(timeout_seconds=15):
-    user = require_env("EXPLORER_DB_USER")
+    user = require_env("DATA_EXPORTS_DB_USER")
     if user == DB_CONFIG["user"]:
-        raise RuntimeError("Explorer requires a separate read-only database login")
+        raise RuntimeError("Data Exports requires a separate read-only database login")
     conn = psycopg2.connect(
         **{
             **DB_CONFIG,
             "user": user,
-            "password": require_env("EXPLORER_DB_PASSWORD"),
+            "password": require_env("DATA_EXPORTS_DB_PASSWORD"),
             "connect_timeout": 5,
-            "application_name": "ssc-data-explorer",
+            "application_name": "ssc-data-exports",
         }
     )
     try:
@@ -59,12 +59,12 @@ def check_role():
             "FROM pg_roles WHERE rolname = current_user"
         )
         if any(cur.fetchone()):
-            raise RuntimeError("Explorer database role must not have administrative privileges")
+            raise RuntimeError("Data Exports database role must not have administrative privileges")
         cur.execute(
             "SELECT count(*) FROM pg_auth_members WHERE member = (SELECT oid FROM pg_roles WHERE rolname = current_user)"
         )
         if cur.fetchone()[0]:
-            raise RuntimeError("Explorer database role must not inherit other roles")
+            raise RuntimeError("Data Exports database role must not inherit other roles")
         cur.execute(
             "SELECT n.nspname, c.relname FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace "
             "WHERE n.nspname NOT IN ('pg_catalog','information_schema') AND n.nspname NOT LIKE 'pg_toast%%' "
@@ -74,13 +74,13 @@ def check_role():
             (list(READER_TABLES),),
         )
         if cur.fetchone():
-            raise RuntimeError("Explorer database role has grants outside the approved read-only catalog")
+            raise RuntimeError("Data Exports database role has grants outside the approved read-only catalog")
         cur.execute(
             "SELECT nspname FROM pg_namespace WHERE nspname NOT LIKE 'pg_temp%%' "
             "AND has_schema_privilege(oid, 'CREATE')"
         )
         if cur.fetchone():
-            raise RuntimeError("Explorer database role must not have schema CREATE privileges")
+            raise RuntimeError("Data Exports database role must not have schema CREATE privileges")
 
         cur.execute(
             "SELECT relname FROM pg_class WHERE relnamespace='public'::regnamespace "

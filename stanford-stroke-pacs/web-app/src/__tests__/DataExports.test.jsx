@@ -7,7 +7,7 @@ import {
 } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import DataExplorer from "../modules/data-explorer/DataExplorer";
+import DataExports from "../modules/data-exports/DataExports";
 
 const state = vi.hoisted(() => ({ admin: true, staff: false }));
 vi.mock("../context/AuthContext", () => ({
@@ -40,9 +40,9 @@ const preview = {
 };
 function mount() {
   return render(
-    <MemoryRouter initialEntries={["/admin/data-explorer"]}>
+    <MemoryRouter initialEntries={["/data-exports"]}>
       <Routes>
-        <Route path="/admin/data-explorer" element={<DataExplorer />} />
+        <Route path="/data-exports" element={<DataExports />} />
         <Route path="/" element={<p>Home page</p>} />
       </Routes>
     </MemoryRouter>,
@@ -386,7 +386,7 @@ describe("instrument selection", () => {
     fireEvent.change(screen.getByLabelText("Column instrument"), {
       target: { value: "instrument:Intake" },
     });
-    const list = within(container.querySelector(".explorer__columns"));
+    const list = within(container.querySelector(".data-exports__columns"));
     expect(list.getAllByRole("checkbox")).toHaveLength(2);
     fireEvent.click(screen.getByText("Select shown (2)"));
     fireEvent.change(screen.getByLabelText("Column instrument"), {

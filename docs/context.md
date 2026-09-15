@@ -11,8 +11,8 @@ One **Orthanc** container (`ssc-orthanc`), one native-host **Web App** service o
 | Runtime, config files, ports, scripts | [`reference/runtime_and_config.md`](reference/runtime_and_config.md) |
 | **Config sources of truth + sync points (deploy map)** | [`reference/configuration_sources.md`](reference/configuration_sources.md) |
 | Schema / tables / SQL behavior | [`reference/data_stores.md`](reference/data_stores.md) |
-| Data Exports: staff/admin research tables, reports and exports | [`reference/data_explorer.md`](reference/data_explorer.md) |
-| Data Exports credentials, limits, recovery and removal | [`operations/data_explorer.md`](operations/data_explorer.md) |
+| Data Exports: staff/admin research tables, reports and exports | [`reference/data_exports.md`](reference/data_exports.md) |
+| Data Exports credentials, limits, recovery and removal | [`operations/data_exports.md`](operations/data_exports.md) |
 | Web App product + UI model | [`reference/web_app.md`](reference/web_app.md) |
 | Web App React / `DataTable` detail | [`reference/web_app_frontend.md`](reference/web_app_frontend.md) |
 | Image ingestion protocol (ingesting new data) | [`reference/image_ingestion_protocol.md`](reference/image_ingestion_protocol.md) |

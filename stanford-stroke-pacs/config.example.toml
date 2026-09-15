@@ -83,9 +83,9 @@ clinical_episode_date_column = "stroke_date"
 # localStorage.sscTrackpadPxPerSlice; see architecture.md §5.1.
 ohif_trackpad_px_per_slice = 50
 
-# Optional admin research-table browser/exporter. Requires dedicated credentials
-# EXPLORER_DB_USER / EXPLORER_DB_PASSWORD in .env; see docs/operations/data_explorer.md.
-[data-explorer]
+# Optional staff/admin research-table browser/exporter. Requires dedicated credentials
+# DATA_EXPORTS_DB_USER / DATA_EXPORTS_DB_PASSWORD in .env; see docs/operations/data_exports.md.
+[data-exports]
 enabled = false
 # Required absolute, app-owned mode-0700 directory when enabled.
 spool_dir = ""

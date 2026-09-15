@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, expect, it, vi } from "vitest";
-import ConditionValue from "../modules/data-explorer/ConditionValue";
+import ConditionValue from "../modules/data-exports/ConditionValue";
 import { apiFetch } from "../api/client";
 
 vi.mock("../api/client", () => ({ apiFetch: vi.fn() }));

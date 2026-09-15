@@ -13,18 +13,18 @@ from psycopg2.extras import Json
 from pydantic import BaseModel, Field, field_validator
 
 from auth import require_staff
-from data_explorer import database
-from data_explorer.access import artifact_in_scope, get_access
-from data_explorer.exports import SERIALIZATION, ExportWorker, text_value
-from data_explorer.policy import RELATIONSHIPS
-from data_explorer.query import build_query, validate_sql
-from data_explorer.scope import apply_dataset_scope
-from data_explorer.settings import load_settings
+from data_exports import database
+from data_exports.access import artifact_in_scope, get_access
+from data_exports.exports import SERIALIZATION, ExportWorker, text_value
+from data_exports.policy import RELATIONSHIPS
+from data_exports.query import build_query, validate_sql
+from data_exports.scope import apply_dataset_scope
+from data_exports.settings import load_settings
 from download_headers import content_disposition, safe_name
 from download_response import DownloadResponse
 
 logger = logging.getLogger(__name__)
-router = APIRouter(prefix="/api/data-explorer", dependencies=[Depends(require_staff)])
+router = APIRouter(prefix="/api/data-exports", dependencies=[Depends(require_staff)])
 _preview_slots = threading.BoundedSemaphore(2)
 
 
@@ -56,37 +56,37 @@ class ReportSpec(BaseModel):
 
 def start(app):
     settings = load_settings()
-    app.state.explorer_settings = settings
-    app.state.explorer_worker = None
-    app.state.explorer_error = None
+    app.state.data_exports_settings = settings
+    app.state.data_exports_worker = None
+    app.state.data_exports_error = None
     if settings.enabled:
         worker = ExportWorker(settings)
         try:
             database.check_role()
             worker.start()
-            app.state.explorer_worker = worker
+            app.state.data_exports_worker = worker
         except Exception:
             worker.stop()
-            app.state.explorer_error = "Data Exports is unavailable; check its credentials, grants and spool settings"
+            app.state.data_exports_error = "Data Exports is unavailable; check its credentials, grants and spool settings"
             logger.error("Data Exports initialization failed; module unavailable", exc_info=False)
 
 
 def stop(app):
-    if getattr(app.state, "explorer_worker", None):
-        app.state.explorer_worker.stop()
+    if getattr(app.state, "data_exports_worker", None):
+        app.state.data_exports_worker.stop()
 
 
 def available(request: Request):
-    if not getattr(request.app.state, "explorer_settings", None) or not request.app.state.explorer_settings.enabled:
+    if not getattr(request.app.state, "data_exports_settings", None) or not request.app.state.data_exports_settings.enabled:
         raise HTTPException(404, "Data Exports is disabled")
-    if request.app.state.explorer_error:
-        raise HTTPException(503, request.app.state.explorer_error)
-    return request.app.state.explorer_worker
+    if request.app.state.data_exports_error:
+        raise HTTPException(503, request.app.state.data_exports_error)
+    return request.app.state.data_exports_worker
 
 
 @router.get("/capabilities")
 def capabilities(request: Request):
-    settings = getattr(request.app.state, "explorer_settings", None)
+    settings = getattr(request.app.state, "data_exports_settings", None)
     return {"enabled": bool(settings and settings.enabled)}
 
 
@@ -190,7 +190,7 @@ def preview(
         with database.reader(worker.settings.preview_timeout_seconds) as conn, conn.cursor() as cur:
             base_sql = cur.mogrify(prepared.base_sql, prepared.base_parameters or None).decode("utf-8")
             equivalent = cur.mogrify(prepared.sql, prepared.parameters or None).decode("utf-8")
-            cur.execute(f"SELECT * FROM ({equivalent}) AS explorer_preview LIMIT 201 OFFSET {offset}")
+            cur.execute(f"SELECT * FROM ({equivalent}) AS data_exports_preview LIMIT 201 OFFSET {offset}")
             rows = cur.fetchall()
             # Text serialization preserves decimal precision and structured values.
             return {
@@ -212,7 +212,7 @@ def preview(
 @router.get("/reports")
 def reports(worker=Depends(available), access=Depends(get_access)):
     return database.records(
-        "SELECT * FROM explorer_reports WHERE (%s OR created_by=%s) ORDER BY name, id",
+        "SELECT * FROM data_exports_reports WHERE (%s OR created_by=%s) ORDER BY name, id",
         (access["scope"] is None, access["user"]),
     )
 
@@ -225,7 +225,7 @@ def create_report(
     if not spec.name.strip():
         raise HTTPException(422, "Report name is required")
     return database.records(
-        "INSERT INTO explorer_reports (id,name,configuration,created_by,updated_by) "
+        "INSERT INTO data_exports_reports (id,name,configuration,created_by,updated_by) "
         "VALUES (%s,%s,%s,%s,%s) RETURNING *",
         (str(uuid4()), spec.name.strip(), Json(config), user, user),
         one=True,
@@ -244,7 +244,7 @@ def update_report(
     if not spec.name.strip():
         raise HTTPException(422, "Report name is required")
     row = database.records(
-        "UPDATE explorer_reports SET name=%s, configuration=%s, updated_by=%s, updated_at=now() "
+        "UPDATE data_exports_reports SET name=%s, configuration=%s, updated_by=%s, updated_at=now() "
         "WHERE id=%s AND (%s OR created_by=%s) RETURNING *",
         (spec.name.strip(), Json(config), user, str(report_id), access["scope"] is None, user),
         one=True,
@@ -257,7 +257,7 @@ def update_report(
 @router.delete("/reports/{report_id}")
 def delete_report(report_id: UUID, worker=Depends(available), access=Depends(get_access)):
     row = database.records(
-        "DELETE FROM explorer_reports WHERE id=%s AND (%s OR created_by=%s) RETURNING id",
+        "DELETE FROM data_exports_reports WHERE id=%s AND (%s OR created_by=%s) RETURNING id",
         (str(report_id), access["scope"] is None, access["user"]),
         one=True,
     )
@@ -281,11 +281,11 @@ def submit(spec: ExportSpec, user: str = Depends(require_staff), worker=Depends(
     try:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             cur.execute("SELECT pg_advisory_xact_lock(782341,22)")
-            cur.execute("SELECT count(*) AS n FROM explorer_exports WHERE status='queued'")
+            cur.execute("SELECT count(*) AS n FROM data_exports_jobs WHERE status='queued'")
             if cur.fetchone()["n"] >= worker.settings.queue_limit:
                 raise HTTPException(429, "Export queue is full; try again later")
             cur.execute(
-                "INSERT INTO explorer_exports (id,name,username,configuration,sql,parameters,format,status) "
+                "INSERT INTO data_exports_jobs (id,name,username,configuration,sql,parameters,format,status) "
                 "VALUES (%s,%s,%s,%s,%s,%s,%s,'queued') RETURNING *",
                 (str(uuid4()), spec.name, user, Json(config), prepared.sql, Json(prepared.parameters), spec.format),
             )
@@ -307,7 +307,7 @@ def history(
     access=Depends(get_access),
 ):
     return database.records(
-        "SELECT * FROM explorer_exports WHERE (%s IS NULL OR configuration->>'dataset'=%s) "
+        "SELECT * FROM data_exports_jobs WHERE (%s IS NULL OR configuration->>'dataset'=%s) "
         "AND (%s OR username=%s) ORDER BY created_at DESC, id LIMIT 50 OFFSET %s",
         (dataset, dataset, access["scope"] is None, access["user"], offset),
     )
@@ -315,7 +315,7 @@ def history(
 
 def get_export(job_id, access):
     row = database.records(
-        "SELECT * FROM explorer_exports WHERE id=%s AND (%s OR username=%s)",
+        "SELECT * FROM data_exports_jobs WHERE id=%s AND (%s OR username=%s)",
         (str(job_id), access["scope"] is None, access["user"]),
         one=True,
     )
@@ -328,7 +328,7 @@ def get_export(job_id, access):
 def export_status(job_id: UUID, worker=Depends(available), access=Depends(get_access)):
     row = get_export(job_id, access)
     row["downloads"] = database.records(
-        "SELECT username, requested_at FROM explorer_downloads WHERE export_id=%s ORDER BY requested_at DESC",
+        "SELECT username, requested_at FROM data_exports_downloads WHERE export_id=%s ORDER BY requested_at DESC",
         (str(job_id),),
     )
     with database.reader() as conn, conn.cursor() as cur:
@@ -340,7 +340,7 @@ def export_status(job_id: UUID, worker=Depends(available), access=Depends(get_ac
 def cancel(job_id: UUID, worker=Depends(available), access=Depends(get_access)):
     get_export(job_id, access)
     row = database.records(
-        "UPDATE explorer_exports SET cancel_requested=true, "
+        "UPDATE data_exports_jobs SET cancel_requested=true, "
         "status=CASE WHEN status='queued' THEN 'cancelled' ELSE status END, "
         "finished_at=CASE WHEN status='queued' THEN now() ELSE finished_at END "
         "WHERE id=%s AND status IN ('queued','running') RETURNING id",
@@ -359,7 +359,7 @@ def download(job_id: UUID, user: str = Depends(require_staff), worker=Depends(av
     if not artifact_in_scope(owned, access["scope"]):
         raise HTTPException(403, "Dataset access has changed; create a new export")
     job = database.records(
-        "SELECT * FROM explorer_exports WHERE id=%s AND status='completed' AND expires_at>now()",
+        "SELECT * FROM data_exports_jobs WHERE id=%s AND status='completed' AND expires_at>now()",
         (str(job_id),),
         one=True,
     )
@@ -375,7 +375,7 @@ def download(job_id: UUID, user: str = Depends(require_staff), worker=Depends(av
     except FileNotFoundError:
         raise HTTPException(410, "Export file expired; rerun it from history")
     try:
-        database.records("INSERT INTO explorer_downloads (export_id,username) VALUES (%s,%s)", (str(job_id), user))
+        database.records("INSERT INTO data_exports_downloads (export_id,username) VALUES (%s,%s)", (str(job_id), user))
     except Exception:
         handle.close()
         raise

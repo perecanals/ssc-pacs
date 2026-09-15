@@ -7,7 +7,7 @@ import ExportHistory from "./ExportHistory";
 import InstrumentTag from "./InstrumentTag";
 import Codebook from "./Codebook";
 import TopBar from "../../components/TopBar";
-import "./DataExplorer.css";
+import "./DataExports.css";
 
 const blank = (table = "") => ({
   table,
@@ -16,7 +16,7 @@ const blank = (table = "") => ({
   filters: { op: "and", rules: [] },
   sort: [],
 });
-export default function DataExplorer() {
+export default function DataExports() {
   const { isAdmin, isStaff, loading } = useAuth();
   const canExport = isAdmin || isStaff;
   const allDatasets = isAdmin ? "All datasets" : "All permitted datasets";
@@ -233,10 +233,10 @@ export default function DataExplorer() {
   if (loading) return null;
   if (!canExport) return <Navigate to="/" replace />;
   return (
-    <div className="explorer">
+    <div className="data-exports">
       <TopBar />
-      <main className="explorer__main">
-        <header className="explorer__header">
+      <main className="data-exports__main">
+        <header className="data-exports__header">
           <div>
             <h1>Data Exports</h1>
             <p>
@@ -244,14 +244,14 @@ export default function DataExplorer() {
               is read-only.
             </p>
           </div>
-          <div className="explorer__actions">
+          <div className="data-exports__actions">
             <Codebook tables={catalog} initialTable={builder.table} />
-            <span className="explorer__badge">
+            <span className="data-exports__badge">
               {isAdmin ? "Admin" : "Staff"} · Read only
             </span>
           </div>
         </header>
-        <nav className="explorer__tabs" aria-label="Data Exports sections">
+        <nav className="data-exports__tabs" aria-label="Data Exports sections">
           <button
             className={tab === "query" ? "active" : ""}
             onClick={() => setTab("query")}
@@ -265,7 +265,10 @@ export default function DataExplorer() {
             Export history
           </button>
         </nav>
-        <section className="explorer__dataset-scope" aria-label="Dataset scope">
+        <section
+          className="data-exports__dataset-scope"
+          aria-label="Dataset scope"
+        >
           <label>
             Dataset
             <select
@@ -302,18 +305,18 @@ export default function DataExplorer() {
           </div>
         </section>
         {error && (
-          <div className="explorer__error" role="alert">
+          <div className="data-exports__error" role="alert">
             {error}
           </div>
         )}
         {notice && (
-          <div className="explorer__notice" role="status">
+          <div className="data-exports__notice" role="status">
             {notice}
           </div>
         )}
         {tab === "query" ? (
           <>
-            <section className="explorer__reports">
+            <section className="data-exports__reports">
               <label>
                 {isAdmin ? "Saved reports" : "My reports"}
                 <select
@@ -382,20 +385,20 @@ export default function DataExplorer() {
                   </button>
                 </>
               )}
-              <p id="export-name-hint" className="explorer__muted">
+              <p id="export-name-hint" className="data-exports__muted">
                 Required for CSV and Excel exports. Also used when saving a
                 report.
               </p>
             </section>
             {editingExport && (
-              <div className="explorer__notice" role="status">
+              <div className="data-exports__notice" role="status">
                 Editing export: <strong>{editingExport.name}</strong>. Change
                 the name, dataset, columns or conditions, then export again to
                 create a new history entry. The original export stays available.
               </div>
             )}
-            <div className="explorer__layout">
-              <aside className="explorer__sidebar">
+            <div className="data-exports__layout">
+              <aside className="data-exports__sidebar">
                 <h2>Research tables</h2>
                 <input
                   aria-label="Search tables"
@@ -408,7 +411,7 @@ export default function DataExplorer() {
                   .map((t) => (
                     <button
                       disabled={mode === "sql"}
-                      className={`explorer__table-choice ${builder.table === t.name ? "active" : ""}`}
+                      className={`data-exports__table-choice ${builder.table === t.name ? "active" : ""}`}
                       key={t.name}
                       onClick={() =>
                         change({
@@ -426,8 +429,8 @@ export default function DataExplorer() {
                   ))}
                 {!catalog.length && <p>No research tables available.</p>}
               </aside>
-              <section className="explorer__workspace">
-                <div className="explorer__actions">
+              <section className="data-exports__workspace">
+                <div className="data-exports__actions">
                   <button
                     className={mode === "builder" ? "active" : "btn-outline"}
                     onClick={() => {
@@ -458,7 +461,7 @@ export default function DataExplorer() {
                       joins: unmatched rows remain, and multiple matches produce
                       additional rows.
                     </p>
-                    <div className="explorer__actions">
+                    <div className="data-exports__actions">
                       <label>
                         Add related table
                         <select
@@ -504,7 +507,7 @@ export default function DataExplorer() {
                       <summary>
                         Columns ({builder.columns.length} selected)
                       </summary>
-                      <div className="explorer__actions">
+                      <div className="data-exports__actions">
                         <input
                           aria-label="Search columns"
                           placeholder="Search columns or labels…"
@@ -562,19 +565,19 @@ export default function DataExplorer() {
                           Deselect shown
                         </button>
                       </div>
-                      <p className="explorer__muted">
+                      <p className="data-exports__muted">
                         Filter by instrument to select its labels together.
                         Existing selections remain when you change the filter.
                         Instrument groups apply to label columns in labelled
                         tables.
                       </p>
-                      <p className="explorer__muted">
+                      <p className="data-exports__muted">
                         Drag anywhere on a row in the right-hand list to reorder
                         selected columns, or use the arrow buttons. Use × to
                         remove a column.
                       </p>
-                      <div className="explorer__column-layout">
-                        <div className="explorer__columns">
+                      <div className="data-exports__column-layout">
+                        <div className="data-exports__columns">
                           {!visibleColumns.length && (
                             <p>No columns match this instrument and search.</p>
                           )}
@@ -604,11 +607,11 @@ export default function DataExplorer() {
                                   })
                                 }
                               />
-                              <span className="explorer__column-text">
-                                <span className="explorer__column-name">
+                              <span className="data-exports__column-text">
+                                <span className="data-exports__column-name">
                                   {c.ref}
                                 </span>
-                                <span className="explorer__column-type">
+                                <span className="data-exports__column-type">
                                   {c.type}
                                 </span>
                                 {c.label_name && (
@@ -619,7 +622,7 @@ export default function DataExplorer() {
                           ))}
                         </div>
                         <ol
-                          className="explorer__selected"
+                          className="data-exports__selected"
                           aria-label="Selected column order"
                         >
                           {builder.columns.map((c, i) => (
@@ -659,16 +662,19 @@ export default function DataExplorer() {
                               }}
                             >
                               <span
-                                className="explorer__drag-handle"
+                                className="data-exports__drag-handle"
                                 aria-hidden="true"
                               >
                                 ⠿
                               </span>
-                              <span className="explorer__column-text" title={c}>
-                                <span className="explorer__column-name">
+                              <span
+                                className="data-exports__column-text"
+                                title={c}
+                              >
+                                <span className="data-exports__column-name">
                                   {c}
                                 </span>
-                                <span className="explorer__column-type">
+                                <span className="data-exports__column-type">
                                   {columnByRef.get(c)?.type}
                                 </span>
                                 {columnByRef.get(c)?.label_name && (
@@ -719,7 +725,7 @@ export default function DataExplorer() {
                     <details>
                       <summary>Sorting ({builder.sort.length})</summary>
                       {builder.sort.map((s, i) => (
-                        <div className="explorer__actions" key={i}>
+                        <div className="data-exports__actions" key={i}>
                           <select
                             aria-label="Sort column"
                             value={s.column}
@@ -793,7 +799,7 @@ export default function DataExplorer() {
                       functions and administrative commands are restricted.
                     </p>
                     <textarea
-                      className="explorer__sql"
+                      className="data-exports__sql"
                       aria-label="SQL query"
                       spellCheck={false}
                       value={sql}
@@ -810,7 +816,7 @@ export default function DataExplorer() {
                     </p>
                   </>
                 )}
-                <div className="explorer__actions">
+                <div className="data-exports__actions">
                   <button disabled={busy} onClick={() => showPreview()}>
                     Preview results
                   </button>
@@ -830,7 +836,7 @@ export default function DataExplorer() {
                   </button>
                   {busy && <span role="status">Working…</span>}
                 </div>
-                <p className="explorer__muted">
+                <p className="data-exports__muted">
                   Preview shows 200 rows per page. Exports include all matching
                   rows within the configured limits. Files are available for{" "}
                   {retentionHours}
@@ -840,7 +846,9 @@ export default function DataExplorer() {
                   <>
                     <details>
                       <summary>Equivalent SQL</summary>
-                      <pre className="explorer__sql-output">{preview.sql}</pre>
+                      <pre className="data-exports__sql-output">
+                        {preview.sql}
+                      </pre>
                       <button
                         className="btn-outline"
                         onClick={() =>
@@ -853,7 +861,7 @@ export default function DataExplorer() {
                         Copy SQL
                       </button>
                     </details>
-                    <div className="explorer__results">
+                    <div className="data-exports__results">
                       <table>
                         <thead>
                           <tr>
@@ -868,7 +876,7 @@ export default function DataExplorer() {
                               {r.map((v, j) => (
                                 <td key={j}>
                                   {v === null ? (
-                                    <span className="explorer__muted">
+                                    <span className="data-exports__muted">
                                       NULL
                                     </span>
                                   ) : (
@@ -882,7 +890,7 @@ export default function DataExplorer() {
                       </table>
                     </div>
                     {preview.rows.length === 0 && <p>No matching rows.</p>}
-                    <div className="explorer__actions">
+                    <div className="data-exports__actions">
                       <button
                         className="btn-outline"
                         disabled={busy || preview.offset === 0}

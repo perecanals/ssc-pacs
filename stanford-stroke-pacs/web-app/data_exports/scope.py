@@ -3,7 +3,7 @@
 from pglast import ast, parse_sql
 from pglast.stream import RawStream
 
-from data_explorer.policy import TABLES
+from data_exports.policy import TABLES
 
 
 def scoped_table(table, dataset_literal=None, allowed_literal=None):
@@ -12,21 +12,21 @@ def scoped_table(table, dataset_literal=None, allowed_literal=None):
         raise ValueError("Choose an available research table")
     checks = []
     if dataset_literal is not None:
-        checks.append(f"{dataset_literal} = ANY(explorer_patient.dataset)")
+        checks.append(f"{dataset_literal} = ANY(data_exports_patient.dataset)")
     if allowed_literal is not None:
-        checks.append(f"explorer_patient.dataset && {allowed_literal}::text[]")
+        checks.append(f"data_exports_patient.dataset && {allowed_literal}::text[]")
     condition = " AND ".join(checks) or "TRUE"
     if table in ("patient_labelled", "image_study_labelled", "image_series_labelled"):
-        source = "ONLY public.patient AS explorer_patient"
-        link = "explorer_patient.patient_id = explorer_row.patient_id"
+        source = "ONLY public.patient AS data_exports_patient"
+        link = "data_exports_patient.patient_id = data_exports_row.patient_id"
     else:
         source = (
-            "ONLY public.image_series_labelled AS explorer_series "
-            "JOIN ONLY public.patient AS explorer_patient USING (patient_id)"
+            "ONLY public.image_series_labelled AS data_exports_series "
+            "JOIN ONLY public.patient AS data_exports_patient USING (patient_id)"
         )
-        link = "explorer_series.seriesinstanceuid = explorer_row.seriesinstanceuid"
+        link = "data_exports_series.seriesinstanceuid = data_exports_row.seriesinstanceuid"
     predicate = f"EXISTS (SELECT 1 FROM {source} WHERE {link} AND {condition})"
-    return f"SELECT * FROM ONLY public.{table} AS explorer_row WHERE {predicate}"
+    return f"SELECT * FROM ONLY public.{table} AS data_exports_row WHERE {predicate}"
 
 
 def apply_dataset_scope(source, dataset_literal=None, allowed_literal=None):
