@@ -11,6 +11,7 @@ import PropTypes from "prop-types";
 import { apiGet } from "../../api/client";
 import {
   downloadDicomZip,
+  downloadNifti,
   resolveOhifLink,
   refreshLabelledTables,
 } from "./actions";
@@ -35,9 +36,10 @@ import usePreferencePersistence from "./usePreferencePersistence";
 import useDragColumns from "./useDragColumns";
 import useWarmStatus from "./useWarmStatus";
 import TableHeader from "./TableHeader";
-import ChildRows, { DownloadIcon, TrashIcon } from "./ChildRows";
+import ChildRows, { TrashIcon } from "./ChildRows";
 import WarmButton from "./WarmButton";
 import CopyPathButtons from "./CopyPathButtons";
+import ImagingDownloadButtons from "./ImagingDownloadButtons";
 import { getStorageMode } from "../../api/warmOhif";
 import { hasSecondScreen } from "../../utils/secondScreen";
 import "./DataTable.css";
@@ -59,7 +61,7 @@ function DataTableInner({
   onLabelsMutated,
   serverPrefs,
 }) {
-  const { currentUser, isAdmin } = useAuth();
+  const { currentUser, isAdmin, isStaff } = useAuth();
   const config = LEVEL_CONFIG[level];
 
   const [showDefModal, setShowDefModal] = useState(false);
@@ -493,10 +495,15 @@ function DataTableInner({
     }
   };
 
-  const handleDicomDownload = async (seriesinstanceuid) => {
+  const handleDicomDownload = async (
+    seriesinstanceuid,
+    format = "dicom-zip",
+  ) => {
     setDownloadingSeries(seriesinstanceuid);
     try {
-      await downloadDicomZip(seriesinstanceuid);
+      await (format === "nifti" ? downloadNifti : downloadDicomZip)(
+        seriesinstanceuid,
+      );
     } catch (err) {
       alert(`Download failed: ${err.message}`);
     } finally {
@@ -597,22 +604,17 @@ function DataTableInner({
                 onWarm={() => warmStudy(uid)}
               />
             ))}
+          {rowLevel === "series" &&
+            row.seriesinstanceuid &&
+            (isAdmin || isStaff) && (
+              <ImagingDownloadButtons
+                uid={row.seriesinstanceuid}
+                busy={downloadingSeries === row.seriesinstanceuid}
+                onDownload={handleDicomDownload}
+              />
+            )}
           {rowLevel === "series" && row.seriesinstanceuid && isAdmin && (
-            <>
-              <button
-                onClick={() => handleDicomDownload(row.seriesinstanceuid)}
-                className="link-btn"
-                title="Download DICOM as zip"
-                disabled={downloadingSeries === row.seriesinstanceuid}
-              >
-                {downloadingSeries === row.seriesinstanceuid ? (
-                  "\u2026"
-                ) : (
-                  <DownloadIcon />
-                )}
-              </button>
-              <CopyPathButtons seriesUid={row.seriesinstanceuid} />
-            </>
+            <CopyPathButtons seriesUid={row.seriesinstanceuid} />
           )}
           {isAdmin && (
             <button
@@ -874,6 +876,7 @@ function DataTableInner({
                         gcColSpan={gcColSpan}
                         activeRowKey={activeRowKey}
                         isAdmin={isAdmin}
+                        canExport={isAdmin || isStaff}
                         downloadingSeries={downloadingSeries}
                         canWarm={canWarm}
                         studyStatus={studyStatus}

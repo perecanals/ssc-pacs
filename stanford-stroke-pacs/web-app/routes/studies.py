@@ -1,28 +1,20 @@
-"""Patient, study, and series browsing endpoints, OHIF link, DICOM zip."""
+"""Patient, study, and series browsing endpoints, OHIF link, imaging downloads."""
 
 from __future__ import annotations
 
 import logging
 import os
-import re
-import shutil
-import tempfile
-from pathlib import Path
 from urllib.parse import urlencode
 
 import psycopg2.extras
 from fastapi import APIRouter, Depends, HTTPException, Query
-from fastapi.responses import StreamingResponse
-from zipstream import ZipStream
 
-from auth import get_dataset_scope, require_admin
+from auth import get_dataset_scope, require_admin, require_staff
 from cache_manager import (
     get_cache_status,
     get_series_cache_status,
-    resolve_series_archive,
     touch_access,
     touch_access_series,
-    untar_zst,
 )
 from common import (
     SERIES_AUTO_COLS,
@@ -46,6 +38,7 @@ from common import (
 )
 from config import CLINICAL_EPISODE_DATE_COLUMN, STORAGE_MODE
 from db import get_conn
+from imaging_downloads import imaging_download
 from orthanc_client import orthanc_lookup
 
 logger = logging.getLogger(__name__)
@@ -967,79 +960,15 @@ def ohif_link(
 
 
 @router.get("/api/series/{seriesinstanceuid}/dicom-zip")
-def download_dicom_zip(
-    seriesinstanceuid: str,
-    user: str = Depends(require_admin),
-):
-    """Stream a `.zip` of the series' DICOMs. Admin-only (bulk DICOM export
-    is a privilege, not a public read like the browsing endpoints)."""
-    conn = get_conn()
-    try:
-        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-            cur.execute(
-                "SELECT patient_id, acquisitiondatetime, seriesdescription, dicom_dir_path, dicom_archive_path "
-                "FROM image_series WHERE seriesinstanceuid = %s LIMIT 1",
-                (seriesinstanceuid,),
-            )
-            row = cur.fetchone()
-    finally:
-        conn.close()
+def download_dicom_zip(seriesinstanceuid: str, user: str = Depends(require_staff),
+                       scope: list[str] | None = Depends(get_dataset_scope)):
+    return imaging_download(seriesinstanceuid, scope)
 
-    if not row:
-        raise HTTPException(status_code=404, detail="Series not found")
 
-    pid = row.get("patient_id") or "unknown"
-    dt = row.get("acquisitiondatetime")
-    date_str = dt.strftime("%Y%m%d") if dt else "nodate"
-    desc = row.get("seriesdescription") or "series"
-    safe = re.sub(r"[^\w\-.]", "_", f"{pid}-{date_str}-{desc}")
-    folder_name = re.sub(r"[^\w\-.]", "_", f"{pid}_{desc}")
-    filename = f"{safe}.zip"
-
-    if STORAGE_MODE == "cold_path_cache":
-        arch = resolve_series_archive(row.get("dicom_archive_path"), row.get("dicom_dir_path"))
-        if arch and arch.is_file():
-            tmpdir = tempfile.mkdtemp(prefix="dicom-zip-")
-            try:
-                untar_zst(arch, Path(tmpdir))
-                zs = ZipStream.from_path(tmpdir, arcname=folder_name)
-                content_length = len(zs)
-
-                def gen():
-                    try:
-                        yield from zs
-                    finally:
-                        shutil.rmtree(tmpdir, ignore_errors=True)
-
-                return StreamingResponse(
-                    gen(),
-                    media_type="application/zip",
-                    headers={
-                        "Content-Disposition": f'attachment; filename="{filename}"',
-                        "Content-Length": str(content_length),
-                    },
-                )
-            except Exception:
-                shutil.rmtree(tmpdir, ignore_errors=True)
-                raise
-
-    if not row.get("dicom_dir_path"):
-        raise HTTPException(status_code=404, detail="DICOM path not found for this series")
-
-    dicom_dir = Path(row["dicom_dir_path"])
-    if not dicom_dir.is_dir():
-        raise HTTPException(status_code=404, detail=f"DICOM directory does not exist: {dicom_dir}")
-
-    zs = ZipStream.from_path(str(dicom_dir), arcname=folder_name)
-
-    return StreamingResponse(
-        zs,
-        media_type="application/zip",
-        headers={
-            "Content-Disposition": f'attachment; filename="{filename}"',
-            "Content-Length": str(len(zs)),
-        },
-    )
+@router.get("/api/series/{seriesinstanceuid}/nifti")
+def download_nifti(seriesinstanceuid: str, user: str = Depends(require_staff),
+                   scope: list[str] | None = Depends(get_dataset_scope)):
+    return imaging_download(seriesinstanceuid, scope, nifti=True)
 
 
 # ---------------------------------------------------------------------------

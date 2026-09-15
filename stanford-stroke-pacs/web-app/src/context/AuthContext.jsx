@@ -1,6 +1,18 @@
-import { createContext, useContext, useState, useEffect, useRef, useCallback } from "react";
+import {
+  createContext,
+  useContext,
+  useState,
+  useEffect,
+  useRef,
+  useCallback,
+} from "react";
 import PropTypes from "prop-types";
-import { apiGet, apiPost, getLastApiActivityAt, markApiActivity } from "../api/client";
+import {
+  apiGet,
+  apiPost,
+  getLastApiActivityAt,
+  markApiActivity,
+} from "../api/client";
 
 const AuthContext = createContext(null);
 
@@ -13,10 +25,13 @@ const IDLE_CHECK_INTERVAL_MS = 20 * 1000;
 export function AuthProvider({ children }) {
   const [currentUser, setCurrentUser] = useState(null);
   const [isAdmin, setIsAdmin] = useState(false);
+  const [isStaff, setIsStaff] = useState(false);
   const [allowedDatasets, setAllowedDatasets] = useState([]);
   const [mustChangePassword, setMustChangePassword] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [sessionTimeoutMs, setSessionTimeoutMs] = useState(DEFAULT_SESSION_TIMEOUT_MS);
+  const [sessionTimeoutMs, setSessionTimeoutMs] = useState(
+    DEFAULT_SESSION_TIMEOUT_MS,
+  );
   // Tracks whether this tab ever had an authenticated user, so ProtectedRoute
   // can show the "expired" banner only on involuntary session loss. Cleared
   // synchronously inside `logout()` so intentional logouts skip the banner.
@@ -27,7 +42,10 @@ export function AuthProvider({ children }) {
       const data = await apiGet("/api/me");
       setCurrentUser(data.username || null);
       setIsAdmin(Boolean(data.is_admin));
-      setAllowedDatasets(Array.isArray(data.allowed_datasets) ? data.allowed_datasets : []);
+      setIsStaff(Boolean(data.is_staff));
+      setAllowedDatasets(
+        Array.isArray(data.allowed_datasets) ? data.allowed_datasets : [],
+      );
       setMustChangePassword(Boolean(data.must_change_password));
       if (Number(data.session_timeout_seconds) > 0) {
         setSessionTimeoutMs(data.session_timeout_seconds * 1000);
@@ -38,6 +56,7 @@ export function AuthProvider({ children }) {
     } catch {
       setCurrentUser(null);
       setIsAdmin(false);
+      setIsStaff(false);
       setAllowedDatasets([]);
       setMustChangePassword(false);
     } finally {
@@ -57,6 +76,7 @@ export function AuthProvider({ children }) {
     const onExpired = () => {
       setCurrentUser(null);
       setIsAdmin(false);
+      setIsStaff(false);
       setAllowedDatasets([]);
       setMustChangePassword(false);
     };
@@ -122,6 +142,7 @@ export function AuthProvider({ children }) {
       wasAuthedRef.current = false;
       setCurrentUser(null);
       setIsAdmin(false);
+      setIsStaff(false);
       setAllowedDatasets([]);
       setMustChangePassword(false);
     }
@@ -132,6 +153,7 @@ export function AuthProvider({ children }) {
       value={{
         currentUser,
         isAdmin,
+        isStaff,
         allowedDatasets,
         mustChangePassword,
         loading,

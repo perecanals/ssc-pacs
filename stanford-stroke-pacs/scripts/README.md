@@ -11,7 +11,8 @@ by default and applies only with `--execute`; interactive prompts have a
 `--yes` bypass; report-only tools take no polarity flag. Deliberately exempt
 (idempotent/additive by design, stated in each docstring):
 `backfill_storage_sizes.py`, `manage_users.py` (interactive),
-`dicom_to_nifti.py` (writes only its output).
+`dicom_to_nifti.py` (writes only its output). Credential tools use explicit
+`provision`, `sync`, or `rotate` subcommands for mutations.
 
 ---
 
@@ -19,7 +20,7 @@ by default and applies only with `--execute`; interactive prompts have a
 
 | Directory | Purpose | Key scripts |
 |---|---|---|
-| `admin/` | User provisioning, credential rotation, label/dataset ops, series classification, study/series deletion, teardown | `manage_users.py`, `manage_readonly_db_users.py`, `rotate_service_account.py`, `rotate_db_password.py`, `bulk_set_label_values.py`, `remove_label.py`, `rename_dataset_value.py`, `reclassify_series_types.py`, `recompute_timepoints.py`, `delete_study.py`, `teardown.sh` |
+| `admin/` | User provisioning, credential rotation, label/dataset ops, series classification, study/series deletion, teardown | `manage_users.py`, `manage_readonly_db_users.py`, `manage_explorer_db.py`, `rotate_service_account.py`, `rotate_db_password.py`, `bulk_set_label_values.py`, `remove_label.py`, `rename_dataset_value.py`, `reclassify_series_types.py`, `recompute_timepoints.py`, `delete_study.py`, `teardown.sh` |
 | `backup/` | PostgreSQL dump, Orthanc volume snapshot, freshness monitoring | `backup_pg_db.sh`, `backup_orthanc_storage.sh` (+ in-container `orthanc_storage_snapshot.py`), `check_backup_freshness.sh` |
 | `cold_storage/` | Archive, cleanup, health, cache state, index repair | `archive_all_series.py`, `cleanup_loose_dicoms.py`, `scoped_index.py`, `reindex_missing_series.py`, `prune_stale_index_paths.py`, `rebuild_cache_state.py`, `cold_storage_health.py`, `backfill_storage_sizes.py`, `list_unarchived_series.py`, `verify_and_repair_archives.py`, `mirror_cold_archive.sh` |
 | `connectivity/` | Sanitized SSH tunnel templates for end users (per OS) | `tunnel/{linux,macos,windows}/tunnel.*` |
@@ -54,12 +55,20 @@ hours-long tree scan into the cron/JSON-report path):
 
 ---
 
+## Data Exports credentials
+
+`admin/manage_explorer_db.py provision|sync|check` manages the dedicated research-only
+web export login (`sscpacs-readonly`). See
+[Data Exports operations](../../docs/operations/data_explorer.md).
+
 ## Quick reference
 
 ```bash
 # User management
 python scripts/admin/manage_users.py list
 python scripts/admin/manage_users.py add <user> [--admin] [--datasets 'A,B']
+python scripts/admin/manage_users.py set-staff <user> [<user> ...]
+python scripts/admin/manage_users.py set-staff <user> --remove
 
 # Read-only PostgreSQL roles for direct DB access (psql/pandas; not web-app
 # users) — covers stanford-stroke + orthanc_db

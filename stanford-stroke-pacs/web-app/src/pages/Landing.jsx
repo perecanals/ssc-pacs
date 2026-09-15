@@ -1,3 +1,5 @@
+import { useEffect, useState } from "react";
+import { apiGet } from "../api/client";
 import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import "./Landing.css";
@@ -55,9 +57,32 @@ const adminOnlyCards = [
 ];
 
 export default function Landing() {
-  const { currentUser, isAdmin, logout } = useAuth();
+  const { currentUser, isAdmin, isStaff, logout } = useAuth();
   const navigate = useNavigate();
-  const cards = isAdmin ? [...baseCards, ...adminOnlyCards] : baseCards;
+  const [explorerEnabled, setExplorerEnabled] = useState(false);
+  useEffect(() => {
+    if (isAdmin || isStaff)
+      apiGet("/api/data-explorer/capabilities")
+        .then((data) => setExplorerEnabled(data.enabled))
+        .catch(() => setExplorerEnabled(false));
+  }, [isAdmin, isStaff]);
+  const explorerCards =
+    (isAdmin || isStaff) && explorerEnabled
+      ? [
+          {
+            to: "/data-exports",
+            internal: true,
+            icon: "▦",
+            title: "Data Exports",
+            description:
+              "Browse research tables, build reusable reports, and export CSV or Excel files.",
+            hint: "Explore data",
+          },
+        ]
+      : [];
+  const cards = isAdmin
+    ? [...baseCards, ...explorerCards, ...adminOnlyCards]
+    : [...baseCards, ...explorerCards];
   const containerClass =
     cards.length === 1 ? "landing__single" : "landing__grid";
 

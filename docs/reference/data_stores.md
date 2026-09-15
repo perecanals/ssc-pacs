@@ -250,11 +250,17 @@ dataset-scoped); pruned when a permitted user removes values via
 username             TEXT PRIMARY KEY
 password_hash        TEXT NOT NULL
 is_admin             BOOLEAN NOT NULL DEFAULT FALSE
+is_staff             BOOLEAN NOT NULL DEFAULT FALSE  -- Alembic 0022
 created_at           TIMESTAMPTZ DEFAULT now()
 must_change_password BOOLEAN NOT NULL DEFAULT FALSE
 password_changed_at  TIMESTAMPTZ
 allowed_datasets     TEXT[] NOT NULL DEFAULT '{}'
 ```
+
+`users_distinct_roles` requires `NOT (is_admin AND is_staff)`. Staff can export
+permitted datasets and download DICOM ZIP/NIfTI, with no administrative bypass.
+Manage this capability with `manage_users.py set-staff`; all existing accounts
+start with `is_staff=false` until explicitly assigned.
 
 `must_change_password` is set TRUE when an admin creates the user (or runs
 `manage_users.py passwd …` against them) and cleared by
@@ -306,6 +312,21 @@ created_by       TEXT
 Indexes: `annotations_history_annotation_id_idx` `(annotation_id, operation_at DESC)`, `annotations_history_entity_id_idx` `(entity_id, operation_at DESC)`.
 
 Populated by `annotations_audit_trg` trigger (PL/pgSQL). See [`../operations/annotation_history.md`](../operations/annotation_history.md).
+
+---
+
+## Data Exports metadata
+
+Alembic `0021_data_explorer` adds `explorer_reports` (named configurations;
+staff see their own, admins see all),
+`explorer_exports` (immutable requests plus lifecycle state), and
+`explorer_downloads` (delivery-request audit). These tables are excluded from
+the research catalog and reader grants. See [Data Exports](data_explorer.md).
+
+Alembic `0023_export_names` adds `explorer_exports.name` (required text, 1–120
+characters, nonblank). An edited export creates a new row; its configuration
+records `source_export_id` when rerun from history. The source row remains
+unchanged. Names need not be unique.
 
 ---
 

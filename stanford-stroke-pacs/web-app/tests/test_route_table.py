@@ -20,6 +20,19 @@ def _collect_routes(app):
 
 # The expected route table — every (METHOD, path) the app must expose.
 EXPECTED_ROUTES = {
+    ("GET", "/api/data-explorer/capabilities"),
+    ("GET", "/api/data-explorer/catalog"),
+    ("GET", "/api/data-explorer/values"),
+    ("POST", "/api/data-explorer/preview"),
+    ("GET", "/api/data-explorer/reports"),
+    ("POST", "/api/data-explorer/reports"),
+    ("PUT", "/api/data-explorer/reports/{report_id}"),
+    ("DELETE", "/api/data-explorer/reports/{report_id}"),
+    ("GET", "/api/data-explorer/exports"),
+    ("POST", "/api/data-explorer/exports"),
+    ("GET", "/api/data-explorer/exports/{job_id}"),
+    ("POST", "/api/data-explorer/exports/{job_id}/cancel"),
+    ("GET", "/api/data-explorer/exports/{job_id}/download"),
     ("POST", "/api/login"),
     ("POST", "/api/logout"),
     ("GET", "/api/me"),
@@ -37,6 +50,7 @@ EXPECTED_ROUTES = {
     ("GET", "/api/ohif-link/{studyinstanceuid}"),
     ("GET", "/api/series/{seriesinstanceuid}/dicom-zip"),
     ("GET", "/api/series/{seriesinstanceuid}/paths"),
+    ("GET", "/api/series/{seriesinstanceuid}/nifti"),
     ("GET", "/api/storage-mode"),
     ("POST", "/api/studies/{studyinstanceuid}/warm"),
     ("POST", "/api/studies/{studyinstanceuid}/evict"),

@@ -188,7 +188,7 @@ def list_users(user: str = Depends(require_admin)):
     try:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             cur.execute(
-                "SELECT username, is_admin, allowed_datasets, created_at "
+                "SELECT username, is_admin, is_staff, allowed_datasets, created_at "
                 "FROM users ORDER BY username"
             )
             return [_serialize_user_row(r) for r in cur.fetchall()]
@@ -225,7 +225,7 @@ def set_user_datasets(
             cur.execute(
                 "UPDATE users SET allowed_datasets = %s::text[] "
                 "WHERE username = %s "
-                "RETURNING username, is_admin, allowed_datasets, created_at",
+                "RETURNING username, is_admin, is_staff, allowed_datasets, created_at",
                 (datasets, username),
             )
             row = cur.fetchone()

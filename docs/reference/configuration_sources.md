@@ -104,6 +104,14 @@ full ordered sequence is in
 
 ---
 
+## Optional Data Exports
+
+`config.toml [data-explorer]` owns enablement, spool path and resource limits.
+`.env EXPLORER_DB_USER/EXPLORER_DB_PASSWORD` supplies its separate read-only
+login; endpoint/database settings come from the existing `DB_*` configuration.
+Provision with `scripts/admin/manage_explorer_db.py`; see
+[operations](../operations/data_explorer.md).
+
 ## Related procedures (don't duplicate them here)
 
 - Secret rotation: [`../operations/secret_rotation.md`](../operations/secret_rotation.md)

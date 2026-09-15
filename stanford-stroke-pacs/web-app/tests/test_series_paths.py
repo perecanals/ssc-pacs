@@ -1,6 +1,6 @@
 """Tests for the series filesystem-paths endpoint (admin-only).
 
-Server-side paths are operational detail like the zip download —
+Server-side paths are restricted operational details —
 `GET /api/series/{uid}/paths` is gated by `require_admin` and backs the
 copy-path quick actions in the table.
 """

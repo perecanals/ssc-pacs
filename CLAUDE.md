@@ -122,6 +122,8 @@ Rebuild frontend: `cd web-app && npm run build`, then restart the web app.
 ```bash
 python scripts/admin/manage_users.py list                    # incl. dataset grants
 python scripts/admin/manage_users.py add <user> [--admin] [--datasets 'PRECISE,CRISP2/LVO']
+python scripts/admin/manage_users.py set-staff <user> [<user> ...]  # preserve dataset grants
+python scripts/admin/manage_users.py set-staff <user> --remove
 python scripts/admin/manage_users.py passwd <user>
 python scripts/admin/manage_users.py set-datasets <user> <csv|--all|--none>
 # Restart Orthanc only when orthanc_users.json changed (admin edits / rotation): docker restart ssc-orthanc
@@ -164,6 +166,7 @@ Two services and two databases. Full topology + request/ingest flows: `docs/refe
 
 **Auth:**
 - End users live in the PostgreSQL `users` table (bcrypt, SSOT); login returns an HttpOnly JWT cookie.
+- **Staff role**: `users.is_staff` grants dataset-scoped DICOM ZIP/NIfTI downloads and Data Exports; user administration, destructive actions and direct Orthanc access remain admin-only. Assign with `manage_users.py set-staff`; role and dataset checks read current DB values.
 - **Per-user dataset access**: `users.allowed_datasets text[]` gates the `patient.dataset` cohorts a non-admin may see (deny-by-default: empty = no data; admins bypass). Enforced on every patient-data endpoint + the DICOMweb proxy (`web-app/dataset_access.py`). See architecture.md §5.4.
 - **Per-label edit access**: `label_definitions.edit_policy`/`edit_users` gate who may *write* a label's values (allow-by-default; admins do **not** bypass — deliberately the opposite of dataset access). Enforced on annotation write/delete (`common.can_edit_label`); managed at `/admin/labels`. See architecture.md §5.5.
 - The Web App reverse-proxies `/ohif/*` and `/dicom-web/*` to Orthanc (`routes/proxy.py`, async `httpx`) with the service-account Basic auth from `.env`; end users never present Orthanc credentials.

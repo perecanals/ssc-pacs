@@ -129,6 +129,10 @@ python scripts/admin/manage_users.py add alice --datasets 'PRECISE,CRISP2/LVO'
 # Add an admin user (DB + orthanc_users.json); admins see all datasets
 python scripts/admin/manage_users.py add bob --admin
 
+# Grant staff exports/downloads to existing accounts; preserve dataset grants
+python scripts/admin/manage_users.py set-staff alice carol
+python scripts/admin/manage_users.py set-staff alice --remove  # back to ordinary user
+
 # Reset a user's password (admin-driven; user is forced to change it again)
 python scripts/admin/manage_users.py passwd alice
 
@@ -218,6 +222,15 @@ python scripts/admin/rotate_db_password.py rotate       # ALTER ROLE on the DB +
 sudo systemctl restart ssc-web-app   # macOS: sudo launchctl kickstart -k system/com.ssc.webapp
 python scripts/admin/rotate_db_password.py check        # verify .env authenticates
 ```
+
+### Data Exports reader
+
+From the stack root, `python scripts/admin/manage_explorer_db.py provision`
+creates/rotates the dedicated `sscpacs-readonly` login and saves credentials
+without displaying them. Use `python scripts/admin/manage_explorer_db.py check`
+to verify grants, or `python scripts/admin/manage_explorer_db.py sync` to
+synchronize the restricted catalog without changing credentials. See
+[Data Exports operations](data_explorer.md) before enabling.
 
 ---
 
@@ -453,6 +466,11 @@ make lint
 (`.github/workflows/ci.yml`). Jobs: `lint` (ruff ×3 surfaces),
 `backend-tests`, `ingestion-tests`, `frontend-tests` (eslint + vitest),
 `frontend-build`. The `mypy` job is advisory (non-blocking).
+
+Backend CI installs only `web-app/requirements.txt` and
+`web-app/requirements-dev.txt`. Declare test dependencies there rather than
+relying on packages from the host ingestion environment; NumPy is required by
+the synthetic DICOM and NIfTI fidelity tests.
 
 **Pre-commit hooks:** Installed by `make install-dev`. Runs ruff and prettier
 on `web-app/` files automatically before each `git commit`.

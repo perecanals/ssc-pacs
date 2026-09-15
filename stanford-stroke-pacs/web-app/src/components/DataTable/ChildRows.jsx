@@ -3,26 +3,9 @@ import PropTypes from "prop-types";
 import LabelCell from "./LabelCell";
 import WarmButton from "./WarmButton";
 import CopyPathButtons from "./CopyPathButtons";
+import ImagingDownloadButtons from "./ImagingDownloadButtons";
 import { isNarrowCol } from "../../utils/table";
 import BuiltinCell from "./BuiltinCell";
-
-const DownloadIcon = () => (
-  <svg
-    width="14"
-    height="14"
-    viewBox="0 0 24 24"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth="2"
-    strokeLinecap="round"
-    strokeLinejoin="round"
-    style={{ display: "inline-block", verticalAlign: "middle" }}
-  >
-    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-    <polyline points="7 10 12 15 17 10" />
-    <line x1="12" y1="15" x2="12" y2="3" />
-  </svg>
-);
 
 const TrashIcon = () => (
   <svg
@@ -51,6 +34,7 @@ function GrandChildTable({
   gcColSpan,
   activeRowKey,
   isAdmin,
+  canExport,
   downloadingSeries,
   canWarm,
   seriesStatus,
@@ -195,29 +179,19 @@ function GrandChildTable({
                             baseClass="dt__gc-link-btn"
                           />
                         )}
+                        {gc.seriesinstanceuid && (canExport || isAdmin) && (
+                          <ImagingDownloadButtons
+                            uid={gc.seriesinstanceuid}
+                            busy={downloadingSeries === gc.seriesinstanceuid}
+                            onDownload={onDicomDownload}
+                            className="dt__gc-link-btn"
+                          />
+                        )}
                         {gc.seriesinstanceuid && isAdmin && (
-                          <>
-                            <button
-                              onClick={() =>
-                                onDicomDownload(gc.seriesinstanceuid)
-                              }
-                              className="dt__gc-link-btn"
-                              title="Download DICOM as zip"
-                              disabled={
-                                downloadingSeries === gc.seriesinstanceuid
-                              }
-                            >
-                              {downloadingSeries === gc.seriesinstanceuid ? (
-                                "\u2026"
-                              ) : (
-                                <DownloadIcon />
-                              )}
-                            </button>
-                            <CopyPathButtons
-                              seriesUid={gc.seriesinstanceuid}
-                              baseClass="dt__gc-link-btn"
-                            />
-                          </>
+                          <CopyPathButtons
+                            seriesUid={gc.seriesinstanceuid}
+                            baseClass="dt__gc-link-btn"
+                          />
                         )}
                         {gc.seriesinstanceuid && isAdmin && onRequestDelete && (
                           <button
@@ -260,6 +234,7 @@ GrandChildTable.propTypes = {
   gcColSpan: PropTypes.number.isRequired,
   activeRowKey: PropTypes.string,
   isAdmin: PropTypes.bool,
+  canExport: PropTypes.bool,
   downloadingSeries: PropTypes.string,
   canWarm: PropTypes.bool,
   seriesStatus: PropTypes.object,
@@ -288,6 +263,7 @@ export default function ChildRows({
   gcColSpan,
   activeRowKey,
   isAdmin,
+  canExport,
   downloadingSeries,
   canWarm,
   studyStatus,
@@ -460,29 +436,20 @@ export default function ChildRows({
                       )}
                     {childConfig.idCol === "seriesinstanceuid" &&
                       child.seriesinstanceuid &&
+                      (canExport || isAdmin) && (
+                        <ImagingDownloadButtons
+                          uid={child.seriesinstanceuid}
+                          busy={downloadingSeries === child.seriesinstanceuid}
+                          onDownload={onDicomDownload}
+                        />
+                      )}
+                    {childConfig.idCol === "seriesinstanceuid" &&
+                      child.seriesinstanceuid &&
                       isAdmin && (
-                        <>
-                          <button
-                            onClick={() =>
-                              onDicomDownload(child.seriesinstanceuid)
-                            }
-                            className="link-btn"
-                            title="Download DICOM as zip"
-                            disabled={
-                              downloadingSeries === child.seriesinstanceuid
-                            }
-                          >
-                            {downloadingSeries === child.seriesinstanceuid ? (
-                              "\u2026"
-                            ) : (
-                              <DownloadIcon />
-                            )}
-                          </button>
-                          <CopyPathButtons
-                            seriesUid={child.seriesinstanceuid}
-                            baseClass="link-btn"
-                          />
-                        </>
+                        <CopyPathButtons
+                          seriesUid={child.seriesinstanceuid}
+                          baseClass="link-btn"
+                        />
                       )}
                     {isAdmin &&
                       onRequestDelete &&
@@ -526,6 +493,7 @@ export default function ChildRows({
                   gcColSpan={gcColSpan}
                   activeRowKey={activeRowKey}
                   isAdmin={isAdmin}
+                  canExport={canExport}
                   downloadingSeries={downloadingSeries}
                   canWarm={canWarm}
                   seriesStatus={seriesStatus}
@@ -580,6 +548,7 @@ ChildRows.propTypes = {
   gcColSpan: PropTypes.number.isRequired,
   activeRowKey: PropTypes.string,
   isAdmin: PropTypes.bool,
+  canExport: PropTypes.bool,
   downloadingSeries: PropTypes.string,
   canWarm: PropTypes.bool,
   studyStatus: PropTypes.object,
@@ -595,4 +564,4 @@ ChildRows.propTypes = {
   onMutated: PropTypes.func.isRequired,
 };
 
-export { DownloadIcon, TrashIcon };
+export { TrashIcon };

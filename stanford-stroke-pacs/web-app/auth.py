@@ -96,6 +96,24 @@ def require_admin(user: str = Depends(get_current_user)) -> str:
     return user
 
 
+def can_user_export(username: str) -> bool:
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT is_admin OR is_staff FROM users WHERE username=%s", (username,))
+            row = cur.fetchone()
+            return bool(row and row[0])
+    finally:
+        conn.close()
+
+
+def require_staff(user: str = Depends(get_current_user)) -> str:
+    """Staff or admin capability; dataset authorization is checked separately."""
+    if not can_user_export(user):
+        raise HTTPException(403, "Staff or admin access required")
+    return user
+
+
 def get_dataset_scope(user: str = Depends(get_current_user)) -> list[str] | None:
     """FastAPI dependency: the caller's dataset scope (401 if not logged in).
 
