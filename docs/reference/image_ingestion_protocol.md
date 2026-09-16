@@ -28,6 +28,14 @@ Takes a directory of per-patient source DICOMs, and for each case:
 All of this is wrapped in a per-case try/except so a failure in one case does
 not stop the batch; errors are written to `logs/error_log_*.json`.
 
+Extracted metadata in `series_dicom_tags.tags` stores non-finite numeric values
+(`Infinity`, `-Infinity`, and `NaN`) as JSON `null`, including private tags,
+array elements, and nested sequences. Other values and array positions are
+preserved. This prevents PostgreSQL JSONB validation from rejecting an entire
+case because of one non-finite DICOM value; the source and copied DICOM files
+are unchanged. Cases that previously failed with `Token "-Infinity" is invalid`
+must be re-run to ingest their metadata.
+
 ---
 
 ## Entry point

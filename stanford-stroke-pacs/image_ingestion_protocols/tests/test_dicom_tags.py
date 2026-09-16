@@ -5,6 +5,8 @@ The assertions here encode the fixes that make the extractor safe to point at
 (maintenance/DicomDetector/metadata.py) gets wrong.
 """
 
+import json
+
 import pydicom
 import pytest
 from pydicom.dataset import Dataset
@@ -41,6 +43,40 @@ def test_private_tags_are_kept_under_a_private_subkey():
     ds.add_new(0x00091001, "LO", "vendor-secret")
     row = extract_series_tags([ds])
     assert row["tags"]["_private"]["0009,1001"] == "vendor-secret"
+
+
+@pytest.mark.parametrize("value", [float("inf"), float("-inf"), float("nan")])
+def test_nonfinite_tags_are_null_without_losing_the_series(value):
+    ds = _header()
+    ds.add_new(0x0018602C, "FD", value)  # PhysicalDeltaX: public scalar
+    # Reproduce the private multi-value tag that failed CRISP2 ingestion.
+    ds.add_new(0x00232018, "FD", [12.0, value, 0.0])
+    inner = Dataset()
+    inner.add_new(0x00232018, "FD", value)
+    ds.ProcedureCodeSequence = Sequence([inner])
+
+    row = extract_series_tags([ds])
+    tags = json.loads(json.dumps(row["tags"], allow_nan=False))
+    assert tags["PhysicalDeltaX"] is None
+    assert tags["_private"]["0023,2018"] == [12.0, None, 0.0]
+    assert tags["ProcedureCodeSequence"][0]["_private"]["0023,2018"] is None
+    assert tags["SeriesDescription"] == "TEST"
+    assert row["n_instances_scanned"] == 1
+
+
+@pytest.mark.parametrize("number_type", [pydicom.valuerep.DSfloat, pydicom.valuerep.DSdecimal])
+@pytest.mark.parametrize("value", ["Infinity", "-Infinity", "NaN", "1.25"])
+def test_dicom_numeric_wrappers_produce_strict_json(number_type, value, monkeypatch):
+    ds = _header()
+    monkeypatch.setattr(pydicom.config, "use_DS_decimal", number_type is pydicom.valuerep.DSdecimal)
+    monkeypatch.setattr(pydicom.config.settings, "reading_validation_mode", pydicom.config.IGNORE)
+    ds.add_new(0x00232018, "DS", [value, "2.0"])
+    assert isinstance(ds[0x00232018].value[0], number_type)
+
+    tags = extract_series_tags([ds])["tags"]
+    stored = json.loads(json.dumps(tags, allow_nan=False))
+    expected = 1.25 if value == "1.25" else None
+    assert stored["_private"]["0023,2018"] == [expected, 2.0]
 
 
 def test_sequences_are_recursed_but_depth_capped():

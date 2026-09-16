@@ -20,6 +20,7 @@ catch series whose recon parameters vary mid-acquisition.
 
 from __future__ import annotations
 
+import math
 from typing import Any
 
 import pydicom
@@ -47,8 +48,12 @@ SKIP_KEYWORDS = frozenset({"PixelData", "FloatPixelData", "DoubleFloatPixelData"
 
 
 def _coerce(value: Any, depth: int) -> Any:
-    """Convert a pydicom element value into something json.dumps can handle."""
-    if value is None or isinstance(value, (str, int, float, bool)):
+    """Convert a DICOM value to JSON, using null for non-finite numbers."""
+    if isinstance(value, float):
+        # json.dumps accepts NaN/Infinity by default, but PostgreSQL JSONB
+        # rejects them. Keep the tag/array position without failing the case.
+        return value if math.isfinite(value) else None
+    if value is None or isinstance(value, (str, int, bool)):
         return value
     if isinstance(value, PersonName):
         return str(value)
@@ -64,9 +69,10 @@ def _coerce(value: Any, depth: int) -> Any:
         return [_coerce(v, depth) for v in value]
     # DSfloat / IS / DSdecimal and friends are numeric subclasses in disguise.
     try:
-        return float(value)
+        number = float(value)
     except (TypeError, ValueError):
         return str(value)
+    return number if math.isfinite(number) else None
 
 
 def _dataset_to_dict(dataset: pydicom.Dataset, depth: int = 0) -> dict:
