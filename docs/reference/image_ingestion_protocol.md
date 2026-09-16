@@ -59,6 +59,12 @@ subdirectory, and aggregates labelled-table sync at the end.
 Logs land under `image_ingestion_protocols/logs/` with a timestamped name.
 Both stdout and stderr are redirected through the logger.
 
+For the local, gitignored `ingestion_mount/mount_mac.sh` helper, run it from
+the checkout with `bash ingestion_mount/mount_mac.sh`. It refuses an existing
+mount and mounts the source read-only; keep `delete_originals_after_verification:
+false`. Stop ingestion before unmounting with `fusermount3 -u <mount_point>`.
+Its connection timeout and SSH keepalives do not impose a per-file read timeout.
+
 ### Resuming an interrupted run
 
 A large backlog runs for days and will be interrupted repeatedly. Each case is
