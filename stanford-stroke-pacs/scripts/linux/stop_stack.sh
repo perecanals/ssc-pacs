@@ -46,6 +46,14 @@ TIMERS=()
 for t in "$SRC"/*.timer.in; do
   [[ -e "$t" ]] || continue
   name="$(basename "${t%.in}")"
+  # A checkout may contain these templates before any remote units are
+  # installed. Do not abort the stack stop on a nonexistent optional unit.
+  if [[ "$name" == pacs-remote-*.timer ]]; then
+    if systemctl is-active --quiet "$name" 2>/dev/null || systemctl is-enabled --quiet "$name" 2>/dev/null; then
+      TIMERS+=("$name")
+    fi
+    continue
+  fi
   if [[ "$name" == cold-archive-mirror.timer ]]; then
     if command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet "$name"; then
       TIMERS+=("$name")

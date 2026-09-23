@@ -1,0 +1,11 @@
+[Unit]
+Description=PACS — hourly remote backup freshness (opt-in)
+
+[Timer]
+OnCalendar=__BACKUP_CALENDAR__
+RandomizedDelaySec=__BACKUP_JITTER__
+Persistent=true
+Unit=pacs-remote-freshness.service
+
+[Install]
+WantedBy=timers.target

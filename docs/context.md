@@ -32,6 +32,7 @@ One **Orthanc** container (`ssc-orthanc`), one native-host **Web App** service o
 | Per-user dataset access (grants, /admin page, enforcement) | [`reference/architecture.md` §5.4](reference/architecture.md) + [`operations/commands.md`](operations/commands.md) |
 | Annotation audit trail (history table, trigger, API) | [`operations/annotation_history.md`](operations/annotation_history.md) |
 | Backup strategy (Tier 1 active, Tier 2 dormant) | [`operations/backup_strategy.md`](operations/backup_strategy.md) |
+| Remote encrypted backups (opt-in SSH/SFTP jobs, retention, activation) | [`operations/remote_backups.md`](operations/remote_backups.md) |
 | Restore runbook (DB recovery procedure) | [`operations/restore_runbook.md`](operations/restore_runbook.md) |
 | Cold storage design | [`cold_storage/design.md`](cold_storage/design.md) |
 | Cold storage operations | [`cold_storage/runbook.md`](cold_storage/runbook.md) |

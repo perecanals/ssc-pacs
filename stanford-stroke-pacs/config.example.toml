@@ -50,6 +50,47 @@ retention_days = 60
 # Freshness-monitor alert threshold: a backup older than this many hours is
 # reported stale by check_backup_freshness.sh.
 max_age_hours = 36
+# Optional legacy local/NFS mirror; leave dormant when using remote restic jobs.
+cold_mirror_dest = ""
+cold_mirror_rsync_args = ""
+
+# Linux backup timer policy. The installer reads these values; re-render/reload
+# units after edits. Missing entries use this example's schedule defaults.
+[backup.schedules]
+pg-backup-stanford-stroke = { calendar = "*-*-* 02:15:00", randomized_delay = "10m" }
+pg-backup-orthanc = { calendar = "*-*-* 02:30:00", randomized_delay = "10m" }
+orthanc-storage-backup = { calendar = "*-*-* 02:45:00", randomized_delay = "10m" }
+pg-backup-freshness = { calendar = "hourly", randomized_delay = "5m" }
+cold-archive-mirror = { calendar = "*-*-* 03:30:00", randomized_delay = "15m" }
+pacs-remote-backup-tier1 = { calendar = "*-*-* 03:15:00", randomized_delay = "5m" }
+pacs-remote-backup-imaging = { calendar = "*-*-* 03:30:00", randomized_delay = "10m" }
+pacs-remote-freshness = { calendar = "hourly", randomized_delay = "5m" }
+pacs-remote-maintain-tier1 = { calendar = "Sun *-*-* 06:00:00", randomized_delay = "15m" }
+pacs-remote-maintain-imaging = { calendar = "Sun *-*-* 08:00:00", randomized_delay = "15m" }
+
+[remote_backup]
+# Opt-in restic over SSH/SFTP; see docs/operations/remote_backups.md.
+# No remote timers are enabled by the installer. Create remote_root manually.
+enabled = false
+host = "REPLACE_WITH_BACKUP_HOST"
+user = "corelab"
+port = 22
+backup_id = "ssc-pacs"   # stable source identity for snapshots and retention
+remote_root = "/path/to/ssc-pacs-backups"
+remote_mount = "/path/to/mounted-backup-disk"
+remote_python = "python3"
+ssh_key_file = "/home/DEPLOY_USER/.ssh/id_ed25519_pacs_backup"
+password_file = "/home/DEPLOY_USER/.config/ssc-pacs/restic-password"
+restic_bin = "/usr/local/bin/restic"
+# Keep state/cache outside the source trees; mode 0700, owned by the job user.
+state_dir = "/path/to/ssc-pacs-remote-state"
+tier1_mount = "/path/to/local-backup-disk"
+imaging_mount = "/path/to/local-imaging-disk"
+# Database names come from .env; freshness from [backup].max_age_hours.
+# Remote recovery points are independent of local file retention_days.
+keep_daily = 60
+min_free_gib = 100
+upload_kib_per_second = 0  # 0 = unlimited; cap if sharing the network
 
 [web-app]
 # HTTP port uvicorn serves on. Consumed at unit-install time: the systemd and

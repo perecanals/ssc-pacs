@@ -3,10 +3,10 @@ Description=PACS — nightly cold-archive mirror (Tier 2, dormant on dev)
 Documentation=file:__DOCS_ROOT__/operations/backup_strategy.md
 
 [Timer]
-# Daily at 03:30. Stays inactive on dev — the unit ships with
+# Schedule from config.toml [backup.schedules]. Stays inactive on dev — ships with
 # [Install] populated but is NOT enabled by default.
-OnCalendar=*-*-* 03:30:00
-RandomizedDelaySec=15m
+OnCalendar=__BACKUP_CALENDAR__
+RandomizedDelaySec=__BACKUP_JITTER__
 Persistent=true
 Unit=cold-archive-mirror.service
 

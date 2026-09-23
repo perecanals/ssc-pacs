@@ -14,7 +14,7 @@ Group=__DEPLOY_GROUP__
 Nice=10
 IOSchedulingClass=best-effort
 IOSchedulingPriority=7
-ExecStart=__REPO_ROOT__/scripts/backup/backup_pg_db.sh stanford-stroke
+ExecStart=__REPO_ROOT__/scripts/backup/backup_pg_db.sh --web-app
 # Restart-on-failure has no meaning for oneshot timer-driven units; the
 # next scheduled run handles transient failures and OnFailure= alerts in
 # the meantime.

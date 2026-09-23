@@ -1,0 +1,11 @@
+[Unit]
+Description=PACS — nightly remote imaging backup (opt-in)
+
+[Timer]
+OnCalendar=__BACKUP_CALENDAR__
+RandomizedDelaySec=__BACKUP_JITTER__
+Persistent=true
+Unit=pacs-remote-backup@imaging.service
+
+[Install]
+WantedBy=timers.target

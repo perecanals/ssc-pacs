@@ -3,10 +3,9 @@ Description=PACS — nightly pg_dump backup of orthanc_db
 Documentation=file:__DOCS_ROOT__/operations/backup_strategy.md
 
 [Timer]
-# Daily at 02:30 local time, 15min after stanford-stroke so they don't
-# collide on disk.
-OnCalendar=*-*-* 02:30:00
-RandomizedDelaySec=10m
+# Schedule from config.toml [backup.schedules]; defaults stagger local dumps.
+OnCalendar=__BACKUP_CALENDAR__
+RandomizedDelaySec=__BACKUP_JITTER__
 Persistent=true
 Unit=pg-backup-orthanc.service
 

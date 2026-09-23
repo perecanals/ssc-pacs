@@ -6,8 +6,20 @@
 on macOS). Tier 2 (cold-archive mirror) is implemented but **dormant** —
 activation is part of the cutover checklist below.
 
+**Remote alternative:** encrypted, versioned restic-over-SFTP jobs now cover
+both Tier 1 artifacts and the cold archive tree. They are implemented and
+opt-in; no remote timers are enabled automatically. See
+[`remote_backups.md`](remote_backups.md) for configuration, validation,
+retention and activation. Use this alternative instead of enabling the
+legacy cold mirror when versioned remote recovery is required.
+
 The single source of truth for the backup root is `config.toml`
 `[backup].backup_root`; resolve it from there rather than hardcoding a path.
+Local and remote freshness share `[backup].max_age_hours`. Linux backup timer
+calendars and jitter come from `[backup.schedules]`, rendered by the installer;
+omitted entries use the defaults in `config.example.toml`. Re-render/reload
+units after schedule edits. Scheduled database dumps use `--web-app` and
+`--orthanc` to resolve names from `.env`, shared with freshness and remote jobs.
 
 This document is the single source of truth for what is backed up, how, where,
 and how to recover. Restore steps live in
@@ -205,8 +217,8 @@ scripts/backup/check_backup_freshness.sh
 echo "exit=$?"   # 0 = fresh, 2 = stale or missing
 
 # Run a backup on demand (any time)
-scripts/backup/backup_pg_db.sh stanford-stroke
-scripts/backup/backup_pg_db.sh orthanc_db
+scripts/backup/backup_pg_db.sh --web-app
+scripts/backup/backup_pg_db.sh --orthanc
 scripts/backup/backup_orthanc_storage.sh
 ```
 
@@ -237,7 +249,7 @@ currently recoverable via re-ingestion.
 | Path | Role |
 |---|---|
 | `scripts/cold_storage/mirror_cold_archive.sh` | `rsync -a --delete` from `SOURCE_DIR` to `COLD_MIRROR_DEST` (no-op if `COLD_MIRROR_DEST` unset) |
-| `deploy/systemd/cold-archive-mirror.service.in` | reads `/etc/default/pacs-cold-mirror`, runs the script |
+| `deploy/systemd/cold-archive-mirror.service.in` | runs the script, which reads `[backup].cold_mirror_dest` from `config.toml` |
 | `deploy/systemd/cold-archive-mirror.timer.in` | nightly, **not enabled by default** |
 
 ### Production cutover checklist
@@ -249,14 +261,19 @@ currently recoverable via re-ingestion.
    contain identifiable data and must not leave the host without
    encryption at rest (borg/restic both support this). See
    `docs/reference/image_ingestion_protocol.md`.
-3. Create `/etc/default/pacs-cold-mirror` (mode 0644, root-owned):
+3. Set the legacy mirror destination in the existing `config.toml` `[backup]`
+   section (the source already comes from `[storage].cold_archive_root`):
 
-   ```ini
-   SOURCE_DIR=<cold_archive_root>   # config.toml [storage].cold_archive_root
-   COLD_MIRROR_DEST=/path/to/mirror
+   ```toml
+   cold_mirror_dest = "/path/to/mirror"
    # Optional rsync tuning, e.g.:
-   # RSYNC_EXTRA_ARGS=--bwlimit=50000
+   cold_mirror_rsync_args = "--bwlimit=50000"
    ```
+
+   The old `/etc/default/pacs-cold-mirror` file is no longer read by newly
+   rendered units. Move any existing persistent settings into `config.toml`
+   before reinstalling. Explicit script environment overrides remain available
+   for one-off operations.
 
 4. First manual sync (sanity check, may take hours):
 
@@ -273,18 +290,9 @@ currently recoverable via re-ingestion.
    sudo systemctl enable --now cold-archive-mirror.timer
    ```
 
-6. Switch the freshness monitor to include the cold mirror (Linux example):
-
-   ```bash
-   sudo systemctl edit pg-backup-freshness.service
-   ```
-   Add:
-   ```ini
-   [Service]
-   ExecStart=
-   ExecStart=/opt/ssc-pacs/ssc-pacs/stanford-stroke-pacs/scripts/backup/check_backup_freshness.sh --include-cold-archive
-   EnvironmentFile=/etc/default/pacs-cold-mirror
-   ```
+6. The freshness monitor automatically includes a nonempty
+   `[backup].cold_mirror_dest` and uses `[backup].max_age_hours`; no separate
+   unit override or environment file is needed.
 
 7. Rehearse the cold-archive restore (see
    [`restore_runbook.md`](restore_runbook.md) §3).
@@ -310,7 +318,8 @@ results are in that file.
   timestamp." Drops `stanford-stroke` RPO toward seconds. Cost: a host
   PostgreSQL config change + monitoring WAL disk usage.
 - **Offsite logical dumps:** rsync the backup root to a second machine on a
-  daily timer. Trivial once a second host exists.
+  daily timer, or activate the implemented encrypted Tier 1 job described in
+  [`remote_backups.md`](remote_backups.md).
 - **`pgbackrest`:** consider for production-grade differential basebackups
   with built-in retention and parallel restore. Heavier than the current
   setup but more complete.

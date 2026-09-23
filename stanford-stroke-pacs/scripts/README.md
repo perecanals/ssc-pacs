@@ -21,7 +21,7 @@ by default and applies only with `--execute`; interactive prompts have a
 | Directory | Purpose | Key scripts |
 |---|---|---|
 | `admin/` | User provisioning, credential rotation, label/dataset ops, series classification, study/series deletion, teardown | `manage_users.py`, `manage_readonly_db_users.py`, `manage_data_exports_db.py`, `rotate_service_account.py`, `rotate_db_password.py`, `bulk_set_label_values.py`, `remove_label.py`, `rename_dataset_value.py`, `reclassify_series_types.py`, `recompute_timepoints.py`, `delete_study.py`, `teardown.sh` |
-| `backup/` | PostgreSQL dump, Orthanc volume snapshot, freshness monitoring | `backup_pg_db.sh`, `backup_orthanc_storage.sh` (+ in-container `orthanc_storage_snapshot.py`), `check_backup_freshness.sh` |
+| `backup/` | PostgreSQL dump, Orthanc volume snapshot, freshness monitoring, opt-in encrypted remote backups | `backup_pg_db.sh`, `backup_orthanc_storage.sh` (+ in-container `orthanc_storage_snapshot.py`), `check_backup_freshness.sh`, `remote_backup.py` ([remote setup](../../docs/operations/remote_backups.md)) |
 | `cold_storage/` | Archive, cleanup, health, cache state, index repair | `archive_all_series.py`, `cleanup_loose_dicoms.py`, `scoped_index.py`, `reindex_missing_series.py`, `prune_stale_index_paths.py`, `rebuild_cache_state.py`, `cold_storage_health.py`, `backfill_storage_sizes.py`, `list_unarchived_series.py`, `verify_and_repair_archives.py`, `mirror_cold_archive.sh` |
 | `connectivity/` | Sanitized SSH tunnel templates for end users (per OS) | `tunnel/{linux,macos,windows}/tunnel.*` |
 | `data_integrity/` | Cross-store audits + repairs (see matrix below) | `reconcile.py`, `dicom_path_sql_fs_audit.py`, `disk_vs_db_series_audit.py`, `detect_mixed_dirs.py`, `repair_dicomweb_metadata_cache.py` |
@@ -127,7 +127,7 @@ python scripts/cold_storage/cold_storage_health.py --json     # read-only probe
 python scripts/dicom/dicom_to_nifti.py --series-uid <uid> --warm-if-cold
 
 # Backup
-./scripts/backup/backup_pg_db.sh stanford-stroke
+./scripts/backup/backup_pg_db.sh --web-app
 ./scripts/backup/check_backup_freshness.sh
 
 # Host Postgres cluster (Linux; see docs/operations/postgres_provisioning.md)

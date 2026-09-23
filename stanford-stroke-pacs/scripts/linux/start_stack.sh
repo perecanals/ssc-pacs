@@ -40,6 +40,11 @@ for t in "$SRC"/*.timer.in; do
   [[ -e "$t" ]] || continue
   name="$(basename "${t%.in}")"
   [[ "$name" == cold-archive-mirror.timer ]] && continue
+  # Remote jobs are opt-in even with --enable. Resume only timers the
+  # operator already enabled after provisioning and restore validation.
+  if [[ "$name" == pacs-remote-*.timer ]]; then
+    systemctl is-enabled --quiet "$name" 2>/dev/null || continue
+  fi
   TIMERS+=("$name")
 done
 

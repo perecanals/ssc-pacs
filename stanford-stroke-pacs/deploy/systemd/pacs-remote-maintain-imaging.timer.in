@@ -1,0 +1,11 @@
+[Unit]
+Description=PACS — weekly remote imaging integrity and retention (opt-in)
+
+[Timer]
+OnCalendar=__BACKUP_CALENDAR__
+RandomizedDelaySec=__BACKUP_JITTER__
+Persistent=true
+Unit=pacs-remote-maintain@imaging.service
+
+[Install]
+WantedBy=timers.target

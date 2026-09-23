@@ -9,15 +9,15 @@
 # plus the Orthanc storage-volume backup (orthanc_storage), under BACKUP_ROOT
 # (config.toml [backup].backup_root).
 #
-# Pass --include-cold-archive to additionally check the cold-archive
-# mirror destination. On the dev host this flag is NOT passed (Tier 2
-# is dormant); production cutover enables it.
+# A configured [backup].cold_mirror_dest is monitored automatically.
+# --include-cold-archive additionally makes a missing destination an error.
 #
 # Env overrides:
 #   BACKUP_ROOT       (default: config.toml [backup].backup_root — required, no built-in fallback)
 #   MAX_AGE_HOURS     (default: config.toml [backup].max_age_hours, else 36)
-#   COLD_MIRROR_DEST  (required if --include-cold-archive)
-#   COLD_MIRROR_MAX_AGE_HOURS (default 36)
+#   BACKUP_ENV_FILE  (default: stack .env; database names only)
+#   COLD_MIRROR_DEST  (default: config.toml [backup].cold_mirror_dest)
+#   COLD_MIRROR_MAX_AGE_HOURS (default MAX_AGE_HOURS)
 #
 # Exit codes:
 #   0 — all checked targets are fresh
@@ -54,15 +54,19 @@ if [[ -z "$BACKUP_ROOT" ]]; then
     exit 2
 fi
 MAX_AGE_HOURS="${MAX_AGE_HOURS:-$(config_get backup max_age_hours 36)}"
-# Dump subdirs are named after the databases; take the names from .env when
-# present so a renamed DB doesn't silently pass freshness on stale dirs.
-if [[ -r "$STACK_DIR/.env" ]]; then
-    set -a
-    # shellcheck disable=SC1091
-    . "$STACK_DIR/.env"
-    set +a
+COLD_MIRROR_DEST="${COLD_MIRROR_DEST:-$(config_get backup cold_mirror_dest "")}"
+[[ -n "$COLD_MIRROR_DEST" ]] && INCLUDE_COLD=1
+# Database identity is shared with the producers and remote consumer.
+BACKUP_ENV_FILE="${BACKUP_ENV_FILE:-$STACK_DIR/.env}"
+if [[ ! -r "$BACKUP_ENV_FILE" ]]; then
+    echo "env file not readable: $BACKUP_ENV_FILE" >&2
+    exit 2
 fi
-DBS=("${PG_ORTHANC_DB:-orthanc_db}" "${DB_NAME:-stanford-stroke}")
+set -a
+# shellcheck disable=SC1090
+. "$BACKUP_ENV_FILE"
+set +a
+DBS=("${PG_ORTHANC_DB:?PG_ORTHANC_DB not set}" "${DB_NAME:?DB_NAME not set}")
 
 now_epoch=$(date +%s)
 max_age_sec=$(( MAX_AGE_HOURS * 3600 ))
@@ -99,7 +103,7 @@ check_path_age "orthanc_storage" "$BACKUP_ROOT/orthanc_storage/latest.tar.gz" "$
 
 if (( INCLUDE_COLD == 1 )); then
     : "${COLD_MIRROR_DEST:?--include-cold-archive set but COLD_MIRROR_DEST not exported}"
-    cold_max=$(( ${COLD_MIRROR_MAX_AGE_HOURS:-36} * 3600 ))
+    cold_max=$(( ${COLD_MIRROR_MAX_AGE_HOURS:-$MAX_AGE_HOURS} * 3600 ))
     check_path_age "cold_mirror" "$COLD_MIRROR_DEST" "$cold_max"
 fi
 

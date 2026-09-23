@@ -3,8 +3,8 @@
 #
 # Mirrors $SOURCE_DIR (the cold archive root) to $COLD_MIRROR_DEST using
 # rsync. SOURCE_DIR defaults to config.toml [storage].cold_archive_root;
-# COLD_MIRROR_DEST is env-only so the dev host can ship the script without
-# a destination configured.
+# COLD_MIRROR_DEST defaults to config.toml [backup].cold_mirror_dest; an empty
+# destination keeps the mirror dormant.
 #
 # Usage:
 #   mirror_cold_archive.sh           # real run (rsync writes)
@@ -13,8 +13,7 @@
 # Activation (production cutover):
 #   1. Provision a destination disk or remote (e.g. /DATA3/cold_mirror,
 #      or a borg/restic repo).
-#   2. Create /etc/default/pacs-cold-mirror with:
-#        COLD_MIRROR_DEST=/path/to/mirror
+#   2. Set config.toml [backup].cold_mirror_dest = "/path/to/mirror"
 #      (SOURCE_DIR only if it must differ from [storage].cold_archive_root)
 #   3. systemctl enable --now cold-archive-mirror.timer
 #
@@ -24,8 +23,8 @@
 #
 # Env:
 #   SOURCE_DIR        (default: config.toml [storage].cold_archive_root)
-#   COLD_MIRROR_DEST  (required to actually run; absent => no-op)
-#   RSYNC_EXTRA_ARGS  (optional, e.g. "--bwlimit=50000")
+#   COLD_MIRROR_DEST  (default: [backup].cold_mirror_dest; empty => no-op)
+#   RSYNC_EXTRA_ARGS  (default: [backup].cold_mirror_rsync_args)
 
 set -euo pipefail
 
@@ -48,7 +47,9 @@ for arg in "$@"; do
     esac
 done
 
-if [[ -z "${COLD_MIRROR_DEST:-}" ]]; then
+COLD_MIRROR_DEST="${COLD_MIRROR_DEST:-$(config_get backup cold_mirror_dest "")}"
+RSYNC_EXTRA_ARGS="${RSYNC_EXTRA_ARGS:-$(config_get backup cold_mirror_rsync_args "")}"
+if [[ -z "$COLD_MIRROR_DEST" ]]; then
     echo "[mirror_cold_archive] COLD_MIRROR_DEST not set; cold mirror is dormant. Exiting 0."
     exit 0
 fi

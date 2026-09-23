@@ -36,7 +36,7 @@ defaults with a logged warning.
 | File | Holds | Secret? | In git? | Authoritative or derived | Per-host edit on fresh deploy? |
 |---|---|---|---|---|---|
 | `.env` | DB + Orthanc-service-account creds, `JWT_SECRET`, `ORTHANC_URL`, optional `ORTHANC_HTTP_PORT`/`ORTHANC_DICOM_PORT` | **Yes** | No (`.env.example` is) | **Authoritative** for all secrets | **Yes** — copy from `.env.example`, fill in |
-| `config.toml` | `[storage]` mode + paths + cold-cache tuning, `[backup]`, `[web-app]` session/auth + `clinical_episode_date_column` | No | No (`config.example.toml` is) | **Authoritative** for non-secret ops | **Yes** — copy from `config.example.toml`, set mode + paths for this host |
+| `config.toml` | `[storage]` mode + paths + cold-cache tuning, `[backup]` policy + Linux schedules, opt-in `[remote_backup]`, `[web-app]` session/auth + `clinical_episode_date_column` | No | No (`config.example.toml` is) | **Authoritative** for non-secret ops | **Yes** — copy from `config.example.toml`, set mode + paths for this host |
 | `deploy.env` | per-host service-unit identity (user, paths, conda) | No | No (`deploy.env.example` is) | **Authoritative** override; else auto-derived | Only if auto-derivation is wrong |
 | `orthanc.json` | Orthanc structural config: ports (in-image default), Folder Indexer (`ScanRoots: ["/dicom-data"]`, `Folders: []`, `RemoveMissingFiles:false`), plugins | No | Yes | **Authoritative** for Orthanc structure; ports are overridable from `.env` | No |
 | `orthanc_users.json` | Orthanc service-account + admin plaintext creds | **Yes** | No | **Derived** from `.env` + DB via `manage_users.py` | No — never hand-edit |

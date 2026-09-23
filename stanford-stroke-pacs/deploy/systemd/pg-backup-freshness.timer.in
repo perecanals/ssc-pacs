@@ -3,8 +3,8 @@ Description=PACS — hourly backup freshness check
 Documentation=file:__DOCS_ROOT__/operations/backup_strategy.md
 
 [Timer]
-OnCalendar=hourly
-RandomizedDelaySec=5m
+OnCalendar=__BACKUP_CALENDAR__
+RandomizedDelaySec=__BACKUP_JITTER__
 Persistent=true
 Unit=pg-backup-freshness.service
 

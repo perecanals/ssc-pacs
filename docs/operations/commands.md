@@ -650,8 +650,35 @@ sudo journalctl -u pg-backup-stanford-stroke.service -e
 ./scripts/backup/check_backup_freshness.sh    # exit 0 = fresh, 2 = stale or missing
 ```
 
-The cold-archive mirror (Tier 2) is implemented but **dormant** — see
-`backup_strategy.md` §4 for the production cutover steps.
+### Remote encrypted backups (restic over SSH, opt-in)
+
+Configured in `config.toml` `[remote_backup]`; database names come from `.env`.
+Setup, what is copied, and the full operating guide: [`remote_backups.md`](remote_backups.md).
+
+```bash
+# One-off runs through systemd (Ctrl+C stops the wait, not the job; `systemctl stop` aborts)
+sudo systemctl start pacs-remote-backup@tier1.service
+sudo systemctl start pacs-remote-backup@imaging.service
+
+# Status / result (journal is quiet until the final JSON summary)
+systemctl status pacs-remote-backup@imaging
+journalctl -u pacs-remote-backup@imaging --since today
+systemctl list-timers 'pacs-remote-*'
+
+# Freshness and integrity from the source host
+python scripts/backup/remote_backup.py freshness tier1
+python scripts/backup/remote_backup.py freshness imaging
+python scripts/backup/remote_backup.py maintain tier1 --dry-run
+
+# Restore a snapshot into a NEW directory (never an existing one)
+python scripts/backup/remote_backup.py restore tier1 --snapshot <id> --target /path/to/new-dir
+# Spot-restore selected archives only (repeat --include)
+python scripts/backup/remote_backup.py restore imaging --snapshot <id> --target /path/to/new-dir \
+  --include /cold/root/.../DICOM.tar.zst
+```
+
+The rsync cold-archive mirror (legacy Tier 2) is implemented but **dormant** —
+see `backup_strategy.md` §4; do not enable it alongside the restic jobs.
 
 ---
 

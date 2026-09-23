@@ -1,0 +1,11 @@
+[Unit]
+Description=PACS — nightly remote DB and Orthanc backup (opt-in)
+
+[Timer]
+OnCalendar=__BACKUP_CALENDAR__
+RandomizedDelaySec=__BACKUP_JITTER__
+Persistent=true
+Unit=pacs-remote-backup@tier1.service
+
+[Install]
+WantedBy=timers.target

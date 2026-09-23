@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Nightly logical backup of one PostgreSQL database via pg_dump -Fc.
 #
-# Usage: backup_pg_db.sh <db-name>
+# Usage: backup_pg_db.sh <db-name>|--web-app|--orthanc
+# Scheduled jobs use flags to resolve the database name from .env.
 #
 # Reads connection details from BACKUP_ENV_FILE (default: <stack>/.env resolved
 # from the script location). Required keys:
@@ -26,7 +27,7 @@ set -euo pipefail
 
 TARGET_DB="${1:-}"
 if [[ -z "$TARGET_DB" ]]; then
-    echo "usage: $0 <db-name>" >&2
+    echo "usage: $0 <db-name>|--web-app|--orthanc" >&2
     exit 1
 fi
 
@@ -61,6 +62,11 @@ set +a
 : "${DB_PORT:?DB_PORT not set in $BACKUP_ENV_FILE}"
 : "${DB_USER:?DB_USER not set in $BACKUP_ENV_FILE}"
 : "${DB_PASSWORD:?DB_PASSWORD not set in $BACKUP_ENV_FILE}"
+
+case "$TARGET_DB" in
+    --web-app) TARGET_DB="${DB_NAME:?DB_NAME not set in $BACKUP_ENV_FILE}" ;;
+    --orthanc) TARGET_DB="${PG_ORTHANC_DB:?PG_ORTHANC_DB not set in $BACKUP_ENV_FILE}" ;;
+esac
 
 dest_dir="$BACKUP_ROOT/$TARGET_DB"
 mkdir -p "$dest_dir"

@@ -4,6 +4,12 @@ Use this when a database is lost, corrupted, or accidentally truncated.
 Backup strategy and RTO/RPO targets live in
 [`backup_strategy.md`](backup_strategy.md).
 
+For encrypted remote copies, first retrieve artifacts into a new staging
+directory using [`remote_backups.md`](remote_backups.md), then follow the
+database/Orthanc restore procedures below. Restored SHA-256 sidecars may name
+the original source paths: verify the restored files explicitly, not the
+still-live originals.
+
 **Audience:** any maintainer with `sudo` and `psql` access. The procedure
 should be doable cold (no prior rehearsal in the same session) — if any
 step is unclear, fix the doc, not your memory.

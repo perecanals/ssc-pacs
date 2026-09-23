@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+Opt-in encrypted SSH/SFTP backups now cover both databases, Orthanc snapshots and cold imaging archives, with independent schedules, retention and freshness checks.
+Remote timers remain disabled until the destination is provisioned and restore checks pass; no schema migration is required.
+Backup paths, shared freshness policy and Linux schedules use config.toml; scheduled dumps and remote uploads resolve database names from .env.
+
 Data Exports uses `data-exports` for routes/configuration and `data_exports` for Python/SQL identifiers.
 Alembic `0024_data_exports_naming` and the host upgrade script preserve existing reports, export history, files and credentials during the rename.
 

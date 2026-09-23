@@ -134,7 +134,8 @@ render() {
       -e "s|__WEBAPP_PORT__|$WEBAPP_PORT|g" \
       -e "s|__DATA_MOUNTS_LINE__|$DATA_MOUNTS_LINE|g" \
       -e "s|__BACKUP_MOUNTS_LINE__|$BACKUP_MOUNTS_LINE|g" \
-      "$1"
+      "$1" | "$PYTHON_BIN" "$STACK_DIR/scripts/backup/render_backup_schedule.py" \
+        "$1" "$CONFIG_TOML" "$STACK_DIR/config.example.toml"
 }
 
 # The Docker drop-in is not a unit: it installs into a .d directory rather than
@@ -205,8 +206,8 @@ echo "==> Enabling units"
 systemctl enable --now ssc-web-app.service
 for t in "$SRC"/*.timer.in; do
   timer="$(basename "${t%.in}")"
-  # cold-archive-mirror is dormant by default (Tier 2; needs /etc/default/pacs-cold-mirror).
-  if [[ "$timer" == cold-archive-mirror.timer ]]; then
+  # Remote destinations must be provisioned and restored from before opt-in.
+  if [[ "$timer" == cold-archive-mirror.timer || "$timer" == pacs-remote-*.timer ]]; then
     echo "  skipping $timer (dormant — enable manually in production)"
     continue
   fi

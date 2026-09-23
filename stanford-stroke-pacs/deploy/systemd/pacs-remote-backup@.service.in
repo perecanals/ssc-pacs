@@ -1,0 +1,21 @@
+[Unit]
+Description=PACS — encrypted remote backup (%i)
+Documentation=file:__DOCS_ROOT__/operations/remote_backups.md
+Wants=network-online.target
+After=network-online.target
+__DATA_MOUNTS_LINE__
+__BACKUP_MOUNTS_LINE__
+StartLimitIntervalSec=2h
+StartLimitBurst=3
+
+[Service]
+Type=oneshot
+User=__DEPLOY_USER__
+Group=__DEPLOY_GROUP__
+UMask=0077
+Nice=15
+IOSchedulingClass=idle
+ExecStart=__PYTHON_BIN__ __REPO_ROOT__/scripts/backup/remote_backup.py backup %i
+TimeoutStartSec=infinity
+Restart=on-failure
+RestartSec=15m

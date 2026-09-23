@@ -14,15 +14,13 @@ Group=__DEPLOY_GROUP__
 Nice=15
 IOSchedulingClass=idle
 # Activation in production:
-#   1. Create /etc/default/pacs-cold-mirror with:
-#        COLD_MIRROR_DEST=/path/to/mirror   # local disk, NFS, or borg/restic repo
+#   1. Set config.toml [backup].cold_mirror_dest to a local/NFS directory.
 #      SOURCE_DIR is NOT needed: mirror_cold_archive.sh defaults it to
 #      config.toml [storage].cold_archive_root. Set it only to mirror some
 #      other directory.
 #   2. systemctl enable --now cold-archive-mirror.timer
 #
-# Without that env file, the script no-ops with a notice (exit 0).
-EnvironmentFile=-/etc/default/pacs-cold-mirror
+# With an empty destination, the script no-ops with a notice (exit 0).
 ExecStart=__REPO_ROOT__/scripts/cold_storage/mirror_cold_archive.sh
 StandardOutput=journal
 StandardError=journal

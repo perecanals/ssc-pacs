@@ -1,0 +1,11 @@
+[Unit]
+Description=PACS — weekly remote Tier 1 integrity and retention (opt-in)
+
+[Timer]
+OnCalendar=__BACKUP_CALENDAR__
+RandomizedDelaySec=__BACKUP_JITTER__
+Persistent=true
+Unit=pacs-remote-maintain@tier1.service
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,14 @@
+[Unit]
+Description=PACS — verify remote backup freshness and snapshot availability
+Documentation=file:__DOCS_ROOT__/operations/remote_backups.md
+Wants=network-online.target
+After=network-online.target
+__BACKUP_MOUNTS_LINE__
+
+[Service]
+Type=oneshot
+User=__DEPLOY_USER__
+Group=__DEPLOY_GROUP__
+UMask=0077
+ExecStart=__PYTHON_BIN__ __REPO_ROOT__/scripts/backup/remote_backup.py freshness tier1
+ExecStart=__PYTHON_BIN__ __REPO_ROOT__/scripts/backup/remote_backup.py freshness imaging

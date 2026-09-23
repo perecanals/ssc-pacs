@@ -12,7 +12,4 @@ Group=__DEPLOY_GROUP__
 ExecStart=__REPO_ROOT__/scripts/backup/check_backup_freshness.sh
 StandardOutput=journal
 StandardError=journal
-# Production: when cold-archive mirror is enabled, swap ExecStart for
-#   ExecStart=/home/.../check_backup_freshness.sh --include-cold-archive
-# and add EnvironmentFile=/etc/default/pacs-cold-mirror so COLD_MIRROR_DEST
-# is exported.
+# A configured [backup].cold_mirror_dest is monitored automatically.
