@@ -17,9 +17,9 @@ import pydicom
 import pytest
 from pydicom.dataset import Dataset
 from pydicom.sequence import Sequence
+from test_image_ingestion_grouping import _write_dcm
 
 from image_ingestion_protocol import ImageIngestionProtocol
-from test_image_ingestion_grouping import _write_dcm
 from utils import (
     ANONYMIZE_BLANK_KEYWORDS,
     ANONYMIZE_METHOD,
