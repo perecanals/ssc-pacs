@@ -124,5 +124,33 @@ def test_copy_handles_basename_collision(tmp_path):
     assert len(p._visible_files(row["dicom_dir_path"])) == 2
 
 
+def test_skip_dir_names_prunes_subtree(tmp_path):
+    case = tmp_path / "case"
+    uid = "1.2.3.70"
+    _write_dcm(case / "S" / "DICOM" / "f1.dcm", uid, 5, 1)
+    _write_dcm(case / "S" / "DICOM" / "f2.dcm", uid, 5, 2)
+    nifti = case / "S" / "NIFTI" / "image.nii.gz"
+    nifti.parent.mkdir(parents=True)
+    nifti.write_bytes(b"\x1f\x8b not a dicom")
+
+    # Default: the NIFTI file is visited and counted as unreadable.
+    p = _protocol(case)
+    p.create_series_table()
+    assert p.scan_candidate_files == 3
+    assert p.scan_unreadable_files == 1
+    assert p.scan_skipped_dirs == 0
+    assert p.case_series_table.iloc[0]["number_of_slices"] == 2
+
+    # With the option the whole NIFTI dir is pruned from the walk.
+    p = ImageIngestionProtocol(
+        case_dir=str(case), postgres_engine=None, skip_dir_names={"NIFTI"}
+    )
+    p.create_series_table()
+    assert p.scan_candidate_files == 2
+    assert p.scan_unreadable_files == 0
+    assert p.scan_skipped_dirs == 1
+    assert p.case_series_table.iloc[0]["number_of_slices"] == 2
+
+
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "-v"]))

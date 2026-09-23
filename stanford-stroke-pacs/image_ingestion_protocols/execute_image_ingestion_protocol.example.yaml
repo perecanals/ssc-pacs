@@ -19,8 +19,14 @@ src_dir: /path/to/source/DICOMS
 # Re-ingest studies already present in the DB.
 overwrite_if_exists: false
 
-# Strip patient identifiers from DICOM headers before copying.
+# Strip patient identifiers from DICOM headers before copying (UIDs, dates and
+# descriptions are preserved; PatientID/StudyID are set to the patient id; see
+# docs/reference/image_ingestion_protocol.md for the tag list).
 anonymize_files: false
+
+# Directory basenames pruned from the source walk, e.g. [NIFTI] for a tree that
+# carries derived volumes next to the DICOM series. Default: none.
+skip_dir_names: []
 
 # Remove the source case_dir after copy verification.
 delete_originals_after_verification: false

@@ -41,9 +41,23 @@ def test_defaults_merge(cold_mode, tmp_path):
     assert cfg["compress_workers"] == 4
     assert cfg["pipeline_indexing"] is True
     assert cfg["cleanup_loose_after_indexing"] is True
+    assert cfg["skip_dir_names"] == []
     # cold_archive_root resolved from config.toml (module globals here).
     assert cfg["cold_archive_root"] == str(tmp_path / "cold_root")
     assert raw.startswith("src_dir:")
+
+
+def test_skip_dir_names_passthrough_and_validation(cold_mode, tmp_path):
+    cfg, _ = load_config(_write_yaml(
+        tmp_path, "src_dir: /data/b\nskip_dir_names: [NIFTI, nifti]\n"))
+    assert cfg["skip_dir_names"] == ["NIFTI", "nifti"]
+
+    cfg, _ = load_config(_write_yaml(tmp_path, "src_dir: /data/b\nskip_dir_names:\n"))
+    assert cfg["skip_dir_names"] == []
+
+    for bad in ("skip_dir_names: NIFTI", "skip_dir_names: [a/b]", "skip_dir_names: ['']"):
+        with pytest.raises(ValueError, match="skip_dir_names"):
+            load_config(_write_yaml(tmp_path, f"src_dir: /data/b\n{bad}\n"))
 
 
 def test_missing_src_dir_fails_fast(cold_mode, tmp_path):

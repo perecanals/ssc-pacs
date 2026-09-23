@@ -1,4 +1,3 @@
-import pydicom
 import SimpleITK as sitk
 
 
@@ -14,40 +13,98 @@ def name_sanity_check(name):
         name = name.replace("'", " ")
     return str(name)
 
-def anonymize_dicom_slice(dcm, study_id=None):
+# --- Anonymisation -----------------------------------------------------------
+#
+# Header-level de-identification applied when the YAML sets `anonymize_files`.
+# The tag set is the one the legacy FlowCat protocol used (so a corpus that
+# already went through it stays homogeneous) plus the remaining person/physician
+# identifiers of PS3.15 Table E.1-1 that the pipeline never reads. Deliberately
+# NOT touched, because the pipeline depends on them: every UID (Study/Series/SOP/
+# FrameOfReference — the whole DB keys on them), StudyDate/Time and the
+# acquisition timestamps (acquisitiondatetime, timepoints), StudyDescription
+# (study_type) and SeriesDescription (directory name, series_type), plus every
+# geometry / reconstruction tag the classifier reads. Private tags are kept by
+# default: `series_dicom_tags` stores them on purpose for vendor-specific
+# discrimination (see dicom_tags.py). This is header tidying, not pixel
+# redaction — burned-in annotations are out of scope.
+
+ANONYMIZE_BLANK_KEYWORDS = (
+    "InstitutionAddress",
+    "InstitutionName",
+    "InstitutionalDepartmentName",
+    "PatientAge",
+    "PatientBirthDate",
+    "PatientSex",
+    "PatientWeight",
+    "PatientSize",
+    "PatientAddress",
+    "PatientTelephoneNumbers",
+    "OtherPatientIDs",
+    "OtherPatientNames",
+    "IssuerOfPatientID",
+    "ReferringPhysicianName",
+    "PerformingPhysicianName",
+    "OperatorsName",
+    "RequestingPhysician",
+    "PhysiciansOfRecord",
+    "NameOfPhysiciansReadingStudy",
+    "StationName",
+    "AccessionNumber",
+    "DeviceSerialNumber",
+    "ProtocolName",
+    "ImageComments",
+    "StudyComments",
+    "AdditionalPatientHistory",
+)
+
+# Sequences that carry identifiers and cannot be meaningfully blanked.
+ANONYMIZE_DELETE_KEYWORDS = (
+    "RequestAttributesSequence",
+    "OtherPatientIDsSequence",
+    "ReferencedPatientSequence",
+)
+
+ANONYMIZE_PATIENT_NAME = "Anonymous"
+ANONYMIZE_METHOD = "BASIC APPLICATION LEVEL CONFIDENTIALITY PROFILE"
+
+
+def anonymize_dicom_slice(dcm, study_id=None, *, remove_private_tags=False):
+    """De-identify a pydicom Dataset in place and return it.
+
+    ``study_id`` becomes both PatientID and StudyID (created when absent). When
+    it is not given the dataset's own PatientID is kept. Blank-list elements
+    are emptied only if present (no empty elements are added); delete-list
+    sequences are removed; UIDs, dates and descriptions are preserved. Calling
+    it twice is a no-op the second time.
+    """
     if study_id is None:
         try:
             study_id = str(dcm["PatientID"].value)
         except Exception:
             study_id = "1"
+    study_id = str(study_id)
 
-    # Anonimyze DICOM slices while preserving the Stanford study identifier.
-    changed_elements_with_values = [('InstitutionAddress', ''),
-                                    ('InstitutionName', ''),
-                                    ('PatientAge', ''),
-                                    ('PatientBirthDate', ''),
-                                    ('PatientID', str(study_id)),
-                                    ('PatientName', 'Anonymous'),
-                                    ('PatientSex', ''),
-                                    ('ReferringPhysicianName', ''),
-                                    ('StationName', ''),
-                                    ('AccessionNumber', ''),
-                                    ('DeviceSerialNumber', ''),
-                                    ('ProtocolName', ''),
-                                    ('StudyID', str(study_id)),
-                                    ('ImageComments', '')]
+    for keyword in ANONYMIZE_BLANK_KEYWORDS:
+        if keyword in dcm:
+            dcm[keyword].value = ""
 
-    # Change tags to anonymized values
-    for element, new_value in changed_elements_with_values:
-        try:
-            dcm[element].value = new_value
-        except Exception:
-            pass
-    # Add additional tags for anonymized dicoms
-    dcm.add_new(pydicom.tag.Tag(0x00120063), "LO", "BASIC APPLICATION LEVEL CONFIDENTIALITY PROFILE")
-    dcm.add_new(pydicom.tag.Tag(0x00120062), "CS", "YES")
+    for keyword in ANONYMIZE_DELETE_KEYWORDS:
+        if keyword in dcm:
+            del dcm[keyword]
+
+    # setattr creates the element with the dictionary VR when it is absent —
+    # the identity tags must exist for the pipeline (PatientID is mandatory).
+    dcm.PatientID = study_id
+    dcm.StudyID = study_id
+    dcm.PatientName = ANONYMIZE_PATIENT_NAME
+    dcm.PatientIdentityRemoved = "YES"
+    dcm.DeidentificationMethod = ANONYMIZE_METHOD
+
+    if remove_private_tags:
+        dcm.remove_private_tags()
 
     return dcm
+
 
 # --- Geometric series-type detection (CTP / PWI / DWI) -----------------------
 #

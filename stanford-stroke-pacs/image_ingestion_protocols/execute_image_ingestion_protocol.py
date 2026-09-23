@@ -170,10 +170,24 @@ def load_config(config_path):
         "resume": True,
         "compress_workers": 4,
         "pipeline_indexing": True,
+        "skip_dir_names": [],
     }
     merged_config = {**defaults, **config}
     if not merged_config.get("src_dir"):
         raise ValueError(f"src_dir is required in the YAML config: {config_path}")
+    skip_dir_names = merged_config["skip_dir_names"] or []
+    if (
+        not isinstance(skip_dir_names, list)
+        or any(
+            not isinstance(name, str) or not name or "/" in name
+            for name in skip_dir_names
+        )
+    ):
+        raise ValueError(
+            "skip_dir_names must be a list of non-empty directory basenames "
+            f"(no '/'), got {merged_config['skip_dir_names']!r}: {config_path}"
+        )
+    merged_config["skip_dir_names"] = list(skip_dir_names)
     merged_config["compress_workers"] = max(
         1, int(merged_config["compress_workers"] or 1))
     if merged_config["overwrite_if_exists"] and merged_config["pipeline_indexing"]:
@@ -233,6 +247,7 @@ def execute_image_ingestion_protocol(
     dataset=None,
     cold_archive_root=None,
     compress_workers=None,
+    skip_dir_names=None,
 ):
     # Create an instance of the ImageIngestionProtocol class
     protocol = ImageIngestionProtocol(
@@ -245,6 +260,7 @@ def execute_image_ingestion_protocol(
         dataset=dataset,
         cold_archive_root=cold_archive_root,
         compress_workers=compress_workers or 1,
+        skip_dir_names=skip_dir_names,
     )
     # Execute the protocol
     return protocol.execute_image_ingestion_protocol(overwrite_if_exists=overwrite_if_exists)
@@ -307,7 +323,8 @@ def index_case_into_orthanc(postgres_engine, logger, series_ids):
     """Register one just-ingested case into Orthanc via POST /indexer/scan.
 
     cold_path_cache only. Called per case, right after the case's DB commit, so
-    each scan is naturally bounded (a case is one patient — OOM-safe) and the
+    each scan is naturally bounded (a case is one source directory, usually
+    one patient; oversized cases go through bounded passes — OOM-safe) and the
     case is viewable in OHIF while the batch is still running. The endpoint scans
     exactly the case's study subtrees (see orthanc-indexer-patched/PATCHES.md and
     scripts/cold_storage/scoped_index.py) — no config edits, no restarts. An
@@ -679,6 +696,7 @@ if __name__ == "__main__":
     logger.info(f"Cleanup loose after indexing: {config['cleanup_loose_after_indexing']}")
     logger.info(f"Compression workers: {config['compress_workers']}")
     logger.info(f"Pipelined Orthanc indexing: {config['pipeline_indexing']}")
+    logger.info(f"Skip directory names: {config['skip_dir_names']}")
     logger.info(f"Storage mode (config.toml): {config['_storage_mode']}")
     logger.info(f"DICOM data root (config.toml): {config['_dicom_data_root']}")
     logger.info(f"Cold archive root (resolved): {config.get('cold_archive_root')}")
@@ -803,6 +821,7 @@ if __name__ == "__main__":
                         dataset=config["dataset"],
                         cold_archive_root=config.get("cold_archive_root"),
                         compress_workers=config["compress_workers"],
+                        skip_dir_names=config["skip_dir_names"],
                     )
                     synced_study_ids.update(result["studyinstanceuids"])
                     synced_series_ids.update(result["seriesinstanceuids"])
