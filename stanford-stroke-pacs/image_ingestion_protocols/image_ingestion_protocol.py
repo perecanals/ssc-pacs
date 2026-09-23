@@ -74,10 +74,14 @@ class ImageIngestionProtocol:
         dataset=None,
         cold_archive_root=None,
         compress_workers=4,
+        skip_dir_names=None,
     ):
         self.case_dir = case_dir
         self.postgres_engine = postgres_engine
         self.anonymize_files = anonymize_files
+        # Directory names pruned from the source walk (e.g. NIFTI siblings in a
+        # tree that also carries derived volumes). Matched on the basename only.
+        self.skip_dir_names = frozenset(skip_dir_names or ())
         self.delete_originals_after_verification = delete_originals_after_verification
         self.import_id = import_id
         self.import_label = import_label
@@ -522,7 +526,12 @@ class ImageIngestionProtocol:
         # execute_image_ingestion_protocol.
         self.scan_candidate_files = 0
         self.scan_unreadable_files = 0
-        for root, _, files in os.walk(self.case_dir):
+        self.scan_skipped_dirs = 0
+        for root, dirs, files in os.walk(self.case_dir):
+            if self.skip_dir_names:
+                kept = [d for d in dirs if d not in self.skip_dir_names]
+                self.scan_skipped_dirs += len(dirs) - len(kept)
+                dirs[:] = sorted(kept)
             for filename in sorted(files):
                 if filename.startswith("."):
                     continue
@@ -591,6 +600,13 @@ class ImageIngestionProtocol:
             headers = [bucket["headers"][i] for i in order]
             dcm = headers[0]
             patient_id = self._safe_text(self._dicom_value(dcm, "PatientID"))
+            if self.anonymize_files:
+                # Everything read from the headers below (series_dicom_tags,
+                # protocolname, ...) must describe what the copied files will
+                # contain, so anonymise the in-memory headers first. PatientID
+                # is rewritten to its own value, so identity is unchanged.
+                for header in headers:
+                    anonymize_dicom_slice(header, study_id=patient_id)
             study_instance_uid = self._safe_text(
                 self._dicom_value(dcm, "StudyInstanceUID")
             )

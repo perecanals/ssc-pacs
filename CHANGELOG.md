@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+Ingestion `anonymize_files` now de-identifies the headers the pipeline persists (`series_dicom_tags`) as well as the copied files, creates missing identity tags, covers the remaining patient/physician identifiers, and keeps UIDs, dates, descriptions and private tags; no schema migration.
+New ingestion option `skip_dir_names` prunes directories (e.g. NIFTI siblings) from the source walk; a case directory is documented as possibly holding several patients.
+
 Opt-in encrypted SSH/SFTP backups now cover both databases, Orthanc snapshots and cold imaging archives, with independent schedules, retention and freshness checks.
 Remote timers remain disabled until the destination is provisioned and restore checks pass; no schema migration is required.
 Backup paths, shared freshness policy and Linux schedules use config.toml; scheduled dumps and remote uploads resolve database names from .env.
