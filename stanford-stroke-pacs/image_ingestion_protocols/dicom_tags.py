@@ -53,10 +53,12 @@ def _coerce(value: Any, depth: int) -> Any:
         # json.dumps accepts NaN/Infinity by default, but PostgreSQL JSONB
         # rejects them. Keep the tag/array position without failing the case.
         return value if math.isfinite(value) else None
-    if value is None or isinstance(value, (str, int, bool)):
+    if isinstance(value, str):
+        return _clean_text(value)
+    if value is None or isinstance(value, (int, bool)):
         return value
     if isinstance(value, PersonName):
-        return str(value)
+        return _clean_text(str(value))
     if isinstance(value, (bytes, bytearray)):
         # Binary payloads (thumbnails, LUT data, unparsed private blobs) — the
         # bytes themselves are not queryable, so record only that they existed.
@@ -71,8 +73,14 @@ def _coerce(value: Any, depth: int) -> Any:
     try:
         number = float(value)
     except (TypeError, ValueError):
-        return str(value)
+        return _clean_text(str(value))
     return number if math.isfinite(number) else None
+
+
+def _clean_text(text: str) -> str:
+    """PostgreSQL jsonb rejects \u0000, so NUL bytes (seen as padding in some
+    vendor headers) are dropped rather than failing the whole series row."""
+    return text.replace("\x00", "") if "\x00" in text else text
 
 
 def _dataset_to_dict(dataset: pydicom.Dataset, depth: int = 0) -> dict:
@@ -80,8 +88,12 @@ def _dataset_to_dict(dataset: pydicom.Dataset, depth: int = 0) -> dict:
     out: dict[str, Any] = {}
     private: dict[str, Any] = {}
 
-    for elem in dataset:
+    # Iterate over tags, not elements: `for elem in dataset` decodes each raw
+    # element on the fly, so a malformed value (e.g. text in an FD element)
+    # would raise from the loop itself, outside the per-element guard.
+    for tag in list(dataset.keys()):
         try:
+            elem = dataset[tag]
             if elem.tag.is_private:
                 key = f"{elem.tag.group:04X},{elem.tag.element:04X}"
                 private[key] = _coerce(elem.value, depth)
