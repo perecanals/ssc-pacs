@@ -196,3 +196,25 @@ def test_accumulator_holds_only_the_first_dataset():
     assert result["n_instances_scanned"] == 500
     assert result["tags"]["SeriesDescription"] == "instance-0"  # the first, not the last
     assert acc._tags is result["tags"]
+
+
+def test_malformed_element_and_nul_bytes_do_not_fail_the_series():
+    """A raw element whose bytes do not decode for its VR (text inside an FD)
+    must be skipped, not abort extraction; NUL padding in strings must be
+    stripped so the row is valid jsonb."""
+    from pydicom.dataelem import RawDataElement
+    from pydicom.tag import Tag
+
+    ds = _header()
+    ds.StudyDescription = "Tc craneal\x00"
+    ds.add_new(0x00091010, "LO", "vendor\x00")
+    bad = Tag(0x0018, 0x9087)  # DiffusionBValue, VR FD — 4 bytes of text
+    ds[bad] = RawDataElement(bad, "FD", 4, b"0.4 ", 0, True, True)
+
+    row = extract_series_tags([ds])
+    tags = row["tags"]
+    assert tags["StudyDescription"] == "Tc craneal"
+    assert tags["_private"]["0009,1010"] == "vendor"
+    assert "DiffusionBValue" not in tags
+    assert tags["Modality"] == "CT"
+    assert "\x00" not in json.dumps(tags)
