@@ -60,6 +60,13 @@ const LEVEL_CONFIG = {
       { key: "modality", label: "Modality", filterable: true },
       { key: "studydescription", label: "Study Description", filterable: true },
       {
+        key: "number_of_series",
+        label: "Series count",
+        filterable: false,
+        introducedIn: 2,
+        defaultBefore: "builtin:study:timepoint",
+      },
+      {
         key: "timepoint",
         label: "Auto Timepoint",
         filterable: true,
@@ -179,7 +186,7 @@ export const PER_PAGE = 50;
 // have saved column prefs. Columns carry the version that introduced them
 // (`introducedIn`); useColumnPrefs merges anything newer than the user's saved
 // `defaultsVersion`, once, then stamps the marker.
-export const COLUMN_DEFAULTS_VERSION = 1;
+export const COLUMN_DEFAULTS_VERSION = 2;
 
 // Annotation labels shown as columns by default (when the user has no saved
 // column preferences). Matched by label name; a label only defaults on at

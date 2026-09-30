@@ -274,6 +274,14 @@ The Navigator page is decomposed into focused React components:
     (shared `compareLabelDefsDefault` in `utils/table.js`, also used by the
     sidebar quick-filter list). Any user-saved column order takes precedence
     over this default.
+  - **Study series count**: The `Series count` column (`number_of_series`) appears
+    immediately before `Auto Timepoint` in Study view and expanded study rows
+    in Patient view. Both study APIs count all `image_series` rows belonging
+    to each study at query time, including series excluded by browsing filters;
+    empty studies show zero. The flat Study view supports numeric sorting.
+    Column-defaults version 2 enables it once for existing users and inserts
+    it before Auto Timepoint in saved main/subtable orders. Later visibility
+    and order changes are preserved. No database migration is needed.
   - **Inline editing with stopPropagation**: Label cells in all table levels
     use `stopPropagation` to prevent expand/collapse when interacting with
     label controls.

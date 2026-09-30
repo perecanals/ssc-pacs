@@ -335,7 +335,7 @@ unchanged. Names need not be unique.
 ## How the web app queries the DB
 
 - **Patients**: listed from the `patient` registry. When `clinical_data` exists it is LEFT JOINed on `c.study_id = p.patient_id` to display `COALESCE(c.stroke_date, p.stroke_date::date::text)` — the clinical date when matched, the imaging-derived date otherwise. When it does not (`common.table_exists` is false), the join is dropped and the expression is just `p.stroke_date::date::text`. Filter, sort, and SELECT all reuse the one expression, so the two branches cannot drift.
-- **Studies**: listed from `image_study`, and modality is aggregated from `image_series` by `studyinstanceuid`.
+- **Studies**: listed from `image_study`, and modality is aggregated from `image_series` by `studyinstanceuid`. Both study-list APIs also return `number_of_series`, counted live from all matching `image_series` rows using the study-UID index. This is a derived API field, with zero for empty studies; it is not a stored column and needs no migration or backfill. Browsing filters do not reduce the count, and imports/deletions are reflected on the next fetch.
 - **Series**: listed from `image_series` and LEFT JOINs `image_study` to include `study_type`.
 - **Annotations** are joined/attached per row and **inherit downward** (patient → study → series) in API responses.
 

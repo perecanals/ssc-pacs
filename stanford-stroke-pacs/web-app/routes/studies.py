@@ -45,6 +45,12 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
+# Count all series in the study, independently of browsing filters.
+STUDY_SERIES_COUNT = (
+    "(SELECT COUNT(*) FROM image_series s "
+    "WHERE s.studyinstanceuid = st.studyinstanceuid)"
+)
+
 # Effective episode-date column on the optional clinical_data table. Frozen at
 # startup by resolve_clinical_date_column() (called from app.py's lifespan,
 # after migrations); table *presence* stays a per-request check so the table
@@ -338,6 +344,7 @@ def patient_studies(
             cur.execute(
                 "SELECT st.patient_id, st.import_id, st.import_label, st.acquisitiondatetime, st.studyinstanceuid, "
                 "st.studydescription, st.study_type, "
+                f"{STUDY_SERIES_COUNT} AS number_of_series, "
                 f"{STUDY_AUTO_COLS}, "
                 "COALESCE(("
                 "  SELECT string_agg(DISTINCT s.modality, ', ' ORDER BY s.modality) "
@@ -573,11 +580,13 @@ def list_studies(
                 "timepoint": "timepoint",
             }
             col = col_map.get(sort_by, "patient_id")
+            sort_expr = STUDY_SERIES_COUNT if sort_by == "number_of_series" else f"st.{col}"
             direction = "DESC" if sort_dir.lower() == "desc" else "ASC"
 
             cur.execute(
                 f"SELECT st.patient_id, st.import_id, st.import_label, st.acquisitiondatetime, "
                 f"st.studyinstanceuid, st.studydescription, st.study_type, "
+                f"{STUDY_SERIES_COUNT} AS number_of_series, "
                 f"{STUDY_AUTO_COLS}, "
                 f"COALESCE(("
                 f"  SELECT string_agg(DISTINCT s.modality, ', ' ORDER BY s.modality) "
@@ -585,7 +594,7 @@ def list_studies(
                 f"), '') AS modality, "
                 f"{_dataset_display_sql('st.patient_id')} "
                 f"FROM image_study st {where} "
-                f"ORDER BY st.{col} {direction} NULLS LAST, st.studyinstanceuid ASC "
+                f"ORDER BY {sort_expr} {direction} NULLS LAST, st.studyinstanceuid ASC "
                 f"LIMIT %s OFFSET %s",
                 params + [per_page, offset],
             )

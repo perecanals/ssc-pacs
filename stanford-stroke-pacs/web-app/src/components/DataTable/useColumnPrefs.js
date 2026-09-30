@@ -101,6 +101,20 @@ export default function useColumnPrefs(
   );
   const prefsUpgraded = hasSavedPrefs && pendingDefaultKeys.length > 0;
 
+  // Insert newly enabled columns at their intended position in saved orders,
+  // once. Subsequent user moves/hides remain authoritative.
+  const upgradeOrder = (order) => {
+    const keys = [...order];
+    if (!prefsUpgraded || !keys.length) return keys;
+    for (const col of builtinCols) {
+      if (!pendingDefaultKeys.includes(col.key) || !col.defaultBefore) continue;
+      if (keys.includes(col.key)) continue;
+      const index = keys.indexOf(col.defaultBefore);
+      if (index !== -1) keys.splice(index, 0, col.key);
+    }
+    return keys;
+  };
+
   const [visibleKeys, setVisibleKeys] = useState(() => {
     if (hasSavedPrefs) {
       return Array.from(
@@ -146,10 +160,14 @@ export default function useColumnPrefs(
   }, []);
 
   const [columnOrder, setColumnOrder] = useState(() =>
-    sanitizeKeys(initialPrefs.columnOrder),
+    upgradeOrder(sanitizeKeys(initialPrefs.columnOrder)),
   );
   const [subtableOrder, setSubtableOrder] = useState(() =>
-    sanitizeSubtableOrder(initialPrefs.subtableColumnOrder),
+    Object.fromEntries(
+      Object.entries(
+        sanitizeSubtableOrder(initialPrefs.subtableColumnOrder),
+      ).map(([lvl, order]) => [lvl, upgradeOrder(order)]),
+    ),
   );
 
   const visibleCols = useMemo(() => {

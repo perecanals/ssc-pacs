@@ -76,6 +76,77 @@ def two_series_study(seeded_db):
         conn.close()
 
 
+class TestStudySeriesCount:
+    @pytest.mark.parametrize("endpoint", ["/api/studies", "/api/patients/P-0001/studies"])
+    def test_count_includes_series_hidden_by_filters(
+        self, logged_in_client, two_series_study, endpoint,
+    ):
+        response = logged_in_client.get(endpoint, params={"series_type": "CTA"})
+        assert response.status_code == 200
+        data = response.json()
+        rows = data["items"] if isinstance(data, dict) else data
+        assert _find(rows, "studyinstanceuid", two_series_study)["number_of_series"] == 2
+
+    @pytest.mark.parametrize("direction,expected", [("asc", [0, 1, 12]), ("desc", [12, 1, 0])])
+    def test_numeric_sort_and_empty_study(
+        self, logged_in_client, two_series_study, db_conn, direction, expected,
+    ):
+        with db_conn.cursor() as cur:
+            cur.executemany(
+                "INSERT INTO image_series (patient_id, studyinstanceuid, seriesinstanceuid) "
+                "VALUES ('P-0001', %s, %s)",
+                [(two_series_study, f"{two_series_study}.{n}") for n in range(3, 13)],
+            )
+        db_conn.commit()
+        response = logged_in_client.get(
+            "/api/studies", params={"sort_by": "number_of_series", "sort_dir": direction},
+        )
+        assert response.status_code == 200
+        assert [row["number_of_series"] for row in response.json()["items"]] == expected
+        response = logged_in_client.get("/api/patients/P-0002/studies")
+        assert response.status_code == 200
+        assert response.json()[0]["number_of_series"] == 0
+
+    @pytest.mark.parametrize("endpoint", ["/api/studies", "/api/patients/P-0001/studies"])
+    def test_count_updates_after_series_insert(
+        self, logged_in_client, two_series_study, db_conn, endpoint,
+    ):
+        def count():
+            response = logged_in_client.get(endpoint)
+            assert response.status_code == 200
+            data = response.json()
+            rows = data["items"] if isinstance(data, dict) else data
+            value = _find(rows, "studyinstanceuid", two_series_study)["number_of_series"]
+            assert isinstance(value, int)
+            return value
+
+        assert count() == 2
+        with db_conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO image_series (patient_id, studyinstanceuid, seriesinstanceuid) "
+                "VALUES ('P-0001', %s, %s)",
+                (two_series_study, f"{two_series_study}.3"),
+            )
+        db_conn.commit()
+        assert count() == 3
+
+    def test_count_updates_after_series_deletion(
+        self, logged_in_client, two_series_study, db_conn,
+    ):
+        with db_conn.cursor() as cur:
+            cur.execute(
+                "DELETE FROM image_series WHERE seriesinstanceuid = %s",
+                ("9.9.9.9.9.1",),
+            )
+        db_conn.commit()
+        for endpoint in ("/api/studies", "/api/patients/P-0001/studies"):
+            response = logged_in_client.get(endpoint)
+            assert response.status_code == 200
+            data = response.json()
+            rows = data["items"] if isinstance(data, dict) else data
+            assert _find(rows, "studyinstanceuid", two_series_study)["number_of_series"] == 1
+
+
 class TestSeriesEndpoint:
     def test_exposes_series_and_study_auto_fields(self, logged_in_client):
         resp = logged_in_client.get("/api/series", params={"patient_id": "P-0001"})
