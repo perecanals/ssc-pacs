@@ -4,6 +4,8 @@
 
 Ingestion tag extraction no longer fails a whole case on a malformed header element or on NUL bytes in header strings (both seen in the FlowCat corpus); the element is skipped or the NUL dropped.
 
+Study tables show a live Series count before Auto Timepoint by default in both Patient and Study views, including existing saved views. Counts include all series in the study and support numeric sorting in Study view; no schema migration.
+
 Ingestion `anonymize_files` now de-identifies the headers the pipeline persists (`series_dicom_tags`) as well as the copied files, creates missing identity tags, covers the remaining patient/physician identifiers, and keeps UIDs, dates, descriptions and private tags; no schema migration.
 New ingestion option `skip_dir_names` prunes directories (e.g. NIFTI siblings) from the source walk; a case directory is documented as possibly holding several patients.
 

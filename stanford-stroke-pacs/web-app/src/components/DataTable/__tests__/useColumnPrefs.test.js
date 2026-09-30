@@ -2,7 +2,57 @@ import { describe, it, expect } from "vitest";
 import { act, renderHook } from "@testing-library/react";
 
 import useColumnPrefs from "../useColumnPrefs";
-import { COLUMN_DEFAULTS_VERSION } from "../../../utils/table";
+import {
+  buildBuiltinColumnCatalog,
+  COLUMN_DEFAULTS_VERSION,
+} from "../../../utils/table";
+
+describe.each(["patient", "study"])("series count in %s view", (level) => {
+  const countKey = "builtin:study:number_of_series";
+  const timepointKey = "builtin:study:timepoint";
+  const descriptionKey = "builtin:study:studydescription";
+  const cols = buildBuiltinColumnCatalog(level);
+  const renderCount = (prefs = {}) =>
+    renderHook(() => useColumnPrefs([], cols, level, prefs));
+  const keys = (result) =>
+    (level === "patient"
+      ? result.current.subtableColsForLevel("study")
+      : result.current.visibleCols
+    ).map((c) => c.key);
+
+  it("shows the count immediately before Auto Timepoint by default", () => {
+    const { result } = renderCount();
+    const order = keys(result);
+    expect(order).toContain(countKey);
+    expect(order.indexOf(countKey)).toBe(order.indexOf(timepointKey) - 1);
+  });
+
+  it("upgrades saved visibility and main/subtable orders once", () => {
+    const order = [timepointKey, descriptionKey];
+    const { result } = renderCount({
+      visibleKeys: order,
+      columnOrder: order,
+      subtableColumnOrder: { study: order },
+      defaultsVersion: 1,
+    });
+    expect(keys(result)).toEqual([countKey, ...order]);
+    expect(result.current.prefsUpgraded).toBe(true);
+  });
+
+  it("preserves hiding or moving the count after upgrading", () => {
+    const order = [timepointKey, descriptionKey, countKey];
+    const prefs = {
+      visibleKeys: order,
+      columnOrder: order,
+      subtableColumnOrder: { study: order },
+      defaultsVersion: COLUMN_DEFAULTS_VERSION,
+    };
+    expect(keys(renderCount(prefs).result)).toEqual(order);
+    const hidden = renderCount({ ...prefs, visibleKeys: order.slice(0, 2) });
+    expect(keys(hidden.result)).not.toContain(countKey);
+    expect(hidden.result.current.prefsUpgraded).toBe(false);
+  });
+});
 
 const OLD_COL = {
   key: "builtin:series:modality",
