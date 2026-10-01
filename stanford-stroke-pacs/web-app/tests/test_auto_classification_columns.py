@@ -12,6 +12,7 @@ else catches that.
 import psycopg2
 import pytest
 
+from study_metadata import refresh_study_modalities
 from tests.conftest import USER_CRISP, USER_NONE, login_as
 
 SERIES_AUTO_FIELDS = (
@@ -68,6 +69,7 @@ def two_series_study(seeded_db):
                 " ('P-0001', %s, '9.9.9.9.9.2', 'CT', 'Axial', 'NCCT', 1, 'NCCT_1', 'kernel-soft', 'rules-v1')",
                 (uid, uid),
             )
+            refresh_study_modalities(cur, [uid])
         yield uid
     finally:
         with conn.cursor() as cur:

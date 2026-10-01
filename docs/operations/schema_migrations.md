@@ -61,10 +61,16 @@ stanford-stroke-pacs/
         ├── 0016_study_episode.py
         ├── 0017_patient_femoral_sheath_time.py
         ├── 0018_drop_femoral_sheath_time.py
-        └── 0019_label_edit_policy.py
+        ├── 0019_label_edit_policy.py
+        ├── 0020_rename_clinical_data.py
+        ├── 0021_data_explorer.py
+        ├── 0022_staff_role.py
+        ├── 0023_export_names.py
+        ├── 0024_data_exports_naming.py
+        └── 0025_study_modalities.py
 ```
 
-The chain is linear (`0001` → `0019`). `alembic history` prints the live
+The chain is linear. `alembic history` prints the live
 graph; `alembic heads` should always show a single head.
 
 Revision ids must fit `alembic_version.version_num`, which is **`varchar(32)`** —
@@ -108,6 +114,42 @@ applied to prod via `alembic stamp` — no DDL re-runs.
 ---
 
 ## Adding a new schema change
+
+### Deploying study modalities (`0025_study_modalities`)
+
+Pause ingestion while deploying this revision. The migration adds
+`image_study.modalities text[]`, backfills it from persisted series, and adds
+and populates the column in an existing `image_study_labelled` mirror. Deploy
+the ingestion and web-app code together; the normal web-app startup applies
+Alembic before serving requests. The ingestion code requires this migration.
+If earlier pending migrations include `0024_data_exports_naming`, follow its
+Data Exports worker shutdown requirement too.
+
+After migration, compare `image_study.modalities` with the sorted distinct
+`UPPER(BTRIM(image_series.modality))` values for each study, ignoring blank and
+NULL values. The arrays should agree for every study, including empty ones.
+Verify the corresponding column in the labelled mirror and browse/sort the
+Modality column, then resume ingestion. No imaging files or Orthanc indexes
+need rebuilding. Downgrade drops the two modality columns; deploy the previous
+application code alongside downgrade because the new API requires the column.
+
+Read-only consistency check (the result should be zero):
+
+```sql
+WITH expected AS (
+    SELECT st.studyinstanceuid,
+           array_agg(DISTINCT UPPER(BTRIM(s.modality)) ORDER BY UPPER(BTRIM(s.modality)))
+               FILTER (WHERE NULLIF(BTRIM(s.modality), '') IS NOT NULL) AS modalities
+    FROM image_study st
+    LEFT JOIN image_series s ON s.studyinstanceuid = st.studyinstanceuid
+    GROUP BY st.studyinstanceuid
+)
+SELECT COUNT(*) AS modality_mismatches
+FROM image_study st JOIN expected USING (studyinstanceuid)
+WHERE st.modalities IS DISTINCT FROM expected.modalities;
+```
+
+### Creating a revision
 
 ```bash
 cd stanford-stroke-pacs

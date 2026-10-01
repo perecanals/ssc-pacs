@@ -206,6 +206,9 @@ def seeded_db(test_db):
                 "('P-0002', '2024-03-03', '{lvo}') "
                 "ON CONFLICT DO NOTHING"
             )
+            from study_metadata import refresh_study_modalities
+
+            refresh_study_modalities(cur, ["1.2.3.4.5", "2.2.2.2.2"])
         conn.commit()
     finally:
         conn.close()

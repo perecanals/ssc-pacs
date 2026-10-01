@@ -12,6 +12,7 @@ Run with: SSC_INGEST_AUDIT=1 pytest tests/test_end_to_end_scratch_db.py
 """
 
 import os
+import shutil
 from pathlib import Path
 from urllib.parse import quote_plus
 
@@ -148,7 +149,7 @@ def roots(tmp_path_factory):
     return scratch
 
 
-def _run_case(scratch, engine, patient_id, import_id=1):
+def _run_case(scratch, engine, patient_id, import_id=1, overwrite=False):
     from image_ingestion_protocol import ImageIngestionProtocol
 
     proto = ImageIngestionProtocol(
@@ -157,7 +158,7 @@ def _run_case(scratch, engine, patient_id, import_id=1):
         cold_archive_root=str(scratch / "cold_root"), compress_workers=2,
     )
     proto.base_dir = str(scratch / "dicom_root")
-    return proto.execute_image_ingestion_protocol()
+    return proto.execute_image_ingestion_protocol(overwrite_if_exists=overwrite)
 
 
 def test_end_to_end_two_patients(roots, scratch_engine, capsys):
@@ -291,6 +292,102 @@ def test_ingests_without_clinical_table(roots, scratch_engine):
     finally:
         with scratch_engine.begin() as conn:
             conn.execute(text("ALTER TABLE clinical_hidden RENAME TO clinical_data"))
+
+
+def test_study_modalities_initial_append_repeat_and_overwrite(roots, scratch_engine):
+    import pydicom
+    from sqlalchemy import text
+    from test_image_ingestion_grouping import _write_dcm
+
+    pid, study_uid = "11-025", "9.25.100"
+
+    def add_series(suffix, modality):
+        path = roots / "src" / pid / suffix / "instance.dcm"
+        _write_dcm(path, f"{study_uid}.{suffix}", 1, 1,
+                   study_uid=study_uid, series_desc=modality, patient_id=pid)
+        ds = pydicom.dcmread(path)
+        ds.Modality = modality
+        ds.save_as(path)
+
+    def values():
+        with scratch_engine.connect() as conn:
+            return conn.execute(text(
+                "SELECT modalities, import_id, import_label, study_path, acquisitiondatetime "
+                "FROM image_study WHERE studyinstanceuid = :uid"
+            ), {"uid": study_uid}).one()
+
+    add_series("1", "CT")
+    add_series("2", "SR")
+    _run_case(roots, scratch_engine, pid, import_id=25)
+    origin = values()
+    assert origin.modalities == ["CT", "SR"]
+
+    add_series("3", "MR")
+    appended = _run_case(roots, scratch_engine, pid, import_id=26)
+    assert appended["studyinstanceuids"] == [study_uid]
+    assert appended["seriesinstanceuids"] == [f"{study_uid}.3"]
+    assert values().modalities == ["CT", "MR", "SR"]
+    assert tuple(values())[1:] == tuple(origin)[1:]
+
+    repeated = _run_case(roots, scratch_engine, pid, import_id=27)
+    assert repeated["seriesinstanceuids"] == []
+    assert values().modalities == ["CT", "MR", "SR"]
+
+    for suffix in ("1", "2"):
+        shutil.rmtree(roots / "src" / pid / suffix)
+    _run_case(roots, scratch_engine, pid, import_id=28, overwrite=True)
+    assert values().modalities == ["MR"]
+
+
+def test_modality_reparent_and_ingestion_rollback(roots, scratch_engine, monkeypatch):
+    import pandas as pd
+    from sqlalchemy import text
+
+    from image_ingestion_protocol import ImageIngestionProtocol
+
+    old, new, series = "9.25.200", "9.25.201", "9.25.200.1"
+    with scratch_engine.begin() as conn:
+        conn.execute(text(
+            "INSERT INTO image_study (patient_id, studyinstanceuid, modalities) "
+            "VALUES ('11-025', :uid, '{CT}')"
+        ), {"uid": old})
+        conn.execute(text(
+            "INSERT INTO image_series (patient_id, studyinstanceuid, seriesinstanceuid, modality) "
+            "VALUES ('11-025', :study, :series, 'CT')"
+        ), {"study": old, "series": series})
+    proto = ImageIngestionProtocol(str(roots / "src" / "11-025"), scratch_engine,
+                                   import_id=29, import_label="rollup_test")
+    proto.case_study_table = pd.DataFrame([
+        {"patient_id": "11-025", "studyinstanceuid": new, "acquisitiondatetime": None}
+    ])
+    proto.case_series_table = pd.DataFrame([
+        {"patient_id": "11-025", "studyinstanceuid": new,
+         "seriesinstanceuid": series, "modality": "SR"}
+    ])
+    proto.update_postgres_tables()
+    assert proto.updated_study_uids == [old, new]
+    with scratch_engine.connect() as conn:
+        assert conn.execute(text(
+            "SELECT modalities FROM image_study WHERE studyinstanceuid = ANY(:uids) "
+            "ORDER BY studyinstanceuid"
+        ), {"uids": [old, new]}).scalars().all() == [None, ["SR"]]
+
+    def fail_patient_upsert(connection):
+        raise RuntimeError("synthetic failure after modality refresh")
+
+    monkeypatch.setattr(proto, "_upsert_patient", fail_patient_upsert)
+    proto.case_series_table.loc[0, "studyinstanceuid"] = old
+    proto.case_series_table.loc[0, "modality"] = "MR"
+    with pytest.raises(RuntimeError, match="synthetic failure"):
+        proto.update_postgres_tables()
+    with scratch_engine.connect() as conn:
+        assert conn.execute(text(
+            "SELECT studyinstanceuid, modality FROM image_series WHERE seriesinstanceuid = :uid"
+        ), {"uid": series}).one() == (new, "SR")
+        assert conn.execute(text(
+            "SELECT modalities FROM image_study WHERE studyinstanceuid = ANY(:uids) "
+            "ORDER BY studyinstanceuid"
+        ), {"uids": [old, new]}).scalars().all() == [None, ["SR"]]
 
 
 if __name__ == "__main__":

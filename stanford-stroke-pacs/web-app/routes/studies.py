@@ -50,6 +50,7 @@ STUDY_SERIES_COUNT = (
     "(SELECT COUNT(*) FROM image_series s "
     "WHERE s.studyinstanceuid = st.studyinstanceuid)"
 )
+STUDY_MODALITY = "array_to_string(st.modalities, ', ')"
 
 # Effective episode-date column on the optional clinical_data table. Frozen at
 # startup by resolve_clinical_date_column() (called from app.py's lifespan,
@@ -346,10 +347,7 @@ def patient_studies(
                 "st.studydescription, st.study_type, "
                 f"{STUDY_SERIES_COUNT} AS number_of_series, "
                 f"{STUDY_AUTO_COLS}, "
-                "COALESCE(("
-                "  SELECT string_agg(DISTINCT s.modality, ', ' ORDER BY s.modality) "
-                "  FROM image_series s WHERE s.studyinstanceuid = st.studyinstanceuid"
-                "), '') AS modality, "
+                f"COALESCE({STUDY_MODALITY}, '') AS modality, "
                 f"{_dataset_display_sql('st.patient_id')} "
                 "FROM image_study st "
                 f"{where} "
@@ -580,7 +578,10 @@ def list_studies(
                 "timepoint": "timepoint",
             }
             col = col_map.get(sort_by, "patient_id")
-            sort_expr = STUDY_SERIES_COUNT if sort_by == "number_of_series" else f"st.{col}"
+            sort_expr = {
+                "number_of_series": STUDY_SERIES_COUNT,
+                "modality": STUDY_MODALITY,
+            }.get(sort_by, f"st.{col}")
             direction = "DESC" if sort_dir.lower() == "desc" else "ASC"
 
             cur.execute(
@@ -588,10 +589,7 @@ def list_studies(
                 f"st.studyinstanceuid, st.studydescription, st.study_type, "
                 f"{STUDY_SERIES_COUNT} AS number_of_series, "
                 f"{STUDY_AUTO_COLS}, "
-                f"COALESCE(("
-                f"  SELECT string_agg(DISTINCT s.modality, ', ' ORDER BY s.modality) "
-                f"  FROM image_series s WHERE s.studyinstanceuid = st.studyinstanceuid"
-                f"), '') AS modality, "
+                f"COALESCE({STUDY_MODALITY}, '') AS modality, "
                 f"{_dataset_display_sql('st.patient_id')} "
                 f"FROM image_study st {where} "
                 f"ORDER BY {sort_expr} {direction} NULLS LAST, st.studyinstanceuid ASC "

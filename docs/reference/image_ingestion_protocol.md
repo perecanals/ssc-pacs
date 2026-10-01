@@ -208,6 +208,23 @@ the tar.
 Return value: `{"studyinstanceuids": [...], "seriesinstanceuids": [...]}` —
 used by the driver to sync per-level labelled mirror tables after the batch.
 
+### Study modalities
+
+Alembic `0025_study_modalities` adds and backfills `image_study.modalities`
+(`text[]`) from existing `image_series` rows; no archive extraction is needed.
+The ingestion transaction refreshes affected studies after both table upserts,
+using all persisted child series, including those skipped by append-mode
+filtering. An existing study receiving new series therefore gains their
+modalities while retaining its origin import metadata. Series reparenting
+refreshes both old and new studies, and both IDs are returned for mirror sync.
+
+Values are uppercase, trimmed, distinct, and alphabetically sorted; blank/NULL
+series values are ignored. No known values yields NULL. Existing parent rows
+are locked in UID order before series writes, then the aggregate is computed
+in a separate statement in the same transaction so concurrent appends remain
+consistent. The shared SQL lives in `web-app/study_metadata.py`; ingestion
+does not add schema columns itself. Apply Alembic before running the new code.
+
 ### How series are identified
 
 The protocol enforces the DICOM identity rule directly, independent of how the

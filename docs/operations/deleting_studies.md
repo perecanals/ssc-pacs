@@ -24,6 +24,12 @@ The shared logic lives in `web-app/deletion.py`, used by both the CLI and the
 admin HTTP endpoints, which run the full sequence **Orthanc → DB → files →
 indexer purge**.
 
+Deleting a series preserves its parent study and refreshes the parent's
+`modalities` array and labelled mirror in the database deletion transaction.
+Removing the final series carrying a modality removes that value; removing
+the final series clears the array to NULL. This applies to both UI and CLI
+deletion. Whole-study deletion removes the study and its mirror as before.
+
 > **Annotations are discarded, not migrated.** Deleting an entity removes its
 > annotations; the removal is captured in `annotations_history` (append-only,
 > attributed to the operator), so values stay auditable/recoverable — but nothing

@@ -147,6 +147,9 @@ def _overwrite_fixture(tmp_path, monkeypatch, study_path, dicom_dir_path):
     monkeypatch.setattr(
         iip_mod, "inspect", lambda engine: SimpleNamespace(has_table=lambda name: False)
     )
+    # These tests isolate filesystem containment; database locking is covered
+    # by the PostgreSQL integration tests.
+    monkeypatch.setattr(iip_mod, "lock_study_rows_sqlalchemy", lambda connection, uids: None)
     return proto
 
 

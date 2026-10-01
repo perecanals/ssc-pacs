@@ -45,6 +45,7 @@ import requests
 
 from common import table_exists
 from config import COLD_ARCHIVE_ROOT, DICOM_DATA_ROOT
+from labelled_table_sync import sync_labelled_rows
 from orthanc_client import (
     ORTHANC_PASS,
     ORTHANC_URL,
@@ -54,6 +55,7 @@ from orthanc_client import (
     orthanc_series_id,
     orthanc_study_id,
 )
+from study_metadata import lock_study_rows, refresh_study_modalities
 
 logger = logging.getLogger(__name__)
 
@@ -270,6 +272,7 @@ def delete_index_and_db(conn, plan: dict[str, Any], *, execute: bool) -> dict[st
     # 2) DB rows in one transaction.
     series_uids = plan["series_uids"]
     with conn.cursor() as cur:
+        lock_study_rows(cur, [plan["studyinstanceuid"]])
         if plan["level"] == "study":
             study_uid = plan["studyinstanceuid"]
             cur.execute(
@@ -313,6 +316,9 @@ def delete_index_and_db(conn, plan: dict[str, Any], *, execute: bool) -> dict[st
                 "DELETE FROM image_series WHERE seriesinstanceuid = %s", (series_uid,)
             )
             result["image_series"] = cur.rowcount
+            refresh_study_modalities(cur, [plan["studyinstanceuid"]])
+            if table_exists(cur, "image_study_labelled"):
+                sync_labelled_rows(conn, "study", [plan["studyinstanceuid"]])
     conn.commit()
     return result
 

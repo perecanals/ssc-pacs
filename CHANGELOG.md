@@ -20,6 +20,11 @@ Staff can export permitted datasets through Data Exports and download DICOM ZIP 
 Data Exports adds instrument selection, nested filters, a codebook, and named exports that can be reopened for editing; `0023_export_names` adds required names while preserving history.
 Downloads support Unicode filenames and release temporary files on failed transfers. Export setup failures are recorded in history.
 
+## v1.26 — 2026-10-01
+
+Study modalities are stored as a sorted array and refreshed during ingestion and series deletion, including append imports and labelled mirrors. Existing API display/filter behavior is retained and study Modality sorting is supported.
+Alembic `0025_study_modalities` adds and backfills the column from series metadata; no imaging-file reread is required.
+
 ## v1.25 — 2026-09-14
 
 Admin Data Explorer adds research-table browsing, a visual/SQL query builder, shared reports and background CSV/Excel exports.

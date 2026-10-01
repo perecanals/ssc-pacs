@@ -20,6 +20,8 @@ os.environ.setdefault("ORTHANC_ADMIN_USER", "test")
 os.environ.setdefault("ORTHANC_ADMIN_PASSWORD", "test")
 
 import deletion  # noqa: E402
+from labelled_table_sync import sync_labelled_rows  # noqa: E402
+from study_metadata import refresh_study_modalities  # noqa: E402
 from tests.conftest import USER_NONE, login_as  # noqa: E402
 
 STUDY_UID = "1.2.999.del.study"
@@ -59,6 +61,8 @@ def del_study(seeded_db):
                     (suid,),
                 )
             # One study-level and one series-level annotation.
+            refresh_study_modalities(cur, [STUDY_UID])
+            sync_labelled_rows(conn, "study", [STUDY_UID])
             cur.execute(
                 "INSERT INTO annotations (level, studyinstanceuid, patient_id, label, value, created_by) "
                 "VALUES ('study', %s, %s, 'timepoint', 'BL', 'tester')",
@@ -85,6 +89,7 @@ def del_study(seeded_db):
             cur.execute("DELETE FROM series_cache_state WHERE seriesinstanceuid = ANY(%s)", (SERIES_UIDS,))
             cur.execute("DELETE FROM image_series WHERE studyinstanceuid = %s", (STUDY_UID,))
             cur.execute("DELETE FROM image_study WHERE studyinstanceuid = %s", (STUDY_UID,))
+            cur.execute("DELETE FROM image_study_labelled WHERE studyinstanceuid = %s", (STUDY_UID,))
             cur.execute("DELETE FROM patient WHERE patient_id = %s", (PATIENT_ID,))
         conn.commit()
     finally:
@@ -174,6 +179,30 @@ def test_delete_index_and_db_dry_run(del_study, seeded_db):
         with conn.cursor() as cur:
             cur.execute("SELECT count(*) FROM image_study WHERE studyinstanceuid = %s", (STUDY_UID,))
             assert cur.fetchone()[0] == 1  # still there
+    finally:
+        conn.close()
+
+
+@pytest.mark.parametrize("distinct", [False, True])
+def test_series_deletion_refreshes_parent_and_mirror(del_study, seeded_db, distinct):
+    conn = psycopg2.connect(**seeded_db)
+    try:
+        with conn.cursor() as cur:
+            if distinct:
+                cur.execute("UPDATE image_series SET modality = 'SR' WHERE seriesinstanceuid = %s",
+                            (SERIES_UIDS[0],))
+            refresh_study_modalities(cur, [STUDY_UID])
+            sync_labelled_rows(conn, "study", [STUDY_UID])
+        conn.commit()
+        for index, uid in enumerate(SERIES_UIDS):
+            with patch.object(deletion, "orthanc_series_id", return_value=None):
+                plan = deletion.build_series_deletion_plan(conn, uid)
+                deletion.delete_index_and_db(conn, plan, execute=True)
+            with conn.cursor() as cur:
+                for table in ("image_study", "image_study_labelled"):
+                    cur.execute(f"SELECT modalities FROM {table} WHERE studyinstanceuid = %s",
+                                (STUDY_UID,))
+                    assert cur.fetchone()[0] == (["CT"] if index == 0 else None)
     finally:
         conn.close()
 

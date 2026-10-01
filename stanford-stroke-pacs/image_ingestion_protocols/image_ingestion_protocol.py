@@ -54,6 +54,11 @@ if str(_WEB_APP_DIR) not in sys.path:
     sys.path.insert(0, str(_WEB_APP_DIR))
 import warnings  # noqa: E402
 
+from study_metadata import (  # noqa: E402
+    lock_study_rows_sqlalchemy,
+    refresh_study_modalities_sqlalchemy,
+)
+
 from config import DICOM_DATA_ROOT, STORAGE_MODE  # noqa: E402
 
 warnings.filterwarnings(
@@ -259,7 +264,8 @@ class ImageIngestionProtocol:
         # overwriting their persisted image_study fields).
         return {
             "studyinstanceuids": sorted(
-                self.case_series_table["studyinstanceuid"].dropna().astype(str).unique().tolist()
+                set(self.case_series_table["studyinstanceuid"].dropna().astype(str))
+                | set(getattr(self, "updated_study_uids", []))
             ),
             "seriesinstanceuids": sorted(
                 self.case_series_table["seriesinstanceuid"].dropna().astype(str).unique().tolist()
@@ -1028,6 +1034,7 @@ class ImageIngestionProtocol:
         # disk will exist in image_series after the protocol completes.
         db_inspector = inspect(self.postgres_engine)
         with self.postgres_engine.begin() as connection:
+            lock_study_rows_sqlalchemy(connection, [str(study_instance_uid)])
             connection.execute(
                 text("DELETE FROM image_series WHERE studyinstanceuid = :uid"),
                 {"uid": str(study_instance_uid)},
@@ -1603,6 +1610,18 @@ class ImageIngestionProtocol:
         # together with the patient registry, else a crash between them leaves
         # studies with no patient row (the bug this table fixes).
         with self.postgres_engine.begin() as connection:
+            study_uids = set(self.case_series_table["studyinstanceuid"].dropna().astype(str))
+            # A partial upsert can move a series to another study. Refresh both
+            # parents and include the old parent in the executor's mirror sync.
+            series_uids = self.case_series_table["seriesinstanceuid"].dropna().astype(str).tolist()
+            old_parents = connection.execute(
+                text("SELECT DISTINCT studyinstanceuid FROM image_series "
+                     "WHERE seriesinstanceuid = ANY(:uids)"),
+                {"uids": series_uids},
+            ).scalars()
+            study_uids.update(str(uid) for uid in old_parents if uid is not None)
+            self.updated_study_uids = sorted(study_uids)
+            lock_study_rows_sqlalchemy(connection, self.updated_study_uids)
             self._upsert_dataframe(
                 "image_series", "seriesinstanceuid", self.case_series_table, connection
             )
@@ -1619,6 +1638,7 @@ class ImageIngestionProtocol:
             self._upsert_dataframe(
                 "image_study", "studyinstanceuid", self.case_study_table, connection
             )
+            refresh_study_modalities_sqlalchemy(connection, self.updated_study_uids)
             self._upsert_patient(connection)
             self._rollup_study_storage_sizes(connection)
 
