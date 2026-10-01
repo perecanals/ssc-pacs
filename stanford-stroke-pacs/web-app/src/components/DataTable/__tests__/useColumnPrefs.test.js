@@ -259,3 +259,41 @@ describe("useColumnPrefs — subtable column order", () => {
     });
   });
 });
+
+describe.each(["patient", "study", "series"])(
+  "UID columns in %s view",
+  (level) => {
+    const cols = buildBuiltinColumnCatalog(level);
+    const uidKeys = cols
+      .filter((c) =>
+        ["studyinstanceuid", "seriesinstanceuid"].includes(c.sourceKey),
+      )
+      .map((c) => c.key);
+
+    it.each([{}, { visibleKeys: ["builtin:patient:patient_id"] }])(
+      "keeps UIDs hidden until enabled, and hides them again on reset (%j)",
+      (prefs) => {
+        const { result } = renderHook(() =>
+          useColumnPrefs([], cols, level, prefs),
+        );
+        expect(uidKeys).toHaveLength(3);
+        for (const key of uidKeys) {
+          expect(result.current.allCols.some((c) => c.key === key)).toBe(true);
+          expect(result.current.visibleKeys).not.toContain(key);
+        }
+        act(() => result.current.setKeysVisible(uidKeys, true));
+        for (const key of uidKeys)
+          expect(result.current.visibleKeys).toContain(key);
+        expect(
+          result.current.subtableColsForLevel("study").map((c) => c.key),
+        ).toContain("builtin:study:studyinstanceuid");
+        expect(
+          result.current.subtableColsForLevel("series").map((c) => c.key),
+        ).toContain("builtin:series:seriesinstanceuid");
+        act(() => result.current.resetColumns());
+        for (const key of uidKeys)
+          expect(result.current.visibleKeys).not.toContain(key);
+      },
+    );
+  },
+);

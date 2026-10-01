@@ -38,6 +38,13 @@ const LEVEL_CONFIG = {
     idCol: "studyinstanceuid",
     entityLabel: "studies",
     builtinCols: [
+      {
+        key: "studyinstanceuid",
+        label: "Study Instance UID",
+        filterable: true,
+        sortable: false,
+        defaultVisible: false,
+      },
       { key: "patient_id", label: "Patient ID", filterable: true },
       { key: "dataset", label: "Dataset", filterable: true, sortable: false },
       {
@@ -78,6 +85,7 @@ const LEVEL_CONFIG = {
     ],
     sortDefault: "patient_id",
     filterParamMap: {
+      studyinstanceuid: "studyinstanceuid",
       patient_id: "patient_id",
       dataset: "dataset",
       import_id: "import_id",
@@ -98,6 +106,20 @@ const LEVEL_CONFIG = {
     idCol: "seriesinstanceuid",
     entityLabel: "series",
     builtinCols: [
+      {
+        key: "studyinstanceuid",
+        label: "Study Instance UID",
+        filterable: true,
+        sortable: false,
+        defaultVisible: false,
+      },
+      {
+        key: "seriesinstanceuid",
+        label: "Series Instance UID",
+        filterable: true,
+        sortable: false,
+        defaultVisible: false,
+      },
       { key: "patient_id", label: "Patient ID", filterable: true },
       { key: "dataset", label: "Dataset", filterable: true, sortable: false },
       {
@@ -162,6 +184,8 @@ const LEVEL_CONFIG = {
     ],
     sortDefault: "patient_id",
     filterParamMap: {
+      studyinstanceuid: "studyinstanceuid",
+      seriesinstanceuid: "seriesinstanceuid",
       patient_id: "patient_id",
       dataset: "dataset",
       import_id: "import_id",

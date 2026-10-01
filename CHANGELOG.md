@@ -20,6 +20,11 @@ Staff can export permitted datasets through Data Exports and download DICOM ZIP 
 Data Exports adds instrument selection, nested filters, a codebook, and named exports that can be reopened for editing; `0023_export_names` adds required names while preserving history.
 Downloads support Unicode filenames and release temporary files on failed transfers. Export setup failures are recorded in history.
 
+## v1.27 — 2026-10-01
+
+Study Instance UID and Series Instance UID are available in Displayed Columns, hidden by default, with substring filters in Study/Series views.
+Existing saved views keep the UID columns hidden until enabled; expanded rows can display them. No schema migration is required.
+
 ## v1.26 — 2026-10-01
 
 Study modalities are stored as a sorted array and refreshed during ingestion and series deletion, including append imports and labelled mirrors. Existing API display/filter behavior is retained and study Modality sorting is supported.

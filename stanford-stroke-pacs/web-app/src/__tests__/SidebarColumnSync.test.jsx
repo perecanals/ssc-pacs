@@ -75,10 +75,65 @@ vi.mock("../api/warmOhif", () => ({
   resolveOhifViewerUrl: vi.fn().mockResolvedValue(null),
 }));
 
+import { apiGet } from "../api/client";
 import { AuthProvider } from "../context/AuthContext";
 import Navigator from "../pages/Navigator";
 
 describe("Sidebar label filter <-> ColumnSelector sync", () => {
+  it("enables UID columns and sends their header filters to the series API", async () => {
+    render(
+      <MemoryRouter>
+        <AuthProvider>
+          <Navigator />
+        </AuthProvider>
+      </MemoryRouter>,
+    );
+    fireEvent.click(await screen.findByRole("button", { name: /^series$/i }));
+    await screen.findByText("AxialSyncTest");
+    expect(
+      screen.queryByText(SERIES_ROW.seriesinstanceuid),
+    ).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /displayed columns/i }));
+    const studyBoxes = screen.getAllByRole("checkbox", {
+      name: "Study Instance UID",
+    });
+    studyBoxes.forEach((box) => expect(box).not.toBeChecked());
+    const seriesBox = screen.getByRole("checkbox", {
+      name: "Series Instance UID",
+    });
+    expect(seriesBox).not.toBeChecked();
+    fireEvent.click(studyBoxes[1]);
+    fireEvent.click(seriesBox);
+    fireEvent.click(document.body);
+    await screen.findByText(SERIES_ROW.studyinstanceuid);
+    await screen.findByText(SERIES_ROW.seriesinstanceuid);
+    const headers = screen.getAllByRole("columnheader");
+    for (const [label, value] of [
+      ["Study Instance UID", "3.4.5"],
+      ["Series Instance UID", "5.6"],
+    ]) {
+      const header = screen.getByRole("columnheader", {
+        name: new RegExp(label),
+      });
+      const filter = headers[headers.indexOf(header) + headers.length / 2];
+      fireEvent.change(filter.querySelector("input"), { target: { value } });
+      await waitFor(() => {
+        expect(
+          apiGet.mock.calls.some(([url]) => {
+            const params = new URL(url, "http://localhost").searchParams;
+            return (
+              params.get(
+                label === "Study Instance UID"
+                  ? "studyinstanceuid"
+                  : "seriesinstanceuid",
+              ) === value
+            );
+          }),
+        ).toBe(true);
+      });
+    }
+  });
+
   it("activating a sidebar label checks its column; it can be hidden while the filter stays active", async () => {
     const { container } = render(
       <MemoryRouter>

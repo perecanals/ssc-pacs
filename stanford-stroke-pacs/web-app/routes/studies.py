@@ -466,6 +466,7 @@ def list_classification_values(scope: list[str] | None = Depends(get_dataset_sco
 
 @router.get("/api/studies")
 def list_studies(
+    studyinstanceuid: str | None = Query(None),
     patient_id: str | None = Query(None),
     import_id: str | None = Query(None),
     import_label: str | None = Query(None),
@@ -510,6 +511,9 @@ def list_studies(
                 conditions.append(dataset_filter_sql("st.patient_id"))
                 params.append(scope)
 
+            if studyinstanceuid:
+                conditions.append("st.studyinstanceuid LIKE %s")
+                params.append(f"%{studyinstanceuid}%")
             if patient_id:
                 conditions.append("st.patient_id LIKE %s")
                 params.append(f"%{patient_id}%")
@@ -684,6 +688,8 @@ def study_series(
 
 @router.get("/api/series")
 def list_series(
+    studyinstanceuid: str | None = Query(None),
+    seriesinstanceuid: str | None = Query(None),
     label: str | None = Query(None),
     label_level: str | None = Query(None),
     label_filters: str | None = Query(None),
@@ -740,6 +746,12 @@ def list_series(
                     build_label_filter_sql("series", label_level, "s.seriesinstanceuid")
                 )
                 params.append(label)
+            if studyinstanceuid:
+                conditions.append("s.studyinstanceuid LIKE %s")
+                params.append(f"%{studyinstanceuid}%")
+            if seriesinstanceuid:
+                conditions.append("s.seriesinstanceuid LIKE %s")
+                params.append(f"%{seriesinstanceuid}%")
             if patient_id:
                 conditions.append("s.patient_id LIKE %s")
                 params.append(f"%{patient_id}%")

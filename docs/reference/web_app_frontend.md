@@ -388,6 +388,13 @@ The Navigator page is decomposed into focused React components:
 | Study   | Patient ID, Acquisition Date, Modality, Study Description, Dataset, Import ID, Import Label, **Auto Timepoint** |
 | Series  | Patient ID, Acquisition Date, Modality, Series Description, Slices, Slice Thickness (mm), Axial Coverage (mm), Dataset, Import ID, Import Label, **Auto Series Type**, **Auto Timepoint** (flat series table only by default) |
 
+`Study Instance UID` (Study and Series) and `Series Instance UID` (Series)
+are available in Displayed Columns and ship **hidden by default**, including
+for existing saved views. Their column-header filters use substring matching
+on `/api/studies?studyinstanceuid=...` and
+`/api/series?studyinstanceuid=...&seriesinstanceuid=...`. They also display in
+expanded study/series rows when enabled.
+
 `Dataset` is a built-in column at all three levels (default-visible). The
 `Study Import Labels` column (Patient) and the `Import ID` / `Import Label`
 columns (Study and Series) ship **hidden by default** — available in the column
