@@ -366,7 +366,7 @@ To avoid a second drifting copy, the module inventory lives in one place each:
 - **Backend module responsibilities** (`app.py`, `routes/`, `db.py`, `auth.py`,
   `dataset_access.py`, `common.py`, `orthanc_client.py`, `cache_manager.py`,
   `reconciliation.py`, `rate_limit.py`, `labelled_table_sync.py`): see the
-  Architecture section of the repo `CLAUDE.md` (one line per module) and
+  Architecture section of the repo `AGENTS.md` (one line per module) and
   [`architecture.md`](architecture.md).
 - **Frontend routes, components, and `DataTable` internals**: see
   [`web_app_frontend.md`](web_app_frontend.md).
