@@ -22,7 +22,7 @@ os.environ.setdefault("ORTHANC_ADMIN_PASSWORD", "test")
 import deletion  # noqa: E402
 from labelled_table_sync import sync_labelled_rows  # noqa: E402
 from study_metadata import refresh_study_modalities  # noqa: E402
-from tests.conftest import USER_NONE, login_as  # noqa: E402
+from tests.conftest import USER_NONE, insert_patient, login_as  # noqa: E402
 
 STUDY_UID = "1.2.999.del.study"
 SERIES_UIDS = ["1.2.999.del.study.1", "1.2.999.del.study.2"]
@@ -36,10 +36,7 @@ def del_study(seeded_db):
     try:
         with conn.cursor() as cur:
             cur.execute("SET app.audit_user = %s", ("tester",))
-            cur.execute(
-                "INSERT INTO patient (patient_id) VALUES (%s) ON CONFLICT DO NOTHING",
-                (PATIENT_ID,),
-            )
+            insert_patient(cur, PATIENT_ID, "lvo")
             cur.execute(
                 "INSERT INTO image_study (patient_id, studyinstanceuid, study_type) "
                 "VALUES (%s, %s, 'CTA') ON CONFLICT DO NOTHING",

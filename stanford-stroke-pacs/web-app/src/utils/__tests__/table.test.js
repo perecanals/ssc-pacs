@@ -143,36 +143,39 @@ describe("buildBuiltinColumnCatalog", () => {
 
 describe("buildPatientStudiesUrl", () => {
   it("returns base URL without filters", () => {
-    expect(buildPatientStudiesUrl({ patient_id: "P1" }, {})).toBe(
-      "/api/patients/P1/studies",
+    expect(buildPatientStudiesUrl({ patient_key: "lvo__P1" }, {})).toBe(
+      "/api/patients/lvo__P1/studies",
     );
-    expect(buildPatientStudiesUrl({ patient_id: "P1" })).toBe(
-      "/api/patients/P1/studies",
+    expect(buildPatientStudiesUrl({ patient_key: "lvo__P1" })).toBe(
+      "/api/patients/lvo__P1/studies",
     );
   });
 
   it("appends study import label", () => {
     expect(
       buildPatientStudiesUrl(
-        { patient_id: "P1" },
+        { patient_key: "lvo__P1" },
         { studyImportLabel: "batch1" },
       ),
-    ).toBe("/api/patients/P1/studies?study_import_label=batch1");
+    ).toBe("/api/patients/lvo__P1/studies?study_import_label=batch1");
   });
 
   it("ignores blank label", () => {
     expect(
-      buildPatientStudiesUrl({ patient_id: "P1" }, { studyImportLabel: "  " }),
-    ).toBe("/api/patients/P1/studies");
+      buildPatientStudiesUrl(
+        { patient_key: "lvo__P1" },
+        { studyImportLabel: "  " },
+      ),
+    ).toBe("/api/patients/lvo__P1/studies");
   });
 
   it("appends cascade filters alongside the import label", () => {
     const url = buildPatientStudiesUrl(
-      { patient_id: "P1" },
+      { patient_key: "lvo__P1" },
       { studyImportLabel: "batch1", autoValues: { series_type: ["CTA"] } },
     );
     expect(url).toBe(
-      "/api/patients/P1/studies?study_import_label=batch1&series_type=CTA",
+      "/api/patients/lvo__P1/studies?study_import_label=batch1&series_type=CTA",
     );
   });
 });

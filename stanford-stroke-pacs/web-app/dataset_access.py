@@ -1,10 +1,13 @@
 """Per-user dataset (cohort) access scopes.
 
-Patients carry cohort tags in ``patient.dataset`` (text[]). A user's scope is
-the set of tags they may see, from ``users.allowed_datasets``:
+Each ``patient`` row is an enrollment in one dataset (``patient.dataset``);
+enrollments of the same person share a ``subject_id``, and a study belongs to
+the whole subject. A user's scope is the set of dataset names they may see,
+from ``users.allowed_datasets``:
 
  - admins are unrestricted — their scope is the ``None`` sentinel;
- - non-admins see only patients whose ``dataset`` overlaps their grants;
+ - non-admins see a study when any enrollment of its subject is in a granted
+   dataset;
  - an empty grant set (the default) means deny-by-default: no patient data.
 
 This module is shared by the sync API routes (via the ``get_dataset_scope``
@@ -25,8 +28,10 @@ Scope = frozenset | None
 
 # Bound staleness after an admin edits grants mid-session.
 _USER_TTL_SECONDS = 30.0
-# study/patient → datasets is effectively immutable (cohort tags only grow at
-# ingest).
+# study/PatientID → datasets changes only at ingest and when enrollments are
+# linked or unlinked (scripts/admin/link_patients.py, out of process). An
+# unlink can therefore take up to this long to revoke cross-dataset access in a
+# running app; link_patients.py tells the operator to restart it.
 _STUDY_TTL_SECONDS = 300.0
 
 
@@ -96,44 +101,55 @@ def fetch_user_scope(username: str) -> Scope:
 
 
 def fetch_study_datasets(studyinstanceuid: str) -> frozenset | None:
-    """Dataset tags of the patient owning a study; None if the study is unknown."""
+    """Datasets of every enrollment of the study's subject; None if unknown."""
     conn = get_conn()
     try:
         with conn.cursor() as cur:
             cur.execute(
-                "SELECT p.dataset FROM image_study st "
-                "JOIN patient p ON p.patient_id = st.patient_id "
-                "WHERE st.studyinstanceuid = %s LIMIT 1",
+                "SELECT st.studyinstanceuid, q.dataset FROM image_study st "
+                "LEFT JOIN patient q ON q.subject_id = st.subject_id "
+                "WHERE st.studyinstanceuid = %s",
                 (studyinstanceuid,),
             )
-            row = cur.fetchone()
+            rows = cur.fetchall()
     finally:
         conn.close()
-    if not row:
+    if not rows:
         return None
-    return frozenset(row[0] or [])
+    return frozenset(r[1] for r in rows if r[1] is not None)
 
 
-def fetch_patient_datasets(patient_id: str) -> frozenset | None:
-    """Dataset tags of a patient; None if the patient is unknown.
+def fetch_patient_id_subjects(patient_id: str) -> tuple | None:
+    """Per subject with imaging under a DICOM PatientID: its datasets and studies.
 
-    Keyed by ``patient.patient_id`` — the value OHIF sends as the DICOM
-    PatientID (0010,0020) in QIDO patient-scoped searches. A QIDO wildcard
-    pattern simply matches no row and resolves to None (deny for non-admins).
+    OHIF's study browser searches QIDO by PatientID (0010,0020). That is the
+    bare id in the files, and Orthanc groups patients by it alone — so one
+    PatientID can cover *different people* from different datasets (same id,
+    separate enrollments and subjects). Returns a tuple of
+    ``(datasets, study_uids)`` frozenset pairs, one per subject, or None when
+    no study carries that PatientID (a QIDO wildcard pattern matches nothing
+    and is therefore denied for non-admins).
     """
     conn = get_conn()
     try:
         with conn.cursor() as cur:
             cur.execute(
-                "SELECT dataset FROM patient WHERE patient_id = %s LIMIT 1",
+                "SELECT st.subject_id, array_agg(DISTINCT st.studyinstanceuid), "
+                "       (SELECT array_agg(DISTINCT q.dataset) FROM patient q "
+                "        WHERE q.subject_id = st.subject_id) "
+                "FROM image_study st WHERE st.patient_id = %s "
+                "GROUP BY st.subject_id",
                 (patient_id,),
             )
-            row = cur.fetchone()
+            rows = cur.fetchall()
     finally:
         conn.close()
-    if not row:
+    if not rows:
         return None
-    return frozenset(row[0] or [])
+    return tuple(
+        (frozenset(datasets or []), frozenset(study_uids or []))
+        for _subject, study_uids, datasets in rows
+    )
 
 
 def get_user_scope_cached(username: str) -> Scope:
@@ -154,13 +170,13 @@ def get_study_datasets_cached(studyinstanceuid: str) -> frozenset | None:
     return datasets
 
 
-def get_patient_datasets_cached(patient_id: str) -> frozenset | None:
+def get_patient_id_subjects_cached(patient_id: str) -> tuple | None:
     cached = _patient_cache.get(patient_id)
     if cached is not None:
         return None if cached == _UNKNOWN else cached
-    datasets = fetch_patient_datasets(patient_id)
-    _patient_cache.set(patient_id, _UNKNOWN if datasets is None else datasets)
-    return datasets
+    subjects = fetch_patient_id_subjects(patient_id)
+    _patient_cache.set(patient_id, _UNKNOWN if subjects is None else subjects)
+    return subjects
 
 
 def invalidate_user_scope(username: str) -> None:
@@ -182,3 +198,15 @@ def scope_allows(scope: Scope, datasets: frozenset | None) -> bool:
     if not datasets:
         return False
     return bool(scope & datasets)
+
+
+def visible_patient_id_studies(scope: Scope, subjects: tuple | None) -> tuple[frozenset, bool]:
+    """Studies under a PatientID the scope may see, and whether that is all of them.
+
+    ``subjects`` comes from :func:`get_patient_id_subjects_cached`. A subject is
+    visible when any of its enrollments is in scope.
+    """
+    if not subjects:
+        return frozenset(), False
+    visible = [uids for datasets, uids in subjects if scope_allows(scope, datasets)]
+    return frozenset().union(*visible), len(visible) == len(subjects)

@@ -124,12 +124,13 @@ export async function queueWarmSeries(seriesinstanceuid) {
 }
 
 /**
- * Fire-and-forget warm of every study under a patient. Returns the queued
- * count from the 202 response.
+ * Fire-and-forget warm of every study under a patient (an enrollment, by
+ * patient_key: its subject's imaging). Returns the queued count from the 202
+ * response.
  */
-export async function queueWarmPatient(patientId) {
+export async function queueWarmPatient(patientKey) {
   const res = await apiPost(
-    `/api/patients/${encodeURIComponent(patientId)}/warm`,
+    `/api/patients/${encodeURIComponent(patientKey)}/warm`,
   );
   if (!res.ok) {
     if (res.status === 401) throw new Error("Log in to decompress studies.");
@@ -140,20 +141,24 @@ export async function queueWarmPatient(patientId) {
 
 /**
  * Cache status for many studies, patients, and/or series in one request.
- * Returns {studies: {uid: status}, patients: {id: {total, cold, warming, hot,
- * error}}, series: {uid: status}}.
+ * Returns {studies: {uid: status}, patients: {patient_key: {total, cold,
+ * warming, hot, error}}, series: {uid: status}}.
  */
 export async function getBatchCacheStatus(
   uids = [],
-  patientIds = [],
+  patientKeys = [],
   seriesUids = [],
 ) {
-  if (uids.length === 0 && patientIds.length === 0 && seriesUids.length === 0) {
+  if (
+    uids.length === 0 &&
+    patientKeys.length === 0 &&
+    seriesUids.length === 0
+  ) {
     return { studies: {}, patients: {}, series: {} };
   }
   const res = await apiPost("/api/cache-status/batch", {
     uids,
-    patient_ids: patientIds,
+    patient_keys: patientKeys,
     series_uids: seriesUids,
   });
   if (!res.ok) throw new Error(`Batch cache-status failed: ${res.status}`);

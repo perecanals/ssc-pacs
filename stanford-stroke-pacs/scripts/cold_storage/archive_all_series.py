@@ -31,6 +31,7 @@ load_dotenv(REPO_ROOT / ".env")
 
 # Paths from repo-root config.toml (see web-app/config.py)
 sys.path.insert(0, str(REPO_ROOT / "web-app"))
+from common import subject_for_patient_arg  # noqa: E402
 from db import DB_CONFIG  # noqa: E402
 
 from cache_manager import archive_path_for_series_dir  # noqa: E402
@@ -92,15 +93,15 @@ def compress_one_job(args: tuple[str, str, str, str, int]) -> dict[str, Any]:
     return out
 
 
-def fetch_rows(conn, patient: str | None) -> list[tuple[str, str]]:
+def fetch_rows(conn, subject_id: str | None) -> list[tuple[str, str]]:
     q = (
         "SELECT seriesinstanceuid, dicom_dir_path FROM image_series "
         "WHERE dicom_dir_path IS NOT NULL AND dicom_dir_path != ''"
     )
     params: list[Any] = []
-    if patient:
-        q += " AND patient_id = %s"
-        params.append(patient)
+    if subject_id:
+        q += " AND subject_id = %s"
+        params.append(subject_id)
     with conn.cursor() as cur:
         cur.execute(q, params)
         return [(r[0], r[1]) for r in cur.fetchall()]
@@ -123,7 +124,9 @@ def main() -> int:
              "--legacy-root is a deprecated alias.",
     )
     ap.add_argument("--cold-root", type=Path, default=DEFAULT_COLD)
-    ap.add_argument("--patient", help="Only series for this patient_id")
+    ap.add_argument("--patient",
+                    help="Only this patient's series: a patient_key, or a patient_id "
+                         "that names one person")
     ap.add_argument(
         "--execute", action="store_true",
         help="Write archives and update image_series. Default is a dry-run preview.",
@@ -142,7 +145,9 @@ def main() -> int:
 
     conn = psycopg2.connect(**DB_CONFIG)
     try:
-        rows = fetch_rows(conn, args.patient)
+        rows = fetch_rows(
+            conn, subject_for_patient_arg(args.patient) if args.patient else None
+        )
     finally:
         conn.close()
 

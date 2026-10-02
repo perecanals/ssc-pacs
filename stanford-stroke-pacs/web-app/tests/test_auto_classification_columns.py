@@ -79,7 +79,7 @@ def two_series_study(seeded_db):
 
 
 class TestStudySeriesCount:
-    @pytest.mark.parametrize("endpoint", ["/api/studies", "/api/patients/P-0001/studies"])
+    @pytest.mark.parametrize("endpoint", ["/api/studies", "/api/patients/lvo__P-0001/studies"])
     def test_count_includes_series_hidden_by_filters(
         self, logged_in_client, two_series_study, endpoint,
     ):
@@ -105,11 +105,11 @@ class TestStudySeriesCount:
         )
         assert response.status_code == 200
         assert [row["number_of_series"] for row in response.json()["items"]] == expected
-        response = logged_in_client.get("/api/patients/P-0002/studies")
+        response = logged_in_client.get("/api/patients/lvo__P-0002/studies")
         assert response.status_code == 200
         assert response.json()[0]["number_of_series"] == 0
 
-    @pytest.mark.parametrize("endpoint", ["/api/studies", "/api/patients/P-0001/studies"])
+    @pytest.mark.parametrize("endpoint", ["/api/studies", "/api/patients/lvo__P-0001/studies"])
     def test_count_updates_after_series_insert(
         self, logged_in_client, two_series_study, db_conn, endpoint,
     ):
@@ -141,7 +141,7 @@ class TestStudySeriesCount:
                 ("9.9.9.9.9.1",),
             )
         db_conn.commit()
-        for endpoint in ("/api/studies", "/api/patients/P-0001/studies"):
+        for endpoint in ("/api/studies", "/api/patients/lvo__P-0001/studies"):
             response = logged_in_client.get(endpoint)
             assert response.status_code == 200
             data = response.json()
@@ -232,7 +232,7 @@ class TestStudyEndpoints:
         assert resp.status_code == 200
 
     def test_patient_studies_expansion_exposes_timepoint(self, logged_in_client):
-        resp = logged_in_client.get("/api/patients/P-0001/studies")
+        resp = logged_in_client.get("/api/patients/lvo__P-0001/studies")
         assert resp.status_code == 200
         row = _find(resp.json(), "studyinstanceuid", "1.2.3.4.5")
         assert row["timepoint"] == "BL"
@@ -254,25 +254,25 @@ class TestStudyEndpoints:
     # so an expanded subtable mirrors the top-level filter (same "has-one" at the
     # study level / direct match at the series level as the flat endpoints).
     def test_patient_studies_filter_by_timepoint(self, logged_in_client):
-        hit = logged_in_client.get("/api/patients/P-0001/studies?timepoint=BL")
+        hit = logged_in_client.get("/api/patients/lvo__P-0001/studies?timepoint=BL")
         assert _find(hit.json(), "studyinstanceuid", "1.2.3.4.5")
-        miss = logged_in_client.get("/api/patients/P-0001/studies?timepoint=FU")
+        miss = logged_in_client.get("/api/patients/lvo__P-0001/studies?timepoint=FU")
         assert miss.json() == []
 
     def test_patient_studies_filter_series_type_is_has_one(self, logged_in_client):
         # P-0001's only study has an NCCT series but no CTA series.
-        hit = logged_in_client.get("/api/patients/P-0001/studies?series_type=NCCT")
+        hit = logged_in_client.get("/api/patients/lvo__P-0001/studies?series_type=NCCT")
         assert _find(hit.json(), "studyinstanceuid", "1.2.3.4.5")
-        miss = logged_in_client.get("/api/patients/P-0001/studies?series_type=CTA")
+        miss = logged_in_client.get("/api/patients/lvo__P-0001/studies?series_type=CTA")
         assert miss.json() == []
 
     def test_patient_studies_filters_and_together(self, logged_in_client):
         both = logged_in_client.get(
-            "/api/patients/P-0001/studies?series_type=NCCT&timepoint=BL"
+            "/api/patients/lvo__P-0001/studies?series_type=NCCT&timepoint=BL"
         )
         assert _find(both.json(), "studyinstanceuid", "1.2.3.4.5")
         neither = logged_in_client.get(
-            "/api/patients/P-0001/studies?series_type=NCCT&timepoint=FU"
+            "/api/patients/lvo__P-0001/studies?series_type=NCCT&timepoint=FU"
         )
         assert neither.json() == []
 
@@ -283,7 +283,7 @@ class TestStudyEndpoints:
         # proving the refactored import-label fragment still binds correctly
         # alongside the new params.
         resp = logged_in_client.get(
-            "/api/patients/P-0001/studies?study_import_label=zzz&timepoint=BL"
+            "/api/patients/lvo__P-0001/studies?study_import_label=zzz&timepoint=BL"
         )
         assert resp.status_code == 200
         assert resp.json() == []
@@ -375,7 +375,7 @@ class TestDatasetScoping:
     def test_subtable_filters_do_not_bypass_scope(self, client):
         """A user with no grants can't reach the sub-row endpoints, filter or not."""
         login_as(client, USER_NONE)
-        studies = client.get("/api/patients/P-0001/studies?series_type=NCCT")
+        studies = client.get("/api/patients/lvo__P-0001/studies?series_type=NCCT")
         assert studies.status_code == 404
         series = client.get("/api/studies/1.2.3.4.5/series?series_type=NCCT")
         assert series.status_code == 404

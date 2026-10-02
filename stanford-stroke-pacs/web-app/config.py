@@ -51,6 +51,11 @@ _DEFAULT_WEB_APP = {
     # Which clinical_data column supplies the patient tab's episode date
     # (COALESCEd over the imaging-derived patient.stroke_date).
     "clinical_episode_date_column": "stroke_date",
+    # The dataset whose patient ids clinical_data.study_id carries. clinical_data
+    # has no dataset column, so without this a same-id patient from another
+    # dataset would be matched to the wrong clinical row. Empty = match any
+    # dataset (only safe for a single-dataset deployment).
+    "clinical_data_dataset": "",
     # Trackpad slice-scroll damping threshold for the OHIF proxy shim
     # (routes/proxy.py): pixels of trackpad scroll per slice. 0 disables
     # injection.
@@ -172,6 +177,10 @@ CLINICAL_EPISODE_DATE_COLUMN = _require_sql_identifier(
     "clinical_episode_date_column",
 )
 
+# Display name of the dataset clinical_data belongs to (see the default's
+# comment); None = unrestricted.
+CLINICAL_DATA_DATASET = str(_web_app["clinical_data_dataset"]).strip() or None
+
 OHIF_TRACKPAD_PX_PER_SLICE = int(_web_app["ohif_trackpad_px_per_slice"])
 if OHIF_TRACKPAD_PX_PER_SLICE < 0:
     raise RuntimeError(
@@ -199,5 +208,6 @@ def effective_config_summary() -> dict:
         "cookie_secure": COOKIE_SECURE,
         "login_rate_limit_per_5min": LOGIN_RATE_LIMIT_PER_5MIN,
         "clinical_episode_date_column": CLINICAL_EPISODE_DATE_COLUMN,
+        "clinical_data_dataset": CLINICAL_DATA_DATASET,
         "ohif_trackpad_px_per_slice": OHIF_TRACKPAD_PX_PER_SLICE,
     }

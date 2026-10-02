@@ -57,6 +57,7 @@ load_dotenv(REPO_ROOT / ".env")
 
 # Read paths from web-app/config.py so cleanup matches the running stack.
 sys.path.insert(0, str(REPO_ROOT / "web-app"))
+from common import subject_for_patient_arg  # noqa: E402
 from db import DB_CONFIG  # noqa: E402
 from orthanc_client import (  # noqa: E402
     orthanc_series_id,
@@ -78,7 +79,7 @@ SERIES_UID_TAG_GROUP = 32
 SERIES_UID_TAG_ELEMENT = 14
 
 
-def fetch_candidate_series(patient: str | None, study: str | None,
+def fetch_candidate_series(subject_id: str | None, study: str | None,
                            import_labels: list[str] | None = None) -> list[dict]:
     """Series with both an archive path and an existing loose dir."""
     q = (
@@ -91,9 +92,9 @@ def fetch_candidate_series(patient: str | None, study: str | None,
         "  AND dicom_dir_path <> ''"
     )
     params: list[Any] = []
-    if patient:
-        q += " AND patient_id = %s"
-        params.append(patient)
+    if subject_id:
+        q += " AND subject_id = %s"
+        params.append(subject_id)
     if study:
         q += " AND studyinstanceuid = %s"
         params.append(study)
@@ -234,7 +235,9 @@ def clean_series_loose_dir(
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--execute", action="store_true", help="Actually delete (default: dry-run)")
-    ap.add_argument("--patient", help="Limit to a single patient_id")
+    ap.add_argument("--patient",
+                    help="Limit to one patient: a patient_key, or a patient_id that "
+                         "names one person")
     ap.add_argument("--study", help="Limit to a single studyinstanceuid")
     ap.add_argument("--import-label", action="append", dest="import_labels",
                     metavar="LABEL",
@@ -272,7 +275,8 @@ def main() -> int:
     print(f"DICOM data root: {DICOM_DATA_ROOT}")
 
     print("Fetching candidate series from image_series ...")
-    candidates = fetch_candidate_series(args.patient, args.study, args.import_labels)
+    subject_id = subject_for_patient_arg(args.patient) if args.patient else None
+    candidates = fetch_candidate_series(subject_id, args.study, args.import_labels)
     print(f"  {len(candidates)} candidate series")
 
     print("Fetching indexed SeriesInstanceUIDs from Orthanc DB ...")

@@ -22,8 +22,10 @@ LEVEL_CONFIGS = {
     "patient": LevelConfig(
         source_table="patient",
         labelled_table="patient_labelled",
-        source_key="patient_id",
-        annotation_key="patient_id",
+        # One mirror row per enrollment (Alembic 0026); patient_id alone is
+        # not unique across datasets.
+        source_key="patient_key",
+        annotation_key="patient_key",
     ),
     "study": LevelConfig(
         source_table="image_study",

@@ -45,15 +45,20 @@ load_dotenv(STACK_ROOT / ".env")
 sys.path.insert(0, str(STACK_ROOT / "web-app"))
 sys.path.insert(0, str(STACK_ROOT / "image_ingestion_protocols"))
 
-from common import table_exists  # noqa: E402
+from common import subject_for_patient_arg, table_exists  # noqa: E402
 from series_classification import (  # noqa: E402
     ASSIGN_RANKS_SQL,
     CLEAR_RANKS_SQL,
     RULES_VERSION,
-    assign_patient_timepoints,
     classify_series,
     classify_study,
 )
+from subject_timepoints import (  # noqa: E402
+    clinical_anchor_sql,
+    resolve_subject_timepoints,
+)
+
+from config import CLINICAL_DATA_DATASET  # noqa: E402
 
 
 def _fmt(value: str | None) -> str:
@@ -138,7 +143,11 @@ def main() -> int:
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
     parser.add_argument("--label", help="restrict to one import_label")
-    parser.add_argument("--patient", help="restrict to one patient_id")
+    parser.add_argument(
+        "--patient",
+        help="restrict to one patient (all imaging of that person): a patient_key, "
+             "or a patient_id that names one person",
+    )
     parser.add_argument("--limit", type=int, help="cap the number of series")
     parser.add_argument(
         "--execute",
@@ -161,8 +170,8 @@ def main() -> int:
         where.append("s.import_label = %s")
         params.append(args.label)
     if args.patient:
-        where.append("s.patient_id = %s")
-        params.append(args.patient)
+        where.append("s.subject_id = %s")
+        params.append(subject_for_patient_arg(args.patient))
 
     sql = f"""
         SELECT s.seriesinstanceuid, s.studyinstanceuid, s.series_type,
@@ -218,68 +227,38 @@ def main() -> int:
     # is passed for signature parity but deliberately unused, so a series-rule
     # change can never silently move a study's type.
     #
-    # timepoint is episode-aware (assign_patient_timepoints): a patient's studies
-    # are split into episodes and each anchored on its own femoral-sheath puncture
-    # from clinical_data (NOT patient.stroke_date — a different clock), else its
-    # own thrombectomy study. Episodes with neither get a NULL timepoint, not a guess.
+    # timepoint is episode-aware (assign_patient_timepoints): a person's studies
+    # (a subject — possibly several dataset enrollments) are split into
+    # episodes and each anchored on its own femoral-sheath puncture from
+    # clinical_data (NOT patient.stroke_date — a different clock), else its own
+    # thrombectomy study. Episodes with neither get a NULL timepoint, not a guess.
     with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-        # clinical_data is optional (a deployment may not have it). Without it every
-        # anchor column reads NULL — the exact shape a patient with no clinical
-        # row already yields — so each episode falls back to its own
-        # thrombectomy study.
-        if table_exists(cur, "clinical_data"):
-            clinical_cols = (
-                "c.femoral_sheath_time, c.receiving_arrival_time, c.time_recognized"
-            )
-            clinical_join = "LEFT JOIN clinical_data c ON c.study_id = st.patient_id"
-        else:
-            clinical_cols = (
-                "NULL::text AS femoral_sheath_time, "
-                "NULL::text AS receiving_arrival_time, "
-                "NULL::text AS time_recognized"
-            )
-            clinical_join = ""
+        # clinical_data is optional (a deployment may not have it); without it
+        # each episode falls back to its own thrombectomy study.
+        clinical_cols, clinical_join, clinical_params = clinical_anchor_sql(
+            table_exists(cur, "clinical_data"), CLINICAL_DATA_DATASET
+        )
         cur.execute(
             f"""
-            SELECT st.studyinstanceuid, st.patient_id, st.study_type,
+            SELECT st.studyinstanceuid, st.subject_id, st.study_type,
                    st.studydescription, st.timepoint, st.acquisitiondatetime,
                    {clinical_cols}
             FROM image_study st
             {clinical_join}
             WHERE st.studyinstanceuid = ANY(%s)
             """,
-            (list(study_types.keys()),),
+            clinical_params + [list(study_types.keys())],
         )
         study_rows = cur.fetchall()
 
-    # First pass: proposed study_type per study (thrombectomy anchoring needs it).
-    proposed_study_type, by_patient, clinical_by_patient = {}, defaultdict(list), {}
-    for row in study_rows:
-        proposed, _ = classify_study(
+    # Proposed study_type per study first: thrombectomy anchoring needs it.
+    proposed_study_type = {
+        row["studyinstanceuid"]: classify_study(
             row["studydescription"], study_types.get(row["studyinstanceuid"])
-        )
-        proposed_study_type[row["studyinstanceuid"]] = proposed
-        by_patient[row["patient_id"]].append(row)
-        clinical_by_patient.setdefault(row["patient_id"], {
-            "femoral_sheath_time": row["femoral_sheath_time"],
-            "receiving_arrival_time": row["receiving_arrival_time"],
-            "time_recognized": row["time_recognized"],
-        })
-
-    # Second pass: episode-aware timepoints, one call per patient.
-    timepoint_by_suid = {}
-    for patient_id, rows in by_patient.items():
-        patient_studies = [
-            {
-                "studyinstanceuid": r["studyinstanceuid"],
-                "acquisition_datetime": r["acquisitiondatetime"],
-                "study_type": proposed_study_type[r["studyinstanceuid"]],
-            }
-            for r in rows
-        ]
-        timepoint_by_suid.update(
-            assign_patient_timepoints(patient_studies, clinical_by_patient[patient_id])
-        )
+        )[0]
+        for row in study_rows
+    }
+    timepoint_by_suid = resolve_subject_timepoints(study_rows, study_type=proposed_study_type)
 
     studies = []
     for row in study_rows:

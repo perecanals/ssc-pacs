@@ -5,14 +5,23 @@ from __future__ import annotations
 import psycopg2.extras
 import pytest
 
+from tests.conftest import insert_patient
+
+# Patient-level history is keyed by the enrollment (patient_key).
+HIST_KEY = "lvo__HIST-TEST"
+
 
 @pytest.fixture(autouse=True)
 def _cleanup(db_conn):
-    """Remove test annotations and history rows after each test."""
+    """Enroll the test patient; remove its annotations, history and row after."""
+    with db_conn.cursor() as cur:
+        insert_patient(cur, "HIST-TEST", "lvo")
+    db_conn.commit()
     yield
     with db_conn.cursor() as cur:
-        cur.execute("DELETE FROM annotations_history WHERE entity_id LIKE 'HIST-TEST%%'")
-        cur.execute("DELETE FROM annotations WHERE patient_id = 'HIST-TEST'")
+        cur.execute("DELETE FROM annotations_history WHERE entity_id = %s", (HIST_KEY,))
+        cur.execute("DELETE FROM annotations WHERE patient_key = %s", (HIST_KEY,))
+        cur.execute("DELETE FROM patient WHERE patient_key = %s", (HIST_KEY,))
     db_conn.commit()
 
 
@@ -34,8 +43,8 @@ class TestTriggerCapture:
         with db_conn.cursor() as cur:
             cur.execute("SET LOCAL app.audit_user = 'alice'")
             cur.execute(
-                "INSERT INTO annotations (level, patient_id, label, value, created_by) "
-                "VALUES ('patient', 'HIST-TEST', 'flag_a', 'v1', 'alice') RETURNING id",
+                "INSERT INTO annotations (level, patient_key, label, value, created_by) "
+                "VALUES ('patient', 'lvo__HIST-TEST', 'flag_a', 'v1', 'alice') RETURNING id",
             )
             ann_id = cur.fetchone()[0]
         db_conn.commit()
@@ -47,15 +56,15 @@ class TestTriggerCapture:
         assert h["operation_by"] == "alice"
         assert h["value_before"] is None
         assert h["value_after"] == "v1"
-        assert h["entity_id"] == "HIST-TEST"
+        assert h["entity_id"] == HIST_KEY
         assert h["label"] == "flag_a"
 
     def test_update_records_before_and_after(self, db_conn):
         with db_conn.cursor() as cur:
             cur.execute("SET LOCAL app.audit_user = 'bob'")
             cur.execute(
-                "INSERT INTO annotations (level, patient_id, label, value, created_by) "
-                "VALUES ('patient', 'HIST-TEST', 'flag_b', 'old', 'bob') RETURNING id",
+                "INSERT INTO annotations (level, patient_key, label, value, created_by) "
+                "VALUES ('patient', 'lvo__HIST-TEST', 'flag_b', 'old', 'bob') RETURNING id",
             )
             ann_id = cur.fetchone()[0]
         db_conn.commit()
@@ -80,8 +89,8 @@ class TestTriggerCapture:
         with db_conn.cursor() as cur:
             cur.execute("SET LOCAL app.audit_user = 'dave'")
             cur.execute(
-                "INSERT INTO annotations (level, patient_id, label, value, created_by) "
-                "VALUES ('patient', 'HIST-TEST', 'flag_c', 'gone', 'dave') RETURNING id",
+                "INSERT INTO annotations (level, patient_key, label, value, created_by) "
+                "VALUES ('patient', 'lvo__HIST-TEST', 'flag_c', 'gone', 'dave') RETURNING id",
             )
             ann_id = cur.fetchone()[0]
         db_conn.commit()
@@ -104,8 +113,8 @@ class TestTriggerCapture:
         with db_conn.cursor() as cur:
             cur.execute("SET LOCAL app.audit_user = 'frank'")
             cur.execute(
-                "INSERT INTO annotations (level, patient_id, label, value, created_by) "
-                "VALUES ('patient', 'HIST-TEST', 'flag_d', 'first', 'frank') RETURNING id",
+                "INSERT INTO annotations (level, patient_key, label, value, created_by) "
+                "VALUES ('patient', 'lvo__HIST-TEST', 'flag_d', 'first', 'frank') RETURNING id",
             )
             ann_id = cur.fetchone()[0]
         db_conn.commit()
@@ -113,9 +122,9 @@ class TestTriggerCapture:
         with db_conn.cursor() as cur:
             cur.execute("SET LOCAL app.audit_user = 'grace'")
             cur.execute(
-                "INSERT INTO annotations (level, patient_id, label, value, created_by) "
-                "VALUES ('patient', 'HIST-TEST', 'flag_d', 'second', 'grace') "
-                "ON CONFLICT (patient_id, label) WHERE level = 'patient' "
+                "INSERT INTO annotations (level, patient_key, label, value, created_by) "
+                "VALUES ('patient', 'lvo__HIST-TEST', 'flag_d', 'second', 'grace') "
+                "ON CONFLICT (patient_key, label) WHERE level = 'patient' "
                 "DO UPDATE SET value = EXCLUDED.value, created_by = EXCLUDED.created_by",
             )
         db_conn.commit()
@@ -133,8 +142,8 @@ class TestTriggerCapture:
         with db_conn.cursor() as cur:
             # Do NOT set app.audit_user — should default to 'system'
             cur.execute(
-                "INSERT INTO annotations (level, patient_id, label, value, created_by) "
-                "VALUES ('patient', 'HIST-TEST', 'flag_e', 'x', 'anon') RETURNING id",
+                "INSERT INTO annotations (level, patient_key, label, value, created_by) "
+                "VALUES ('patient', 'lvo__HIST-TEST', 'flag_e', 'x', 'anon') RETURNING id",
             )
             ann_id = cur.fetchone()[0]
         db_conn.commit()
@@ -153,7 +162,7 @@ class TestHistoryEndpoint:
             "/api/annotations",
             json={
                 "level": "patient",
-                "patient_id": "HIST-TEST",
+                "patient_key": HIST_KEY,
                 "label": "api_hist",
                 "value": "v1",
             },
@@ -200,7 +209,7 @@ class TestHistoryEndpoint:
             "/api/annotations",
             json={
                 "level": "patient",
-                "patient_id": "HIST-TEST",
+                "patient_key": HIST_KEY,
                 "label": "sort_test",
                 "value": "a",
             },
@@ -211,7 +220,7 @@ class TestHistoryEndpoint:
             "/api/annotations",
             json={
                 "level": "patient",
-                "patient_id": "HIST-TEST",
+                "patient_key": HIST_KEY,
                 "label": "sort_test",
                 "value": "b",
             },

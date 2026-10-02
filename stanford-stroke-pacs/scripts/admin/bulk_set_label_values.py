@@ -30,6 +30,18 @@ Dry-run (default; validate and report, no DB writes):
         --options 'good,acceptable,poor' \\
         --instrument 'manual review'
 
+Patient level: rows name an *enrollment* (one patient in one dataset, Alembic
+0026) — either by patient_key, or by patient_id together with --dataset:
+
+    python scripts/admin/bulk_set_label_values.py \\
+        --file /tmp/crisp2_clinical.csv \\
+        --level patient \\
+        --dataset 'CRISP2/LVO' \\
+        --id-column patient_id \\
+        --value-column femoral_sheath_time \\
+        --label femoral_sheath_time \\
+        --datatype text
+
 Apply, auto-confirm label creation:
 
     python scripts/admin/bulk_set_label_values.py \\
@@ -88,7 +100,14 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--id-column", required=True,
         help="Column in the file that holds the entity ID "
-             "(seriesinstanceuid / studyinstanceuid / patient_id).",
+             "(seriesinstanceuid / studyinstanceuid; at patient level a "
+             "patient_key, or a patient_id with --dataset).",
+    )
+    parser.add_argument(
+        "--dataset", default=None,
+        help="Patient level only: the dataset (name) the file's patient ids "
+             "belong to. Without it, patient-level ids must be patient_keys — a "
+             "bare patient_id can name different people in different datasets.",
     )
     parser.add_argument(
         "--value-column", required=True,
@@ -325,15 +344,16 @@ def _upsert_annotation(
             )
             if datatype == "select":
                 record_label_value(cur, label, value, _audit_user())
-    else:  # patient
+    else:  # patient: entity_id is the enrollment's patient_key
         with conn.cursor() as cur:
             cur.execute(
                 "INSERT INTO annotations "
-                "(level, patient_id, label, value, created_by) "
-                "VALUES ('patient', %s, %s, %s, %s) "
-                "ON CONFLICT (patient_id, label) WHERE level = 'patient' DO UPDATE "
+                "(level, patient_key, patient_id, label, value, created_by) "
+                "SELECT 'patient', p.patient_key, p.patient_id, %s, %s, %s "
+                "FROM patient p WHERE p.patient_key = %s "
+                "ON CONFLICT (patient_key, label) WHERE level = 'patient' DO UPDATE "
                 "SET value = EXCLUDED.value, created_by = EXCLUDED.created_by, created_at = now()",
-                (entity_id, label, value, _audit_user()),
+                (label, value, _audit_user(), entity_id),
             )
             if datatype == "select":
                 record_label_value(cur, label, value, _audit_user())
@@ -352,10 +372,38 @@ def _existing_entity_ids(conn, level: str, candidate_ids: list[str]) -> set[str]
         return {row[0] for row in cur.fetchall()}
 
 
+def _patient_keys_for_dataset(conn, dataset: str, patient_ids: list[str]) -> dict[str, str]:
+    """patient_id -> patient_key of the enrollments in ``dataset``."""
+    with conn.cursor() as cur:
+        cur.execute("SELECT 1 FROM dataset WHERE name = %s", (dataset,))
+        if cur.fetchone() is None:
+            sys.exit(f"Error: dataset {dataset!r} is not registered "
+                     "(scripts/admin/manage_datasets.py list).")
+        cur.execute(
+            "SELECT patient_id, patient_key FROM patient "
+            "WHERE dataset = %s AND patient_id = ANY(%s)",
+            (dataset, patient_ids),
+        )
+        return dict(cur.fetchall())
+
+
+def _conflicting_duplicates(df, id_column: str, value_column: str) -> dict[str, list]:
+    """Ids the file gives more than one distinct value (the last would silently win)."""
+    seen: dict[str, set] = {}
+    for _, row in df.iterrows():
+        if _is_blank(row[id_column]):
+            continue
+        value = None if _is_blank(row[value_column]) else str(row[value_column]).strip()
+        seen.setdefault(str(row[id_column]).strip(), set()).add(value)
+    return {i: sorted(v, key=str) for i, v in seen.items() if len(v) > 1}
+
+
 def main() -> None:
     args = _parse_args()
     dry_run = not args.execute
     audit_user = _audit_user()
+    if args.dataset and args.level != "patient":
+        sys.exit("Error: --dataset applies to --level patient only.")
 
     df = _load_table(args.file, args.sheet)
     for col in (args.id_column, args.value_column):
@@ -364,6 +412,13 @@ def main() -> None:
                 f"Error: column {col!r} not in file. Available columns: "
                 f"{list(df.columns)}"
             )
+
+    conflicts = _conflicting_duplicates(df, args.id_column, args.value_column)
+    if conflicts:
+        for cid, values in list(conflicts.items())[:10]:
+            print(f"  {cid}: {values}")
+        sys.exit(f"Error: {len(conflicts)} id(s) appear more than once with different "
+                 "values; resolve them in the file first.")
 
     conn = psycopg2.connect(**DB_CONFIG)
     conn.autocommit = False
@@ -415,8 +470,18 @@ def main() -> None:
         # --- Validate entities exist -------------------------------------
         raw_ids = [str(v).strip() for v in df[args.id_column].tolist()]
         unique_ids = sorted({i for i in raw_ids if i})
-        existing = _existing_entity_ids(conn, args.level, unique_ids)
+        # Patient level with --dataset: the file names patient ids within that
+        # dataset; resolve them to enrollment keys up front.
+        key_of = (
+            _patient_keys_for_dataset(conn, args.dataset, unique_ids)
+            if args.dataset else {i: i for i in unique_ids}
+        )
+        existing_keys = _existing_entity_ids(conn, args.level, sorted(set(key_of.values())))
+        existing = {i for i, k in key_of.items() if k in existing_keys}
         missing = [i for i in unique_ids if i not in existing]
+        if args.level == "patient" and not args.dataset and missing == unique_ids:
+            print("Hint: no id matched a patient_key. If the file holds patient ids, "
+                  "pass --dataset <name> to say which dataset they belong to.")
         if missing:
             print(f"Warning: {len(missing)} {args.level} ID(s) from the file "
                   f"are not in {LEVEL_CONFIGS[args.level].source_table}; "
@@ -448,13 +513,14 @@ def main() -> None:
             if value is None:
                 skipped_blank += 1
                 continue
+            entity_key = key_of[entity_id]
             if dry_run:
                 applied += 1
-                touched_ids.append(entity_id)
+                touched_ids.append(entity_key)
                 continue
-            _upsert_annotation(conn, args.level, entity_id, args.label, value, datatype)
+            _upsert_annotation(conn, args.level, entity_key, args.label, value, datatype)
             applied += 1
-            touched_ids.append(entity_id)
+            touched_ids.append(entity_key)
 
         # --- Sync labelled mirror table ----------------------------------
         if applied and not dry_run:

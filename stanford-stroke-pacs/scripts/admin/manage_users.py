@@ -92,32 +92,30 @@ def _is_admin(username: str) -> bool:
 
 # -- Dataset grant helpers -----------------------------------------------------
 
-def _distinct_patient_datasets() -> list[str]:
-    """Distinct cohort tags currently present in `patient.dataset`."""
+def _registered_datasets() -> list[str]:
+    """Registered dataset names (the `dataset` registry)."""
     conn = get_conn()
     try:
         with conn.cursor() as cur:
-            cur.execute(
-                "SELECT DISTINCT unnest(dataset) AS ds FROM patient "
-                "WHERE dataset <> '{}' ORDER BY 1"
-            )
+            cur.execute("SELECT name FROM dataset ORDER BY 1")
             return [r[0] for r in cur.fetchall()]
     finally:
         conn.close()
 
 
 def _parse_datasets_csv(raw: str) -> list[str]:
-    """Parse 'PRECISE,CRISP2/LVO' into a sorted, deduped list; warn on unknown tags.
+    """Parse 'PRECISE,CRISP2/LVO' into a sorted, deduped list; warn on unknown names.
 
-    Unknown tags are allowed (grants may precede ingest of a new cohort) but
-    flagged so typos don't silently grant nothing.
+    Unregistered names are allowed but flagged so typos don't silently grant
+    nothing; register a new dataset with manage_datasets.py add (it can then
+    be granted before anything is ingested into it).
     """
     datasets = sorted({d.strip() for d in raw.split(",") if d.strip()})
-    known = set(_distinct_patient_datasets())
+    known = set(_registered_datasets())
     unknown = [d for d in datasets if d not in known]
     if unknown:
         print(
-            f"Warning: dataset(s) not present in patient.dataset yet: "
+            f"Warning: dataset(s) not registered (scripts/admin/manage_datasets.py add): "
             f"{', '.join(unknown)} (known: {', '.join(sorted(known)) or 'none'})",
             file=sys.stderr,
         )
@@ -302,7 +300,7 @@ def cmd_set_datasets(args: argparse.Namespace) -> None:
     _refuse_service_account(args.username)
 
     if args.all:
-        datasets = _distinct_patient_datasets()
+        datasets = _registered_datasets()
         if not datasets:
             print("No datasets found in patient.dataset; nothing to grant.",
                   file=sys.stderr)

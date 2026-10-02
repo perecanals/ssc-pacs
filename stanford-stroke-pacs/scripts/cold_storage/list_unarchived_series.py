@@ -29,12 +29,15 @@ REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 load_dotenv(REPO_ROOT / ".env")
 
 sys.path.insert(0, str(REPO_ROOT / "web-app"))
+from common import subject_for_patient_arg  # noqa: E402
 from db import DB_CONFIG  # noqa: E402
 
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--patient", help="Limit to a single patient_id")
+    ap.add_argument("--patient",
+                    help="Limit to one patient: a patient_key, or a patient_id that "
+                         "names one person")
     ap.add_argument("--import-label", dest="import_label", help="Limit to a single import_label")
     ap.add_argument("--count", action="store_true", help="Print only the total count")
     args = ap.parse_args()
@@ -50,8 +53,8 @@ def main() -> int:
     ]
     params: list[Any] = []
     if args.patient:
-        where.append("patient_id = %s")
-        params.append(args.patient)
+        where.append("subject_id = %s")
+        params.append(subject_for_patient_arg(args.patient))
     if args.import_label:
         where.append("import_label = %s")
         params.append(args.import_label)

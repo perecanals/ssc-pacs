@@ -219,7 +219,7 @@ class TestLabelDefinitions:
             "/api/annotations",
             json={
                 "level": "patient",
-                "patient_id": "P-0001",
+                "patient_key": "lvo__P-0001",
                 "label": "inline_vocab",
                 "value": "freshly_created",
             },
@@ -268,7 +268,7 @@ class TestLabelDefinitions:
             "/api/annotations",
             json={
                 "level": "patient",
-                "patient_id": "P-0001",
+                "patient_key": "lvo__P-0001",
                 "label": "free_text",
                 "value": "some prose",
             },
@@ -314,7 +314,7 @@ class TestLabelDefinitions:
             "/api/annotations",
             json={
                 "level": "patient",
-                "patient_id": "P-0001",
+                "patient_key": "lvo__P-0001",
                 "label": "opts_inline",
                 "value": "typed",
             },
@@ -349,7 +349,7 @@ class TestLabelDefinitions:
             "/api/annotations",
             json={
                 "level": "patient",
-                "patient_id": "P-0001",
+                "patient_key": "lvo__P-0001",
                 "label": "opts_inuse",
                 "value": "drop",
             },
@@ -457,7 +457,7 @@ class TestLabelDefinitions:
             "/api/annotations",
             json={
                 "level": "patient",
-                "patient_id": "P-0001",
+                "patient_key": "lvo__P-0001",
                 "label": "usage_lbl",
                 "value": "u1",
             },

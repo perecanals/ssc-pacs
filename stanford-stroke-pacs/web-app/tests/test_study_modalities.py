@@ -14,7 +14,7 @@ from sqlalchemy import URL, create_engine
 
 from labelled_table_sync import sync_labelled_rows
 from study_metadata import lock_study_rows, refresh_study_modalities
-from tests.conftest import USER_CRISP, USER_NONE, login_as
+from tests.conftest import USER_CRISP, USER_NONE, insert_patient, login_as
 
 PATIENT_ID = "P-MODALITY-025"
 
@@ -23,7 +23,7 @@ PATIENT_ID = "P-MODALITY-025"
 def modality_studies(db_conn):
     uids = ["9.25.1", "9.25.2", "9.25.3"]
     with db_conn.cursor() as cur:
-        cur.execute("INSERT INTO patient (patient_id, dataset) VALUES (%s, '{crisp2}')", (PATIENT_ID,))
+        insert_patient(cur, PATIENT_ID, "crisp2")
         cur.executemany(
             "INSERT INTO image_study (patient_id, studyinstanceuid) VALUES (%s, %s)",
             [(PATIENT_ID, uid) for uid in uids],
@@ -48,7 +48,7 @@ def modality_studies(db_conn):
     db_conn.commit()
 
 
-@pytest.mark.parametrize("endpoint", ["/api/studies", f"/api/patients/{PATIENT_ID}/studies"])
+@pytest.mark.parametrize("endpoint", ["/api/studies", f"/api/patients/crisp2__{PATIENT_ID}/studies"])
 def test_modality_display_and_normalization(logged_in_client, modality_studies, endpoint):
     response = logged_in_client.get(endpoint)
     assert response.status_code == 200

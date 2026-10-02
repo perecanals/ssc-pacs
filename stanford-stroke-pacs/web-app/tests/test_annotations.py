@@ -23,7 +23,7 @@ class TestPatientAnnotations:
             "/api/annotations",
             json={
                 "level": "patient",
-                "patient_id": "P-0001",
+                "patient_key": "lvo__P-0001",
                 "label": "test_flag",
                 "value": "yes",
             },
@@ -38,19 +38,22 @@ class TestPatientAnnotations:
         # Create an annotation first.
         logged_in_client.post(
             "/api/annotations",
-            json={"level": "patient", "patient_id": "P-0001", "label": "read_test", "value": "v1"},
+            json={"level": "patient", "patient_key": "lvo__P-0001", "label": "read_test", "value": "v1"},
         )
         resp = logged_in_client.get("/api/patients", params={"patient_id": "P-0001"})
         assert resp.status_code == 200
-        items = resp.json()["items"]
-        assert len(items) >= 1
-        ann_labels = [a["label"] for a in items[0].get("annotations", [])]
+        rows = {r["patient_key"]: r for r in resp.json()["items"]}
+        ann_labels = [a["label"] for a in rows["lvo__P-0001"].get("annotations", [])]
         assert "read_test" in ann_labels
+        # Patient labels are per enrollment: the linked crisp2 one has its own.
+        assert "read_test" not in [
+            a["label"] for a in rows["crisp2__P-0001"].get("annotations", [])
+        ]
 
     def test_delete_annotation(self, logged_in_client):
         create = logged_in_client.post(
             "/api/annotations",
-            json={"level": "patient", "patient_id": "P-0001", "label": "del_me", "value": "x"},
+            json={"level": "patient", "patient_key": "lvo__P-0001", "label": "del_me", "value": "x"},
         )
         ann_id = create.json()["id"]
         resp = logged_in_client.delete(f"/api/annotations/{ann_id}")
@@ -59,11 +62,11 @@ class TestPatientAnnotations:
     def test_upsert_overwrites_value(self, logged_in_client):
         logged_in_client.post(
             "/api/annotations",
-            json={"level": "patient", "patient_id": "P-0001", "label": "upsert_test", "value": "v1"},
+            json={"level": "patient", "patient_key": "lvo__P-0001", "label": "upsert_test", "value": "v1"},
         )
         resp = logged_in_client.post(
             "/api/annotations",
-            json={"level": "patient", "patient_id": "P-0001", "label": "upsert_test", "value": "v2"},
+            json={"level": "patient", "patient_key": "lvo__P-0001", "label": "upsert_test", "value": "v2"},
         )
         assert resp.status_code == 201
         assert resp.json()["value"] == "v2"
@@ -116,7 +119,7 @@ class TestSeriesAnnotations:
         # Create a patient-level annotation.
         logged_in_client.post(
             "/api/annotations",
-            json={"level": "patient", "patient_id": "P-0001", "label": "inherit_test", "value": "parent"},
+            json={"level": "patient", "patient_key": "lvo__P-0001", "label": "inherit_test", "value": "parent"},
         )
         resp = logged_in_client.get("/api/series", params={"patient_id": "P-0001"})
         assert resp.status_code == 200

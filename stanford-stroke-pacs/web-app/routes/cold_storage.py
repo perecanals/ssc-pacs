@@ -24,7 +24,12 @@ from cache_manager import (
     warm_series,
     warm_study,
 )
-from common import check_patient_access, check_series_access, check_study_access
+from common import (
+    check_patient_access,
+    check_series_access,
+    check_study_access,
+    subject_scope_sql,
+)
 from config import STORAGE_MODE
 from db import get_conn
 from metrics import cold_storage_evict_total, cold_storage_warm_total
@@ -32,35 +37,35 @@ from metrics import cold_storage_evict_total, cold_storage_warm_total
 router = APIRouter()
 
 
-def _filter_in_scope(uids: list[str], patient_ids: list[str], scope: list[str]):
+def _filter_in_scope(uids: list[str], patient_keys: list[str], scope: list[str]):
     """Narrow batch ids to those within scope (silently drops the rest)."""
-    if not uids and not patient_ids:
-        return uids, patient_ids
+    if not uids and not patient_keys:
+        return uids, patient_keys
     conn = get_conn()
     try:
         with conn.cursor() as cur:
             if uids:
                 cur.execute(
                     "SELECT st.studyinstanceuid FROM image_study st "
-                    "JOIN patient p ON p.patient_id = st.patient_id "
-                    "WHERE st.studyinstanceuid = ANY(%s) AND p.dataset && %s::text[]",
+                    "WHERE st.studyinstanceuid = ANY(%s) AND "
+                    + subject_scope_sql("st.subject_id"),
                     (uids, scope),
                 )
                 uids = [r[0] for r in cur.fetchall()]
-            if patient_ids:
+            if patient_keys:
                 cur.execute(
-                    "SELECT patient_id FROM patient "
-                    "WHERE patient_id = ANY(%s) AND dataset && %s::text[]",
-                    (patient_ids, scope),
+                    "SELECT patient_key FROM patient "
+                    "WHERE patient_key = ANY(%s) AND dataset = ANY(%s::text[])",
+                    (patient_keys, scope),
                 )
-                patient_ids = [r[0] for r in cur.fetchall()]
+                patient_keys = [r[0] for r in cur.fetchall()]
     finally:
         conn.close()
-    return uids, patient_ids
+    return uids, patient_keys
 
 
 def _filter_series_in_scope(series_uids: list[str], scope: list[str]) -> list[str]:
-    """Narrow batch series ids to those whose patient is within scope."""
+    """Narrow batch series ids to those whose subject is within scope."""
     if not series_uids:
         return series_uids
     conn = get_conn()
@@ -68,8 +73,8 @@ def _filter_series_in_scope(series_uids: list[str], scope: list[str]) -> list[st
         with conn.cursor() as cur:
             cur.execute(
                 "SELECT s.seriesinstanceuid FROM image_series s "
-                "JOIN patient p ON p.patient_id = s.patient_id "
-                "WHERE s.seriesinstanceuid = ANY(%s) AND p.dataset && %s::text[]",
+                "WHERE s.seriesinstanceuid = ANY(%s) AND "
+                + subject_scope_sql("s.subject_id"),
                 (series_uids, scope),
             )
             return [r[0] for r in cur.fetchall()]
@@ -240,18 +245,18 @@ def api_series_cache_status(
     return get_series_cache_status(seriesinstanceuid)
 
 
-@router.post("/api/patients/{patient_id}/warm", status_code=202)
+@router.post("/api/patients/{patient_key}/warm", status_code=202)
 async def api_warm_patient(
-    patient_id: str,
+    patient_key: str,
     request: Request,
     scope: list[str] | None = Depends(get_dataset_scope),
 ):
-    """Queue every study of a patient for warming, one executor task per study.
-    Disk prechecks run inside each worker, so one study failing for space does
-    not block the rest."""
-    check_patient_access(patient_id, scope)
+    """Queue every study of a patient (its subject's imaging) for warming, one
+    executor task per study. Disk prechecks run inside each worker, so one study
+    failing for space does not block the rest."""
+    check_patient_access(patient_key, scope)
 
-    uids = list_patient_study_uids(patient_id)
+    uids = list_patient_study_uids(patient_key)
     # Persist 'queued' markers up front so the whole patient shows Queued
     # immediately and durably, even before the workers start draining them.
     mark_queued(uids)
@@ -262,42 +267,42 @@ async def api_warm_patient(
             _run_warm_with_metrics,
             uid,
         )
-    return {"ok": True, "queued": len(uids), "patient_id": patient_id}
+    return {"ok": True, "queued": len(uids), "patient_key": patient_key}
 
 
-@router.get("/api/patients/{patient_id}/cache-status")
+@router.get("/api/patients/{patient_key}/cache-status")
 def api_patient_cache_status(
-    patient_id: str,
+    patient_key: str,
     scope: list[str] | None = Depends(get_dataset_scope),
 ):
-    check_patient_access(patient_id, scope)
-    return get_patient_cache_status(patient_id)
+    check_patient_access(patient_key, scope)
+    return get_patient_cache_status(patient_key)
 
 
 @router.post("/api/cache-status/batch")
 def api_batch_cache_status(
     uids: list[str] = Body(default=[]),
-    patient_ids: list[str] = Body(default=[]),
+    patient_keys: list[str] = Body(default=[]),
     series_uids: list[str] = Body(default=[]),
     scope: list[str] | None = Depends(get_dataset_scope),
 ):
     """Cache status for many study UIDs, patients, and/or series in one round-trip.
 
     Lets the table poll every visible row at once instead of one request per
-    row. Returns ``{"studies": {uid: status}, "patients": {id: counts},
+    row. Returns ``{"studies": {uid: status}, "patients": {patient_key: counts},
     "series": {uid: status}}``. Bounded to keep the ``ANY(%s)`` queries and
     response small.
 
     Out-of-scope ids are silently dropped (not rejected): the table polls
     whatever rows are visible, and a wholesale 404 would break the poll loop.
     """
-    if len(uids) > 500 or len(patient_ids) > 500 or len(series_uids) > 500:
+    if len(uids) > 500 or len(patient_keys) > 500 or len(series_uids) > 500:
         raise HTTPException(status_code=413, detail="too_many_ids")
     if scope is not None:
-        uids, patient_ids = _filter_in_scope(uids, patient_ids, scope)
+        uids, patient_keys = _filter_in_scope(uids, patient_keys, scope)
         series_uids = _filter_series_in_scope(series_uids, scope)
     return {
         "studies": get_batch_cache_status(uids),
-        "patients": get_patients_cache_status(patient_ids),
+        "patients": get_patients_cache_status(patient_keys),
         "series": get_batch_series_status(series_uids),
     }

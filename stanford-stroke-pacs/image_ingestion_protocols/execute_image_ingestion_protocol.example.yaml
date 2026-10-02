@@ -34,11 +34,14 @@ delete_originals_after_verification: false
 # Tag all rows in this run with a label (recorded on image_study/image_series).
 import_label: my_batch_1
 
-# Dataset/cohort tag for this batch (e.g. PRECISE, CRISP2/LVO). Recorded on the
-# `patient` table only (union-accumulated across batches); not stored on
-# image_study/image_series. This is also the tag that per-user dataset
-# permissions filter on (users.allowed_datasets) — patients ingested without
-# a dataset tag are invisible to all non-admin users.
+# Dataset this batch is ingested into (required; e.g. PRECISE, CRISP2/LVO). Must
+# be registered first: scripts/admin/manage_datasets.py add --slug <slug> --name <name>.
+# Each PatientID becomes an enrollment in this dataset (patient_key
+# <slug>__<PatientID>), so the same id in two datasets stays two patients. It is
+# also what per-user dataset permissions filter on (users.allowed_datasets).
+# To declare that a patient here is the same person as one already ingested in
+# another dataset, link them (scripts/admin/link_patients.py) — before
+# ingesting, if the two share imaging.
 dataset: my_cohort
 
 # Resume a previously interrupted run: skip cases that a prior log with a

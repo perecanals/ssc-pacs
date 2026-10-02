@@ -97,6 +97,7 @@ def update_reconciliation_metrics(summary: dict, duration: float) -> None:
         "in_orthanc_not_in_db",
         "dicom_archive_missing",
         "orphaned_annotations",
+        "ownership_mismatches",
     ):
         reconciliation_mismatches_total.labels(category=category).set(
             summary.get(category, 0)

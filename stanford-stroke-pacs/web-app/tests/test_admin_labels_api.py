@@ -12,6 +12,7 @@ import pytest
 from tests.conftest import TEST_USER, USER_LVO, login_as
 
 PATIENT = "P-0001"
+PATIENT_KEY = "lvo__P-0001"
 
 
 @pytest.fixture()
@@ -99,7 +100,7 @@ class TestSetLabelPermissions:
         login_as(client, USER_LVO)
         assert client.post(
             "/api/annotations",
-            json={"level": "patient", "patient_id": PATIENT, "label": name, "value": "a"},
+            json={"level": "patient", "patient_key": PATIENT_KEY, "label": name, "value": "a"},
         ).status_code == 201
 
         login_as(logged_in_client, TEST_USER)
@@ -108,7 +109,7 @@ class TestSetLabelPermissions:
         login_as(client, USER_LVO)
         assert client.post(
             "/api/annotations",
-            json={"level": "patient", "patient_id": PATIENT, "label": name, "value": "b"},
+            json={"level": "patient", "patient_key": PATIENT_KEY, "label": name, "value": "b"},
         ).status_code == 403
 
         login_as(logged_in_client, TEST_USER)
@@ -117,7 +118,7 @@ class TestSetLabelPermissions:
         login_as(client, USER_LVO)
         assert client.post(
             "/api/annotations",
-            json={"level": "patient", "patient_id": PATIENT, "label": name, "value": "c"},
+            json={"level": "patient", "patient_key": PATIENT_KEY, "label": name, "value": "c"},
         ).status_code == 201
 
 
@@ -157,7 +158,7 @@ class TestDeleteLabelDefinition:
             "/api/annotations",
             json={
                 "level": "patient",
-                "patient_id": PATIENT,
+                "patient_key": PATIENT_KEY,
                 "label": label["name"],
                 "value": "x",
             },
@@ -188,7 +189,7 @@ class TestDeleteLabelDefinition:
             "/api/annotations",
             json={
                 "level": "patient",
-                "patient_id": PATIENT,
+                "patient_key": PATIENT_KEY,
                 "label": "doomed_label",
                 "value": "a",
             },
@@ -282,7 +283,7 @@ class TestDeleteInstrument:
             "/api/annotations",
             json={
                 "level": "patient",
-                "patient_id": PATIENT,
+                "patient_key": PATIENT_KEY,
                 "label": "instr_del_a",
                 "value": "x",
             },
@@ -304,7 +305,7 @@ class TestDeleteInstrument:
             "/api/annotations",
             json={
                 "level": "patient",
-                "patient_id": PATIENT,
+                "patient_key": PATIENT_KEY,
                 "label": "instr_del_a",
                 "value": "x",
             },

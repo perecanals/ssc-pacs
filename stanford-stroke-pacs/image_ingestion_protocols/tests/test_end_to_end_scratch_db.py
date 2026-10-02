@@ -69,6 +69,15 @@ def _alembic_upgrade(database_url):
             os.environ["DATABASE_URL"] = prev
 
 
+@pytest.fixture(autouse=True)
+def _unrestricted_clinical_data(monkeypatch):
+    """The host config.toml may tie clinical_data to one dataset
+    ([web-app] clinical_data_dataset); these runs use their own datasets."""
+    import image_ingestion_protocol
+
+    monkeypatch.setattr(image_ingestion_protocol, "CLINICAL_DATA_DATASET", None)
+
+
 @pytest.fixture(scope="module")
 def scratch_engine():
     import psycopg2
@@ -92,6 +101,10 @@ def scratch_engine():
 
     engine = create_engine(scratch_url)
     with engine.begin() as conn:
+        # Ingestion requires a registered dataset (Alembic 0026).
+        conn.execute(text(
+            "INSERT INTO dataset (slug, name) VALUES ('audit', 'audit'), "
+            "('other', 'OTHER/DS')"))
         # 11-001 clinically matched; 11-002 deliberately unmatched. The protocol
         # reads only study_id + stroke_date from the (wide) clinical_data.
         conn.execute(text(
@@ -149,12 +162,13 @@ def roots(tmp_path_factory):
     return scratch
 
 
-def _run_case(scratch, engine, patient_id, import_id=1, overwrite=False):
+def _run_case(scratch, engine, patient_id, import_id=1, overwrite=False,
+              dataset="audit", case_dir=None):
     from image_ingestion_protocol import ImageIngestionProtocol
 
     proto = ImageIngestionProtocol(
-        str(scratch / "src" / patient_id), engine,
-        import_id=import_id, import_label="audit_batch", dataset="audit",
+        str(case_dir or scratch / "src" / patient_id), engine,
+        import_id=import_id, import_label="audit_batch", dataset=dataset,
         cold_archive_root=str(scratch / "cold_root"), compress_workers=2,
     )
     proto.base_dir = str(scratch / "dicom_root")
@@ -190,8 +204,10 @@ def test_end_to_end_two_patients(roots, scratch_engine, capsys):
             "SELECT studyinstanceuid, compressed_size_mb, decompressed_size_mb "
             "FROM image_study ORDER BY studyinstanceuid")).mappings().all()
         patients = conn.execute(text(
-            "SELECT patient_id, stroke_date, dataset, "
+            "SELECT patient_id, patient_key, subject_id, stroke_date, dataset, "
             "import_label FROM patient ORDER BY patient_id")).mappings().all()
+        owners = conn.execute(text(
+            "SELECT DISTINCT patient_key, subject_id FROM image_series")).all()
 
     assert len(series) == 4
     for row in series:
@@ -217,8 +233,12 @@ def test_end_to_end_two_patients(roots, scratch_engine, capsys):
     for p in patients:
         # stroke_date = MIN(image_study.acquisitiondatetime), imaging-derived.
         assert p["stroke_date"].strftime("%Y%m%d") == ACQ_DATE[p["patient_id"]]
-        assert p["dataset"] == ["audit"]
+        # One enrollment in the batch's dataset; its own subject.
+        assert p["dataset"] == "audit"
+        assert p["patient_key"] == p["subject_id"] == f"audit__{p['patient_id']}"
         assert p["import_label"] == "audit_batch"
+    assert sorted(owners) == [("audit__11-001", "audit__11-001"),
+                              ("audit__11-002", "audit__11-002")]
 
     # Source tree untouched.
     assert _manifest(roots / "src") == src_manifest
@@ -285,8 +305,8 @@ def test_batch_sync_mirrors_patients(roots, scratch_engine):
     )
     with scratch_engine.begin() as conn:
         mirrored = conn.execute(text(
-            "SELECT patient_id FROM patient_labelled ORDER BY patient_id")).scalars().all()
-    assert mirrored == ["11-001", "11-002"]
+            "SELECT patient_key FROM patient_labelled ORDER BY patient_key")).scalars().all()
+    assert mirrored == ["audit__11-001", "audit__11-002"]
 
 
 def test_ingests_without_clinical_table(roots, scratch_engine):
@@ -385,7 +405,8 @@ def test_modality_reparent_and_ingestion_rollback(roots, scratch_engine, monkeyp
             "VALUES ('11-025', :study, :series, 'CT')"
         ), {"study": old, "series": series})
     proto = ImageIngestionProtocol(str(roots / "src" / "11-025"), scratch_engine,
-                                   import_id=29, import_label="rollup_test")
+                                   import_id=29, import_label="rollup_test",
+                                   dataset="audit")
     proto.case_study_table = pd.DataFrame([
         {"patient_id": "11-025", "studyinstanceuid": new, "acquisitiondatetime": None}
     ])
@@ -417,6 +438,85 @@ def test_modality_reparent_and_ingestion_rollback(roots, scratch_engine, monkeyp
             "SELECT modalities FROM image_study WHERE studyinstanceuid = ANY(:uids) "
             "ORDER BY studyinstanceuid"
         ), {"uids": [old, new]}).scalars().all() == [None, ["SR"]]
+
+
+def _write_study(case_dir, patient_id, study_uid, series_uid):
+    from test_image_ingestion_grouping import _write_dcm
+
+    _write_dcm(case_dir / "s" / "i1.dcm", series_uid, 1, 1, study_uid=study_uid,
+               series_desc="AX", patient_id=patient_id)
+    return case_dir
+
+
+def test_same_id_in_another_dataset_is_another_patient(roots, scratch_engine):
+    """The 11-*/12-* collision: a different person with the same PatientID in
+    another dataset must become a separate enrollment AND subject, never be
+    merged into the existing patient."""
+    from sqlalchemy import text
+
+    case = _write_study(roots / "src_other" / "11-001", "11-001", "5.1.1", "5.1.1.1")
+    _run_case(roots, scratch_engine, "11-001", dataset="OTHER/DS", case_dir=case)
+    with scratch_engine.connect() as conn:
+        rows = conn.execute(text(
+            "SELECT patient_key, subject_id, dataset FROM patient "
+            "WHERE patient_id = '11-001' ORDER BY patient_key")).all()
+        owner = conn.execute(text(
+            "SELECT patient_key, subject_id FROM image_study "
+            "WHERE studyinstanceuid = '5.1.1'")).one()
+    assert rows == [("audit__11-001", "audit__11-001", "audit"),
+                    ("other__11-001", "other__11-001", "OTHER/DS")]
+    assert tuple(owner) == ("other__11-001", "other__11-001")
+
+
+def test_uid_owned_by_another_person_is_refused_before_any_delete(roots, scratch_engine):
+    """A study UID already owned by an unlinked patient: the case is refused
+    up front — even with overwrite, nothing of the owner's is deleted."""
+    from sqlalchemy import text
+
+    owned = STUDY_UIDS["11-002"]
+    archives_before = sorted((roots / "cold_root").rglob("*.tar.zst"))
+    case = _write_study(roots / "src_clash" / "X-9", "X-9", owned, SERIES_UIDS["11-002"]["A"])
+    with pytest.raises(RuntimeError, match="already belong to a different patient"):
+        _run_case(roots, scratch_engine, "X-9", dataset="OTHER/DS", case_dir=case,
+                  overwrite=True)
+    assert sorted((roots / "cold_root").rglob("*.tar.zst")) == archives_before
+    with scratch_engine.connect() as conn:
+        assert conn.execute(text(
+            "SELECT patient_key FROM image_study WHERE studyinstanceuid = :u"),
+            {"u": owned}).scalar() == "audit__11-002"
+        assert conn.execute(text(
+            "SELECT count(*) FROM patient WHERE patient_id = 'X-9'")).scalar() == 0
+
+
+def test_linked_enrollment_resending_shared_study_keeps_owner(roots, scratch_engine):
+    """Once linked (same subject), a second dataset may carry the same imaging
+    under its own id: the study keeps its owner and the owner's tree."""
+    from sqlalchemy import text
+
+    with scratch_engine.begin() as conn:
+        conn.execute(text(
+            "INSERT INTO patient (patient_key, subject_id, patient_id, dataset) "
+            "VALUES ('other__OL-7', 'audit__11-002', 'OL-7', 'OTHER/DS')"))
+    owned, series = STUDY_UIDS["11-002"], SERIES_UIDS["11-002"]["B"]
+    case = _write_study(roots / "src_linked" / "OL-7", "OL-7", owned, series)
+    _run_case(roots, scratch_engine, "OL-7", dataset="OTHER/DS", case_dir=case,
+              overwrite=True)
+    with scratch_engine.connect() as conn:
+        study = conn.execute(text(
+            "SELECT patient_id, patient_key, subject_id, study_path FROM image_study "
+            "WHERE studyinstanceuid = :u"), {"u": owned}).one()
+        series_owner = conn.execute(text(
+            "SELECT patient_key FROM image_series WHERE seriesinstanceuid = :u"),
+            {"u": series}).scalar()
+    assert tuple(study)[:3] == ("11-002", "audit__11-002", "audit__11-002")
+    assert f"/11-002/{owned}" in study.study_path
+    assert series_owner == "audit__11-002"
+
+
+def test_unregistered_or_missing_dataset_is_refused(roots, scratch_engine):
+    for dataset in (None, "NOT-REGISTERED"):
+        with pytest.raises(RuntimeError, match="dataset|Dataset"):
+            _run_case(roots, scratch_engine, "11-001", dataset=dataset)
 
 
 if __name__ == "__main__":

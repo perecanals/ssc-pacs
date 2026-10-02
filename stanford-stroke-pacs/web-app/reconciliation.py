@@ -134,12 +134,12 @@ def _get_orphaned_annotations(conn) -> list[dict[str, Any]]:
     """
     with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
         cur.execute(
-            "SELECT 'patient' AS level, a.patient_id AS entity_id, "
+            "SELECT 'patient' AS level, COALESCE(a.patient_key, a.patient_id) AS entity_id, "
             "       a.label, a.created_by "
             "FROM annotations a "
-            "WHERE a.level = 'patient' AND a.patient_id IS NOT NULL "
+            "WHERE a.level = 'patient' "
             "  AND NOT EXISTS (SELECT 1 FROM patient p "
-            "                  WHERE p.patient_id = a.patient_id) "
+            "                  WHERE p.patient_key = a.patient_key) "
             "UNION ALL "
             "SELECT 'study', a.studyinstanceuid, a.label, a.created_by "
             "FROM annotations a "
@@ -153,6 +153,33 @@ def _get_orphaned_annotations(conn) -> list[dict[str, Any]]:
             "  AND NOT EXISTS (SELECT 1 FROM image_series se "
             "                  WHERE se.seriesinstanceuid = a.seriesinstanceuid) "
             "ORDER BY 1, 2, 3"
+        )
+        return [dict(r) for r in cur.fetchall()]
+
+
+def _get_ownership_mismatches(conn) -> list[dict[str, Any]]:
+    """Imaging whose ownership violates the identity model (Alembic 0026).
+
+    A study is owned by an existing enrollment and carries that enrollment's
+    subject; a series is owned by its study's owner. Ingestion and
+    scripts/admin/link_patients.py maintain this; anything else is drift.
+    """
+    with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+        cur.execute(
+            "SELECT 'study' AS level, st.studyinstanceuid AS entity_id, "
+            "       CASE WHEN p.patient_key IS NULL THEN 'owner_missing' "
+            "            ELSE 'subject_mismatch' END AS problem "
+            "FROM image_study st "
+            "LEFT JOIN patient p ON p.patient_key = st.patient_key "
+            "WHERE p.patient_key IS NULL "
+            "   OR st.subject_id IS DISTINCT FROM p.subject_id "
+            "UNION ALL "
+            "SELECT 'series', s.seriesinstanceuid, 'differs_from_study' "
+            "FROM image_series s "
+            "JOIN image_study st ON st.studyinstanceuid = s.studyinstanceuid "
+            "WHERE s.patient_key IS DISTINCT FROM st.patient_key "
+            "   OR s.subject_id IS DISTINCT FROM st.subject_id "
+            "ORDER BY 1, 2"
         )
         return [dict(r) for r in cur.fetchall()]
 
@@ -206,6 +233,7 @@ def diff_image_series_vs_orthanc(
     db_by_uid = {r["seriesinstanceuid"]: r for r in db_rows}
     db_uids = set(db_by_uid.keys())
     orphaned_annotations = _get_orphaned_annotations(conn)
+    ownership_mismatches = _get_ownership_mismatches(conn)
 
     # These SELECTs are the only DB work in this function — the Orthanc calls below
     # are HTTP and the classify/disk-stat loops touch no DB. End the transaction
@@ -271,6 +299,7 @@ def diff_image_series_vs_orthanc(
         "in_orthanc_not_in_db": in_orthanc_not_in_db,
         "dicom_archive_missing": dicom_archive_missing,
         "orphaned_annotations": orphaned_annotations,
+        "ownership_mismatches": ownership_mismatches,
     }
 
     report = {
@@ -300,6 +329,7 @@ def snapshot_summary_from_mismatches(
         "in_orthanc_not_in_db": len(mismatches.get("in_orthanc_not_in_db", [])),
         "dicom_archive_missing": len(mismatches.get("dicom_archive_missing", [])),
         "orphaned_annotations": len(mismatches.get("orphaned_annotations", [])),
+        "ownership_mismatches": len(mismatches.get("ownership_mismatches", [])),
         "db_series_count": db_count,
         "orthanc_series_count": orthanc_count,
         "matched": matched,

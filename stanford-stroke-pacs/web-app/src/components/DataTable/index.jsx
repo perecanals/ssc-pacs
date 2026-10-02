@@ -299,7 +299,9 @@ function DataTableInner({
   // series rows are series-backed: they show and trigger their *own* warm state.
   const visiblePatientIds = useMemo(
     () =>
-      level === "patient" ? items.map((r) => r.patient_id).filter(Boolean) : [],
+      level === "patient"
+        ? items.map((r) => r.patient_key).filter(Boolean)
+        : [],
     [level, items],
   );
   const visibleStudyUids = useMemo(() => {
@@ -560,11 +562,11 @@ function DataTableInner({
 
   const renderActions = (row, rowLevel) => {
     if (rowLevel === "patient") {
-      if (!canWarm || !row.patient_id) return null;
+      if (!canWarm || !row.patient_key) return null;
       return (
         <WarmButton
-          summary={patientStatus[row.patient_id]}
-          onWarm={() => warmPatient(row.patient_id)}
+          summary={patientStatus[row.patient_key]}
+          onWarm={() => warmPatient(row.patient_key)}
         />
       );
     }

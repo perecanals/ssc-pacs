@@ -26,17 +26,20 @@ from common import (
     TIMEPOINT_MATCH_EXPR,
     apply_label_filters,
     attach_annotations,
+    attach_enrollment_display,
     attach_inherited_annotations,
     auto_match_sql,
     build_label_filter_sql,
     column_exists,
-    dataset_filter_sql,
+    enrollment_match_sql,
     ensure_patient_access,
     ensure_study_access,
     parse_label_filters,
+    scope_literal,
+    subject_scope_sql,
     table_exists,
 )
-from config import CLINICAL_EPISODE_DATE_COLUMN, STORAGE_MODE
+from config import CLINICAL_DATA_DATASET, CLINICAL_EPISODE_DATE_COLUMN, STORAGE_MODE
 from db import get_conn
 from imaging_downloads import imaging_download
 from orthanc_client import orthanc_lookup
@@ -85,22 +88,18 @@ def resolve_clinical_date_column(cur) -> str:
     return col
 
 
-def _dataset_display_sql(patient_id_expr: str) -> str:
-    """SELECT-list fragment: the owning patient's cohort tags, comma-joined
-    (same display format as /api/patients), aliased AS dataset."""
-    return (
-        "(SELECT array_to_string(p.dataset, ', ') FROM patient p "
-        f"WHERE p.patient_id = {patient_id_expr}) AS dataset"
-    )
+def _clinical_join_sql(cur, patient_alias: str) -> str:
+    """ON-clause for joining clinical_data to an enrollment.
 
-
-def _dataset_member_sql(patient_id_expr: str) -> str:
-    """WHERE fragment: the owning patient's dataset array contains the tag
-    bound to one %s placeholder (exact membership, like /api/patients)."""
-    return (
-        "EXISTS (SELECT 1 FROM patient p "
-        f"WHERE p.patient_id = {patient_id_expr} AND %s = ANY(p.dataset))"
-    )
+    clinical_data.study_id carries one dataset's patient ids but has no dataset
+    column; restricting the join to config's ``clinical_data_dataset`` keeps a
+    same-id patient from another dataset off that clinical row.
+    """
+    on = f"c.study_id = {patient_alias}.patient_id"
+    if CLINICAL_DATA_DATASET:
+        literal = cur.mogrify("%s", (CLINICAL_DATA_DATASET,)).decode().replace("%", "%%")
+        on += f" AND {patient_alias}.dataset = {literal}"
+    return on
 
 
 # ---------------------------------------------------------------------------
@@ -121,10 +120,7 @@ def list_patients(
     ),
     dataset: str | None = Query(
         None,
-        description=(
-            "Exact match on a cohort tag in patient.dataset (text[]); "
-            "patient included if this tag is a member of its dataset array."
-        ),
+        description="Exact match on the enrollment's dataset name.",
     ),
     series_type: list[str] | None = Query(
         None,
@@ -150,24 +146,25 @@ def list_patients(
             params: list = []
 
             if scope is not None:
-                conditions.append("p.dataset && %s::text[]")
+                conditions.append("p.dataset = ANY(%s::text[])")
                 params.append(scope)
 
             # The Auto filters are series-/study-level, so at the patient level
             # they ask "has one": a patient matches if any of their series (or
-            # studies) does.
+            # studies) does — including imaging owned by a linked enrollment
+            # of the same subject.
             st_sql, st_params = auto_match_sql(SERIES_TYPE_MATCH_EXPR, series_type)
             if st_sql:
                 conditions.append(
                     "EXISTS (SELECT 1 FROM image_series s "
-                    f"WHERE s.patient_id = p.patient_id AND {st_sql})"
+                    f"WHERE s.subject_id = p.subject_id AND {st_sql})"
                 )
                 params.extend(st_params)
             tp_sql, tp_params = auto_match_sql(TIMEPOINT_MATCH_EXPR, timepoint)
             if tp_sql:
                 conditions.append(
                     "EXISTS (SELECT 1 FROM image_study st "
-                    f"WHERE st.patient_id = p.patient_id AND {tp_sql})"
+                    f"WHERE st.subject_id = p.subject_id AND {tp_sql})"
                 )
                 params.extend(tp_params)
 
@@ -178,7 +175,8 @@ def list_patients(
             # clinically-matched patients. Without it every patient falls back to
             # the imaging-derived patient.stroke_date — the same value a patient
             # with no clinical row already gets. (Its patient-id column is
-            # historically named study_id.) Which clinical column supplies the
+            # historically named study_id, and the join is restricted to the
+            # dataset it belongs to.) Which clinical column supplies the
             # episode date is config.toml [web-app] clinical_episode_date_column,
             # resolved once at startup by resolve_clinical_date_column().
             #
@@ -191,7 +189,7 @@ def list_patients(
             if table_exists(cur, "clinical_data"):
                 from_clause = (
                     "FROM patient p "
-                    "LEFT JOIN clinical_data c ON c.study_id = p.patient_id"
+                    f"LEFT JOIN clinical_data c ON {_clinical_join_sql(cur, 'p')}"
                 )
                 stroke_date_expr = (
                     f"COALESCE(c.{_effective_clinical_date_column}::text, "
@@ -210,25 +208,25 @@ def list_patients(
             sil = (study_import_label or "").strip()
             if sil:
                 conditions.append(
-                    "p.patient_id IN ("
-                    "SELECT DISTINCT patient_id FROM image_study st WHERE st.import_label = %s "
+                    "p.subject_id IN ("
+                    "SELECT subject_id FROM image_study st WHERE st.import_label = %s "
                     "UNION "
-                    "SELECT DISTINCT patient_id FROM image_series s WHERE s.import_label = %s)"
+                    "SELECT subject_id FROM image_series s WHERE s.import_label = %s)"
                 )
                 params.append(sil)
                 params.append(sil)
             ds = (dataset or "").strip()
             if ds:
-                conditions.append("%s = ANY(p.dataset)")
+                conditions.append("p.dataset = %s")
                 params.append(ds)
             if label:
                 conditions.append(
-                    build_label_filter_sql("patient", label_level, "p.patient_id")
+                    build_label_filter_sql("patient", label_level, "p.patient_key")
                 )
                 params.append(label)
             apply_label_filters(
                 parse_label_filters(label_filters),
-                "patient", "p.patient_id", conditions, params,
+                "patient", "p.patient_key", conditions, params,
             )
 
             where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
@@ -249,39 +247,43 @@ def list_patients(
                 "  SELECT string_agg(lbl, ', ' ORDER BY lbl) FROM ("
                 "    SELECT DISTINCT TRIM(sti.import_label) AS lbl "
                 "    FROM image_study sti "
-                "    WHERE sti.patient_id = p.patient_id "
+                "    WHERE sti.subject_id = p.subject_id "
                 "      AND sti.import_label IS NOT NULL AND TRIM(sti.import_label) <> '' "
                 "    UNION "
                 "    SELECT DISTINCT TRIM(s.import_label) AS lbl "
                 "    FROM image_series s "
-                "    WHERE s.patient_id = p.patient_id "
+                "    WHERE s.subject_id = p.subject_id "
                 "      AND s.import_label IS NOT NULL AND TRIM(s.import_label) <> '' "
                 "  ) u"
                 "), '') AS study_import_labels"
             )
             cur.execute(
-                "SELECT p.patient_id AS patient_id, "
+                "SELECT p.patient_key, p.subject_id, p.patient_id AS patient_id, "
+                # Where a patient-label edit on this row writes (study/series
+                # rows get theirs from attach_inherited_annotations).
+                "p.patient_key AS edit_patient_key, "
                 f"{stroke_date_expr} AS stroke_date, "
                 f"{study_labels_agg}, "
-                f"array_to_string(p.dataset, ', ') AS dataset "
+                "p.dataset "
                 f"{from_clause} {where} "
-                f"ORDER BY {order_expr} {direction} NULLS LAST, p.patient_id ASC "
+                f"ORDER BY {order_expr} {direction} NULLS LAST, p.patient_id ASC, "
+                "p.patient_key ASC "
                 f"LIMIT %s OFFSET %s",
                 params + [per_page, offset],
             )
             rows = cur.fetchall()
 
-            attach_annotations(cur, rows, "patient", "patient_id")
-            attach_inherited_annotations(cur, rows, "patient")
+            attach_annotations(cur, rows, "patient", "patient_key")
+            attach_inherited_annotations(cur, rows, "patient", scope=scope)
 
         return {"total": total, "page": page, "per_page": per_page, "items": rows}
     finally:
         conn.close()
 
 
-@router.get("/api/patients/{patient_id}/studies")
+@router.get("/api/patients/{patient_key}/studies")
 def patient_studies(
-    patient_id: str,
+    patient_key: str,
     study_import_label: str | None = Query(
         None,
         description="If set, only studies connected to this import_label are returned.",
@@ -302,6 +304,10 @@ def patient_studies(
 ):
     """Studies for a patient (expandable sub-rows).
 
+    Every study of the enrollment's subject — including imaging owned by a
+    linked enrollment in another dataset. Inherited patient labels are this
+    enrollment's only (the rows are shown on its behalf).
+
     Optionally narrowed by the sidebar quick filters (import_label, the Auto
     `series_type` / `timepoint` columns, and select-value annotation labels) so
     an expanded subtable mirrors the top-level filter. `series_type` is a
@@ -312,9 +318,15 @@ def patient_studies(
     conn = get_conn()
     try:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-            ensure_patient_access(cur, patient_id, scope)
-            conditions = ["st.patient_id = %s"]
-            params: list = [patient_id]
+            ensure_patient_access(cur, patient_key, scope)
+            cur.execute(
+                "SELECT subject_id FROM patient WHERE patient_key = %s", (patient_key,)
+            )
+            patient = cur.fetchone()
+            if patient is None:
+                raise HTTPException(status_code=404, detail="Patient not found")
+            conditions = ["st.subject_id = %s"]
+            params: list = [patient["subject_id"]]
             sil = (study_import_label or "").strip()
             if sil:
                 conditions.append(
@@ -337,18 +349,20 @@ def patient_studies(
                     f"WHERE s.studyinstanceuid = st.studyinstanceuid AND {st_sql})"
                 )
                 params.extend(st_params)
+            scope_lit = scope_literal(cur, scope)
             apply_label_filters(
                 parse_label_filters(label_filters),
-                "study", "st.studyinstanceuid", conditions, params,
+                "study", "st.studyinstanceuid", conditions, params, scope_lit,
             )
             where = "WHERE " + " AND ".join(conditions)
             cur.execute(
-                "SELECT st.patient_id, st.import_id, st.import_label, st.acquisitiondatetime, st.studyinstanceuid, "
+                "SELECT st.patient_key, st.subject_id, st.import_id, st.import_label, "
+                "st.acquisitiondatetime, st.studyinstanceuid, "
                 "st.studydescription, st.study_type, "
                 f"{STUDY_SERIES_COUNT} AS number_of_series, "
                 f"{STUDY_AUTO_COLS}, "
                 f"COALESCE({STUDY_MODALITY}, '') AS modality, "
-                f"{_dataset_display_sql('st.patient_id')} "
+                "st.patient_id "
                 "FROM image_study st "
                 f"{where} "
                 "ORDER BY st.acquisitiondatetime",
@@ -359,8 +373,11 @@ def patient_studies(
                 dt = r.get("acquisitiondatetime")
                 r["acquisitiondatetime"] = dt.isoformat() if dt else None
 
+            attach_enrollment_display(cur, rows, scope)
             attach_annotations(cur, rows, "study", "studyinstanceuid")
-            attach_inherited_annotations(cur, rows, "study")
+            attach_inherited_annotations(
+                cur, rows, "study", scope=scope, context_key=patient_key
+            )
 
         return rows
     finally:
@@ -376,8 +393,8 @@ def list_study_import_labels(scope: list[str] | None = Depends(get_dataset_scope
             scope_st = scope_s = ""
             params: list = []
             if scope is not None:
-                scope_st = " AND " + dataset_filter_sql("image_study.patient_id")
-                scope_s = " AND " + dataset_filter_sql("image_series.patient_id")
+                scope_st = " AND " + subject_scope_sql("image_study.subject_id")
+                scope_s = " AND " + subject_scope_sql("image_series.subject_id")
                 params = [scope, scope]
             cur.execute(
                 "SELECT import_label FROM ("
@@ -396,19 +413,17 @@ def list_study_import_labels(scope: list[str] | None = Depends(get_dataset_scope
 
 @router.get("/api/datasets")
 def list_datasets(scope: list[str] | None = Depends(get_dataset_scope)):
-    """Distinct cohort tags in `patient.dataset` (text[]).
+    """Registered dataset names (the `dataset` registry).
 
-    Non-admins get only the tags they are granted (sidebar filter); admins
+    Non-admins get only the datasets they are granted (sidebar filter); admins
     get the full list — which is also what the /admin permissions page
-    consumes as the set of grantable datasets.
+    consumes as the set of grantable datasets (a dataset is grantable once
+    registered, before anything is ingested into it).
     """
     conn = get_conn()
     try:
         with conn.cursor() as cur:
-            cur.execute(
-                "SELECT DISTINCT unnest(dataset) AS dataset FROM patient "
-                "WHERE dataset <> '{}' ORDER BY 1"
-            )
+            cur.execute("SELECT name FROM dataset ORDER BY name")
             all_datasets = [r[0] for r in cur.fetchall()]
     finally:
         conn.close()
@@ -430,8 +445,8 @@ def list_classification_values(scope: list[str] | None = Depends(get_dataset_sco
             params: list = []
             scope_s = scope_t = ""
             if scope is not None:
-                scope_s = f" AND {dataset_filter_sql('s.patient_id')}"
-                scope_t = f" AND {dataset_filter_sql('st.patient_id')}"
+                scope_s = f" AND {subject_scope_sql('s.subject_id')}"
+                scope_t = f" AND {subject_scope_sql('st.subject_id')}"
 
             cur.execute(
                 "SELECT s.series_type, COUNT(*) FROM image_series s "
@@ -473,8 +488,8 @@ def list_studies(
     dataset: str | None = Query(
         None,
         description=(
-            "Exact match on a cohort tag in the owning patient's dataset "
-            "(text[]); study included if the tag is a member of that array."
+            "Exact match on a dataset name; study included if any in-scope "
+            "enrollment of its subject is in that dataset."
         ),
     ),
     modality: str | None = Query(None),
@@ -507,15 +522,18 @@ def list_studies(
             conditions = []
             params: list = []
 
+            scope_lit = scope_literal(cur, scope)
             if scope is not None:
-                conditions.append(dataset_filter_sql("st.patient_id"))
+                conditions.append(subject_scope_sql("st.subject_id"))
                 params.append(scope)
 
             if studyinstanceuid:
                 conditions.append("st.studyinstanceuid LIKE %s")
                 params.append(f"%{studyinstanceuid}%")
             if patient_id:
-                conditions.append("st.patient_id LIKE %s")
+                conditions.append(
+                    enrollment_match_sql("st.subject_id", scope_lit, "q.patient_id LIKE %s")
+                )
                 params.append(f"%{patient_id}%")
             if import_id:
                 conditions.append("st.import_id::text LIKE %s")
@@ -525,7 +543,9 @@ def list_studies(
                 params.append(f"%{import_label}%")
             ds = (dataset or "").strip()
             if ds:
-                conditions.append(_dataset_member_sql("st.patient_id"))
+                conditions.append(
+                    enrollment_match_sql("st.subject_id", scope_lit, "q.dataset = %s")
+                )
                 params.append(ds)
             if study_type:
                 conditions.append("UPPER(st.study_type) = UPPER(%s)")
@@ -556,12 +576,14 @@ def list_studies(
                 params.append(f"%{modality}%")
             if label:
                 conditions.append(
-                    build_label_filter_sql("study", label_level, "st.studyinstanceuid")
+                    build_label_filter_sql(
+                        "study", label_level, "st.studyinstanceuid", scope_lit=scope_lit
+                    )
                 )
                 params.append(label)
             apply_label_filters(
                 parse_label_filters(label_filters),
-                "study", "st.studyinstanceuid", conditions, params,
+                "study", "st.studyinstanceuid", conditions, params, scope_lit,
             )
 
             where = "WHERE " + " AND ".join(conditions) if conditions else ""
@@ -588,13 +610,16 @@ def list_studies(
             }.get(sort_by, f"st.{col}")
             direction = "DESC" if sort_dir.lower() == "desc" else "ASC"
 
+            # patient_id / dataset are replaced by the subject's in-scope
+            # enrollments below; sorting by patient_id orders by the owner's id.
             cur.execute(
-                f"SELECT st.patient_id, st.import_id, st.import_label, st.acquisitiondatetime, "
+                f"SELECT st.patient_key, st.subject_id, st.import_id, st.import_label, "
+                f"st.acquisitiondatetime, "
                 f"st.studyinstanceuid, st.studydescription, st.study_type, "
                 f"{STUDY_SERIES_COUNT} AS number_of_series, "
                 f"{STUDY_AUTO_COLS}, "
                 f"COALESCE({STUDY_MODALITY}, '') AS modality, "
-                f"{_dataset_display_sql('st.patient_id')} "
+                f"st.patient_id "
                 f"FROM image_study st {where} "
                 f"ORDER BY {sort_expr} {direction} NULLS LAST, st.studyinstanceuid ASC "
                 f"LIMIT %s OFFSET %s",
@@ -605,8 +630,9 @@ def list_studies(
                 dt = r.get("acquisitiondatetime")
                 r["acquisitiondatetime"] = dt.isoformat() if dt else None
 
+            attach_enrollment_display(cur, rows, scope)
             attach_annotations(cur, rows, "study", "studyinstanceuid")
-            attach_inherited_annotations(cur, rows, "study")
+            attach_inherited_annotations(cur, rows, "study", scope=scope)
 
         return {"total": total, "page": page, "per_page": per_page, "items": rows}
     finally:
@@ -643,6 +669,7 @@ def study_series(
     try:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             ensure_study_access(cur, studyinstanceuid, scope)
+            scope_lit = scope_literal(cur, scope)
             conditions = ["s.studyinstanceuid = %s"]
             params: list = [studyinstanceuid]
             for expr, vals in (
@@ -655,15 +682,16 @@ def study_series(
                     params.extend(ps)
             apply_label_filters(
                 parse_label_filters(label_filters),
-                "series", "s.seriesinstanceuid", conditions, params,
+                "series", "s.seriesinstanceuid", conditions, params, scope_lit,
             )
             where = "WHERE " + " AND ".join(conditions)
             cur.execute(
-                "SELECT s.seriesinstanceuid, s.studyinstanceuid, s.patient_id, s.import_id, s.import_label, "
+                "SELECT s.seriesinstanceuid, s.studyinstanceuid, s.patient_key, s.subject_id, "
+                "s.import_id, s.import_label, "
                 "s.modality, s.seriesdescription, s.acquisitiondatetime, s.number_of_slices, "
                 "s.slicethickness, s.scanaxialcoverage_mm, "
                 f"{SERIES_AUTO_COLS}, {STUDY_AUTO_COLS}, "
-                f"{_dataset_display_sql('s.patient_id')} "
+                "s.patient_id "
                 f"FROM {SERIES_FROM_CLAUSE} {where} "
                 "ORDER BY s.acquisitiondatetime, s.seriesdescription",
                 tuple(params),
@@ -673,8 +701,9 @@ def study_series(
                 dt = r.get("acquisitiondatetime")
                 r["acquisitiondatetime"] = dt.isoformat() if dt else None
 
+            attach_enrollment_display(cur, rows, scope)
             attach_annotations(cur, rows, "series", "seriesinstanceuid")
-            attach_inherited_annotations(cur, rows, "series")
+            attach_inherited_annotations(cur, rows, "series", scope=scope)
 
         return rows
     finally:
@@ -699,8 +728,8 @@ def list_series(
     dataset: str | None = Query(
         None,
         description=(
-            "Exact match on a cohort tag in the owning patient's dataset "
-            "(text[]); series included if the tag is a member of that array."
+            "Exact match on a dataset name; series included if any in-scope "
+            "enrollment of its subject is in that dataset."
         ),
     ),
     modality: str | None = Query(None),
@@ -737,13 +766,16 @@ def list_series(
             conditions = []
             params: list = []
 
+            scope_lit = scope_literal(cur, scope)
             if scope is not None:
-                conditions.append(dataset_filter_sql("s.patient_id"))
+                conditions.append(subject_scope_sql("s.subject_id"))
                 params.append(scope)
 
             if label:
                 conditions.append(
-                    build_label_filter_sql("series", label_level, "s.seriesinstanceuid")
+                    build_label_filter_sql(
+                        "series", label_level, "s.seriesinstanceuid", scope_lit=scope_lit
+                    )
                 )
                 params.append(label)
             if studyinstanceuid:
@@ -753,7 +785,9 @@ def list_series(
                 conditions.append("s.seriesinstanceuid LIKE %s")
                 params.append(f"%{seriesinstanceuid}%")
             if patient_id:
-                conditions.append("s.patient_id LIKE %s")
+                conditions.append(
+                    enrollment_match_sql("s.subject_id", scope_lit, "q.patient_id LIKE %s")
+                )
                 params.append(f"%{patient_id}%")
             if import_id:
                 conditions.append("s.import_id::text LIKE %s")
@@ -763,7 +797,9 @@ def list_series(
                 params.append(f"%{import_label}%")
             ds = (dataset or "").strip()
             if ds:
-                conditions.append(_dataset_member_sql("s.patient_id"))
+                conditions.append(
+                    enrollment_match_sql("s.subject_id", scope_lit, "q.dataset = %s")
+                )
                 params.append(ds)
             if modality:
                 conditions.append("UPPER(s.modality) LIKE UPPER(%s)")
@@ -793,7 +829,7 @@ def list_series(
                 params.append(f"%{scanaxialcoverage}%")
             apply_label_filters(
                 parse_label_filters(label_filters),
-                "series", "s.seriesinstanceuid", conditions, params,
+                "series", "s.seriesinstanceuid", conditions, params, scope_lit,
             )
 
             where = "WHERE " + " AND ".join(conditions) if conditions else ""
@@ -816,7 +852,8 @@ def list_series(
                     SELECT DISTINCT ON (s.seriesinstanceuid)
                         s.seriesinstanceuid,
                         s.studyinstanceuid,
-                        s.patient_id,
+                        s.patient_key,
+                        s.subject_id,
                         s.import_id,
                         s.import_label,
                         st.study_type,
@@ -828,7 +865,7 @@ def list_series(
                         s.scanaxialcoverage_mm,
                         {SERIES_AUTO_COLS},
                         {STUDY_AUTO_COLS},
-                        {_dataset_display_sql('s.patient_id')}
+                        s.patient_id
                     FROM {SERIES_FROM_CLAUSE}
                     {where}
                     ORDER BY s.seriesinstanceuid
@@ -843,8 +880,9 @@ def list_series(
                 dt = r.get("acquisitiondatetime")
                 r["acquisitiondatetime"] = dt.isoformat() if dt else None
 
+            attach_enrollment_display(cur, rows, scope)
             attach_annotations(cur, rows, "series", "seriesinstanceuid")
-            attach_inherited_annotations(cur, rows, "series")
+            attach_inherited_annotations(cur, rows, "series", scope=scope)
 
         return {"total": total, "page": page, "per_page": per_page, "series": rows}
     finally:

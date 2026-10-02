@@ -72,6 +72,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 load_dotenv(REPO_ROOT / ".env")
 sys.path.insert(0, str(REPO_ROOT / "web-app"))
 
+from common import subject_for_patient_arg  # noqa: E402
 from db import DB_CONFIG  # noqa: E402
 from orthanc_client import (  # noqa: E402
     DICOMWEB_SERIES_METADATA_ATTACHMENT,
@@ -145,7 +146,7 @@ def find_broken_series(include_missing: bool) -> dict[str, str]:
         conn.close()
 
 
-def load_series_context(series_uids: list[str], patient: str | None,
+def load_series_context(series_uids: list[str], subject_id: str | None,
                         study: str | None) -> list[dict]:
     """Join the broken series to their study/patient and current cache state."""
     sql = """
@@ -158,9 +159,9 @@ def load_series_context(series_uids: list[str], patient: str | None,
         WHERE s.seriesinstanceuid = ANY(%s)
     """
     params: list = [series_uids]
-    if patient:
-        sql += " AND st.patient_id = %s"
-        params.append(patient)
+    if subject_id:
+        sql += " AND st.subject_id = %s"
+        params.append(subject_id)
     if study:
         sql += " AND s.studyinstanceuid = %s"
         params.append(study)
@@ -237,7 +238,9 @@ def main() -> int:
     )
     ap.add_argument("--execute", action="store_true",
                     help="Actually repair (default: report only)")
-    ap.add_argument("--patient", help="Limit to one patient_id")
+    ap.add_argument("--patient",
+                    help="Limit to one patient: a patient_key, or a patient_id that "
+                         "names one person")
     ap.add_argument("--study", help="Limit to one studyinstanceuid")
     ap.add_argument("--limit", type=int,
                     help="Repair at most this many series (resume-friendly)")
@@ -282,7 +285,11 @@ def main() -> int:
         print("No broken series found. Nothing to do.")
         return 0
 
-    rows = load_series_context(list(orthanc_ids), args.patient, args.study)
+    rows = load_series_context(
+        list(orthanc_ids),
+        subject_for_patient_arg(args.patient) if args.patient else None,
+        args.study,
+    )
     if args.hot_only:
         rows = [r for r in rows if r["cache_status"] == "hot"]
     if args.limit:

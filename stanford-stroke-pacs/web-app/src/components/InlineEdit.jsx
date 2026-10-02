@@ -41,25 +41,54 @@ const editorPropTypes = {
   onMutated: PropTypes.func.isRequired,
 };
 
+// A patient-level value belongs to one enrollment (dataset + patient id). Every
+// row carries `edit_patient_key`: a patient row's own key, or on a study/series
+// row the single enrollment of its person in view — null when several are, in
+// which case the cell is read-only (see AmbiguousPatientValue).
 function buildPayload(level, entity, labelName, value) {
   const base = { level, label: labelName, value };
   if (level === "patient") {
-    return { ...base, patient_id: entity.patient_id };
+    return { ...base, patient_key: entity.edit_patient_key };
   }
   if (level === "study") {
-    return {
-      ...base,
-      studyinstanceuid: entity.studyinstanceuid,
-      patient_id: entity.patient_id,
-    };
+    return { ...base, studyinstanceuid: entity.studyinstanceuid };
   }
   return {
     ...base,
     seriesinstanceuid: entity.seriesinstanceuid,
     studyinstanceuid: entity.studyinstanceuid,
-    patient_id: entity.patient_id,
   };
 }
+
+// Read-only patient-label cell for a study/series row whose person is enrolled
+// in several datasets the user can see: each enrollment has its own value, so
+// there is no single one to edit here. Shows the distinct values; the tooltip
+// says whose is whose.
+function AmbiguousPatientValue({ datatype, anns }) {
+  const lines = anns.map(
+    (a) =>
+      `${a.patient_id ?? "?"} (${a.dataset ?? "?"}): ${datatype === "bool" ? "\u2713" : (a.value ?? "")}`,
+  );
+  const title = [
+    "This person is enrolled in several datasets in view; edit patient labels from the patient row.",
+    ...lines,
+  ].join("\n");
+  if (datatype === "bool") {
+    return anns.length ? (
+      <span className="inline-edit__check" title={title}>
+        &#10003;
+      </span>
+    ) : null;
+  }
+  const values = [...new Set(anns.map((a) => a.value).filter(Boolean))];
+  if (values.length === 0) return null;
+  return <span title={title}>{values.join(" | ")}</span>;
+}
+
+AmbiguousPatientValue.propTypes = {
+  datatype: PropTypes.string,
+  anns: PropTypes.arrayOf(PropTypes.object).isRequired,
+};
 
 export default function InlineEdit({
   level = "series",
@@ -72,8 +101,19 @@ export default function InlineEdit({
   labelDef = null,
 }) {
   const { currentUser } = useAuth();
-  const ann = annotations.find((a) => a.label === labelName) || null;
+  const matching = annotations.filter((a) => a.label === labelName);
+  const patientTarget = level === "patient" ? entity.edit_patient_key : null;
+  // A patient label may be inherited from several enrollments: show the one
+  // this cell edits.
+  const ann =
+    (patientTarget
+      ? matching.find((a) => (a.patient_key ?? patientTarget) === patientTarget)
+      : matching[0]) || null;
   const protection = labelEditability(labelDef, currentUser);
+
+  if (level === "patient" && !patientTarget) {
+    return <AmbiguousPatientValue datatype={datatype} anns={matching} />;
+  }
 
   // Read-only render: logged out, or the label's edit policy excludes this user.
   // The server is the enforcement boundary (403 on POST/DELETE) — this only
