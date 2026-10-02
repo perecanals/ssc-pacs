@@ -18,8 +18,9 @@ datasets are the same person. Schema: [`../reference/data_stores.md`](../referen
   makes several enrollments one subject.
 - **Ownership** — every study/series is owned by exactly one enrollment
   (`image_study.patient_key`), the one that ingested it first, and carries its
-  subject. Imaging is stored once, in the owner's tree; the patient_id on
-  imaging rows is the DICOM PatientID / folder name.
+  subject. Imaging is stored once, in the owner's tree —
+  `<root>/<owner's slug>/<patient_id>/<StudyUID>` ([dataset layout](dataset_layout.md));
+  the patient_id on imaging rows is the DICOM PatientID / folder name.
 
 What linking changes — and what it does not:
 
@@ -65,6 +66,9 @@ python scripts/admin/link_patients.py link outerlimits_links.csv --apply
   ingestion at all.
 - If it already exists, its whole subject — including any imaging it owns —
   joins the other's; nothing moves on disk.
+- After `--apply` the [linked view](dataset_layout.md#linked-view) is rebuilt
+  (when `[storage].linked_view_root` is set), so each enrollment shows the
+  imaging it now shares as symlinks.
 - The run validates every row first (registered datasets, existing target, no
   self-links, no source listed twice) and writes nothing if any row fails. With
   `--apply` everything is one transaction, followed by re-deriving what follows
@@ -110,6 +114,12 @@ python scripts/data_integrity/reconcile.py          # ownership mismatches must 
 
 Patient labels stay with the enrollment they were recorded on (there, the
 CRISP2/LVO one). Restart the web app afterwards.
+
+**Files are not moved** by a split (or by any change of owner): the moved
+studies keep working from their stored paths, under the previous owner's
+folder. The script reports how many studies are now filed under another
+enrollment's folder; relocate them in a maintenance window with
+`scripts/migration/move_to_dataset_layout.py` ([dataset layout](dataset_layout.md)).
 
 ## Clinical data
 

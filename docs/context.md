@@ -29,6 +29,7 @@ One **Orthanc** container (`ssc-orthanc`), one native-host **Web App** service o
 | Observability (logs, /healthz, /metrics, Grafana) | [`operations/observability.md`](operations/observability.md) |
 | Two-DB reconciliation (image_series vs Orthanc) | [`operations/reconciliation.md`](operations/reconciliation.md) |
 | Deleting studies/series (CLI + admin UI, 3 layers) | [`operations/deleting_studies.md`](operations/deleting_studies.md) |
+| Dataset layout on disk (`<root>/<slug>/<patient_id>/<StudyUID>`), moving / relocating studies, the linked view | [`operations/dataset_layout.md`](operations/dataset_layout.md) |
 | Per-user dataset access (grants, /admin page, enforcement) | [`reference/architecture.md` §5.4](reference/architecture.md) + [`operations/commands.md`](operations/commands.md) |
 | Patient identity: datasets, enrollments, linking patients across datasets, per-dataset clinical tables (`import-clinical`) | [`operations/linking_patients.md`](operations/linking_patients.md) |
 | Annotation audit trail (history table, trigger, API) | [`operations/annotation_history.md`](operations/annotation_history.md) |

@@ -156,14 +156,16 @@ months, so every cache was built from readable files before archiving.
 
 ```
 cold_archive_root/                    (canonical — never moves)
-  {patient_id}/
+  {dataset_slug}/                     (owner enrollment's dataset; v2.2)
+   {patient_id}/
     {study_uid}/
       {series_desc}/
         {series_uid}/
           DICOM.tar.zst               (one archive per series, flat file tree inside)
 
 dicom_data_root/                    (transient — files come and go)
-  {patient_id}/
+  {dataset_slug}/
+   {patient_id}/
     {study_uid}/
       {series_desc}/
         {series_uid}/
@@ -171,7 +173,9 @@ dicom_data_root/                    (transient — files come and go)
             <instance UIDs>
 ```
 
-The archive naming preserves the series' full uncompressed path (except the leaf
+Both trees file a study under the dataset slug of the enrollment that owns it
+(`storage_layout.py`; the pre-v2.2 trees had no slug level — see
+[`../operations/dataset_layout.md`](../operations/dataset_layout.md)). The archive naming preserves the series' full uncompressed path (except the leaf
 `DICOM/` directory becomes `DICOM.tar.zst`). That means we can compute either
 direction deterministically without a lookup:
 

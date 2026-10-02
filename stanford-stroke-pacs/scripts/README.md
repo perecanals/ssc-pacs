@@ -22,13 +22,13 @@ by default and applies only with `--execute`; interactive prompts have a
 |---|---|---|
 | `admin/` | User provisioning, credential rotation, label/dataset ops, series classification, study/series deletion, teardown | `manage_users.py`, `manage_readonly_db_users.py`, `manage_data_exports_db.py`, `rotate_service_account.py`, `rotate_db_password.py`, `bulk_set_label_values.py`, `remove_label.py`, `manage_datasets.py`, `link_patients.py`, `reclassify_series_types.py`, `recompute_timepoints.py`, `delete_study.py`, `teardown.sh` |
 | `backup/` | PostgreSQL dump, Orthanc volume snapshot, freshness monitoring, opt-in encrypted remote backups | `backup_pg_db.sh`, `backup_orthanc_storage.sh` (+ in-container `orthanc_storage_snapshot.py`), `check_backup_freshness.sh`, `remote_backup.py` ([remote setup](../../docs/operations/remote_backups.md)) |
-| `cold_storage/` | Archive, cleanup, health, cache state, index repair | `archive_all_series.py`, `cleanup_loose_dicoms.py`, `scoped_index.py`, `reindex_missing_series.py`, `prune_stale_index_paths.py`, `rebuild_cache_state.py`, `cold_storage_health.py`, `backfill_storage_sizes.py`, `list_unarchived_series.py`, `verify_and_repair_archives.py`, `mirror_cold_archive.sh` |
+| `cold_storage/` | Archive, cleanup, health, cache state, index repair | `archive_all_series.py`, `cleanup_loose_dicoms.py`, `scoped_index.py`, `reindex_missing_series.py`, `prune_stale_index_paths.py`, `rebuild_cache_state.py`, `cold_storage_health.py`, `backfill_storage_sizes.py`, `list_unarchived_series.py`, `verify_and_repair_archives.py`, `mirror_cold_archive.sh`, `build_linked_view.py` |
 | `connectivity/` | Sanitized SSH tunnel templates for end users (per OS) | `tunnel/{linux,macos,windows}/tunnel.*` |
 | `data_integrity/` | Cross-store audits + repairs (see matrix below) | `reconcile.py`, `dicom_path_sql_fs_audit.py`, `disk_vs_db_series_audit.py`, `detect_mixed_dirs.py`, `repair_dicomweb_metadata_cache.py` |
 | `dicom/` | DICOM conversion utilities | `dicom_to_nifti.py` |
 | `linux/` | Linux deploy path (systemd units, Postgres cluster) + whole-stack control | `install_systemd.sh`, `provision_postgres.sh`, `stop_stack.sh`, `start_stack.sh` |
 | `macos/` | macOS host tooling (Colima, launchd, disks) + whole-stack control | `colima_start.sh`, `colima_watchdog.sh`, `install_launchd.sh`, `stop_stack.sh`, `start_stack.sh` |
-| `migration/` | Port the stack to a new host; one-off data corrections | `repoint_host_paths.py`, `reconcile_migration.py`, `split_merged_patients.py` |
+| `migration/` | Port the stack to a new host; one-off data corrections; the dataset layout move | `repoint_host_paths.py`, `reconcile_migration.py`, `split_merged_patients.py`, `move_to_dataset_layout.py` (+ its in-container helper `indexer_paths.py`) |
 | `orthanc/` | Compose wrapper, status check | `dc.sh`, `check_status.sh` |
 
 `_lib.sh` holds the shared shell helpers (`STACK_DIR`, `config_get`,

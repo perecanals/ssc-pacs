@@ -17,8 +17,10 @@ independent places** it lives (none of which cascade):
    would re-register them and *resurrect* the study — so file removal always
    precedes the indexer purge.
 3. **On disk** — the loose `dicom_dir_path` tree and the cold `dicom_archive_path`
-   archives, under `<root>/<patient>/<studyUID>/…` in both `dicom_data_root` and
-   `cold_archive_root`.
+   archives, under `<root>/<slug>/<patient>/<studyUID>/…` in both `dicom_data_root`
+   and `cold_archive_root` ([dataset layout](dataset_layout.md)). A delete removes
+   the study's **stored** paths (`image_study.study_path`, the series' paths),
+   never a path rebuilt from the patient id.
 
 The shared logic lives in `web-app/deletion.py`, used by both the CLI and the
 admin HTTP endpoints, which run the full sequence **Orthanc → DB → files →
@@ -42,8 +44,10 @@ The web-app service user **owns both storage roots** — it already
 deletes loose files there during cold-cache eviction — so file removal needs no
 privilege escalation. Deletion is complete from either entry point (UI or CLI).
 The safety gate for the irreversible file delete is the **path-safety guard**
-(target must sit under a configured root and be ≥ `<patient>/<studyUID>` deep, so
-it can never remove a root or a whole patient) plus **admin-only auth** on the
+(target must sit under a configured root and be a study directory — named by its
+StudyInstanceUID, at `<slug>/<patient>/<studyUID>` or the pre-v2.2
+`<patient>/<studyUID>` — or deeper, so it can never remove a root, a dataset or a
+whole patient) plus **admin-only auth** on the
 endpoint and a **typed `yes`** on the CLI — not OS permissions.
 
 ## Option A — CLI (`scripts/admin/delete_study.py`)
@@ -99,7 +103,7 @@ psql -d stanford-stroke -c "SELECT count(*) FROM annotations_history WHERE entit
 # Indexer Files rows purged (0 after a full CLI delete or the sweep):
 docker exec ssc-orthanc python3 -c "import sqlite3; \
 print(sqlite3.connect('file:/var/lib/orthanc/db/indexer-plugin.db?immutable=1',uri=True) \
-.execute('SELECT count(*) FROM Files WHERE path LIKE ?', ['/dicom-data/<patient>/<studyUID>/%']).fetchone()[0])"
+.execute('SELECT count(*) FROM Files WHERE path LIKE ?', ['/dicom-data/<slug>/<patient>/<studyUID>/%']).fetchone()[0])"
 ```
 
 Then `python scripts/data_integrity/reconcile.py` should report the affected
@@ -111,6 +115,8 @@ patient as clean.
   ok), and file removal (missing ⇒ ok) all tolerate partial prior runs. If a run
   fails midway, re-run it.
 - **Path safety**: file removal refuses any target not under `dicom_data_root` /
-  `cold_archive_root`, or shallower than `<patient>/<studyUID>` — it can never
-  delete a storage root or a whole patient directory.
+  `cold_archive_root`, or shallower than a study directory — it can never
+  delete a storage root, a dataset directory or a whole patient directory. The
+  orphan sweep reads dataset directories as such (registered slugs), never as
+  patients.
 - **Storage mode**: the CLI requires `cold_path_cache` (the production layout).
