@@ -198,7 +198,8 @@ class TestImportClinical:
             assert _q("SELECT relkind FROM pg_class WHERE relname = 'clinical_data'") == [("v",)]
             assert _q("SELECT stroke_date FROM clinical_data") == [("2017-07-07",)]
         finally:
-            _q("DROP VIEW IF EXISTS clinical_data")
+            kind = _q("SELECT relkind FROM pg_class WHERE relname = 'clinical_data'")
+            _q("DROP VIEW clinical_data" if kind == [("v",)] else "DROP TABLE IF EXISTS clinical_data")
             _q("ALTER TABLE clinical_data_parked RENAME TO clinical_data")
 
     def test_clear_unregisters_but_keeps_the_table(self, mod, csv_file):
