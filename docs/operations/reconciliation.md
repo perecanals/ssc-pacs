@@ -156,7 +156,7 @@ on disk.
   (`image_ingestion_protocols/`) is the biggest source of NULL or broken
   archive paths.  Retry with:
   ```bash
-  python scripts/cold_storage/archive_all_series.py --patient <patient_id>
+  python scripts/cold_storage/archive_all_series.py --patient <patient_key>
   ```
 
 **Investigation:**
@@ -164,8 +164,9 @@ on disk.
 # List all unarchived series
 python scripts/cold_storage/list_unarchived_series.py
 
-# Retry archiving for a specific patient
-python scripts/cold_storage/archive_all_series.py --patient <patient_id>
+# Retry archiving for a specific patient (a patient_key, or a patient_id that
+# names one person)
+python scripts/cold_storage/archive_all_series.py --patient <patient_key>
 ```
 
 ### `orphaned_annotations`
@@ -192,7 +193,22 @@ jq '.mismatches.orphaned_annotations' \
 
 Resolve by re-ingesting the missing entity (if it should exist) or deleting
 the stale annotation via the API / a manual `DELETE` (if the entity is gone
-for good).
+for good). Patient-level annotations are matched on `patient_key` (Alembic
+`0026`).
+
+### `ownership_mismatches`
+
+Imaging whose ownership breaks the identity model (see
+[`linking_patients.md`](linking_patients.md)): a study whose owner
+(`patient_key`) does not exist (`owner_missing`) or whose `subject_id` differs
+from its owner's (`subject_mismatch`), or a series whose owner/subject differs
+from its study's (`differs_from_study`). Ingestion and
+`scripts/admin/link_patients.py` maintain these columns; a non-zero count means
+a manual SQL change bypassed them.
+
+**Investigation:** `jq '.mismatches.ownership_mismatches' <report>.json`, then
+correct the rows with `patient_identity.move_studies` / `link_patients.py`
+rather than by hand, so subjects and mirrors stay consistent.
 
 ---
 

@@ -36,10 +36,15 @@ checks the current role; research data is read-only.
 ### Relationships
 
 The builder uses predefined left joins between labelled patients, studies and
-series, plus series-to-DICOM-tags. Patient and series join directly on
-`patient_id` in either direction; study is not required. When study and series
-are both selected, their join uses `studyinstanceuid` to avoid matching unrelated
-studies from the same patient.
+series, plus series-to-DICOM-tags. Patient and series (or study) join directly on
+`subject_id` — the person (Alembic `0026`) — in either direction; study is not
+required. When study and series are both selected, their join uses
+`studyinstanceuid` to avoid matching unrelated studies from the same patient.
+`patient_id` is not a join key: the same id can be different people in
+different datasets. A person enrolled in several datasets has one
+`patient_labelled` row per enrollment, so a patient↔imaging join yields **one
+row per enrollment** in the cohort — choose a cohort (dataset) to get one per
+person in that dataset.
 
 Unmatched base rows remain in a left join, and multiple matches produce multiple
 output rows. Choose the base table for the desired patient/study/series level.
@@ -127,14 +132,15 @@ automatically.
 Labelled mirrors are eventually consistent and contain that level's labels.
 They do not apply Navigator's annotation inheritance or clinical-date fallback.
 New label columns appear through introspection. Internal reads of
-`label_definitions` supply label metadata; `patient.dataset` supplies authoritative
-cohort membership, so a stale mirror cannot preserve revoked cohort access.
+`label_definitions` supply label metadata; `patient.dataset` (one dataset per
+enrollment) supplies authoritative cohort membership, so a stale mirror cannot preserve revoked cohort access.
 These internal tables cannot be selected in the UI or submitted SQL.
 
 Dataset restrictions are applied to every physical table reference before
 aggregates and limits, including CTEs, subqueries and joins. Studies and series
-link to patients by `patient_id`; tags link through their series. Scoped queries
-exclude rows without a matching patient. User conditions can narrow this scope.
+are in a cohort when any enrollment of their subject is (so linked imaging is
+included); patient rows by their own dataset; tags link through their series.
+Scoped queries exclude rows without a matching patient. User conditions can narrow this scope.
 
 **SQL query** accepts one SELECT using approved tables, functions, types and
 operators. Ordinary joins, non-recursive CTEs, subqueries, CASE, grouping,

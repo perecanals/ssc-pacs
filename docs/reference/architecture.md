@@ -425,8 +425,21 @@ read the database rather than trusting a role embedded in the login token.
 ### 5.4 Dataset-level authorization (per-user cohort access)
 
 Beyond authentication, every non-admin user carries a **dataset scope**:
-`users.allowed_datasets text[]`, a subset of the cohort tags found in
-`patient.dataset` (e.g. `PRECISE`, `CRISP2/LVO`).
+`users.allowed_datasets text[]`, a subset of the registered dataset names
+(`dataset.name`, e.g. `PRECISE`, `CRISP2/LVO`).
+
+Scope follows the identity model (Alembic `0026`, see
+[`data_stores.md`](data_stores.md)): a `patient` row is an **enrollment** — one
+patient id in one dataset, keyed by `patient_key` — and enrollments of the same
+person share a `subject_id`. Each study/series is owned by one enrollment but
+belongs to the whole subject. So a user sees:
+
+- patient rows (and their patient-level labels) of enrollments in their
+  datasets — never another dataset's identifiers or patient labels;
+- every study/series of those enrollments' subjects, wherever it was ingested
+  (study/series labels are shared, being properties of the imaging);
+- on study/series rows, the `patient_id`/`dataset` columns list only the
+  in-scope enrollments of the subject.
 
 - **Deny by default** — an empty grant set (the default for new users) means
   the user sees *no* patient data until an admin grants datasets.
@@ -434,8 +447,10 @@ Beyond authentication, every non-admin user carries a **dataset scope**:
 - **Enforced server-side on every endpoint** that returns or mutates
   patient-derived data:
   - the list endpoints (`/api/patients`, `/api/studies`, `/api/series`, plus
-    sidebar option endpoints) filter rows to patients whose `dataset`
-    overlaps the scope (`dataset && allowed`);
+    sidebar option endpoints) filter patient rows by `dataset = ANY(allowed)`
+    and imaging by "some enrollment of the subject is in scope"
+    (`common.subject_scope_sql`); label filters on patient labels from a
+    study/series only match in-scope enrollments;
   - detail endpoints keyed by a patient/study/series id (sub-row listings,
     `/api/ohif-link`, warm/evict/cache-status, annotation reads/writes)
     return **404** for out-of-scope ids, so they are indistinguishable from
@@ -444,10 +459,19 @@ Beyond authentication, every non-admin user carries a **dataset scope**:
     scoped entity — the StudyInstanceUID (path or QIDO query param), or,
     failing that, the PatientID (`00100020`/`PatientID` query param; OHIF's
     study-browser panel searches by PatientID) — and rejects out-of-scope
-    requests with 403. Lookups are served from in-process TTL caches
-    (`web-app/dataset_access.py`: user scope 30 s, study/patient→datasets
-    5 min), so per-frame WADO requests cost no DB round-trips. QIDO searches
-    with neither identifier are denied for non-admins.
+    requests with 403. A **PatientID is not an identity**: it is the bare id
+    in the files, and Orthanc groups patients by it alone, so one PatientID
+    can cover different people from different datasets (one Orthanc patient
+    for both). A PatientID request is therefore allowed only when every study
+    under it is visible — except a QIDO study search
+    (`/dicom-web/studies?PatientID=`), which is let through with its JSON
+    response filtered to the visible studies (`proxy.filter_qido_studies`).
+    Lookups are served from in-process TTL caches (`web-app/dataset_access.py`:
+    user scope 30 s, study/PatientID→datasets 5 min), so per-frame WADO
+    requests cost no DB round-trips — and an unlink
+    (`scripts/admin/link_patients.py`) can take up to 5 min to revoke access
+    in a running app unless it is restarted. QIDO searches with neither
+    identifier are denied for non-admins.
   - The proxy also strips `Modality` (0008,0060) from `includefield` on
     study-level QIDO searches (`routes/proxy.py:sanitize_study_search_query`):
     it is a series-level tag, so Orthanc answers it by opening one stored

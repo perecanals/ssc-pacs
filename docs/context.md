@@ -30,6 +30,7 @@ One **Orthanc** container (`ssc-orthanc`), one native-host **Web App** service o
 | Two-DB reconciliation (image_series vs Orthanc) | [`operations/reconciliation.md`](operations/reconciliation.md) |
 | Deleting studies/series (CLI + admin UI, 3 layers) | [`operations/deleting_studies.md`](operations/deleting_studies.md) |
 | Per-user dataset access (grants, /admin page, enforcement) | [`reference/architecture.md` §5.4](reference/architecture.md) + [`operations/commands.md`](operations/commands.md) |
+| Patient identity: datasets, enrollments, linking patients across datasets | [`operations/linking_patients.md`](operations/linking_patients.md) |
 | Annotation audit trail (history table, trigger, API) | [`operations/annotation_history.md`](operations/annotation_history.md) |
 | Backup strategy (Tier 1 active, Tier 2 dormant) | [`operations/backup_strategy.md`](operations/backup_strategy.md) |
 | Remote encrypted backups (opt-in SSH/SFTP jobs, retention, activation) | [`operations/remote_backups.md`](operations/remote_backups.md) |

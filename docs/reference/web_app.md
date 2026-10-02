@@ -248,8 +248,9 @@ when the sidebar label is cleared.
 ### 5.6 Per-user dataset access
 
 Every non-admin user has a dataset scope (`users.allowed_datasets`, a subset
-of the `patient.dataset` cohort tags such as `PRECISE` / `CRISP2/LVO`) that
-gates what they see:
+of the registered dataset names such as `PRECISE` / `CRISP2/LVO`) that gates
+what they see — the patients enrolled in those datasets and all imaging of
+those people (see [`../operations/linking_patients.md`](../operations/linking_patients.md)):
 
 - list endpoints return only in-scope patients (and their studies/series);
   the sidebar's Dataset and Import-label option lists narrow the same way

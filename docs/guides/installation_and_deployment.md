@@ -604,8 +604,9 @@ Pre-commit hooks run locally before each commit if installed via `make install-d
 Common actions after deployment:
 
 Add a user. **Dataset grants are deny-by-default**: a non-admin created
-without `--datasets` sees **no data at all** — grant the `patient.dataset`
-cohorts the user may see at creation time (or later with `set-datasets`):
+without `--datasets` sees **no data at all** — grant the registered datasets
+(`scripts/admin/manage_datasets.py list`) the user may see at creation time (or
+later with `set-datasets`):
 
 ```bash
 python scripts/admin/manage_users.py add <username> --datasets 'PRECISE,CRISP2/LVO'

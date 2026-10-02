@@ -100,13 +100,20 @@ overwrite_if_exists: false
 anonymize_files: false
 delete_originals_after_verification: false
 import_label: "2026-04-batch"               # optional, tags all rows in this run
-dataset: "crisp2"                           # optional, cohort tag recorded on the patient table
+dataset: "CRISP2/LVO"                       # required: a registered dataset name
 ```
 
 A *case* is one immediate subdirectory of `src_dir`; its name is only a label
-for logs and resume. Identity comes from each file's `PatientID`, so a case may
-hold several patients (each becomes its own `patient` row, directory tree and
-Orthanc patient) and the same patient may span several cases.
+for logs and resume. Identity comes from each file's `PatientID` **within the
+batch's `dataset`**: each PatientID becomes an *enrollment* — a `patient` row
+keyed `<dataset slug>__<PatientID>` (Alembic `0026`) — so a case may hold several
+patients (each its own enrollment, directory tree and Orthanc patient), the same
+patient may span several cases, and **the same PatientID in another dataset is
+another patient**, never merged into this one. To declare that a patient here
+is the same person as one in another dataset, link them with
+`scripts/admin/link_patients.py` (see
+[`../operations/linking_patients.md`](../operations/linking_patients.md)) —
+before ingesting, when both datasets carry the same imaging.
 
 | Key | Purpose |
 |---|---|
@@ -118,7 +125,7 @@ Orthanc patient) and the same patient may span several cases.
 | `skip_dir_names` | List of directory basenames pruned from the source walk (default `[]`), e.g. `[NIFTI]` for a tree that carries derived volumes next to the DICOM series. Matched on the basename at any depth; skipped dirs are counted in the per-case scan summary. |
 | `delete_originals_after_verification` | After verifying every file copied successfully, remove the source case directory |
 | `import_label` | Free-text tag written to `import_label` column in both tables — useful for filtering a batch later |
-| `dataset` | Optional cohort/dataset tag. Recorded only on the `patient` table (`dataset text[]`, union-accumulated across batches); not written to `image_study`/`image_series`. |
+| `dataset` | **Required.** The registered dataset (its display name, e.g. `CRISP2/LVO`) this batch is ingested into — register new ones with `scripts/admin/manage_datasets.py add`. The driver raises `ValueError` at config load when it is missing and the protocol refuses an unregistered name. Each PatientID becomes an enrollment in it (`patient.dataset`); it is also what users' dataset grants filter on. |
 | `cold_archive_root` | **Optional override.** Defaults to `[storage].cold_archive_root` from `config.toml` when `mode = "cold_path_cache"`, or `null` in legacy mode. The script warns if you override and the override differs from `config.toml`. |
 | `cleanup_loose_after_indexing` | `cold_path_cache` only (ignored with a warning in legacy mode). Default `true`: after each case's Orthanc indexing verifies, delete its series' loose `DICOM/` dirs (same safety checks as `cleanup_loose_dicoms.py`; NIFTI siblings preserved). Set `false` to keep loose files until a manual cleanup pass. See "Cleanup of loose DICOMs after ingestion". |
 | `resume` | Default `true`. Skip cases that prior logs for this `src_dir` prove were successfully completed; failed/interrupted cases re-run (see "Resume"). CLI `--no-resume` overrides. |
@@ -162,8 +169,11 @@ Each series ends up at:
           NIFTI/image.nii.gz  ← only in legacy mode; skipped in cold_path_cache
 ```
 
-`dicom_dir_path` in `image_series` points at the `DICOM/` directory. The
-NIFTI sibling, when present, is at `.../<seriesUID>/NIFTI/image.nii.gz`.
+`{patient_id}` is the owning enrollment's PatientID (no dataset level yet), so
+same-id patients of different datasets share a `{patient_id}/` folder; their
+studies never collide (one owner per StudyInstanceUID), and tools treat
+`{studyinstanceuid}/` as the unit. `dicom_dir_path` in `image_series` points at
+the `DICOM/` directory. The NIFTI sibling, when present, is at `.../<seriesUID>/NIFTI/image.nii.gz`.
 In `cold_path_cache` mode this sibling is not produced by the protocol —
 generate NIFTIs on demand via `scripts/dicom/dicom_to_nifti.py`.
 
@@ -193,16 +203,17 @@ the tar.
 |------|--------|-------|
 | 1 | `create_series_table` | Recursively walks `case_dir` (pruning `skip_dir_names`), reads each file's DICOM header, and **buckets files by `SeriesInstanceUID`** — one DataFrame row per real series, with the aggregated list of source file paths. A series is defined by its UID, not its folder: same-UID files spread across folders are **merged** into one row; a "mixed" folder holding several UIDs is **split** into its true series; `number_of_slices` = count of files carrying that UID. Files under one UID that disagree on `SeriesNumber`/`StudyInstanceUID` (a standard violation) trigger a **loud WARNING** and are kept merged — a suspected true UID collision to inspect at source (no split, no UID re-mint). This guarantees the upsert conflict key is unique within the batch. See [How series are identified](#how-series-are-identified). |
 | 2 | `create_study_table` | Groups series by StudyInstanceUID, computes per-study metadata, and classifies `study_type` (BASELINE/FOLLOW_UP) from `stroke_date`. **Kept-dormant-by-design:** the classifier still runs and the value is stored, but nothing downstream currently consumes `study_type` beyond display — retained for planned future use, not an active feature. |
+| 2b | `_resolve_dataset` + `resolve_ownership` | Requires the batch `dataset` to be registered, then stamps every study/series row with its **owner** (`patient_key`, `subject_id`). A new study is owned by the incoming enrollment (`<slug>__<PatientID>`). A study already in the DB keeps its owner: if that owner is the same person (same subject — a linked dataset re-sending shared imaging) the rows take the owner's key and `patient_id`, so files land in the owner's tree; if it is a **different person**, the case is **refused** with the UIDs and both keys — before step 3, so an overwrite never deletes another person's files. |
 | 3 | `filter_existing_studies` | Decides per study/series what to do given the current DB state. Always loads both `image_study` and `image_series` for the scanned `StudyInstanceUID`s. **Append mode (`overwrite_if_exists=false`):** for studies already in DB, drops the study row from the working set so the persisted `import_id` / `import_label` / `study_path` are preserved; then per series, drops the series row if `(SeriesUID, number_of_slices)` matches DB, keeps it for re-ingest if the slice count drifted (and wipes the stale `dicom_dir_path` and `dicom_archive_path` from disk before re-copy), keeps it if the SeriesUID is new, or warns-and-skips if DB `number_of_slices` is NULL. **Overwrite mode (`overwrite_if_exists=true`):** calls `overwrite_existing_study()`, which deletes the on-disk DICOM directories, stale cold archives, and the rows in `image_study`, `image_series`, `image_study_labelled`, and `image_series_labelled` for that study, all in one transaction — orphan rows from series that no longer exist on disk cannot survive. |
 | 4 | `load_clinical_data_table` | Reads `clinical_data` |
-| 5 | `validate_studies_against_clinical_data` | Flags each study with `clinical_match_found` (does `patient_id` have a `clinical_data` row?) and warns per unmatched patient. Nothing is dropped — the flag only informs timepoint anchoring (step 6). |
+| 5 | `validate_studies_against_clinical_data` | Flags each study with `clinical_match_found` (does `patient_id` have a `clinical_data` row?) and warns per unmatched patient. Nothing is dropped. Skipped when config.toml `[web-app] clinical_data_dataset` names another dataset — `clinical_data.study_id` holds that dataset's ids, so a same-id patient here is someone else. |
 | 6 | `assign_import_id` / `assign_import_label` | Tags all rows with the batch import_id/label |
 | 7 | `add_paths_and_copy_dicom_files` | **Copies DICOMs** from source → `{dicom_data_root}/{patient_id}/{studyUID}/{seriesDesc}/{seriesUID}/DICOM/`. Copies the series' aggregated file list (which may span several source folders); on a destination basename collision it **renames** the file (`…__dupN`) so nothing is overwritten. Optionally anonymizes (see `anonymize_files`; the headers were already anonymised in step 1 so DB and files agree). Sets `dicom_dir_path` and records the source→dest pairs for verification. |
 | 8 | `compress_cold_archives` | **Only if `cold_archive_root` is set.** For each series, creates `{cold_archive_root}/.../DICOM.tar.zst`. Sets `dicom_archive_path` on each row. **Per-series strict, batch soft**: each archive is built to a `.tmp` sibling, member-count verified, and atomically renamed — so a published archive is always valid. A failure on one series does NOT abort the case; the loop continues and failures are collected. After the loop, a WARNING is printed summarizing `N/M` failed, and a JSON report is written to `image_ingestion_protocols/logs/compression_failures_<timestamp>.json` (includes seriesinstanceuid, studyinstanceuid, dicom_dir_path, error). Failed rows keep `dicom_archive_path = NULL` — retriable via `scripts/cold_storage/archive_all_series.py --patient <id>`. Idempotent: existing archives are re-verified rather than rebuilt; corrupted ones are detected and rebuilt. |
 | 9 | `create_nifti_files` | In `legacy` mode: runs DICOM→NIFTI conversion for select series and writes `{seriesUID}/NIFTI/image.nii.gz`. In `cold_path_cache` mode (production): **skipped by design** — NIFTIs would orphan once their sibling loose DICOMs are cleaned up. The conversion code is kept-dormant-by-design (available for a future legacy-style run); generate NIFTIs on demand via `scripts/dicom/dicom_to_nifti.py` (see [`../recipes/dicom_processing.md`](../recipes/dicom_processing.md)). |
 | 10 | `format_column_names` | Normalizes DataFrame column names, including adding `dicom_archive_path` to the set of columns to upsert |
 | 11 | `_require_import_id_columns` / `_require_import_label_columns` / `_require_number_of_slices_column` / `_require_dicom_archive_path_column` | Auto-DDL: `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` for any columns the protocol writes that don't yet exist. Safe to run against a fresh DB. |
-| 12 | `update_postgres_tables` | Upserts `image_series`, `image_study`, then `patient` — all in one transaction. `_upsert_patient` registers one row per patient, **imaging-derived only** (no clinical join): `stroke_date = MIN(image_study.acquisitiondatetime)` (recomputed across all of the patient's studies), `import_id`/`import_label` keep the **origin** (first-seen, preserved on conflict), and `dataset` is the deduped union of the `dataset` config across batches. As a belt-and-suspenders guard, `_upsert_dataframe` drops any rows duplicated on the conflict key (keep-last, with a WARNING) before the INSERT — so a stray duplicate can never again roll back a whole case via `CardinalityViolation` (`ON CONFLICT DO UPDATE` cannot touch the same target twice). |
+| 12 | `update_postgres_tables` | Upserts `image_series`, `image_study`, then `patient` — all in one transaction. Ownership (`patient_key`/`subject_id`) is written on insert only: a re-ingest never moves it. `_upsert_patient` registers one enrollment per (batch `dataset`, PatientID) — a new one is its own subject — **imaging-derived only** (no clinical join): `stroke_date = MIN(acquisitiondatetime)` over the subject's studies, written to every enrollment of the subject; `import_id`/`import_label` keep the **origin** (first-seen, preserved on conflict). Then, per touched subject: series ranks (`NCCT_1`, …) and episodes/timepoints over *all* of the subject's studies (`subject_timepoints.recompute_subject_timepoints`). As a belt-and-suspenders guard, `_upsert_dataframe` drops any rows duplicated on the conflict key (keep-last, with a WARNING) before the INSERT — so a stray duplicate can never again roll back a whole case via `CardinalityViolation` (`ON CONFLICT DO UPDATE` cannot touch the same target twice). |
 | 13 | `verify_ingested_case` + `delete_original_case_dir` | **Only if `delete_originals_after_verification=true`.** Iterates the recorded source→dest pairs (so it survives the collision-rename case), byte-compares each copied file against its source, then removes the source case directory. |
 
 Return value: `{"studyinstanceuids": [...], "seriesinstanceuids": [...]}` —
@@ -358,11 +369,16 @@ python scripts/admin/reclassify_series_types.py --execute   # apply
 
 `image_study.timepoint` answers *when* a study happened relative to the
 intervention: `BL` (before), `THROMBECTOMY` (the procedure study itself), `FU`
-(after), or `NULL`. Assigned by `assign_study_timepoints()`, which must run after
-`load_clinical_data_table()` — the anchor lives in `clinical_data`, which
-`create_study_table()` (earlier in the sequence) cannot see. The per-patient
-logic lives in `series_classification.assign_patient_timepoints()`, shared with
-`scripts/admin/recompute_timepoints.py` so ingestion and backfill can't diverge.
+(after), or `NULL`. Computed **per subject** (one person, possibly several
+dataset enrollments) over all of the subject's studies, at the end of each case's
+upsert, by `subject_timepoints.recompute_subject_timepoints()` — so a new study
+can open a new episode or re-anchor an earlier one (the old per-batch assignment
+could not, which left a few timepoints stale). The classifier itself is
+`series_classification.assign_patient_timepoints()`, shared with
+`scripts/admin/recompute_timepoints.py`, `reclassify_series_types.py` and the
+link/split tools so they can't diverge. The clinical anchor comes from the
+subject's enrollment in config's `clinical_data_dataset` (any enrollment when
+unset).
 
 > **The anchor is femoral-sheath puncture, NOT stroke onset.** `BL` means
 > *pre-thrombectomy*, not *post-onset*. `patient.stroke_date` is a different clock
@@ -370,11 +386,13 @@ logic lives in `series_classification.assign_patient_timepoints()`, shared with
 
 **Episodes (`image_study.episode`).** A patient's studies are first split into
 episodes: sorted by acquisition time, a gap greater than **45 days** starts a new
-1-based episode. A handful of patients (the `11-*` cohort, ~15 in all) carry two
-distinct stroke episodes months apart, and a single per-patient anchor scored one
-episode's imaging against the *other* episode's puncture — a whole episode
-mislabelled `BL` with `hours_to_event` in the tens of thousands. Each episode is
-now anchored independently.
+1-based episode. A few patients carry distinct stroke episodes months apart, and a
+single per-patient anchor scored one episode's imaging against the *other*
+episode's puncture — a whole episode mislabelled `BL` with `hours_to_event` in the
+tens of thousands. Each episode is now anchored independently. (The `11-*`
+"multi-episode cohort" that prompted this was in fact pairs of *different people*
+sharing an id across CRISP2/LVO and PRECISE, merged into one patient before
+Alembic `0026`; they are now separate subjects, one episode each.)
 
 **Per-episode anchor precedence.** For the episode the clinical puncture falls in
 (nearest-window match), the puncture is used; any other episode falls back to its

@@ -31,15 +31,32 @@ This is where the web app reads metadata and stores annotations and preferences.
 
 These tables drive browsing in the Navigator UI:
 
+- **`dataset`** (dataset registry, Alembic `0026_patient_identity`)
+  - one row per dataset: `slug` (PK, immutable, `^[a-z0-9]+(-[a-z0-9]+)*$` —
+    the prefix of every `patient_key`), `name` (unique display name — what
+    users, grants, filters, saved exports and ingestion YAMLs use; renamed
+    with `scripts/admin/manage_datasets.py rename`), `created_at`.
+  - ingestion refuses an unregistered dataset; register with
+    `manage_datasets.py add`. A dataset can be granted before anything is
+    ingested into it.
 - **`patient`** (patient-level registry — the patient-tab spine)
-  - one row per patient in the database, populated equivalently to
-    `image_study`/`image_series` by the ingest pipeline (idempotent upsert) and
-    backfillable from imaging. Comprehensive: a patient appears here whether or
-    not a clinical row exists in `clinical_data`.
-  - fields: `patient_id` (PK), `stroke_date` (imaging-derived =
-    `MIN(image_study.acquisitiondatetime)`), `import_id`/`import_label` (origin
-    batch, preserved on conflict), `dataset` (`text[]`, union-accumulated),
-    `created_at`, `updated_at`
+  - one row per **enrollment**: one patient id in one dataset (Alembic `0026`).
+    The same `patient_id` in two datasets is two rows — possibly two different
+    people. Populated by the ingest pipeline (idempotent upsert) and by
+    `scripts/admin/link_patients.py`. Comprehensive: a patient appears here
+    whether or not a clinical row exists in `clinical_data`.
+  - fields: `patient_key` (PK, `<dataset slug>__<patient_id>`, e.g.
+    `crisp2-lvo__11-001`), `patient_id` (the id as the dataset knows it),
+    `dataset` (`text`, FK → `dataset.name` `ON UPDATE CASCADE`),
+    `subject_id` (the person: enrollments sharing it are the same person —
+    defaults to the row's own key; see
+    [`../operations/linking_patients.md`](../operations/linking_patients.md)),
+    `stroke_date` (imaging-derived = `MIN(acquisitiondatetime)` over the
+    subject's studies), `import_id`/`import_label` (origin batch, preserved on
+    conflict), `created_at`, `updated_at`. Unique `(dataset, patient_id)`.
+  - Join imaging to patients through `subject_id`, never `patient_id`:
+    `patient_id` is not unique, and a linked person's imaging may be owned by
+    an enrollment with another id.
   - **Imaging-derived only — do not add clinical columns here.** Alembic `0017`
     added a `femoral_sheath_time` column and `0018` removed it again: a column
     per clinical variable means a migration on an upstream-owned table, a
@@ -63,21 +80,28 @@ These tables drive browsing in the Navigator UI:
     `time_recognized` — to anchor `image_study.timepoint` on the thrombectomy
     puncture. That is the *only* other sanctioned read; do not widen it.
   - key fields: `study_id` (the patient id; joined as `c.study_id = patient.patient_id`), `stroke_date` (TEXT)
+  - **Belongs to one dataset**, but has no dataset column: config.toml
+    `[web-app] clinical_data_dataset` names it, and every clinical join also
+    requires `patient.dataset = <that>` — otherwise a same-id patient from
+    another dataset is matched to someone else's clinical row. Imaging reads
+    it through the subject's enrollment in that dataset.
   - Contains identifiable clinical data. Treat as sensitive: query it in the
     aggregate, and don't page through row values without a reason.
 - **`image_study`** (study-level imaging metadata)
   - typical fields: `patient_id`, `studyinstanceuid`, `studydescription`, `study_type`, `study_path`, `acquisitiondatetime`, `import_id`, `import_label`
+  - **ownership** (Alembic `0026`): `patient_key` — the enrollment that owns the study (the first to ingest it; never moved by a re-ingest) — and `subject_id`, that enrollment's person (denormalized; scope checks and patient joins go through it). `patient_id` stays the DICOM PatientID and on-disk folder name. A study is visible from every enrollment of its subject.
   - **`modalities text[]`** (Alembic `0025_study_modalities`): machine-maintained, sorted distinct uppercase modalities from all persisted child series. Whitespace and blank values are removed; NULL means no known modality. Ingestion refreshes it transactionally after upserts (including appends and series reparenting); series deletion refreshes the surviving parent. The API presents this array as the existing `modality` string, e.g. `CT, SR`. Direct SQL series changes must explicitly refresh the rollup with `web-app/study_metadata.py`.
   - storage-size rollups (Alembic `0012`, `double precision`, decimal MB): `compressed_size_mb`, `decompressed_size_mb` — stay NULL until every child series has that size
   - classification: **`study_type`** — machine-derived from `StudyDescription` at ingest, plus `study_type_version` (Alembic `0015`). See [`image_ingestion_protocol.md`](image_ingestion_protocol.md) §How `series_type` and `study_type` are detected
-  - temporal (Alembic `0015`, extended `0016`): **`timepoint`** (`BL` / `THROMBECTOMY` / `FU` / NULL), `timepoint_anchor_source`, `hours_to_event` (signed), `timepoint_version`, **`episode`** (1-based, `0016`). Anchored **per episode** on the **femoral-sheath puncture** from `clinical_data` — *not* stroke onset, so `BL` means pre-thrombectomy — falling back to the episode's own `THROMBECTOMY` study when there is no clinical anchor (`timepoint_anchor_source = 'thrombectomy_study'`, covers non-LVO patients + the second episode of the `11-*` multi-episode cohort). Only 59% of clinical rows carry a recorded puncture; the rest are `+5h`/`+10h` estimates, which is why `timepoint_anchor_source` exists — filter on it before trusting a timepoint. `acquisitiondatetime_source` (`0016`, `acquisition` | `study`) records which DICOM clock built `acquisitiondatetime`. See [`image_ingestion_protocol.md`](image_ingestion_protocol.md) §How `timepoint` is detected
+  - temporal (Alembic `0015`, extended `0016`): **`timepoint`** (`BL` / `THROMBECTOMY` / `FU` / NULL), `timepoint_anchor_source`, `hours_to_event` (signed), `timepoint_version`, **`episode`** (1-based, `0016`). Anchored **per episode** on the **femoral-sheath puncture** from `clinical_data` — *not* stroke onset, so `BL` means pre-thrombectomy — falling back to the episode's own `THROMBECTOMY` study when there is no clinical anchor (`timepoint_anchor_source = 'thrombectomy_study'`, covers non-LVO patients and later episodes). Episodes are computed **per subject** — over all of a person's studies across linked enrollments — after every ingest. (The "`11-*` multi-episode cohort" that motivated `0016` turned out to be pairs of different people merged under one id; `0026` + `split_merged_patients.py` separated them.) Only 59% of clinical rows carry a recorded puncture; the rest are `+5h`/`+10h` estimates, which is why `timepoint_anchor_source` exists — filter on it before trusting a timepoint. `acquisitiondatetime_source` (`0016`, `acquisition` | `study`) records which DICOM clock built `acquisitiondatetime`. See [`image_ingestion_protocol.md`](image_ingestion_protocol.md) §How `timepoint` is detected
 - **`image_series`** (series-level imaging metadata)
   - typical fields: `patient_id`, `studyinstanceuid`, `seriesinstanceuid`, `seriesdescription`, `modality`, `acquisitiondatetime`, `acquisitiondatetime_source` (`0016`)
+  - ownership: `patient_key`, `subject_id` — always its study's (checked as `ownership_mismatches` by reconciliation)
   - file pointers: `dicom_dir_path`, `nifti_path`
   - optional cold storage: **`dicom_archive_path`** — path to per-series `*.tar.zst` when using `cold_path_cache` mode
   - storage sizes (Alembic `0012`, `double precision`, decimal MB): `compressed_size_mb`, `decompressed_size_mb`
   - classification: **`series_type`** — one of `NCCT` / `CTA` / `CTP` / `PWI` / `DWI` (the reference implementation's five) plus `ADC` / `MRA_TOF` / `MRA_CE`, or NULL. Everything else in that taxonomy (bone, dual-energy, topogram, test bolus, RAPID output, projections, CT reformats, DSA) is an **exclusion, not a type** — `series_type` is NULL and **`series_type_rule`** records which exclusion fired, so a NULL is a decision, not a failure. ~84% of the corpus is NULL; read the rule before concluding a series is unclassified. Plus `series_type_version` (Alembic `0015`). See [`image_ingestion_protocol.md`](image_ingestion_protocol.md) §How `series_type` and `study_type` are detected
-  - preference rank (Alembic `0015`): **`series_type_rank`** (integer, 1 = the series of that type to use for this patient) and **`series_label`** = `series_type || '_' || series_type_rank`, e.g. `NCCT_1` — the value to *display* and to filter on. NULL exactly when `series_type` is NULL. A window function over the patient's other series, so it is a plain column, not GENERATED; recomputed wholesale by `scripts/admin/reclassify_series_types.py`
+  - preference rank (Alembic `0015`): **`series_type_rank`** (integer, 1 = the series of that type to use for this person — ranked per subject since `0026`) and **`series_label`** = `series_type || '_' || series_type_rank`, e.g. `NCCT_1` — the value to *display* and to filter on. NULL exactly when `series_type` is NULL. A window function over the patient's other series, so it is a plain column, not GENERATED; recomputed wholesale by `scripts/admin/reclassify_series_types.py`
   - ingestion bookkeeping: `import_id`, `import_label`
   - geometry-derived: `imageshape`, **`number_of_slices`**, `slicethickness`, `scanaxialcoverage_mm`
 
@@ -101,7 +125,7 @@ for the workflow when adding a new revision.
 - **`label_value_options`**: known values (controlled vocabulary) per select-type label. Indexed `(label, value)` lookup kept in sync on annotation writes and label-definition creation; the live source feeding the inline-edit dropdown and the column filter (replaces a `SELECT DISTINCT` scan of `annotations`). Global (not dataset-scoped); values persist once created.
 - **`user_preferences`**: per-user persisted table layout/state and Navigator session state (JSONB).
 - **`series_dicom_tags`** (Alembic `0015`): one row per series holding the full DICOM tag set of a representative instance as `jsonb` (keyed by pydicom *keyword*; private tags under a `_private` sub-key), plus the cross-instance aggregates no single header carries — `same_position_count` (the CTP/PWI/DWI discriminator, previously computed at ingest and discarded), `n_positions`, `n_instances_scanned`, `distinct_kernels`, `distinct_image_types`. GIN-indexed on `tags`, so `tags ? 'ConvolutionKernel'` / `tags @> '{...}'` are cheap. This is what makes classification *iterable*: re-deriving `series_type` for the whole corpus becomes a table scan (seconds) instead of a re-read of every cold archive (~45 min). Written by ingestion in the same transaction as `image_series`; backfilled by `maintenance/scripts/backfill_series_dicom_tags.py`. Keyed `seriesinstanceuid text PRIMARY KEY` with **no FK** to `image_series` — same pattern as `series_cache_state`, because `image_series` is upstream-owned (`alembic/env.py:UPSTREAM_TABLES`).
-- **`patient_labelled` / `image_study_labelled` / `image_series_labelled`**: per-level mirror tables that join each source table with its level's annotations pivoted into label columns. Maintained (eventually consistent) by `web-app/labelled_table_sync.py` — refreshed in the background after each annotation write and once per batch at the end of an ingestion run. Used for labelled-pivot / export views; the live table read path never depends on them. (These replaced the former `snapshot_*` tables, dropped by Alembic `0013_drop_snapshot_tables`.)
+- **`patient_labelled` / `image_study_labelled` / `image_series_labelled`**: per-level mirror tables that join each source table with its level's annotations pivoted into label columns. Maintained (eventually consistent) by `web-app/labelled_table_sync.py` — refreshed in the background after each annotation write and, for all three levels, once per batch at the end of an ingestion run. `patient_labelled` has one row per enrollment, unique on `patient_key`; all three carry `patient_key`/`subject_id`. Used for labelled-pivot / export views; the live table read path never depends on them. (These replaced the former `snapshot_*` tables, dropped by Alembic `0013_drop_snapshot_tables`.)
 
 Audit:
 
@@ -146,7 +170,8 @@ The Alembic revisions under `alembic/versions/` are authoritative (app startup o
 id                  SERIAL PRIMARY KEY
 seriesinstanceuid   TEXT            (nullable, used only for level='series')
 studyinstanceuid    TEXT            (nullable, used for level='study' and 'series')
-patient_id          TEXT            (nullable, used for all levels)
+patient_key         TEXT            (level='patient' only: the enrollment, 0026)
+patient_id          TEXT            (nullable; the entity's patient id, informational)
 label               TEXT NOT NULL
 value               TEXT
 level               TEXT NOT NULL DEFAULT 'series'
@@ -160,7 +185,7 @@ Partial unique indexes (shared annotations — one value per entity+label):
 
 - `idx_ann_shared_series` on `(seriesinstanceuid, label) WHERE level = 'series'`
 - `idx_ann_shared_study` on `(studyinstanceuid, label) WHERE level = 'study'`
-- `idx_ann_shared_patient` on `(patient_id, label) WHERE level = 'patient'`
+- `idx_ann_shared_patient` on `(patient_key, label) WHERE level = 'patient'` (`0026`; was `patient_id` — a patient label belongs to one enrollment, so the same person's other datasets keep their own value)
 
 ### `label_definitions`
 
@@ -270,9 +295,10 @@ While the flag is TRUE the API rejects every non-auth endpoint with
 `403 password_change_required`. `password_changed_at` is stamped when the user
 last self-set their password (NULL means never self-chosen).
 
-`allowed_datasets` holds the user's dataset grants — the `patient.dataset`
-cohort tags they may see (deny-by-default: empty = no patient data; admins
-bypass). Managed via the `/admin` page or `manage_users.py set-datasets`;
+`allowed_datasets` holds the user's dataset grants — registered dataset names
+(deny-by-default: empty = no patient data; admins bypass). A user sees the
+enrollments in those datasets, their patient labels, and every study of their
+subjects — including imaging another dataset ingested. Managed via the `/admin` page or `manage_users.py set-datasets`;
 enforced by every patient-data endpoint and the DICOMweb proxy (see
 [`architecture.md`](architecture.md) §5.4).
 
@@ -335,7 +361,7 @@ unchanged. Names need not be unique.
 
 ## How the web app queries the DB
 
-- **Patients**: listed from the `patient` registry. When `clinical_data` exists it is LEFT JOINed on `c.study_id = p.patient_id` to display `COALESCE(c.stroke_date, p.stroke_date::date::text)` — the clinical date when matched, the imaging-derived date otherwise. When it does not (`common.table_exists` is false), the join is dropped and the expression is just `p.stroke_date::date::text`. Filter, sort, and SELECT all reuse the one expression, so the two branches cannot drift.
+- **Patients**: listed from the `patient` registry. One row per enrollment. When `clinical_data` exists it is LEFT JOINed on `c.study_id = p.patient_id` (and `p.dataset = clinical_data_dataset` when configured) to display `COALESCE(c.stroke_date, p.stroke_date::date::text)` — the clinical date when matched, the imaging-derived date otherwise. When it does not (`common.table_exists` is false), the join is dropped and the expression is just `p.stroke_date::date::text`. Filter, sort, and SELECT all reuse the one expression, so the two branches cannot drift.
 - **Studies**: listed from `image_study`; the stored `modalities` array is rendered as the `modality` string by both study-list APIs. Study modality sorting uses that string with NULLs last; the existing case-insensitive substring filter still matches child series. Both study-list APIs also return `number_of_series`, counted live from all matching `image_series` rows using the study-UID index. This is a derived API field, with zero for empty studies; it is not a stored column and needs no migration or backfill. Browsing filters do not reduce the count, and imports/deletions are reflected on the next fetch.
 - **Series**: listed from `image_series` and LEFT JOINs `image_study` to include `study_type`.
 - **Annotations** are joined/attached per row and **inherit downward** (patient → study → series) in API responses.
