@@ -69,6 +69,41 @@ _test_dsn = dict(
 )
 
 
+# Test-only convenience: many fixtures insert imaging rows the way ingestion did
+# before Alembic 0026, naming only patient_id. Ingestion now stamps the owning
+# enrollment (patient_key) and its subject; this trigger does the same for such
+# fixture rows, from the patient's owner enrollment (the one whose key is its
+# subject). Rows that set the columns explicitly are left alone. Production has
+# no such trigger — ingestion and scripts/admin/link_patients.py maintain
+# ownership, covered by the ingestion suite's scratch DB.
+_OWNERSHIP_FILL_SQL = """
+CREATE OR REPLACE FUNCTION test_fill_imaging_owner() RETURNS trigger AS $$
+BEGIN
+    IF NEW.patient_key IS NULL AND NEW.patient_id IS NOT NULL THEN
+        SELECT p.patient_key, p.subject_id INTO NEW.patient_key, NEW.subject_id
+        FROM patient p
+        WHERE p.patient_id = NEW.patient_id AND p.patient_key = p.subject_id
+        ORDER BY p.patient_key LIMIT 1;
+    END IF;
+    RETURN NEW;
+END $$ LANGUAGE plpgsql;
+CREATE TRIGGER test_fill_study_owner BEFORE INSERT ON image_study
+    FOR EACH ROW EXECUTE FUNCTION test_fill_imaging_owner();
+CREATE TRIGGER test_fill_series_owner BEFORE INSERT ON image_series
+    FOR EACH ROW EXECUTE FUNCTION test_fill_imaging_owner();
+"""
+
+
+def _install_ownership_fill(dsn):
+    conn = psycopg2.connect(**dsn)
+    try:
+        with conn.cursor() as cur:
+            cur.execute(_OWNERSHIP_FILL_SQL)
+        conn.commit()
+    finally:
+        conn.close()
+
+
 # ---------------------------------------------------------------------------
 # Session-scoped: create the scratch DB, run Alembic migrations, seed data.
 # ---------------------------------------------------------------------------
@@ -99,6 +134,7 @@ def test_db():
 
     cfg = Config(str(_REPO_ROOT / "alembic.ini"))
     command.upgrade(cfg, "head")
+    _install_ownership_fill(_test_dsn)
 
     if old_url is None:
         os.environ.pop("DATABASE_URL", None)
@@ -124,9 +160,10 @@ TEST_USER = "testuser"
 TEST_PASSWORD = "testpass123"
 
 # Non-admin users with dataset scopes (deny-by-default access control).
-# Seeded patients: P-0001 in {lvo, crisp2}, P-0002 in {lvo} — so:
-#   USER_LVO sees both patients, USER_CRISP sees only P-0001,
-#   USER_NONE (no grants) sees nothing.
+# Seeded patients: P-0001 is enrolled in lvo (owning its imaging) and in crisp2
+# (a linked enrollment of the same subject); P-0002 only in lvo — so:
+#   USER_LVO sees both lvo patients, USER_CRISP sees only crisp2's P-0001 (and
+#   P-0001's imaging through the link), USER_NONE (no grants) sees nothing.
 USER_LVO = "user_lvo"
 USER_CRISP = "user_crisp"
 USER_NONE = "user_none"
@@ -135,6 +172,34 @@ SCOPED_USERS = {
     USER_CRISP: ["crisp2"],
     USER_NONE: [],
 }
+
+
+def dataset_slug(name: str) -> str:
+    """The registry slug the 0026 migration and manage_datasets.py derive."""
+    import re
+
+    return re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
+
+
+def insert_patient(cur, patient_id: str, dataset: str, *, subject_id: str | None = None,
+                   stroke_date: str | None = None) -> str:
+    """Register ``dataset`` if needed and enroll ``patient_id`` in it.
+
+    Returns the patient_key. ``subject_id`` links the enrollment to another
+    one's subject (default: its own key — an unlinked person).
+    """
+    slug = dataset_slug(dataset)
+    cur.execute(
+        "INSERT INTO dataset (slug, name) VALUES (%s, %s) ON CONFLICT DO NOTHING",
+        (slug, dataset),
+    )
+    key = f"{slug}__{patient_id}"
+    cur.execute(
+        "INSERT INTO patient (patient_key, subject_id, patient_id, dataset, stroke_date) "
+        "VALUES (%s, %s, %s, %s, %s) ON CONFLICT DO NOTHING",
+        (key, subject_id or key, patient_id, dataset, stroke_date),
+    )
+    return key
 
 
 @pytest.fixture(scope="session")
@@ -170,17 +235,21 @@ def seeded_db(test_db):
             # is anchored on an offset, i.e. ESTIMATED.
             cur.execute(
                 "INSERT INTO image_study "
-                "(patient_id, studyinstanceuid, study_type, acquisitiondatetime, "
+                "(patient_id, patient_key, subject_id, studyinstanceuid, study_type, "
+                " acquisitiondatetime, "
                 " timepoint, timepoint_anchor_source, hours_to_event, timepoint_version) "
-                "VALUES ('P-0001', '1.2.3.4.5', 'CTA', '2025-02-02', "
+                "VALUES ('P-0001', 'lvo__P-0001', 'lvo__P-0001', '1.2.3.4.5', 'CTA', "
+                " '2025-02-02', "
                 " 'BL', 'femoral_sheath_time', -3.5, 'rules-v1') "
                 "ON CONFLICT DO NOTHING"
             )
             cur.execute(
                 "INSERT INTO image_series "
-                "(patient_id, studyinstanceuid, seriesinstanceuid, modality, seriesdescription, "
+                "(patient_id, patient_key, subject_id, studyinstanceuid, seriesinstanceuid, "
+                " modality, seriesdescription, "
                 " series_type, series_type_rank, series_label, series_type_rule, series_type_version) "
-                "VALUES ('P-0001', '1.2.3.4.5', '1.2.3.4.5.6', 'CT', 'Axial', "
+                "VALUES ('P-0001', 'lvo__P-0001', 'lvo__P-0001', '1.2.3.4.5', '1.2.3.4.5.6', "
+                " 'CT', 'Axial', "
                 " 'NCCT', 1, 'NCCT_1', 'kernel-soft', 'rules-v1') "
                 "ON CONFLICT DO NOTHING"
             )
@@ -189,23 +258,23 @@ def seeded_db(test_db):
             # stroke_date falling back to the earliest study date.
             cur.execute(
                 "INSERT INTO image_study "
-                "(patient_id, studyinstanceuid, study_type, acquisitiondatetime, "
+                "(patient_id, patient_key, subject_id, studyinstanceuid, study_type, "
+                " acquisitiondatetime, "
                 " timepoint, timepoint_anchor_source, hours_to_event, timepoint_version) "
-                "VALUES ('P-0002', '2.2.2.2.2', 'CTA', '2024-03-03', "
+                "VALUES ('P-0002', 'lvo__P-0002', 'lvo__P-0002', '2.2.2.2.2', 'CTA', "
+                " '2024-03-03', "
                 " 'FU', 'time_recognized', 26.0, 'rules-v1') "
                 "ON CONFLICT DO NOTHING"
             )
-            # Patient registry (the patient-level spine). Mirrors what the ingest
-            # pipeline / backfill produce: stroke_date is the imaging-derived MIN.
-            # dataset is the cohort-tag set membership (text[]) the patient-level
-            # /api/datasets filter narrows on: P-0001 is in {lvo, crisp2}, P-0002
-            # only in {lvo}, so 'crisp2' isolates P-0001.
-            cur.execute(
-                "INSERT INTO patient (patient_id, stroke_date, dataset) VALUES "
-                "('P-0001', '2025-02-02', '{lvo,crisp2}'), "
-                "('P-0002', '2024-03-03', '{lvo}') "
-                "ON CONFLICT DO NOTHING"
-            )
+            # Patient registry (the patient-level spine): one row per
+            # enrollment. Mirrors what the ingest pipeline produces: stroke_date
+            # is the imaging-derived MIN. P-0001's crisp2 enrollment is linked to
+            # its lvo one (same subject), so the 'crisp2' dataset filter isolates
+            # P-0001 and USER_CRISP still reaches P-0001's imaging.
+            insert_patient(cur, "P-0001", "lvo", stroke_date="2025-02-02")
+            insert_patient(cur, "P-0001", "crisp2", subject_id="lvo__P-0001",
+                           stroke_date="2025-02-02")
+            insert_patient(cur, "P-0002", "lvo", stroke_date="2024-03-03")
             from study_metadata import refresh_study_modalities
 
             refresh_study_modalities(cur, ["1.2.3.4.5", "2.2.2.2.2"])
@@ -213,6 +282,16 @@ def seeded_db(test_db):
     finally:
         conn.close()
     return test_db
+
+
+@pytest.fixture(autouse=True)
+def _unrestricted_clinical_join(monkeypatch):
+    """The host config.toml may restrict the clinical join to one dataset
+    ([web-app] clinical_data_dataset); tests must not depend on it. Tests of
+    the restriction patch it explicitly."""
+    import routes.studies as studies_mod
+
+    monkeypatch.setattr(studies_mod, "CLINICAL_DATA_DATASET", None)
 
 
 # ---------------------------------------------------------------------------

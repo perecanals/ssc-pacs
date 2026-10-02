@@ -6,7 +6,9 @@ const LEVEL_CONFIG = {
   patient: {
     endpoint: "/api/patients",
     itemsKey: "items",
-    idCol: "patient_id",
+    // One row per enrollment (dataset + patient_id): patient_id alone is not
+    // unique across datasets, so rows are keyed by patient_key.
+    idCol: "patient_key",
     entityLabel: "patients",
     builtinCols: [
       { key: "patient_id", label: "Patient ID", filterable: true },
@@ -29,7 +31,7 @@ const LEVEL_CONFIG = {
     },
     expandable: true,
     expandEndpoint: (row) =>
-      `/api/patients/${encodeURIComponent(row.patient_id)}/studies`,
+      `/api/patients/${encodeURIComponent(row.patient_key)}/studies`,
     childLevel: "study",
   },
   study: {
@@ -407,7 +409,7 @@ export function appendCascadeFilters(baseUrl, filters) {
 }
 
 export function buildPatientStudiesUrl(row, filters) {
-  let base = `/api/patients/${encodeURIComponent(row.patient_id)}/studies`;
+  let base = `/api/patients/${encodeURIComponent(row.patient_key)}/studies`;
   const v =
     typeof filters?.studyImportLabel === "string"
       ? filters.studyImportLabel.trim()

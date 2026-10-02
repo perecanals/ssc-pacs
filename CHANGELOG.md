@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+Patient identity is now per dataset: a patient is an enrollment keyed `<dataset slug>__<patient_id>`, so the same id in two datasets is no longer merged into one patient (as the 12 CRISP2/LVO + PRECISE ids `11-*`/`12-*` were). Enrollments of one person share a subject and its imaging; patient labels stay per enrollment and users see only their datasets' identifiers. New `dataset` registry (`manage_datasets.py`, replacing `rename_dataset_value.py`), table-driven `link_patients.py`, and `split_merged_patients.py` for the merged ids; ingestion requires a registered `dataset` and refuses a study owned by another person.
+Alembic `0026_patient_identity` (irreversible once same-id patients exist — major release) adds the registry, re-keys `patient`, imaging ownership and patient-level annotations/history, and the mirrors. Set config.toml `[web-app] clinical_data_dataset`; timepoints, episodes and series ranks are now computed per person after every ingest. The patient labelled mirror is synced by ingestion again (it had fallen 128 rows behind).
+
 Ingestion tag extraction no longer fails a whole case on a malformed header element or on NUL bytes in header strings (both seen in the FlowCat corpus); the element is skipped or the NUL dropped.
 
 Study tables show a live Series count before Auto Timepoint by default in both Patient and Study views, including existing saved views. Counts include all series in the study and support numeric sorting in Study view; no schema migration.

@@ -175,6 +175,13 @@ def load_config(config_path):
     merged_config = {**defaults, **config}
     if not merged_config.get("src_dir"):
         raise ValueError(f"src_dir is required in the YAML config: {config_path}")
+    if not str(merged_config.get("dataset") or "").strip():
+        # Every patient is an enrollment in one dataset (Alembic 0026); the same
+        # PatientID in two datasets must stay two patients.
+        raise ValueError(
+            f"dataset is required in the YAML config (a registered dataset name; "
+            f"see scripts/admin/manage_datasets.py list): {config_path}"
+        )
     skip_dir_names = merged_config["skip_dir_names"] or []
     if (
         not isinstance(skip_dir_names, list)
@@ -266,6 +273,21 @@ def execute_image_ingestion_protocol(
     return protocol.execute_image_ingestion_protocol(overwrite_if_exists=overwrite_if_exists)
 
 
+def batch_patient_keys(raw_conn, study_ids, series_ids):
+    """Every enrollment of the subjects owning the given studies/series, sorted
+    (the patient mirror key). All of a subject's enrollments: their
+    stroke_date follows the subject's imaging."""
+    with raw_conn.cursor() as cur:
+        cur.execute(
+            "SELECT patient_key FROM patient WHERE subject_id IN ("
+            "  SELECT subject_id FROM image_study WHERE studyinstanceuid = ANY(%s) "
+            "  UNION "
+            "  SELECT subject_id FROM image_series WHERE seriesinstanceuid = ANY(%s))",
+            (list(study_ids), list(series_ids)),
+        )
+        return sorted(row[0] for row in cur.fetchall())
+
+
 def sync_batch_labelled_tables(postgres_engine, logger, study_ids, series_ids):
     if not study_ids and not series_ids:
         logger.info("No labelled-table sync needed for this batch")
@@ -273,6 +295,13 @@ def sync_batch_labelled_tables(postgres_engine, logger, study_ids, series_ids):
 
     raw_conn = postgres_engine.raw_connection()
     try:
+        # The patient mirror is keyed by patient, so resolve the patients the
+        # batch touched from its studies and series (a series-only append still
+        # refreshes its patient's stroke_date/dataset).
+        patient_keys = batch_patient_keys(raw_conn, study_ids, series_ids)
+        if patient_keys:
+            synced = sync_labelled_rows(raw_conn, "patient", patient_keys)
+            logger.info(f"Synced {synced} patient labelled row(s)")
         if study_ids:
             synced = sync_labelled_rows(raw_conn, "study", study_ids)
             logger.info(f"Synced {synced} study labelled row(s)")

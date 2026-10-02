@@ -226,7 +226,7 @@ The Navigator page is decomposed into focused React components:
     bottom of the list (rooted on the bounded `.dt__scroll` container, with a
     ~200px `rootMargin` prefetch) fetches the next offset page and appends it.
     The backend `ORDER BY` carries a fixed `ASC` unique-id tiebreaker
-    (`patient_id` / `studyinstanceuid` / `seriesinstanceuid`) so appended
+    (`patient_key` / `studyinstanceuid` / `seriesinstanceuid`) so appended
     pages never duplicate or skip rows on tied sort values. The DOM is
     unbounded (no cap / no virtualization). Any filter/sort/level change
     resets the accumulated list and scrolls back to the top; `handleMutated`
@@ -304,6 +304,14 @@ The Navigator page is decomposed into focused React components:
   types. Accepts a `level` and generic `entity` prop so it can annotate at
   any level. Annotations are shared across all users (one value per
   entity+label); `created_by` is shown as a tooltip for audit traceability.
+  A **patient-level** value belongs to one enrollment (dataset + patient id;
+  Alembic `0026`): every row carries `edit_patient_key` — a patient row's own
+  `patient_key`, or on a study/series row the one enrollment of its person in
+  the user's view — and writes go to that key. When several enrollments are in
+  view (`edit_patient_key` null) the cell is read-only
+  (`AmbiguousPatientValue`: distinct values joined ` | `, tooltip says whose is
+  whose). Patient rows are keyed by `patient_key` (`LEVEL_CONFIG.patient.idCol`),
+  which is also what expansion, warm and cache-status calls send.
   Edits are **optimistic**: `BoolEdit`/`SelectEdit` keep a local `pending`
   override that shows the new value immediately and yields to the reloaded
   `ann` prop once it catches up (a `useEffect` clears the override only when the

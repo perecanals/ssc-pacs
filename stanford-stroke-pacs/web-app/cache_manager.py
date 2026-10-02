@@ -292,27 +292,17 @@ def _series_for_studies(study_uids: list[str]) -> list[str]:
         conn.close()
 
 
-def _series_for_patient(patient_id: str) -> list[str]:
+def list_patient_study_uids(patient_key: str) -> list[str]:
+    """Every studyinstanceuid of an enrollment's subject (warm-all fan-out) —
+    including imaging owned by a linked enrollment."""
     conn = get_conn()
     try:
         with conn.cursor() as cur:
             cur.execute(
-                "SELECT seriesinstanceuid FROM image_series WHERE patient_id = %s",
-                (patient_id,),
-            )
-            return [r[0] for r in cur.fetchall()]
-    finally:
-        conn.close()
-
-
-def list_patient_study_uids(patient_id: str) -> list[str]:
-    """Return every studyinstanceuid belonging to a patient (warm-all fan-out)."""
-    conn = get_conn()
-    try:
-        with conn.cursor() as cur:
-            cur.execute(
-                "SELECT studyinstanceuid FROM image_study WHERE patient_id = %s",
-                (patient_id,),
+                "SELECT st.studyinstanceuid FROM patient p "
+                "JOIN image_study st ON st.subject_id = p.subject_id "
+                "WHERE p.patient_key = %s",
+                (patient_key,),
             )
             return [r[0] for r in cur.fetchall()]
     finally:
@@ -537,31 +527,33 @@ def get_batch_cache_status(uids: list[str]) -> dict[str, str]:
         conn.close()
 
 
-def _patient_status_counts(patient_ids: list[str]) -> dict[str, dict[str, int]]:
-    """Per-patient {status: study_count} aggregated over each study's series.
+def _patient_status_counts(patient_keys: list[str]) -> dict[str, dict[str, int]]:
+    """Per-enrollment {status: study_count} aggregated over each study's series
+    (the studies of the enrollment's subject).
 
     Two-level aggregation done in Python for clarity: collapse each study's series
     to a binary study status, then count studies by status per patient. A study
     with no series counts as one ``cold`` study (LEFT JOIN keeps it present).
     """
     counts = {
-        pid: {"cold": 0, "queued": 0, "warming": 0, "hot": 0, "error": 0}
-        for pid in patient_ids
+        pkey: {"cold": 0, "queued": 0, "warming": 0, "hot": 0, "error": 0}
+        for pkey in patient_keys
     }
-    if not patient_ids:
+    if not patient_keys:
         return counts
     conn = get_conn()
     try:
         with conn.cursor() as cur:
             cur.execute(
-                f"SELECT st.patient_id, st.studyinstanceuid, {effective_status_sql()} AS eff "
-                "FROM image_study st "
+                f"SELECT p.patient_key, st.studyinstanceuid, {effective_status_sql()} AS eff "
+                "FROM patient p "
+                "JOIN image_study st ON st.subject_id = p.subject_id "
                 "LEFT JOIN image_series s ON s.studyinstanceuid = st.studyinstanceuid "
                 "LEFT JOIN series_cache_state cs ON cs.seriesinstanceuid = s.seriesinstanceuid "
-                "WHERE st.patient_id = ANY(%s)",
-                (WARMING_TIMEOUT_MINUTES, list(patient_ids)),
+                "WHERE p.patient_key = ANY(%s)",
+                (WARMING_TIMEOUT_MINUTES, list(patient_keys)),
             )
-            # patient_id -> study_uid -> [eff, ...]
+            # patient_key -> study_uid -> [eff, ...]
             per_study: dict[str, dict[str, list[str]]] = {}
             for pid, study_uid, eff in cur.fetchall():
                 per_study.setdefault(pid, {}).setdefault(study_uid, []).append(eff)
@@ -575,19 +567,19 @@ def _patient_status_counts(patient_ids: list[str]) -> dict[str, dict[str, int]]:
     return counts
 
 
-def get_patient_cache_status(patient_id: str) -> dict[str, Any]:
+def get_patient_cache_status(patient_key: str) -> dict[str, Any]:
     """Aggregate cache status across all of a patient's studies (counts studies)."""
-    counts = _patient_status_counts([patient_id])[patient_id]
+    counts = _patient_status_counts([patient_key])[patient_key]
     total = sum(counts.values())
-    return {"patient_id": patient_id, "total": total, **counts}
+    return {"patient_key": patient_key, "total": total, **counts}
 
 
-def get_patients_cache_status(patient_ids: list[str]) -> dict[str, dict[str, Any]]:
+def get_patients_cache_status(patient_keys: list[str]) -> dict[str, dict[str, Any]]:
     """Aggregate cache status for many patients (one query, study-counted summaries)."""
-    counts = _patient_status_counts(patient_ids)
+    counts = _patient_status_counts(patient_keys)
     out: dict[str, dict[str, Any]] = {}
-    for pid, c in counts.items():
-        out[pid] = {"patient_id": pid, "total": sum(c.values()), **c}
+    for pkey, c in counts.items():
+        out[pkey] = {"patient_key": pkey, "total": sum(c.values()), **c}
     return out
 
 
@@ -970,11 +962,6 @@ def warm_study(studyinstanceuid: str) -> dict[str, Any]:
         else:
             out["error"] = res.get("error", "warm_failed")
     return out
-
-
-def warm_patient(patient_id: str) -> dict[str, Any]:
-    """Warm every series under a patient (used by the patient warm fan-out)."""
-    return warm_series(_series_for_patient(patient_id))
 
 
 # ---------------------------------------------------------------------------

@@ -59,6 +59,7 @@ def _print_human(report: dict) -> None:
     print(f"  In Orthanc, not in DB:     {s.get('in_orthanc_not_in_db', 0)}")
     print(f"  dicom_archive_path missing:{s.get('dicom_archive_missing', 0)}")
     print(f"  Orphaned annotations:      {s.get('orphaned_annotations', 0)}")
+    print(f"  Ownership mismatches:      {s.get('ownership_mismatches', 0)}")
     total = s.get("total_mismatches", 0)
     print(f"  Total mismatches:          {total}")
 
@@ -82,6 +83,13 @@ def _print_human(report: dict) -> None:
         for entry in orphans[:20]:
             print(f"  {entry.get('level', '?')}  {entry.get('entity_id', '?')}  "
                   f"label={entry.get('label', '?')}")
+
+    owners = report.get("mismatches", {}).get("ownership_mismatches", [])
+    if owners:
+        print(f"\n--- Ownership mismatches (first 20 of {len(owners)}) ---")
+        for entry in owners[:20]:
+            print(f"  {entry.get('level', '?')}  {entry.get('entity_id', '?')}  "
+                  f"{entry.get('problem', '?')}")
 
 
 def main() -> int:

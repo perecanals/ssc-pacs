@@ -208,7 +208,7 @@ stanford-stroke-pacs/
 ├── alembic/                      # Schema migrations (versions/) — web-app runs them at startup
 ├── init_orthanc_db.sh
 ├── scripts/                      # Organized into subdirectories
-│   ├── admin/                    # manage_users, rename_dataset_value, backfill_annotation_history, teardown
+│   ├── admin/                    # manage_users, manage_datasets, link_patients, backfill_annotation_history, teardown
 │   ├── backup/                   # backup_pg_db, check_backup_freshness
 │   ├── cold_storage/             # archive, cleanup, scoped_index, reindex_missing_series, health, mirror
 │   ├── connectivity/             # tunnel

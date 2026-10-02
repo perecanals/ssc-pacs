@@ -12,6 +12,7 @@ import numpy as np
 import pandas as pd
 import pydicom
 import zstandard as zstd
+from psycopg2.extras import RealDictCursor
 from sqlalchemy import MetaData, Table, func, inspect, select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
@@ -20,11 +21,11 @@ from series_classification import (
     ASSIGN_RANKS_SQL,
     CLEAR_RANKS_SQL,
     RULES_VERSION,
-    assign_patient_timepoints,
     classify_series,
     classify_study,
     construct_acquisition_datetime,
 )
+from subject_timepoints import recompute_subject_timepoints
 from utils import (
     anonymize_dicom_slice,
     convert_dicom_to_nifti,
@@ -59,7 +60,7 @@ from study_metadata import (  # noqa: E402
     refresh_study_modalities_sqlalchemy,
 )
 
-from config import DICOM_DATA_ROOT, STORAGE_MODE  # noqa: E402
+from config import CLINICAL_DATA_DATASET, DICOM_DATA_ROOT, STORAGE_MODE  # noqa: E402
 
 warnings.filterwarnings(
     "ignore",
@@ -68,6 +69,8 @@ warnings.filterwarnings(
 
 
 class ImageIngestionProtocol:
+    OWNERSHIP_COLUMNS = frozenset({"patient_key", "subject_id"})
+
     def __init__(
         self,
         case_dir,
@@ -90,9 +93,12 @@ class ImageIngestionProtocol:
         self.delete_originals_after_verification = delete_originals_after_verification
         self.import_id = import_id
         self.import_label = import_label
-        # Dataset/cohort tag for this batch (e.g. 'crisp2'). Lives only on the
-        # `patient` table (union-accumulated), not on image_study/image_series.
+        # The registered dataset this batch is ingested into (its display name,
+        # e.g. 'CRISP2/LVO'). Required: every patient is an *enrollment* — one
+        # (dataset, patient_id) pair keyed by patient_key = <slug>__<patient_id>
+        # (Alembic 0026) — so the same id in two datasets stays two patients.
         self.dataset = dataset
+        self.dataset_slug = None
         self.cold_archive_root = cold_archive_root
         # Series archives are compressed concurrently (zstd releases the GIL);
         # 1 = serial. Shared-state writes stay in the calling thread.
@@ -158,6 +164,12 @@ class ImageIngestionProtocol:
             return {"studyinstanceuids": [], "seriesinstanceuids": [],
                     "skipped_existing_seriesinstanceuids": []}
 
+        # Before filter_existing_studies: in overwrite mode that deletes the
+        # existing study's files, which must not happen when the incoming study
+        # belongs to someone else.
+        self._resolve_dataset()
+        self.resolve_ownership()
+
         initial_study_count = len(self.case_study_table)
         step_started = time.perf_counter()
         self.filter_existing_studies(overwrite_if_exists=overwrite_if_exists)
@@ -184,11 +196,8 @@ class ImageIngestionProtocol:
         self.validate_studies_against_clinical_data()
         print(f"Validated clinical matches in {time.perf_counter() - step_started:.2f}s")
 
-        # Must run after load_clinical_data_table: the timepoint anchor comes from
-        # clinical_data, which create_study_table cannot see (it runs first).
-        step_started = time.perf_counter()
-        self.assign_study_timepoints()
-        print(f"Assigned study timepoints in {time.perf_counter() - step_started:.2f}s")
+        # Timepoints/episodes are assigned per subject in update_postgres_tables,
+        # once this case's studies are in the DB next to the subject's others.
 
         step_started = time.perf_counter()
         self.assign_import_id()
@@ -322,10 +331,18 @@ class ImageIngestionProtocol:
 
     def load_clinical_data_table(self):
         # clinical_data is an optional clinical import a deployment may not
-        # have. Absent it, clinical enrichment is skipped and
-        # `_clinical_row` returns None for every patient — the same shape a
-        # patient with no clinical row already produces, which the timepoint
-        # classifier handles by falling back to the thrombectomy-study anchor.
+        # have. Absent it, the clinical match check is skipped; timepoints
+        # (subject_timepoints, after the upsert) then fall back to each
+        # episode's thrombectomy-study anchor.
+        if CLINICAL_DATA_DATASET and self.dataset != CLINICAL_DATA_DATASET:
+            # clinical_data.study_id holds another dataset's ids: a same-id
+            # patient here would be matched to someone else's clinical row.
+            print(
+                f"Note: clinical_data belongs to {CLINICAL_DATA_DATASET!r}, not "
+                f"{self.dataset!r} — clinical validation skipped for this batch."
+            )
+            self.clinical_data = None
+            return
         if not inspect(self.postgres_engine).has_table("clinical_data"):
             print(
                 "Note: table clinical_data not found — clinical enrichment "
@@ -770,54 +787,95 @@ class ImageIngestionProtocol:
             return pd.NaT
         return matches["stroke_date"].dropna().iloc[0] if matches["stroke_date"].notna().any() else pd.NaT
 
-    def _clinical_row(self, patient_id):
-        """The patient's clinical_data row as a plain dict, or None."""
-        if self.clinical_data is None or self.clinical_data.empty:
-            return None
-        matches = self.clinical_data[self.clinical_data["study_id"] == str(patient_id)]
-        if matches.empty:
-            return None
-        return matches.iloc[0].to_dict()
+    def _resolve_dataset(self):
+        """Require a registered dataset; remember its slug (the key prefix)."""
+        if not self.dataset or not str(self.dataset).strip():
+            raise RuntimeError(
+                "No dataset configured: every ingested patient is enrolled in a "
+                "dataset. Set `dataset:` in the YAML to a registered dataset name "
+                "(list them with scripts/admin/manage_datasets.py list)."
+            )
+        self.dataset = str(self.dataset).strip()
+        with self.postgres_engine.begin() as connection:
+            slug = connection.execute(
+                text("SELECT slug FROM dataset WHERE name = :name"), {"name": self.dataset}
+            ).scalar()
+        if slug is None:
+            raise RuntimeError(
+                f"Dataset {self.dataset!r} is not registered. Register it first: "
+                f"scripts/admin/manage_datasets.py add --slug <slug> --name {self.dataset!r}"
+            )
+        self.dataset_slug = slug
 
-    def assign_study_timepoints(self):
-        """Label each study BL / THROMBECTOMY / FU, split by episode.
+    def resolve_ownership(self):
+        """Stamp every study/series row with its owning enrollment and subject.
 
-        A separate step (not part of create_study_table) because the anchor lives
-        in clinical_data, which is only loaded later in the sequence. Studies
-        are grouped per patient and split into episodes; each episode is anchored
-        on its own clinical puncture or, failing that, its own thrombectomy study
-        (see series_classification.assign_patient_timepoints).
-
-        Machine-owned, and independent of the human `timepoint` annotation label
-        (mirrored as `label_timepoint_*`) — neither is derived from the other.
+        The incoming enrollment is (this batch's dataset, the file's PatientID).
+        A study already in the DB keeps its owner: when that owner is the same
+        person (same subject — e.g. a linked dataset re-sending shared imaging)
+        the rows take the owner's patient_key / patient_id, so files land in the
+        owner's tree; when it is a *different* person the case is refused, since
+        one StudyInstanceUID cannot belong to two people — either the two
+        enrollments must be linked first (scripts/admin/link_patients.py) or the
+        source data is wrong. Raised before filter_existing_studies, so an
+        overwrite never deletes another person's files.
         """
         if self.case_study_table is None or self.case_study_table.empty:
             return
+        patient_ids = sorted({str(p) for p in self.case_series_table["patient_id"].dropna()})
+        study_uids = sorted({str(u) for u in self.case_study_table["studyinstanceuid"].dropna()})
+        with self.postgres_engine.begin() as connection:
+            enrolled = {
+                row.patient_id: (row.patient_key, row.subject_id)
+                for row in connection.execute(
+                    text(
+                        "SELECT patient_id, patient_key, subject_id FROM patient "
+                        "WHERE dataset = :ds AND patient_id = ANY(:pids)"
+                    ),
+                    {"ds": self.dataset, "pids": patient_ids},
+                )
+            }
+            existing = {
+                row.studyinstanceuid: row
+                for row in connection.execute(
+                    text(
+                        "SELECT studyinstanceuid, patient_id, patient_key, subject_id "
+                        "FROM image_study WHERE studyinstanceuid = ANY(:uids)"
+                    ),
+                    {"uids": study_uids},
+                )
+            }
 
-        resolved = {}  # studyinstanceuid -> assign_patient_timepoints() result
-        for patient_id, group in self.case_study_table.groupby("patient_id"):
-            studies = [
-                {
-                    "studyinstanceuid": row["studyinstanceuid"],
-                    "acquisition_datetime": row["acquisitiondatetime"],
-                    "study_type": row.get("study_type"),
-                }
-                for _, row in group.iterrows()
-            ]
-            resolved.update(
-                assign_patient_timepoints(studies, self._clinical_row(patient_id))
+        self.incoming_patient_keys = {}
+        owners, conflicts = {}, []
+        for _, row in self.case_study_table.iterrows():
+            pid, uid = str(row["patient_id"]), str(row["studyinstanceuid"])
+            key = f"{self.dataset_slug}__{pid}"
+            key, subject = enrolled.get(pid, (key, key))
+            self.incoming_patient_keys[pid] = key
+            owner = existing.get(uid)
+            if owner is None:
+                owners[uid] = (pid, key, subject)
+            elif owner.subject_id is not None and owner.subject_id == subject:
+                owners[uid] = (owner.patient_id, owner.patient_key, owner.subject_id)
+            else:
+                conflicts.append((uid, owner.patient_key, key))
+        if conflicts:
+            details = "; ".join(
+                f"study {uid} is owned by {owner} (incoming {incoming})"
+                for uid, owner, incoming in conflicts
             )
-
-        suids = self.case_study_table["studyinstanceuid"]
-        self.case_study_table["episode"] = suids.map(lambda s: resolved[s]["episode"])
-        self.case_study_table["timepoint"] = suids.map(lambda s: resolved[s]["timepoint"])
-        self.case_study_table["timepoint_anchor_source"] = suids.map(
-            lambda s: resolved[s]["timepoint_anchor_source"]
-        )
-        self.case_study_table["hours_to_event"] = suids.map(
-            lambda s: resolved[s]["hours_to_event"]
-        )
-        self.case_study_table["timepoint_version"] = RULES_VERSION
+            raise RuntimeError(
+                "Refusing case: StudyInstanceUID(s) already belong to a different "
+                f"patient — {details}. If they are the same person, link the "
+                "enrollments first (scripts/admin/link_patients.py); otherwise the "
+                "source data carries a UID clash."
+            )
+        for table in (self.case_study_table, self.case_series_table):
+            uids = table["studyinstanceuid"].astype(str)
+            table["patient_id"] = uids.map(lambda u: owners[u][0])
+            table["patient_key"] = uids.map(lambda u: owners[u][1])
+            table["subject_id"] = uids.map(lambda u: owners[u][2])
 
     def filter_existing_studies(self, overwrite_if_exists=False):
         # Series found on disk but skipped because they are already in
@@ -1397,6 +1455,8 @@ class ImageIngestionProtocol:
         self.case_series_table = self.case_series_table[
             [
                 "patient_id",
+                "patient_key",
+                "subject_id",
                 "acquisitiondatetime",
                 "acquisitiondatetime_source",
                 "studydescription",
@@ -1439,6 +1499,8 @@ class ImageIngestionProtocol:
         self.case_study_table = self.case_study_table[
             [
                 "patient_id",
+                "patient_key",
+                "subject_id",
                 "acquisitiondatetime",
                 "acquisitiondatetime_source",
                 "study_type",
@@ -1539,12 +1601,16 @@ class ImageIngestionProtocol:
         #  2. A column absent from the dataframe would otherwise be SET to
         #     EXCLUDED.<col> — i.e. reset to its INSERT default — silently wiping
         #     an existing value on a partial upsert.
+        #  3. Ownership (patient_key / subject_id, Alembic 0026) is set when a
+        #     row is first inserted and changed only by link_patients.py — a
+        #     re-ingest never moves it.
         dataframe_columns = set(dataframe.columns)
         update_columns = {
             column.name: insert_stmt.excluded[column.name]
             for column in table.columns
             if column.name != key_column
             and column.name in dataframe_columns
+            and column.name not in self.OWNERSHIP_COLUMNS
             and column.computed is None
         }
         upsert_stmt = insert_stmt.on_conflict_do_update(
@@ -1554,29 +1620,23 @@ class ImageIngestionProtocol:
         connection.execute(upsert_stmt)
 
     def _upsert_patient(self, connection):
-        """Register/refresh one `patient` row per patient_id in this batch.
+        """Register this batch's enrollments; refresh their subjects' stroke_date.
 
-        Must run AFTER the image_study upsert so MIN(acquisitiondatetime) sees
-        the new studies. stroke_date is recomputed from the DB (all of the
-        patient's studies, not just this batch). import_id/import_label keep
-        ORIGIN (first-seen) semantics — preserved on conflict; dataset is the
-        deduped union across batches; updated_at advances on every touch.
+        One `patient` row per (dataset, patient_id) — this batch's dataset and
+        the incoming PatientIDs (resolve_ownership collected their keys; a
+        linked enrollment that re-sends shared imaging is one of them even
+        though the studies stay with their owner). A new enrollment starts as
+        its own subject. import_id/import_label keep ORIGIN (first-seen)
+        semantics — preserved on conflict; updated_at advances on every touch.
 
-        Patient ids come from case_series_table, not case_study_table: in pure
-        append-only runs (new series under an existing study) the study row is
-        dropped from case_study_table, but the patient still needs its dataset
-        unioned and stroke_date refreshed. case_series_table always carries
-        every patient touched this run.
+        stroke_date is imaging-derived: MIN(acquisitiondatetime) over all of the
+        subject's studies, written to every enrollment of that subject. Must run
+        AFTER the image_study upsert so the new studies count.
         """
-        if self.case_series_table is None or self.case_series_table.empty:
+        keys = getattr(self, "incoming_patient_keys", None) or {}
+        if not keys:
             return
-        patient_ids = sorted(
-            {str(pid) for pid in self.case_series_table["patient_id"].dropna().unique()}
-        )
-        if not patient_ids:
-            return
-
-        dataset_arr = [self.dataset] if self.dataset else []
+        pids = sorted(keys)
         # Imaging-derived only — no clinical join. Clinical variables belong in
         # annotations (see scripts/admin/bulk_set_label_values.py), not in
         # columns on this upstream-owned table: a column per variable does not
@@ -1584,26 +1644,55 @@ class ImageIngestionProtocol:
         connection.execute(
             text(
                 "INSERT INTO patient "
-                "(patient_id, stroke_date, import_id, "
-                " import_label, dataset, created_at, updated_at) "
-                "SELECT s.patient_id, MIN(s.acquisitiondatetime), "
-                "       :import_id, :import_label, :dataset, now(), now() "
-                "FROM image_study s "
-                "WHERE s.patient_id = ANY(:patient_ids) "
-                "GROUP BY s.patient_id "
-                "ON CONFLICT (patient_id) DO UPDATE SET "
-                "  stroke_date = EXCLUDED.stroke_date, "
-                "  dataset = ARRAY(SELECT DISTINCT unnest("
-                "      patient.dataset || EXCLUDED.dataset) ORDER BY 1), "
-                "  updated_at = now()"
+                "(patient_key, subject_id, patient_id, dataset, import_id, "
+                " import_label, created_at, updated_at) "
+                "SELECT k.key, k.key, k.pid, :dataset, :import_id, :import_label, "
+                "       now(), now() "
+                "FROM unnest(CAST(:keys AS text[]), CAST(:pids AS text[])) AS k(key, pid) "
+                "ON CONFLICT (patient_key) DO UPDATE SET updated_at = now()"
             ),
             {
+                "dataset": self.dataset,
                 "import_id": self.import_id,
                 "import_label": self.import_label,
-                "dataset": dataset_arr,
-                "patient_ids": patient_ids,
+                "keys": [keys[p] for p in pids],
+                "pids": pids,
             },
         )
+        connection.execute(
+            text(
+                "UPDATE patient p SET stroke_date = sub.first_study "
+                "FROM (SELECT st.subject_id, MIN(st.acquisitiondatetime) AS first_study "
+                "      FROM image_study st "
+                "      WHERE st.subject_id IN (SELECT subject_id FROM patient "
+                "                              WHERE patient_key = ANY(:keys)) "
+                "      GROUP BY st.subject_id) sub "
+                "WHERE p.subject_id = sub.subject_id"
+            ),
+            {"keys": [keys[p] for p in pids]},
+        )
+
+    def _recompute_timepoints(self, connection):
+        """Episodes/timepoints of every study of the subjects this case touched.
+
+        Per subject, over all of its studies (not just this case's): a new study
+        can open a new episode or move an existing study's anchor.
+        """
+        subject_ids = connection.execute(
+            text("SELECT DISTINCT subject_id FROM image_study "
+                 "WHERE studyinstanceuid = ANY(:uids)"),
+            {"uids": self.updated_study_uids},
+        ).scalars().all()
+        has_clinical = inspect(connection).has_table("clinical_data")
+        dbapi = connection.connection
+        cur = dbapi.cursor(cursor_factory=RealDictCursor)
+        try:
+            recompute_subject_timepoints(
+                cur, subject_ids,
+                has_clinical_table=has_clinical, clinical_dataset=CLINICAL_DATA_DATASET,
+            )
+        finally:
+            cur.close()
 
     def update_postgres_tables(self):
         # One transaction for all three tables: image_study must be committed
@@ -1642,10 +1731,11 @@ class ImageIngestionProtocol:
             self._upsert_patient(connection)
             self._rollup_study_storage_sizes(connection)
 
-            # Ranks are a window over each patient's series, so this must run
+            # Ranks are a window over each subject's series, so this must run
             # after the image_series upsert — the new rows have to be visible.
             connection.execute(text(ASSIGN_RANKS_SQL))
             connection.execute(text(CLEAR_RANKS_SQL))
+            self._recompute_timepoints(connection)
 
     # GUARDS ONLY, not schema management: Alembic is the canonical home of
     # these columns (rev 0001 baseline has dicom_archive_path, rev 0012 the

@@ -12,17 +12,23 @@ def scoped_table(table, dataset_literal=None, allowed_literal=None):
         raise ValueError("Choose an available research table")
     checks = []
     if dataset_literal is not None:
-        checks.append(f"{dataset_literal} = ANY(data_exports_patient.dataset)")
+        checks.append(f"data_exports_patient.dataset = {dataset_literal}")
     if allowed_literal is not None:
-        checks.append(f"data_exports_patient.dataset && {allowed_literal}::text[]")
+        checks.append(f"data_exports_patient.dataset = ANY({allowed_literal}::text[])")
     condition = " AND ".join(checks) or "TRUE"
-    if table in ("patient_labelled", "image_study_labelled", "image_series_labelled"):
+    # A patient row is its own enrollment; imaging belongs to the whole subject,
+    # so it is in the cohort when any enrollment of its subject is.
+    if table == "patient_labelled":
         source = "ONLY public.patient AS data_exports_patient"
-        link = "data_exports_patient.patient_id = data_exports_row.patient_id"
+        link = "data_exports_patient.patient_key = data_exports_row.patient_key"
+    elif table in ("image_study_labelled", "image_series_labelled"):
+        source = "ONLY public.patient AS data_exports_patient"
+        link = "data_exports_patient.subject_id = data_exports_row.subject_id"
     else:
         source = (
             "ONLY public.image_series_labelled AS data_exports_series "
-            "JOIN ONLY public.patient AS data_exports_patient USING (patient_id)"
+            "JOIN ONLY public.patient AS data_exports_patient "
+            "ON data_exports_patient.subject_id = data_exports_series.subject_id"
         )
         link = "data_exports_series.seriesinstanceuid = data_exports_row.seriesinstanceuid"
     predicate = f"EXISTS (SELECT 1 FROM {source} WHERE {link} AND {condition})"

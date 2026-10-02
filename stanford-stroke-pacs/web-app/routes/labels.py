@@ -55,7 +55,7 @@ def list_labels(
 
 
 _SUMMARY_COUNT_COL = {
-    "patient": "patient_id",
+    "patient": "patient_key",
     "study": "studyinstanceuid",
     "series": "seriesinstanceuid",
 }

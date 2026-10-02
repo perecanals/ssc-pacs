@@ -16,10 +16,13 @@ READER_TABLES = set(TABLES) | METADATA_TABLES
 
 # Prefer the study/series UID relationship when both tables are selected;
 # joining them through the patient instead would multiply unrelated studies.
-# Direct series -> patient is many-to-one; inverse paths can multiply rows.
+# Imaging joins patients through the subject (Alembic 0026): series -> patient
+# is many-to-one for an unlinked person, but a person enrolled in several
+# datasets yields one row per (in-cohort) enrollment — one row per identifier.
+# Inverse paths can multiply rows.
 RELATIONSHIPS = [
     ("image_study_labelled", "studyinstanceuid", "image_series_labelled", "studyinstanceuid"),
-    ("patient_labelled", "patient_id", "image_study_labelled", "patient_id"),
+    ("patient_labelled", "subject_id", "image_study_labelled", "subject_id"),
     ("image_series_labelled", "seriesinstanceuid", "series_dicom_tags", "seriesinstanceuid"),
-    ("patient_labelled", "patient_id", "image_series_labelled", "patient_id"),
+    ("patient_labelled", "subject_id", "image_series_labelled", "subject_id"),
 ]

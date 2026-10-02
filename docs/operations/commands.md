@@ -166,17 +166,33 @@ python scripts/admin/manage_readonly_db_users.py remove <user>
 Hand collaborators `docs/guides/direct_db_access.md` — tunnel setup, their
 own `.env`, and a pandas/SQLAlchemy example.
 
-Rename a dataset tag across the `patient` table and every user's grants
-(keeps access intact when a cohort is renamed; dry-run default, `--execute`
-to apply):
+Datasets are a registry (Alembic `0026`): an immutable slug (the prefix of every
+`patient_key`) and a display name (what grants, filters, saved exports and
+ingestion YAMLs use). Register one before its first ingestion; it can be granted
+right away. A rename changes the name everywhere it is stored — enrollments,
+user grants, saved Data Exports, session filters, the patient mirror — in one
+transaction (dry-run default, `--execute` to apply):
 
 ```bash
-python scripts/admin/rename_dataset_value.py --from-value lvo --to-value 'CRISP2/LVO'
-python scripts/admin/rename_dataset_value.py --from-value lvo --to-value 'CRISP2/LVO' --execute
+python scripts/admin/manage_datasets.py list
+python scripts/admin/manage_datasets.py add --slug outerlimits --name OUTERLIMITS
+python scripts/admin/manage_datasets.py rename crisp2-lvo 'CRISP2 LVO'            # dry-run
+python scripts/admin/manage_datasets.py rename crisp2-lvo 'CRISP2 LVO' --execute
+```
+
+Link a patient of one dataset to the same person already ingested in another
+(shared imaging, separate patient labels) — table-driven, dry-run default; see
+[`linking_patients.md`](linking_patients.md):
+
+```bash
+python scripts/admin/link_patients.py link links.csv            # dataset,patient_id,link_dataset,link_patient_id
+python scripts/admin/link_patients.py link links.csv --apply
+python scripts/admin/link_patients.py unlink mistakes.csv --apply # dataset,patient_id
 ```
 
 Dataset grants control which patients a non-admin user sees in the web app
-(`patient.dataset` overlap; admins bypass). They can also be edited in the
+(enrollments in the granted datasets, plus all imaging of those people; admins
+bypass). They can also be edited in the
 web app's `/admin` page (admin-only). Changes take effect immediately — no
 restart needed.
 
@@ -422,8 +438,11 @@ python scripts/admin/bulk_set_label_values.py \
 # its cells render read-only in the web app (--edit-policy applies on label
 # CREATION only, like --instrument; change it later under Label Access).
 #   --edit-policy everyone (default) | nobody | users (+ --edit-users 'a,b')
+# Patient level: rows name an enrollment — a patient_key, or a patient_id plus
+# --dataset (the same id can be a different person in another dataset). A file
+# giving one id two different values is refused.
 python scripts/admin/bulk_set_label_values.py \
-    --file /tmp/femoral_sheath_time.csv --level patient \
+    --file /tmp/femoral_sheath_time.csv --level patient --dataset 'CRISP2/LVO' \
     --id-column patient_id --value-column femoral_sheath_time \
     --label femoral_sheath_time --datatype text \
     --edit-policy nobody --execute --yes
@@ -536,7 +555,7 @@ python scripts/cold_storage/backfill_storage_sizes.py --label my_batch --workers
 
 # Triage series with loose files but no archive (compression failures)
 python scripts/cold_storage/list_unarchived_series.py --count
-python scripts/cold_storage/list_unarchived_series.py --patient <patient-id>
+python scripts/cold_storage/list_unarchived_series.py --patient <patient-key|patient-id>
 
 # Delete loose DICOMs that are safe to remove (archive exists + Orthanc indexed)
 python scripts/cold_storage/cleanup_loose_dicoms.py                  # dry-run
@@ -604,7 +623,7 @@ owns the storage roots). Annotations are discarded to history, not migrated.
 
 ```bash
 # Review a patient's null/empty-description studies (a common faulty-upload sign)
-python scripts/admin/delete_study.py --patient <patient-id> --null-description
+python scripts/admin/delete_study.py --patient <patient-key|patient-id> --null-description
 
 # Dry-run, then execute (complete removal) for one or more studies
 python scripts/admin/delete_study.py --study <UID>

@@ -5,6 +5,11 @@ captured in `annotations_history` — an append-only audit log.  This provides
 a complete change trail for reproducibility, forensic analysis, and regulatory
 compliance.
 
+One sanctioned exception: Alembic `0026_patient_identity` rewrote existing
+patient-level `entity_id`s from `patient_id` to the new `patient_key` (a key
+change, not an edit — no history rows were added; the trigger was disabled for
+the backfill), so a patient's history stays queryable by one id.
+
 ---
 
 ## Schema
@@ -17,7 +22,7 @@ annotations_history
   operation_by     TEXT DEFAULT 'system'     -- authenticated username or 'system'
   annotation_id    INTEGER NOT NULL          -- FK to annotations.id (logical, not enforced)
   level            TEXT NOT NULL             -- patient | study | series
-  entity_id        TEXT NOT NULL             -- resolved from level (patient_id / studyinstanceuid / seriesinstanceuid)
+  entity_id        TEXT NOT NULL             -- resolved from level (patient_key / studyinstanceuid / seriesinstanceuid)
   label            TEXT NOT NULL
   value_before     TEXT                      -- NULL on INSERT
   value_after      TEXT                      -- NULL on DELETE
@@ -83,7 +88,7 @@ Example:
     "operation_by": "jsmith",
     "annotation_id": 7,
     "level": "patient",
-    "entity_id": "P-0001",
+    "entity_id": "crisp2-lvo__P-0001",
     "label": "stroke_type",
     "value_before": "ischemic",
     "value_after": "hemorrhagic",

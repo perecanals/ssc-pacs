@@ -12,6 +12,8 @@ from unittest.mock import patch
 import pytest
 import zstandard as zstd
 
+from tests.conftest import insert_patient
+
 
 @pytest.fixture()
 def cold_env(db_conn, seeded_db):
@@ -64,10 +66,7 @@ def cold_env(db_conn, seeded_db):
                 "INSERT INTO clinical_data (study_id) VALUES (%s) ON CONFLICT DO NOTHING",
                 (patient_id,),
             )
-            cur.execute(
-                "INSERT INTO patient (patient_id) VALUES (%s) ON CONFLICT DO NOTHING",
-                (patient_id,),
-            )
+            insert_patient(cur, patient_id, "lvo")
             cur.execute(
                 "INSERT INTO image_study (patient_id, studyinstanceuid, study_type, study_path) "
                 "VALUES (%s, %s, 'CTA', %s) ON CONFLICT DO NOTHING",
@@ -152,10 +151,7 @@ def cold_env_multi(db_conn, seeded_db):
     conn = psycopg2.connect(**seeded_db)
     try:
         with conn.cursor() as cur:
-            cur.execute(
-                "INSERT INTO patient (patient_id) VALUES (%s) ON CONFLICT DO NOTHING",
-                (patient_id,),
-            )
+            insert_patient(cur, patient_id, "lvo")
             cur.execute(
                 "INSERT INTO image_study (patient_id, studyinstanceuid, study_type, study_path) "
                 "VALUES (%s, %s, 'CTA', %s) ON CONFLICT DO NOTHING",
@@ -391,19 +387,19 @@ def test_patient_aggregate_counts_studies(cold_env_multi, seeded_db):
         patch.object(cm, "DICOM_DATA_ROOT", cold_env_multi["dicom_root"]),
         patch.object(cm, "COLD_ARCHIVE_ROOT", cold_env_multi["cold_root"]),
     ):
-        summary = cm.get_patient_cache_status(patient_id)
+        summary = cm.get_patient_cache_status(f"lvo__{patient_id}")
         assert summary["total"] == 1  # one study
         assert summary["cold"] == 1
 
         # Partially warming the study (one series) keeps the study non-hot, so the
         # patient still counts it as a single non-hot study.
         cm.warm_series([s1["uid"]])
-        summary = cm.get_patient_cache_status(patient_id)
+        summary = cm.get_patient_cache_status(f"lvo__{patient_id}")
         assert summary["total"] == 1
         assert summary["hot"] == 0
 
         cm.warm_study(study_uid)
-        summary = cm.get_patient_cache_status(patient_id)
+        summary = cm.get_patient_cache_status(f"lvo__{patient_id}")
         assert summary["hot"] == 1
 
 

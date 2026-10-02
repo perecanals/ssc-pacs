@@ -12,12 +12,12 @@ Three things, in order:
      series carry no acquisition tag and fall to the StudyDate encounter clock;
      `acquisitiondatetime_source` records which was used.
   2. A study's `acquisitiondatetime` is the earliest of its series' rebuilt clocks.
-  3. Group each patient's studies into episodes (a >45-day inter-study gap starts a
+  3. Group each person's studies — a subject, which may span several dataset
+     enrollments (Alembic 0026) — into episodes (a >45-day inter-study gap starts a
      new one) and label each study BL / THROMBECTOMY / FU against its OWN episode's
      anchor: the clinical puncture for the episode it falls in, else that episode's
-     thrombectomy study (`assign_patient_timepoints`). This fixes the `11-*` cohort,
-     whose two separate stroke episodes were previously scored against one anchor,
-     and gives non-LVO patients a thrombectomy-anchored timepoint.
+     thrombectomy study (`assign_patient_timepoints`). The clinical row is the one
+     of the subject's enrollment in config's `clinical_data_dataset`.
 
 Every write stamps `timepoint_version` (RULES_VERSION), so a classification can
 always be explained and safely redone. MACHINE-OWNED, and independent of the human
@@ -30,7 +30,7 @@ maintenance/scripts/backfill_series_dicom_tags.py first for full coverage.
 
 Examples:
     python scripts/admin/recompute_timepoints.py                 # dry-run, whole corpus
-    python scripts/admin/recompute_timepoints.py --patient 11-004
+    python scripts/admin/recompute_timepoints.py --patient crisp2-lvo__11-004
     python scripts/admin/recompute_timepoints.py --execute
 """
 
@@ -48,12 +48,17 @@ load_dotenv(STACK_ROOT / ".env")
 sys.path.insert(0, str(STACK_ROOT / "web-app"))
 sys.path.insert(0, str(STACK_ROOT / "image_ingestion_protocols"))
 
-from common import table_exists  # noqa: E402
+from common import subject_for_patient_arg, table_exists  # noqa: E402
 from series_classification import (  # noqa: E402
     RULES_VERSION,
-    assign_patient_timepoints,
     construct_acquisition_datetime,
 )
+from subject_timepoints import (  # noqa: E402
+    clinical_anchor_sql,
+    resolve_subject_timepoints,
+)
+
+from config import CLINICAL_DATA_DATASET  # noqa: E402
 
 
 def _fmt(value) -> str:
@@ -69,8 +74,12 @@ def main() -> int:
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
     parser.add_argument("--label", help="restrict to one import_label")
-    parser.add_argument("--patient", help="restrict to one patient_id")
-    parser.add_argument("--limit", type=int, help="cap the number of patients")
+    parser.add_argument(
+        "--patient",
+        help="restrict to one patient (all imaging of that person): a patient_key, "
+             "or a patient_id that names one person",
+    )
+    parser.add_argument("--limit", type=int, help="cap the number of subjects (people)")
     parser.add_argument(
         "--execute",
         action="store_true",
@@ -87,13 +96,14 @@ def main() -> int:
         print("DB_USER not set — check .env", file=sys.stderr)
         return 1
 
+    subject_id = subject_for_patient_arg(args.patient) if args.patient else None
     where, params = ["TRUE"], []
     if args.label:
         where.append("s.import_label = %s")
         params.append(args.label)
-    if args.patient:
-        where.append("s.patient_id = %s")
-        params.append(args.patient)
+    if subject_id:
+        where.append("s.subject_id = %s")
+        params.append(subject_id)
 
     conn = psycopg2.connect(**DB_CONFIG)
 
@@ -101,12 +111,12 @@ def main() -> int:
     with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
         cur.execute(
             f"""
-            SELECT s.seriesinstanceuid, s.studyinstanceuid, s.patient_id,
+            SELECT s.seriesinstanceuid, s.studyinstanceuid,
                    s.acquisitiondatetime AS current_dt, t.tags
             FROM image_series s
             LEFT JOIN series_dicom_tags t USING (seriesinstanceuid)
             WHERE {' AND '.join(where)}
-            ORDER BY s.patient_id, s.studyinstanceuid, s.seriesinstanceuid
+            ORDER BY s.subject_id, s.studyinstanceuid, s.seriesinstanceuid
             """,
             params,
         )
@@ -149,72 +159,40 @@ def main() -> int:
     if args.label:
         study_where.append("st.import_label = %s")
         study_params.append(args.label)
-    if args.patient:
-        study_where.append("st.patient_id = %s")
-        study_params.append(args.patient)
+    if subject_id:
+        study_where.append("st.subject_id = %s")
+        study_params.append(subject_id)
 
     with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-        # clinical_data is optional (a deployment may not have it). Without it every
-        # anchor column reads NULL — the exact shape a patient with no clinical
-        # row already yields — so `resolve_event_anchor` returns no anchor and
-        # each episode falls back to its own thrombectomy study.
-        if table_exists(cur, "clinical_data"):
-            clinical_cols = (
-                "c.femoral_sheath_time, c.receiving_arrival_time, c.time_recognized"
-            )
-            clinical_join = "LEFT JOIN clinical_data c ON c.study_id = st.patient_id"
-        else:
-            clinical_cols = (
-                "NULL::text AS femoral_sheath_time, "
-                "NULL::text AS receiving_arrival_time, "
-                "NULL::text AS time_recognized"
-            )
-            clinical_join = ""
+        # clinical_data is optional (a deployment may not have it); without it
+        # every anchor reads NULL and each episode falls back to its own
+        # thrombectomy study.
+        clinical_cols, clinical_join, clinical_params = clinical_anchor_sql(
+            table_exists(cur, "clinical_data"), CLINICAL_DATA_DATASET
+        )
         cur.execute(
             f"""
-            SELECT st.studyinstanceuid, st.patient_id, st.study_type,
+            SELECT st.studyinstanceuid, st.subject_id, st.study_type,
+                   st.acquisitiondatetime,
                    st.timepoint AS current_timepoint, st.episode AS current_episode,
                    {clinical_cols}
             FROM image_study st
             {clinical_join}
             WHERE {' AND '.join(study_where)}
-            ORDER BY st.patient_id, st.studyinstanceuid
+            ORDER BY st.subject_id, st.studyinstanceuid
             """,
-            study_params,
+            clinical_params + study_params,
         )
         study_rows = cur.fetchall()
 
-    by_patient = defaultdict(list)
-    clinical_by_patient = {}
-    for row in study_rows:
-        by_patient[row["patient_id"]].append(row)
-        clinical_by_patient.setdefault(row["patient_id"], {
-            "femoral_sheath_time": row["femoral_sheath_time"],
-            "receiving_arrival_time": row["receiving_arrival_time"],
-            "time_recognized": row["time_recognized"],
-        })
-
-    patient_ids = list(by_patient)
+    subject_ids = list(dict.fromkeys(r["subject_id"] for r in study_rows))
     if args.limit:
-        patient_ids = patient_ids[: args.limit]
+        keep = set(subject_ids[: args.limit])
+        subject_ids = subject_ids[: args.limit]
+        study_rows = [r for r in study_rows if r["subject_id"] in keep]
 
-    study_results = {}   # studyinstanceuid -> assign_patient_timepoints() result
-    current_by_suid = {}
-    for patient_id in patient_ids:
-        rows = by_patient[patient_id]
-        studies = [
-            {
-                "studyinstanceuid": r["studyinstanceuid"],
-                "acquisition_datetime": study_dt.get(r["studyinstanceuid"]),
-                "study_type": r["study_type"],
-            }
-            for r in rows
-        ]
-        study_results.update(
-            assign_patient_timepoints(studies, clinical_by_patient[patient_id])
-        )
-        for r in rows:
-            current_by_suid[r["studyinstanceuid"]] = r
+    study_results = resolve_subject_timepoints(study_rows, acquisition=study_dt)
+    current_by_suid = {r["studyinstanceuid"]: r for r in study_rows}
 
     # --- Report -------------------------------------------------------------
     print(f"\n=== DATETIME SOURCE (series, rules {RULES_VERSION}) ===\n")
@@ -223,16 +201,16 @@ def main() -> int:
     if no_tags:
         print(f"\n  {no_tags} series had no series_dicom_tags row — datetime left as-is.")
 
-    print(f"\n=== EPISODES ({len(patient_ids)} patients) ===\n")
-    per_patient_max = defaultdict(int)
+    print(f"\n=== EPISODES ({len(subject_ids)} subjects) ===\n")
+    per_subject_max = defaultdict(int)
     for suid, res in study_results.items():
-        pid = current_by_suid[suid]["patient_id"]
+        sid = current_by_suid[suid]["subject_id"]
         if res["episode"]:
-            per_patient_max[pid] = max(per_patient_max[pid], res["episode"])
-    multi = {p: n for p, n in per_patient_max.items() if n > 1}
-    print(f"  {len(multi)} patient(s) split into >1 episode:")
-    for pid, n in sorted(multi.items(), key=lambda kv: -kv[1]):
-        print(f"    {pid:12} {n} episodes")
+            per_subject_max[sid] = max(per_subject_max[sid], res["episode"])
+    multi = {p: n for p, n in per_subject_max.items() if n > 1}
+    print(f"  {len(multi)} subject(s) split into >1 episode:")
+    for sid, n in sorted(multi.items(), key=lambda kv: -kv[1]):
+        print(f"    {sid:24} {n} episodes")
 
     print(f"\n=== TIMEPOINT ({len(study_results)} studies) ===\n")
     for value, count in Counter(r["timepoint"] for r in study_results.values()).most_common():

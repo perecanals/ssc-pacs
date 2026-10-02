@@ -121,14 +121,15 @@ def test_disabled_module(logged_in_client):
     assert logged_in_client.get(ROOT + "/values", params={"column": "patient_labelled.patient_id"}).status_code == 404
 
 
-def test_existing_values_search_and_array_filter_roundtrip(data_exports):
+def test_existing_values_search_and_filter_roundtrip(data_exports):
     client, _ = data_exports
     response = client.get(ROOT + "/values", params={"column": "patient_labelled.dataset", "operator": "contains"})
     assert response.status_code == 200
     assert response.json() == {"values": ["crisp2", "lvo"], "has_more": False}
+    # One dataset per enrollment (Alembic 0026): plain text values.
     assert set(
         client.get(ROOT + "/values", params={"column": "patient_labelled.dataset", "operator": "eq"}).json()["values"]
-    ) == {"{lvo,crisp2}", "{lvo}"}
+    ) == {"crisp2", "lvo"}
     config = {
         "builder": {
             "table": "patient_labelled",
@@ -162,16 +163,19 @@ def test_existing_values_limits_empty_strings_and_timestamps(data_exports):
     database.records(
         "INSERT INTO patient_labelled (patient_id) SELECT 'choice-' || lpad(n::text, 3, '0') FROM generate_series(1, 110) n"
     )
-    database.records("UPDATE patient_labelled SET dataset=ARRAY['', NULL, 'lvo', 'lvo'] WHERE patient_id='P-0001'")
+    database.records(
+        "UPDATE image_study_labelled SET modalities=ARRAY['', NULL, 'CT', 'CT'] "
+        "WHERE studyinstanceuid='1.2.3.4.5'"
+    )
     response = client.get(ROOT + "/values", params={"column": "patient_labelled.patient_id"}).json()
     assert len(response["values"]) == 100
     assert response["has_more"] is True
     assert client.get(
         ROOT + "/values", params={"column": "patient_labelled.patient_id", "search": "choice-110"}
     ).json() == {"values": ["choice-110"], "has_more": False}
-    assert client.get(ROOT + "/values", params={"column": "patient_labelled.dataset", "operator": "contains"}).json()[
-        "values"
-    ] == ["", "lvo"]
+    assert client.get(
+        ROOT + "/values", params={"column": "image_study_labelled.modalities", "operator": "contains"}
+    ).json()["values"] == ["", "CT"]
     value = client.get(ROOT + "/values", params={"column": "image_study_labelled.acquisitiondatetime"}).json()[
         "values"
     ][0]
@@ -230,12 +234,13 @@ def test_nested_boolean_conditions_preview_report_and_export(data_exports):
     config = {"builder": {"table": "patient_labelled", "columns": ["patient_labelled.patient_id"], "filters": filters}}
     response = client.post(ROOT + "/preview", json=config)
     assert response.status_code == 200
-    assert response.json()["rows"] == [["P-0001"]]
+    # P-0001 is enrolled in lvo and crisp2: one patient row per enrollment.
+    assert response.json()["rows"] == [["P-0001"], ["P-0001"]]
     assert "NOT (" in response.json()["sql"]
     report = client.post(ROOT + "/reports", json={"name": "Nested logic", "configuration": config}).json()
     assert report["configuration"]["builder"]["filters"] == filters
     job = client.post(ROOT + "/exports", json={**config, "name": "Test export", "format": "csv"}).json()
-    assert run_job(worker, job)["row_count"] == 1
+    assert run_job(worker, job)["row_count"] == 2
     filters["negated"] = "false"
     assert client.post(ROOT + "/preview", json=config).status_code == 422
 
@@ -330,7 +335,8 @@ def test_in_conditions_preserve_values_and_dataset_in_reports_and_exports(data_e
     job = client.post(ROOT + "/exports", json={**config, "name": "Test export", "format": "csv"}).json()
     assert run_job(worker, job)["row_count"] == 1
     config["dataset"] = None
-    assert len(client.post(ROOT + "/preview", json=config).json()["rows"]) == 2
+    # Without a cohort: P-0001's two enrollments plus P-0002.
+    assert len(client.post(ROOT + "/preview", json=config).json()["rows"]) == 3
     for invalid in ([], "P-0001", [None], [["P-0001"]], ["P-0001"] * 1001):
         config["builder"]["filters"]["rules"][0]["value"] = invalid
         assert client.post(ROOT + "/preview", json=config).status_code == 422
@@ -419,7 +425,7 @@ def test_catalog_preview_join_and_shared_report(data_exports):
             "columns": ["patient_labelled.patient_id", "image_series_labelled.seriesinstanceuid"],
             "filters": {
                 "op": "and",
-                "rules": [{"column": "patient_labelled.dataset", "op": "contains", "value": "crisp2"}],
+                "rules": [{"column": "patient_labelled.dataset", "op": "eq", "value": "crisp2"}],
             },
             "sort": [{"column": "patient_labelled.patient_id", "direction": "asc"}],
         },
@@ -441,11 +447,12 @@ def test_catalog_preview_join_and_shared_report(data_exports):
 
 def test_direct_patient_series_relationship_without_study(data_exports):
     client, worker = data_exports
-    relation = ["patient_labelled", "patient_id", "image_series_labelled", "patient_id"]
+    relation = ["patient_labelled", "subject_id", "image_series_labelled", "subject_id"]
     assert relation in client.get(ROOT + "/catalog").json()["relationships"]
     database.records(
-        "INSERT INTO image_series_labelled (patient_id, studyinstanceuid, seriesinstanceuid) "
-        "VALUES ('P-0001', 'missing-study', 'series-without-study')"
+        "INSERT INTO image_series_labelled "
+        "(patient_id, patient_key, subject_id, studyinstanceuid, seriesinstanceuid) "
+        "VALUES ('P-0001', 'lvo__P-0001', 'lvo__P-0001', 'missing-study', 'series-without-study')"
     )
     database.records("INSERT INTO series_dicom_tags (seriesinstanceuid) VALUES ('series-without-study')")
     config = {
@@ -475,7 +482,8 @@ def test_direct_patient_series_relationship_without_study(data_exports):
 def test_adding_study_to_direct_patient_series_join_uses_series_study_uid(data_exports):
     client, _ = data_exports
     database.records(
-        "INSERT INTO image_study_labelled (patient_id, studyinstanceuid) VALUES ('P-0001', 'unrelated-study')"
+        "INSERT INTO image_study_labelled (patient_id, patient_key, subject_id, studyinstanceuid) "
+        "VALUES ('P-0001', 'lvo__P-0001', 'lvo__P-0001', 'unrelated-study')"
     )
     for base, joins in [
         ("image_series_labelled", ["patient_labelled", "image_study_labelled"]),
@@ -492,7 +500,9 @@ def test_adding_study_to_direct_patient_series_join_uses_series_study_uid(data_e
         }
         response = client.post(ROOT + "/preview", json=config)
         assert response.status_code == 200, response.text
-        assert response.json()["rows"] == [["1.2.3.4.5.6", "1.2.3.4.5"]]
+        # Joining through the patient yields one row per enrollment of the
+        # subject (P-0001: lvo + crisp2) — never the unrelated study.
+        assert response.json()["rows"] == [["1.2.3.4.5.6", "1.2.3.4.5"]] * 2
 
 
 @pytest.mark.parametrize("format", ["csv", "xlsx"])

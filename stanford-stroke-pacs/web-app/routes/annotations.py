@@ -47,6 +47,10 @@ class AnnotationCreate(BaseModel):
     level: str = "series"
     seriesinstanceuid: str | None = None
     studyinstanceuid: str | None = None
+    # Patient-level values belong to one enrollment: patient_key is required
+    # there. (patient_id is accepted for older clients but never trusted — the
+    # stored patient_id is always resolved server-side.)
+    patient_key: str | None = None
     patient_id: str | None = None
     label: str
     value: str | None = None
@@ -57,7 +61,8 @@ _UPSERT_SQL = {
     "series": (
         "INSERT INTO annotations "
         "(level, seriesinstanceuid, studyinstanceuid, patient_id, label, value, created_by, notes) "
-        "VALUES ('series', %s, %s, %s, %s, %s, %s, %s) "
+        "SELECT 'series', s.seriesinstanceuid, s.studyinstanceuid, s.patient_id, "
+        "%s, %s, %s, %s FROM image_series s WHERE s.seriesinstanceuid = %s "
         "ON CONFLICT (seriesinstanceuid, label) WHERE level = 'series' DO UPDATE "
         "SET value = EXCLUDED.value, "
         "created_by = EXCLUDED.created_by, "
@@ -68,7 +73,8 @@ _UPSERT_SQL = {
     "study": (
         "INSERT INTO annotations "
         "(level, studyinstanceuid, patient_id, label, value, created_by, notes) "
-        "VALUES ('study', %s, %s, %s, %s, %s, %s) "
+        "SELECT 'study', st.studyinstanceuid, st.patient_id, "
+        "%s, %s, %s, %s FROM image_study st WHERE st.studyinstanceuid = %s "
         "ON CONFLICT (studyinstanceuid, label) WHERE level = 'study' DO UPDATE "
         "SET value = EXCLUDED.value, "
         "created_by = EXCLUDED.created_by, "
@@ -78,9 +84,10 @@ _UPSERT_SQL = {
     ),
     "patient": (
         "INSERT INTO annotations "
-        "(level, patient_id, label, value, created_by, notes) "
-        "VALUES ('patient', %s, %s, %s, %s, %s) "
-        "ON CONFLICT (patient_id, label) WHERE level = 'patient' DO UPDATE "
+        "(level, patient_key, patient_id, label, value, created_by, notes) "
+        "SELECT 'patient', p.patient_key, p.patient_id, "
+        "%s, %s, %s, %s FROM patient p WHERE p.patient_key = %s "
+        "ON CONFLICT (patient_key, label) WHERE level = 'patient' DO UPDATE "
         "SET value = EXCLUDED.value, "
         "created_by = EXCLUDED.created_by, "
         "notes = COALESCE(EXCLUDED.notes, annotations.notes), "
@@ -137,28 +144,24 @@ def create_annotation(
                 if not body.seriesinstanceuid:
                     raise HTTPException(status_code=400, detail="seriesinstanceuid required for series-level")
                 ensure_series_access(cur, body.seriesinstanceuid, scope)
-                params = (
-                    body.seriesinstanceuid, body.studyinstanceuid, body.patient_id,
-                    body.label, body.value, username, body.notes,
-                )
+                entity_id = body.seriesinstanceuid
             elif body.level == "study":
                 if not body.studyinstanceuid:
                     raise HTTPException(status_code=400, detail="studyinstanceuid required for study-level")
                 ensure_study_access(cur, body.studyinstanceuid, scope)
-                params = (
-                    body.studyinstanceuid, body.patient_id,
-                    body.label, body.value, username, body.notes,
-                )
+                entity_id = body.studyinstanceuid
             else:
-                if not body.patient_id:
-                    raise HTTPException(status_code=400, detail="patient_id required for patient-level")
-                ensure_patient_access(cur, body.patient_id, scope)
-                params = (
-                    body.patient_id,
-                    body.label, body.value, username, body.notes,
-                )
-            cur.execute(sql, params)
+                if not body.patient_key:
+                    raise HTTPException(status_code=400, detail="patient_key required for patient-level")
+                ensure_patient_access(cur, body.patient_key, scope)
+                entity_id = body.patient_key
+            # The entity's own row supplies the stored ids, so the INSERT
+            # writes nothing when the entity does not exist (admins skip the
+            # access check above).
+            cur.execute(sql, (body.label, body.value, username, body.notes, entity_id))
             row = cur.fetchone()
+            if row is None:
+                raise HTTPException(status_code=404, detail=f"{body.level.capitalize()} not found")
             # Record the value in the select-label vocabulary so it shows up
             # immediately in the inline dropdown and the column filter. Same
             # transaction as the annotation, so a rolled-back write leaves no
@@ -176,9 +179,6 @@ def create_annotation(
         # Commit the annotation write independently; refresh the labelled mirror
         # table off the request path so it never blocks (or rolls back) the save.
         conn.commit()
-        entity_id = body.seriesinstanceuid if body.level == "series" else (
-            body.studyinstanceuid if body.level == "study" else body.patient_id
-        )
         background_tasks.add_task(_sync_labelled_rows_bg, body.level, entity_id)
         return row
     finally:
@@ -196,7 +196,7 @@ def delete_annotation(
     try:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             cur.execute(
-                "SELECT id, level, label, patient_id, studyinstanceuid, "
+                "SELECT id, level, label, patient_key, studyinstanceuid, "
                 "       seriesinstanceuid "
                 "FROM annotations WHERE id = %s",
                 (annotation_id,),
@@ -215,7 +215,7 @@ def delete_annotation(
             elif row["level"] == "study":
                 ensure_study_access(cur, row["studyinstanceuid"], scope)
             else:
-                ensure_patient_access(cur, row["patient_id"], scope)
+                ensure_patient_access(cur, row["patient_key"], scope)
             cur.execute(
                 "DELETE FROM annotations WHERE id = %s", (annotation_id,)
             )
@@ -224,7 +224,7 @@ def delete_annotation(
         # so they survive the connection close in `finally`.
         conn.commit()
         entity_id = row["seriesinstanceuid"] if row["level"] == "series" else (
-            row["studyinstanceuid"] if row["level"] == "study" else row["patient_id"]
+            row["studyinstanceuid"] if row["level"] == "study" else row["patient_key"]
         )
         background_tasks.add_task(_sync_labelled_rows_bg, row["level"], entity_id)
     finally:

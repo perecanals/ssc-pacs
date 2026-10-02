@@ -8,6 +8,7 @@ no longer need entries in orthanc_users.json.
 from __future__ import annotations
 
 import asyncio
+import json
 import re
 import time
 from urllib.parse import parse_qsl, urlencode
@@ -535,7 +536,12 @@ async def dicomweb_dataset_guard(
      - StudyInstanceUID from the WADO-RS path or QIDO-RS query string
        (OHIF's viewer requests);
      - PatientID (0010,0020) from the QIDO-RS query string — OHIF's study
-       browser panel searches by PatientID, not StudyInstanceUID.
+       browser panel searches by PatientID, not StudyInstanceUID. A PatientID
+       is the bare id in the files and can cover different people from
+       different datasets (Orthanc groups by it alone), so it is allowed only
+       when every study under it is visible — except a QIDO study search,
+       which is let through with ``request.state.qido_study_allowlist`` set and
+       has its response filtered to the visible studies (see ``_proxy``).
 
     Requests with neither identifier (unscoped QIDO searches) are denied for
     non-admins: deny-by-default.
@@ -563,9 +569,16 @@ async def dicomweb_dataset_guard(
         )
         if not patient_id:
             raise HTTPException(status_code=403, detail="Dataset access denied")
-        datasets = await run_in_threadpool(
-            dataset_access.get_patient_datasets_cached, patient_id
+        subjects = await run_in_threadpool(
+            dataset_access.get_patient_id_subjects_cached, patient_id
         )
+        visible, complete = dataset_access.visible_patient_id_studies(scope, subjects)
+        if complete:
+            return
+        if visible and request.url.path == _STUDY_SEARCH_PATH:
+            request.state.qido_study_allowlist = visible
+            return
+        raise HTTPException(status_code=403, detail="Dataset access denied")
     if not dataset_access.scope_allows(scope, datasets):
         raise HTTPException(status_code=403, detail="Dataset access denied")
 
@@ -655,6 +668,27 @@ async def wait_for_series_warm(seriesinstanceuid: str) -> None:
 # the browser resolve those URLs against the web app origin, sending bulkdata
 # through the authenticated proxy like every other DICOMweb request.
 _ORTHANC_DICOMWEB_BASE = f"{ORTHANC_URL.rstrip('/')}/dicom-web".encode()
+
+
+def filter_qido_studies(body: bytes, allowed_study_uids: frozenset) -> bytes:
+    """Keep only the QIDO study results whose StudyInstanceUID is allowed.
+
+    Used when a PatientID search spans people the caller may not see (see
+    dicomweb_dataset_guard). Fails closed: a body that is not a JSON list of
+    DICOM JSON objects becomes an empty result.
+    """
+    try:
+        studies = json.loads(body)
+    except ValueError:
+        return b"[]"
+    if not isinstance(studies, list):
+        return b"[]"
+    kept = [
+        study for study in studies
+        if isinstance(study, dict)
+        and ((study.get("0020000D") or {}).get("Value") or [None])[0] in allowed_study_uids
+    ]
+    return json.dumps(kept).encode()
 
 
 def rewrite_dicomweb_urls(body: bytes) -> bytes:
@@ -822,6 +856,9 @@ async def _proxy(request: Request) -> Response:
             await upstream.aclose()
         headers.pop("content-encoding", None)
         headers.pop("content-length", None)
+        allowlist = getattr(request.state, "qido_study_allowlist", None)
+        if allowlist is not None:
+            body = filter_qido_studies(body, allowlist)
         return Response(
             content=rewrite_dicomweb_urls(body),
             status_code=upstream.status_code,

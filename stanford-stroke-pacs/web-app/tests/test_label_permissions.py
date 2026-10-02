@@ -13,6 +13,7 @@ from tests.conftest import TEST_USER, USER_LVO, login_as
 # USER_LVO is granted the 'lvo' dataset, so P-0001 is in scope for them — any
 # 403 here is the label policy, never dataset scoping (which 404s).
 PATIENT = "P-0001"
+PATIENT_KEY = "lvo__P-0001"
 
 
 def _set_policy(client, label_id, policy, users=None):
@@ -25,7 +26,7 @@ def _set_policy(client, label_id, policy, users=None):
 def _post_value(client, label, value="x"):
     return client.post(
         "/api/annotations",
-        json={"level": "patient", "patient_id": PATIENT, "label": label, "value": value},
+        json={"level": "patient", "patient_key": PATIENT_KEY, "label": label, "value": value},
     )
 
 

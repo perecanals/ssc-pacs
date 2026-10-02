@@ -1,7 +1,8 @@
 """Per-user dataset (cohort) access control.
 
 Seeded fixture geometry (conftest.py):
-  patients   P-0001 dataset={lvo,crisp2},  P-0002 dataset={lvo}
+  patients   P-0001 enrolled in lvo (owner) + crisp2 (linked, same subject),
+             P-0002 enrolled in lvo
   studies    1.2.3.4.5 (P-0001),           2.2.2.2.2 (P-0002)
   series     1.2.3.4.5.6 (P-0001)
   users      testuser (admin),
@@ -105,11 +106,17 @@ class TestListFiltering:
 
 class TestDetailAccess:
     def test_patient_studies_in_scope(self, client):
-        resp = login_as(client, USER_CRISP).get("/api/patients/P-0001/studies")
+        resp = login_as(client, USER_CRISP).get("/api/patients/crisp2__P-0001/studies")
         assert resp.status_code == 200
+        # The linked enrollment sees the imaging owned by the lvo enrollment.
+        assert [r["studyinstanceuid"] for r in resp.json()] == [P1_STUDY]
+
+    def test_linked_enrollment_of_other_dataset_404(self, client):
+        resp = login_as(client, USER_CRISP).get("/api/patients/lvo__P-0001/studies")
+        assert resp.status_code == 404
 
     def test_patient_studies_out_of_scope_404(self, client):
-        resp = login_as(client, USER_CRISP).get("/api/patients/P-0002/studies")
+        resp = login_as(client, USER_CRISP).get("/api/patients/lvo__P-0002/studies")
         assert resp.status_code == 404
 
     def test_study_series_out_of_scope_404(self, client):
@@ -123,13 +130,13 @@ class TestDetailAccess:
     def test_cache_status_out_of_scope_404(self, client):
         login_as(client, USER_CRISP)
         assert client.get(f"/api/studies/{P2_STUDY}/cache-status").status_code == 404
-        assert client.get("/api/patients/P-0002/cache-status").status_code == 404
+        assert client.get("/api/patients/lvo__P-0002/cache-status").status_code == 404
 
     def test_warm_evict_out_of_scope_404(self, client):
         login_as(client, USER_CRISP)
         assert client.post(f"/api/studies/{P2_STUDY}/warm").status_code == 404
         assert client.post(f"/api/studies/{P2_STUDY}/evict").status_code == 404
-        assert client.post("/api/patients/P-0002/warm").status_code == 404
+        assert client.post("/api/patients/lvo__P-0002/warm").status_code == 404
 
     def test_series_endpoints_out_of_scope_404(self, client, db_conn):
         """A P-0002 (lvo-only) series is invisible to a crisp2-scoped user."""
@@ -137,8 +144,10 @@ class TestDetailAccess:
         with db_conn.cursor() as cur:
             cur.execute(
                 "INSERT INTO image_series "
-                "(patient_id, studyinstanceuid, seriesinstanceuid, modality) "
-                "VALUES ('P-0002', %s, %s, 'CT') ON CONFLICT DO NOTHING",
+                "(patient_id, patient_key, subject_id, studyinstanceuid, "
+                " seriesinstanceuid, modality) "
+                "VALUES ('P-0002', 'lvo__P-0002', 'lvo__P-0002', %s, %s, 'CT') "
+                "ON CONFLICT DO NOTHING",
                 (P2_STUDY, p2_series),
             )
         db_conn.commit()
@@ -159,12 +168,13 @@ class TestDetailAccess:
         resp = client.post(
             "/api/cache-status/batch",
             json={"uids": [P1_STUDY, P2_STUDY],
-                  "patient_ids": ["P-0001", "P-0002"]},
+                  "patient_keys": ["crisp2__P-0001", "lvo__P-0001", "lvo__P-0002"]},
         )
         assert resp.status_code == 200
         body = resp.json()
         assert P2_STUDY not in body["studies"]
-        assert "P-0002" not in body["patients"]
+        # Patient rows are scoped by their own dataset: only crisp2's P-0001.
+        assert set(body["patients"]) == {"crisp2__P-0001"}
 
 
 # ---------------------------------------------------------------------------
@@ -187,7 +197,7 @@ class TestAnnotationScoping:
         login_as(client, USER_CRISP)
         resp = client.post(
             "/api/annotations",
-            json={"level": "patient", "patient_id": "P-0002",
+            json={"level": "patient", "patient_key": "lvo__P-0002",
                   "label": "dsperm_flag", "value": "x"},
         )
         assert resp.status_code == 404
@@ -196,10 +206,21 @@ class TestAnnotationScoping:
         login_as(client, USER_CRISP)
         resp = client.post(
             "/api/annotations",
-            json={"level": "patient", "patient_id": "P-0001",
+            json={"level": "patient", "patient_key": "crisp2__P-0001",
                   "label": "dsperm_flag", "value": "x"},
         )
         assert resp.status_code == 201
+
+    def test_linked_enrollment_in_other_dataset_is_out_of_scope(self, client):
+        # Same person, but the lvo enrollment's patient labels are lvo's: a
+        # crisp2-only user may see the shared imaging, not write lvo labels.
+        login_as(client, USER_CRISP)
+        resp = client.post(
+            "/api/annotations",
+            json={"level": "patient", "patient_key": "lvo__P-0001",
+                  "label": "dsperm_flag", "value": "x"},
+        )
+        assert resp.status_code == 404
 
     def test_delete_out_of_scope_404(self, logged_in_client, client):
         created = logged_in_client.post(
@@ -228,7 +249,7 @@ class TestAnnotationScoping:
         )
         logged_in_client.post(
             "/api/annotations",
-            json={"level": "patient", "patient_id": "P-0002",
+            json={"level": "patient", "patient_key": "lvo__P-0002",
                   "label": "dsperm_sel", "value": "shared-val"},
         )
         login_as(client, USER_CRISP)

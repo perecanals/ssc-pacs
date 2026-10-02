@@ -50,6 +50,7 @@ load_dotenv(REPO_ROOT / ".env")
 
 # Import web-app modules for the shared deletion core, DB config, and settings.
 sys.path.insert(0, str(REPO_ROOT / "web-app"))
+from common import subject_for_patient_arg  # noqa: E402
 from db import DB_CONFIG  # noqa: E402
 from deletion import (  # noqa: E402
     build_series_deletion_plan,
@@ -104,6 +105,7 @@ def _print_plan(plan: dict) -> None:
 
 
 def _list_null_description(patient: str) -> int:
+    subject_id = subject_for_patient_arg(patient)
     conn = psycopg2.connect(**DB_CONFIG)
     try:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
@@ -112,10 +114,10 @@ def _list_null_description(patient: str) -> int:
                 "  (SELECT count(*) FROM image_series s "
                 "     WHERE s.studyinstanceuid = st.studyinstanceuid) AS n_series "
                 "FROM image_study st "
-                "WHERE st.patient_id = %s "
+                "WHERE st.subject_id = %s "
                 "  AND (st.studydescription IS NULL OR st.studydescription = '') "
                 "ORDER BY st.acquisitiondatetime",
-                (patient,),
+                (subject_id,),
             )
             rows = cur.fetchall()
     finally:
@@ -252,7 +254,8 @@ def main() -> int:
     ap.add_argument("--series", action="append", metavar="UID",
                     help="SeriesInstanceUID to delete (repeatable)")
     ap.add_argument("--patient", metavar="ID",
-                    help="With --null-description: which patient to list")
+                    help="With --null-description: which patient to list (a "
+                         "patient_key, or a patient_id that names one person)")
     ap.add_argument("--null-description", action="store_true",
                     help="List a patient's null/empty-StudyDescription studies "
                          "(review only; never deletes)")

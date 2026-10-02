@@ -55,7 +55,7 @@ def test_protected_endpoint_requires_auth(client):
         "/api/annotations",
         json={
             "level": "patient",
-            "patient_id": "P-0001",
+            "patient_key": "lvo__P-0001",
             "label": "test_label",
             "value": "yes",
         },

@@ -139,7 +139,7 @@ def catalog():
 
 def datasets(scope=None):
     with reader() as conn, conn.cursor() as cur:
-        cur.execute("SELECT DISTINCT unnest(dataset) AS dataset FROM ONLY public.patient ORDER BY dataset")
+        cur.execute("SELECT DISTINCT dataset FROM ONLY public.patient ORDER BY dataset")
         return [row[0] for row in cur.fetchall() if row[0] and (scope is None or row[0] in scope)]
 
 

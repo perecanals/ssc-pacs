@@ -204,18 +204,17 @@ def set_user_datasets(
 ):
     """Replace a user's dataset grants.
 
-    Values must be existing `patient.dataset` tags (422 otherwise — catches
-    typos; grant-ahead-of-ingest is a script-only affordance). Invalidates
-    the proxy's cached scope so the change applies immediately.
+    Values must be registered dataset names (422 otherwise — catches typos).
+    A dataset is registered with scripts/admin/manage_datasets.py, so it can be
+    granted before anything is ingested into it. Invalidates the proxy's cached
+    scope so the change applies immediately.
     """
     datasets = sorted({d.strip() for d in body.datasets if d.strip()})
     conn = get_conn()
     try:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-            cur.execute(
-                "SELECT DISTINCT unnest(dataset) AS ds FROM patient"
-            )
-            known = {r["ds"] for r in cur.fetchall()}
+            cur.execute("SELECT name FROM dataset")
+            known = {r["name"] for r in cur.fetchall()}
             unknown = [d for d in datasets if d not in known]
             if unknown:
                 raise HTTPException(

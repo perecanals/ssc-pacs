@@ -61,32 +61,43 @@ class TestPatientListing:
         assert row is not None
         assert str(row["stroke_date"]).startswith("2025-01-01")
 
-    def test_datasets_endpoint_lists_distinct_tags(self, logged_in_client):
-        """/api/datasets returns the distinct, sorted cohort tags across patients."""
+    def test_clinical_row_restricted_to_its_dataset(self, logged_in_client, monkeypatch):
+        """clinical_data.study_id has no dataset: with clinical_data_dataset set,
+        only that dataset's enrollment of P-0001 takes the clinical date — a
+        same-id patient elsewhere keeps its imaging date."""
+        import routes.studies as studies_mod
+
+        monkeypatch.setattr(studies_mod, "CLINICAL_DATA_DATASET", "lvo")
+        resp = logged_in_client.get("/api/patients", params={"patient_id": "P-0001"})
+        dates = {r["patient_key"]: str(r["stroke_date"])[:10] for r in resp.json()["items"]}
+        assert dates == {"lvo__P-0001": "2025-01-01", "crisp2__P-0001": "2025-02-02"}
+
+    def test_datasets_endpoint_lists_registered_datasets(self, logged_in_client):
+        """/api/datasets returns the registered dataset names, sorted."""
         resp = logged_in_client.get("/api/datasets")
         assert resp.status_code == 200
-        tags = resp.json()
-        # P-0001 is in {lvo, crisp2}, P-0002 in {lvo} → distinct union, sorted.
-        assert tags == ["crisp2", "lvo"]
+        assert resp.json() == ["crisp2", "lvo"]
 
     def test_dataset_filter_narrows_results(self, logged_in_client):
-        """dataset=crisp2 isolates P-0001 (member); P-0002 is excluded."""
+        """dataset=crisp2 isolates P-0001's crisp2 enrollment; P-0002 is excluded."""
         resp = logged_in_client.get("/api/patients", params={"dataset": "crisp2"})
         assert resp.status_code == 200
         items = resp.json()["items"]
         assert _find(items, "P-0001") is not None
         assert _find(items, "P-0002") is None
 
-    def test_patient_row_exposes_dataset_column(self, logged_in_client):
-        """The patient row carries `dataset` as a comma-joined string for display."""
+    def test_one_row_per_enrollment(self, logged_in_client):
+        """P-0001 is enrolled in two datasets: one patient row per enrollment,
+        each with its own key and dataset, sharing one subject."""
         resp = logged_in_client.get("/api/patients", params={"patient_id": "P-0001"})
-        row = _find(resp.json()["items"], "P-0001")
-        assert row is not None
-        # text[] {lvo,crisp2} is returned array_to_string-joined for the table cell.
-        assert row["dataset"] == "lvo, crisp2"
+        rows = {r["patient_key"]: r for r in resp.json()["items"]}
+        assert set(rows) == {"lvo__P-0001", "crisp2__P-0001"}
+        assert rows["lvo__P-0001"]["dataset"] == "lvo"
+        assert rows["crisp2__P-0001"]["dataset"] == "crisp2"
+        assert {r["subject_id"] for r in rows.values()} == {"lvo__P-0001"}
 
     def test_dataset_filter_shared_tag_keeps_both(self, logged_in_client):
-        """dataset=lvo is a member of both patients' arrays → both listed."""
+        """dataset=lvo holds both patients' lvo enrollments → both listed."""
         resp = logged_in_client.get("/api/patients", params={"dataset": "lvo"})
         assert resp.status_code == 200
         items = resp.json()["items"]
@@ -94,7 +105,8 @@ class TestPatientListing:
         assert _find(items, "P-0002") is not None
 
     def test_studies_and_series_expose_dataset_column(self, logged_in_client):
-        """Study/series rows carry the owning patient's comma-joined dataset."""
+        """Study/series rows list their subject's enrollments' datasets, owner
+        first (one row per study — never duplicated per enrollment)."""
         studies = logged_in_client.get("/api/studies").json()["items"]
         by_uid = {s["studyinstanceuid"]: s for s in studies}
         assert by_uid["1.2.3.4.5"]["dataset"] == "lvo, crisp2"
@@ -103,7 +115,7 @@ class TestPatientListing:
         series = logged_in_client.get("/api/series").json()["series"]
         assert any(s["dataset"] == "lvo, crisp2" for s in series)
 
-        sub_rows = logged_in_client.get("/api/patients/P-0001/studies").json()
+        sub_rows = logged_in_client.get("/api/patients/lvo__P-0001/studies").json()
         assert sub_rows[0]["dataset"] == "lvo, crisp2"
         grand_rows = logged_in_client.get("/api/studies/1.2.3.4.5/series").json()
         assert grand_rows[0]["dataset"] == "lvo, crisp2"
@@ -120,7 +132,9 @@ class TestPatientListing:
         series = logged_in_client.get(
             "/api/series", params={"dataset": "crisp2"}
         ).json()["series"]
-        assert series and all(s["patient_id"] == "P-0001" for s in series)
+        assert series and all(
+            set(s["patient_id"].split(", ")) == {"P-0001"} for s in series
+        )
 
     def test_sort_by_stroke_date(self, logged_in_client):
         """Sorting by stroke_date orders on the displayed COALESCE value."""
@@ -184,75 +198,3 @@ class TestWithoutClinicalTable:
         resp = logged_in_client.get("/api/patients", params={"patient_id": "P-0001"})
         row = _find(resp.json()["items"], "P-0001")
         assert str(row["stroke_date"]).startswith("2025-01-01")
-
-
-# The exact ON CONFLICT clause used by ImageIngestionProtocol._upsert_patient.
-# Kept in sync with image_ingestion_protocol.py; psycopg2 paramstyle.
-_UPSERT_SQL = """
-INSERT INTO patient (patient_id, stroke_date, import_id,
-                     import_label, dataset, created_at, updated_at)
-SELECT s.patient_id, MIN(s.acquisitiondatetime),
-       %(import_id)s, %(import_label)s, %(dataset)s, now(), now()
-FROM image_study s
-WHERE s.patient_id = ANY(%(patient_ids)s)
-GROUP BY s.patient_id
-ON CONFLICT (patient_id) DO UPDATE SET
-  stroke_date = EXCLUDED.stroke_date,
-  dataset = ARRAY(SELECT DISTINCT unnest(patient.dataset || EXCLUDED.dataset) ORDER BY 1),
-  updated_at = now()
-"""
-
-
-class TestPatientUpsertSemantics:
-    """Mirrors ImageIngestionProtocol._upsert_patient: origin-preserving
-    import provenance, deduped dataset array union, recomputed stroke_date."""
-
-    PID = "PT-UPSERT"
-
-    def _upsert(self, cur, *, import_id, import_label, dataset):
-        cur.execute(_UPSERT_SQL, {
-            "import_id": import_id,
-            "import_label": import_label,
-            "dataset": dataset,
-            "patient_ids": [self.PID],
-        })
-
-    def test_origin_preserved_union_and_min(self, db_conn):
-        cur = db_conn.cursor()
-        # Batch 1: one study, import_id 10.
-        cur.execute(
-            "INSERT INTO image_study (patient_id, studyinstanceuid, acquisitiondatetime, "
-            "import_id, import_label) VALUES (%s, 'up.1', '2025-05-05', 10, 'b1')",
-            (self.PID,),
-        )
-        self._upsert(cur, import_id=10, import_label="b1", dataset=["ds1"])
-        cur.execute(
-            "SELECT stroke_date, import_id, import_label, dataset FROM patient WHERE patient_id=%s",
-            (self.PID,),
-        )
-        stroke, iid, ilabel, dataset = cur.fetchone()
-        assert str(stroke).startswith("2025-05-05")
-        assert (iid, ilabel, dataset) == (10, "b1", ["ds1"])
-
-        # Batch 2: earlier study, import_id 20, new dataset/label.
-        cur.execute(
-            "INSERT INTO image_study (patient_id, studyinstanceuid, acquisitiondatetime, "
-            "import_id, import_label) VALUES (%s, 'up.2', '2025-01-01', 20, 'b2')",
-            (self.PID,),
-        )
-        self._upsert(cur, import_id=20, import_label="b2", dataset=["ds2"])
-        cur.execute(
-            "SELECT stroke_date, import_id, import_label, dataset FROM patient WHERE patient_id=%s",
-            (self.PID,),
-        )
-        stroke, iid, ilabel, dataset = cur.fetchone()
-        assert str(stroke).startswith("2025-01-01")   # recomputed global MIN
-        assert (iid, ilabel) == (10, "b1")             # ORIGIN preserved
-        assert dataset == ["ds1", "ds2"]               # deduped union, ordered
-
-        # Idempotent re-run: dataset stays deduped, origin unchanged.
-        self._upsert(cur, import_id=20, import_label="b2", dataset=["ds2"])
-        cur.execute("SELECT import_id, dataset FROM patient WHERE patient_id=%s", (self.PID,))
-        iid, dataset = cur.fetchone()
-        assert (iid, dataset) == (10, ["ds1", "ds2"])
-        # db_conn fixture rolls back — no committed test rows to clean up.

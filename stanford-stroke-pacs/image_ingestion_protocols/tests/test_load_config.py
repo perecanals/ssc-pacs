@@ -13,7 +13,11 @@ import execute_image_ingestion_protocol as executor
 from execute_image_ingestion_protocol import load_config
 
 
-def _write_yaml(tmp_path, body):
+def _write_yaml(tmp_path, body, dataset="TEST"):
+    """Write a run YAML; `dataset` (required by load_config) is appended
+    unless None."""
+    if dataset is not None:
+        body += f"dataset: {dataset}\n"
     p = tmp_path / "run.yaml"
     p.write_text(body, encoding="utf-8")
     return str(p)
@@ -65,11 +69,17 @@ def test_missing_src_dir_fails_fast(cold_mode, tmp_path):
         load_config(_write_yaml(tmp_path, "import_label: x\n"))
 
 
+def test_missing_dataset_fails_fast(cold_mode, tmp_path):
+    for dataset in (None, "''"):
+        with pytest.raises(ValueError, match="dataset is required"):
+            load_config(_write_yaml(tmp_path, "src_dir: /data/b\n", dataset=dataset))
+
+
 def test_missing_file_and_non_mapping_yaml_raise(cold_mode, tmp_path):
     with pytest.raises(FileNotFoundError):
         load_config(str(tmp_path / "nope.yaml"))
     with pytest.raises(ValueError, match="top-level mapping"):
-        load_config(_write_yaml(tmp_path, "- just\n- a\n- list\n"))
+        load_config(_write_yaml(tmp_path, "- just\n- a\n- list\n", dataset=None))
 
 
 def test_compress_workers_coercion(cold_mode, tmp_path):

@@ -20,7 +20,7 @@ by default and applies only with `--execute`; interactive prompts have a
 
 | Directory | Purpose | Key scripts |
 |---|---|---|
-| `admin/` | User provisioning, credential rotation, label/dataset ops, series classification, study/series deletion, teardown | `manage_users.py`, `manage_readonly_db_users.py`, `manage_data_exports_db.py`, `rotate_service_account.py`, `rotate_db_password.py`, `bulk_set_label_values.py`, `remove_label.py`, `rename_dataset_value.py`, `reclassify_series_types.py`, `recompute_timepoints.py`, `delete_study.py`, `teardown.sh` |
+| `admin/` | User provisioning, credential rotation, label/dataset ops, series classification, study/series deletion, teardown | `manage_users.py`, `manage_readonly_db_users.py`, `manage_data_exports_db.py`, `rotate_service_account.py`, `rotate_db_password.py`, `bulk_set_label_values.py`, `remove_label.py`, `manage_datasets.py`, `link_patients.py`, `reclassify_series_types.py`, `recompute_timepoints.py`, `delete_study.py`, `teardown.sh` |
 | `backup/` | PostgreSQL dump, Orthanc volume snapshot, freshness monitoring, opt-in encrypted remote backups | `backup_pg_db.sh`, `backup_orthanc_storage.sh` (+ in-container `orthanc_storage_snapshot.py`), `check_backup_freshness.sh`, `remote_backup.py` ([remote setup](../../docs/operations/remote_backups.md)) |
 | `cold_storage/` | Archive, cleanup, health, cache state, index repair | `archive_all_series.py`, `cleanup_loose_dicoms.py`, `scoped_index.py`, `reindex_missing_series.py`, `prune_stale_index_paths.py`, `rebuild_cache_state.py`, `cold_storage_health.py`, `backfill_storage_sizes.py`, `list_unarchived_series.py`, `verify_and_repair_archives.py`, `mirror_cold_archive.sh` |
 | `connectivity/` | Sanitized SSH tunnel templates for end users (per OS) | `tunnel/{linux,macos,windows}/tunnel.*` |
@@ -28,7 +28,7 @@ by default and applies only with `--execute`; interactive prompts have a
 | `dicom/` | DICOM conversion utilities | `dicom_to_nifti.py` |
 | `linux/` | Linux deploy path (systemd units, Postgres cluster) + whole-stack control | `install_systemd.sh`, `provision_postgres.sh`, `stop_stack.sh`, `start_stack.sh` |
 | `macos/` | macOS host tooling (Colima, launchd, disks) + whole-stack control | `colima_start.sh`, `colima_watchdog.sh`, `install_launchd.sh`, `stop_stack.sh`, `start_stack.sh` |
-| `migration/` | Port the stack to a new host | `repoint_host_paths.py`, `reconcile_migration.py` |
+| `migration/` | Port the stack to a new host; one-off data corrections | `repoint_host_paths.py`, `reconcile_migration.py`, `split_merged_patients.py` |
 | `orthanc/` | Compose wrapper, status check | `dc.sh`, `check_status.sh` |
 
 `_lib.sh` holds the shared shell helpers (`STACK_DIR`, `config_get`,
@@ -82,8 +82,12 @@ python scripts/admin/rotate_service_account.py check    # verify the two agree
 python scripts/admin/rotate_db_password.py rotate       # DB_PASSWORD: ALTER ROLE + .env
 python scripts/admin/rotate_db_password.py check        # verify .env authenticates
 
-# Rename a dataset cohort tag everywhere (patient + user grants + mirror)
-python scripts/admin/rename_dataset_value.py --from-value old --to-value new [--execute]
+# Datasets: register, list, rename (name changes everywhere it is stored)
+python scripts/admin/manage_datasets.py add --slug outerlimits --name OUTERLIMITS
+python scripts/admin/manage_datasets.py rename <slug> <new-name> [--execute]
+
+# Link a patient of one dataset to the same person in another (docs/operations/linking_patients.md)
+python scripts/admin/link_patients.py link links.csv [--apply]
 
 # Bulk-set label values from CSV/Excel (dry-run by default)
 python scripts/admin/bulk_set_label_values.py --file x.csv --level series \
