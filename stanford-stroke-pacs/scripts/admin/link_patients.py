@@ -40,7 +40,6 @@ import argparse
 import sys
 from pathlib import Path
 
-import pandas as pd
 import psycopg2
 from dotenv import load_dotenv
 
@@ -68,6 +67,10 @@ UNLINK_COLUMNS = ("dataset", "patient_id")
 
 
 def _load(path: Path, columns) -> list[dict]:
+    # Deferred: only reading the table needs pandas (not installed in the
+    # web-app test environment, which imports this module).
+    import pandas as pd  # noqa: PLC0415
+
     if path.suffix.lower() in (".xlsx", ".xls"):
         df = pd.read_excel(path, dtype=str)
     else:
