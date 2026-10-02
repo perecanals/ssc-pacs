@@ -168,8 +168,9 @@ own `.env`, and a pandas/SQLAlchemy example.
 
 Datasets are a registry (Alembic `0026`): an immutable slug (the prefix of every
 `patient_key`) and a display name (what grants, filters, saved exports and
-ingestion YAMLs use). Register one before its first ingestion; it can be granted
-right away. A rename changes the name everywhere it is stored — enrollments,
+ingestion YAMLs use). Register one before its first ingestion — or confirm the
+prompt ingestion shows for an unknown name when run from a terminal; it can be
+granted right away. A rename changes the name everywhere it is stored — enrollments,
 user grants, saved Data Exports, session filters, the patient mirror — in one
 transaction (dry-run default, `--execute` to apply):
 

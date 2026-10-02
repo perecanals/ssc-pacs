@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import queue
+import re
 import sys
 import threading
 import traceback
@@ -271,6 +272,64 @@ def execute_image_ingestion_protocol(
     )
     # Execute the protocol
     return protocol.execute_image_ingestion_protocol(overwrite_if_exists=overwrite_if_exists)
+
+
+def dataset_slug_for(name):
+    """The slug the 0026 migration derives from a dataset name (crisp2-lvo)."""
+    return re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
+
+
+def ensure_dataset_registered(postgres_engine, name, logger, stdin=None, stdout=None):
+    """Preflight, once per run: make sure the batch's dataset is registered.
+
+    A registered name passes. An unknown one — a new dataset, or a typo, which
+    would silently file every patient of the batch as a new, unlinked person —
+    is offered for creation only to a person at a terminal: the prompt shows
+    the slug it would get (permanent: the prefix of every patient_key) and any
+    similar existing names. Without a terminal (a background run) it stops with
+    the command to register it. Returns the dataset's slug.
+    """
+    import difflib
+
+    from sqlalchemy import text
+
+    stdin = stdin or sys.__stdin__
+    stdout = stdout or sys.__stdout__
+    with postgres_engine.begin() as connection:
+        registered = dict(connection.execute(text("SELECT name, slug FROM dataset")).all())
+    if name in registered:
+        return registered[name]
+
+    slug = dataset_slug_for(name)
+    by_lower = {n.lower(): n for n in registered}
+    similar = difflib.get_close_matches(name.lower(), list(by_lower), n=3, cutoff=0.6)
+    hint = f" Did you mean: {', '.join(repr(by_lower[s]) for s in similar)}?" if similar else ""
+    command = f"scripts/admin/manage_datasets.py add --slug {slug} --name {name!r}"
+    if not slug or slug in registered.values():
+        raise SystemExit(
+            f"Dataset {name!r} is not registered and its derived slug {slug!r} is "
+            f"unusable or taken.{hint} Register it with an explicit slug: "
+            f"scripts/admin/manage_datasets.py add --slug <slug> --name {name!r}"
+        )
+    if not (stdin and stdin.isatty()):
+        raise SystemExit(
+            f"Dataset {name!r} is not registered.{hint} If it is new, register it "
+            f"first ({command}) or start the run from a terminal to confirm it."
+        )
+    stdout.write(
+        f"\nDataset {name!r} is not registered.{hint}\n"
+        f"Create it now as a new dataset (slug {slug!r}, permanent)? [y/N] "
+    )
+    stdout.flush()
+    if stdin.readline().strip().lower() not in ("y", "yes"):
+        raise SystemExit(f"Aborted: dataset {name!r} not created; fix the YAML or register it.")
+    with postgres_engine.begin() as connection:
+        connection.execute(
+            text("INSERT INTO dataset (slug, name) VALUES (:slug, :name)"),
+            {"slug": slug, "name": name},
+        )
+    logger.info(f"Registered new dataset {name!r} (slug {slug!r}) on confirmation")
+    return slug
 
 
 def batch_patient_keys(raw_conn, study_ids, series_ids):
@@ -707,6 +766,9 @@ if __name__ == "__main__":
     postgres_engine = create_engine(
         build_db_url(DB_USER, DB_PASSWORD, DB_HOST, DB_PORT, config["database"])
     )
+    # Once, before any case: an unregistered dataset would otherwise fail (or,
+    # mistyped, misfile) every case of the batch.
+    ensure_dataset_registered(postgres_engine, config["dataset"].strip(), logger)
     run_import_id = ImageIngestionProtocol.get_next_import_id(postgres_engine)
 
     src_dir = config["src_dir"]

@@ -519,5 +519,53 @@ def test_unregistered_or_missing_dataset_is_refused(roots, scratch_engine):
             _run_case(roots, scratch_engine, "11-001", dataset=dataset)
 
 
+class _Terminal:
+    """A stdin stand-in that is (or is not) an interactive terminal."""
+
+    def __init__(self, answer="", tty=True):
+        self._answer, self._tty = answer, tty
+
+    def isatty(self):
+        return self._tty
+
+    def readline(self):
+        return self._answer + "\n"
+
+
+def test_dataset_preflight(scratch_engine):
+    import io
+    import logging
+
+    from sqlalchemy import text
+
+    from execute_image_ingestion_protocol import ensure_dataset_registered
+
+    log = logging.getLogger("test")
+
+    def run(name, answer="", tty=True):
+        out = io.StringIO()
+        result = ensure_dataset_registered(
+            scratch_engine, name, log, stdin=_Terminal(answer, tty), stdout=out)
+        return result, out.getvalue()
+
+    # Registered: passes silently.
+    assert run("audit", tty=False) == ("audit", "")
+    # Unknown in a background run: refused, with a typo hint and the command.
+    with pytest.raises(SystemExit, match=r"'OTHER/DZ' is not registered\. Did you mean: 'OTHER/DS'"):
+        run("OTHER/DZ", tty=False)
+    # At a terminal: declining aborts and creates nothing...
+    with pytest.raises(SystemExit, match="not created"):
+        run("NEW SET", answer="n")
+    # ...confirming registers it under the derived slug.
+    slug, prompt = run("NEW SET", answer="y")
+    assert slug == "new-set" and "slug 'new-set', permanent" in prompt
+    with scratch_engine.connect() as conn:
+        assert conn.execute(text(
+            "SELECT name FROM dataset WHERE slug = 'new-set'")).scalar() == "NEW SET"
+    # A name whose slug is taken by another dataset needs an explicit slug.
+    with pytest.raises(SystemExit, match="explicit slug"):
+        run("new set", answer="y")
+
+
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "-v"]))

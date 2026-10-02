@@ -34,8 +34,10 @@ delete_originals_after_verification: false
 # Tag all rows in this run with a label (recorded on image_study/image_series).
 import_label: my_batch_1
 
-# Dataset this batch is ingested into (required; e.g. PRECISE, CRISP2/LVO). Must
-# be registered first: scripts/admin/manage_datasets.py add --slug <slug> --name <name>.
+# Dataset this batch is ingested into (required; e.g. PRECISE, CRISP2/LVO). A new
+# name is offered for creation (y/N, with similar existing names) when the run
+# is started from a terminal; a background run needs it registered first:
+# scripts/admin/manage_datasets.py add --slug <slug> --name <name>.
 # Each PatientID becomes an enrollment in this dataset (patient_key
 # <slug>__<PatientID>), so the same id in two datasets stays two patients. It is
 # also what per-user dataset permissions filter on (users.allowed_datasets).
