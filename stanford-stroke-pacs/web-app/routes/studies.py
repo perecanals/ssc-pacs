@@ -16,6 +16,7 @@ from cache_manager import (
     touch_access,
     touch_access_series,
 )
+from clinical_sources import episode_date_sql
 from common import (
     SERIES_AUTO_COLS,
     SERIES_FROM_CLAUSE,
@@ -30,16 +31,14 @@ from common import (
     attach_inherited_annotations,
     auto_match_sql,
     build_label_filter_sql,
-    column_exists,
     enrollment_match_sql,
     ensure_patient_access,
     ensure_study_access,
     parse_label_filters,
     scope_literal,
     subject_scope_sql,
-    table_exists,
 )
-from config import CLINICAL_DATA_DATASET, CLINICAL_EPISODE_DATE_COLUMN, STORAGE_MODE
+from config import STORAGE_MODE
 from db import get_conn
 from imaging_downloads import imaging_download
 from orthanc_client import orthanc_lookup
@@ -54,53 +53,6 @@ STUDY_SERIES_COUNT = (
     "WHERE s.studyinstanceuid = st.studyinstanceuid)"
 )
 STUDY_MODALITY = "array_to_string(st.modalities, ', ')"
-
-# Effective episode-date column on the optional clinical_data table. Frozen at
-# startup by resolve_clinical_date_column() (called from app.py's lifespan,
-# after migrations); table *presence* stays a per-request check so the table
-# can come and go without a restart.
-_effective_clinical_date_column: str = CLINICAL_EPISODE_DATE_COLUMN
-
-
-def resolve_clinical_date_column(cur) -> str:
-    """Validate the configured episode-date column against the live schema.
-
-    Runs once at startup. Falls back to ``stroke_date`` with a WARN when
-    clinical_data exists but lacks the configured column — a typo'd config
-    must degrade, not 500 on every /api/patients. When the table is absent
-    the configured value is kept verbatim: there is nothing to validate
-    against, the identifier is already injection-safe (config.py), and it is
-    only interpolated into SQL once a table exists.
-    """
-    global _effective_clinical_date_column
-    col = CLINICAL_EPISODE_DATE_COLUMN
-    if (
-        col != "stroke_date"
-        and table_exists(cur, "clinical_data")
-        and not column_exists(cur, "clinical_data", col)
-    ):
-        logger.warning(
-            "clinical_episode_date_column %r not found on clinical_data; "
-            "falling back to stroke_date", col,
-        )
-        col = "stroke_date"
-    _effective_clinical_date_column = col
-    return col
-
-
-def _clinical_join_sql(cur, patient_alias: str) -> str:
-    """ON-clause for joining clinical_data to an enrollment.
-
-    clinical_data.study_id carries one dataset's patient ids but has no dataset
-    column; restricting the join to config's ``clinical_data_dataset`` keeps a
-    same-id patient from another dataset off that clinical row.
-    """
-    on = f"c.study_id = {patient_alias}.patient_id"
-    if CLINICAL_DATA_DATASET:
-        literal = cur.mogrify("%s", (CLINICAL_DATA_DATASET,)).decode().replace("%", "%%")
-        on += f" AND {patient_alias}.dataset = {literal}"
-    return on
-
 
 # ---------------------------------------------------------------------------
 # Patient browsing
@@ -169,35 +121,14 @@ def list_patients(
                 params.extend(tp_params)
 
             # Patient level is sourced from the `patient` registry (one row per
-            # patient, comprehensive). clinical_data is an optional clinical
-            # import that a deployment may not have at all; when it is present
-            # it is joined only to prefer its clinical episode date for
-            # clinically-matched patients. Without it every patient falls back to
-            # the imaging-derived patient.stroke_date — the same value a patient
-            # with no clinical row already gets. (Its patient-id column is
-            # historically named study_id, and the join is restricted to the
-            # dataset it belongs to.) Which clinical column supplies the
-            # episode date is config.toml [web-app] clinical_episode_date_column,
-            # resolved once at startup by resolve_clinical_date_column().
-            #
-            # The configured column may not be TEXT (the historical stroke_date
-            # is); ::text keeps the COALESCE in text space either way — prefer
-            # the clinical string, fall back to the imaging date as YYYY-MM-DD —
-            # preserving the prior text contract and lexicographic date sort.
-            # Filter, sort, and SELECT all reuse stroke_date_expr, so the two
-            # branches cannot drift apart.
-            if table_exists(cur, "clinical_data"):
-                from_clause = (
-                    "FROM patient p "
-                    f"LEFT JOIN clinical_data c ON {_clinical_join_sql(cur, 'p')}"
-                )
-                stroke_date_expr = (
-                    f"COALESCE(c.{_effective_clinical_date_column}::text, "
-                    "p.stroke_date::date::text)"
-                )
-            else:
-                from_clause = "FROM patient p"
-                stroke_date_expr = "p.stroke_date::date::text"
+            # enrollment, comprehensive). A dataset may register a clinical
+            # table (clinical_sources.py, Alembic 0027): its episode date is
+            # preferred for that dataset's enrollments, falling back to the
+            # imaging-derived patient.stroke_date — what every patient without
+            # a clinical row gets. Filter, sort, and SELECT all reuse
+            # stroke_date_expr, so they cannot drift apart.
+            clinical_joins, stroke_date_expr = episode_date_sql(cur, "p")
+            from_clause = f"FROM patient p {clinical_joins}"
 
             if patient_id:
                 conditions.append("p.patient_id::text LIKE %s")

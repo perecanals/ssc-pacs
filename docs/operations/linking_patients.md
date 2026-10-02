@@ -113,17 +113,53 @@ CRISP2/LVO one). Restart the web app afterwards.
 
 ## Clinical data
 
-`clinical_data.study_id` holds one dataset's patient ids but has no dataset
-column. Set config.toml `[web-app] clinical_data_dataset` to that dataset's name
-(production: `CRISP2/LVO`): the patient tab's episode date, the timepoint
-anchors and ingestion's clinical match then only use clinical rows for that
-dataset's enrollments, never for a same-id patient elsewhere. A person linked
-to such an enrollment gets its anchor for all of their imaging.
+Clinical data is per dataset (Alembic `0027`): each `dataset` row may register
+one clinical table (`<slug with - as _>_clinical_data`, e.g.
+`precise_clinical_data`), its patient-id column, its episode-date column and an
+optional `timepoint_strategy`. A clinical row only ever matches enrollments of
+its own dataset — the patient tab's episode date and ingestion's clinical match
+never use it for a same-id patient elsewhere. The timepoint anchors (the CRISP2
+puncture columns) are read only from the dataset with `timepoint_strategy =
+crisp2_puncture` (production: `CRISP2/LVO`); a person linked to such an
+enrollment gets its anchor for all of their imaging. Other datasets anchor on
+each episode's thrombectomy study.
+
+```bash
+# Upload a CSV/Excel (dry-run: validates ids, dates, coverage; then --execute)
+python scripts/admin/manage_datasets.py import-clinical --dataset PRECISE \
+    --file precise.xlsx --id-column 'Patient ID' --date-column 'Stroke Date'
+python scripts/admin/manage_datasets.py import-clinical --dataset PRECISE \
+    --file precise.xlsx --id-column 'Patient ID' --date-column 'Stroke Date' --execute  # --replace to overwrite
+python scripts/admin/manage_datasets.py clear-clinical --dataset PRECISE --execute  # unregister, keep table
+```
+
+The dry run reports missing/duplicate ids, unparseable dates, coverage ("N of M
+enrolled patients have a row") and file ids not enrolled. Headers are
+normalized to snake_case (`Patient ID` → `patient_id`) and the id column is
+stored as text. An unknown dataset is offered for creation (same y/N prompt as
+ingestion). `--execute` writes the table, a unique index on the id column,
+SELECT grants copied from `patient`, and the registration in one transaction.
+
+**Production cutover** (the former global table): adopt it, then remove the
+retired `[web-app] clinical_episode_date_column` / `clinical_data_dataset` keys
+from config.toml (they are ignored with a startup WARN) and restart the web app.
+
+```bash
+python scripts/admin/manage_datasets.py import-clinical --dataset CRISP2/LVO \
+    --from-table clinical_data --id-column study_id --date-column stroke_date \
+    --timepoint-strategy crisp2_puncture --execute
+```
+
+`--from-table` renames the table to the convention name
+(`crisp2_lvo_clinical_data`). Because it was named `clinical_data`, a
+compatibility **view** `clinical_data` (`SELECT *`, same SELECT grants) is left
+so researchers' existing queries keep working — deprecated, to be dropped in a
+later release; `--replace` rebuilds it.
 
 ## Checking
 
 ```bash
-python scripts/admin/manage_datasets.py list                 # datasets, enrollments, grants
+python scripts/admin/manage_datasets.py list                 # datasets, enrollments, grants, clinical table
 python scripts/data_integrity/reconcile.py                   # incl. ownership mismatches
 ```
 

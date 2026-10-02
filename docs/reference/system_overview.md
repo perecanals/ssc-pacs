@@ -168,7 +168,7 @@ One PostgreSQL server hosts both. Connection params and credentials are in
 ┌─ stanford-stroke ────────────────────────────────┐
 │  upstream / research metadata (read-only to app):│
 │  ├── patient               (patient level)       │
-│  ├── clinical_data     (clinical side-table)  │
+│  ├── *_clinical_data   (per-dataset clinical) │
 │  ├── image_study           (study level)         │
 │  └── image_series          (series level)        │
 │       ├── dicom_dir_path                         │
@@ -347,7 +347,7 @@ enrichment is optional). One run per batch:
   scan + group → case_series_table, case_study_table
         │
         ▼
-  filter existing / validate against clinical_data
+  filter existing / validate against the dataset's clinical table
         │
         ▼
   copy DICOMs →  dicom_data_root/.../DICOM/
@@ -406,7 +406,7 @@ canonical in [`architecture.md`](architecture.md) §5.
 The Orthanc + OHIF + Explorer 2 + custom-indexer layer, the Web App, the
 `cold_path_cache` stack, and `manage_users.py` / `init_orthanc_db.sh` are
 portable; `image_ingestion_protocols/` is general too, with only its inputs
-(source DICOM layout, optional `clinical_data` enrichment) varying per
+(source DICOM layout, optional per-dataset clinical enrichment) varying per
 deployment. The full portability breakdown and fresh-deployment guidance are
 canonical in [`architecture.md`](architecture.md) §7.
 

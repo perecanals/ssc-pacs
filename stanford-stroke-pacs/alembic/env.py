@@ -69,44 +69,10 @@ db_url = os.environ.get("DATABASE_URL") or _build_db_url()
 
 
 # --- Autogenerate scope filter ----------------------------------------------
-# Tables owned outside the web app's migration scope. Listed by name only —
-# they all live in the `public` schema. See workstream 04 §2.
-UPSTREAM_TABLES = frozenset({
-    "clinical_data",
-    "image_series",
-    "image_study",
-    # Pre-0020 name of clinical_data, kept so --autogenerate against a
-    # not-yet-migrated DB doesn't draft a DROP of the clinical side-table.
-    "lvo_clinical_data",
-    "patient",
-})
-
-# Tables created/maintained by labelled_table_sync.py at runtime based on
-# label_definitions. Their shape changes with annotations, not with code, so
-# Alembic must not try to manage them. (snapshot_* retired in revision 0013.)
-LABELLED_TABLES = frozenset({
-    "image_series_labelled",
-    "image_study_labelled",
-    "patient_labelled",
-})
-
-EXCLUDED_TABLES = UPSTREAM_TABLES | LABELLED_TABLES
-
-
-def include_object(object_, name, type_, reflected, compare_to):
-    """Filter callback for --autogenerate.
-
-    Skip tables we don't own and any indexes/constraints attached to them,
-    so autogen drafts only touch web-app-owned tables.
-    """
-    if type_ == "table" and name in EXCLUDED_TABLES:
-        return False
-    if type_ in ("index", "unique_constraint", "foreign_key_constraint"):
-        table_name = getattr(object_, "table", None)
-        table_name = getattr(table_name, "name", None) if table_name else None
-        if table_name in EXCLUDED_TABLES:
-            return False
-    return True
+# Which tables --autogenerate must leave alone (upstream, runtime-built mirrors,
+# per-dataset clinical tables) lives in web-app/schema_scope.py so it can be
+# unit-tested without running migrations.
+from schema_scope import include_object  # noqa: E402
 
 
 # No SQLAlchemy models — the web app uses raw psycopg2. Set target_metadata to

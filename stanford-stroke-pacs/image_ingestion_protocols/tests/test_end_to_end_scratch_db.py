@@ -69,15 +69,6 @@ def _alembic_upgrade(database_url):
             os.environ["DATABASE_URL"] = prev
 
 
-@pytest.fixture(autouse=True)
-def _unrestricted_clinical_data(monkeypatch):
-    """The host config.toml may tie clinical_data to one dataset
-    ([web-app] clinical_data_dataset); these runs use their own datasets."""
-    import image_ingestion_protocol
-
-    monkeypatch.setattr(image_ingestion_protocol, "CLINICAL_DATA_DATASET", None)
-
-
 @pytest.fixture(scope="module")
 def scratch_engine():
     import psycopg2
@@ -105,11 +96,20 @@ def scratch_engine():
         conn.execute(text(
             "INSERT INTO dataset (slug, name) VALUES ('audit', 'audit'), "
             "('other', 'OTHER/DS')"))
-        # 11-001 clinically matched; 11-002 deliberately unmatched. The protocol
-        # reads only study_id + stroke_date from the (wide) clinical_data.
+        # audit's clinical table (Alembic 0027), with the CRISP2 puncture
+        # columns its timepoint strategy reads. 11-001 clinically matched (and
+        # punctured shortly after its imaging); 11-002 deliberately unmatched.
         conn.execute(text(
-            "INSERT INTO clinical_data (study_id, stroke_date) "
-            "VALUES ('11-001', '2026-01-01')"))
+            "CREATE TABLE audit_clinical_data (study_id text PRIMARY KEY, "
+            "stroke_date text, femoral_sheath_time text, receiving_arrival_time text, "
+            "time_recognized text)"))
+        conn.execute(text(
+            "INSERT INTO audit_clinical_data (study_id, stroke_date, femoral_sheath_time) "
+            "VALUES ('11-001', '2026-01-01', '2026-01-02 12:00:00')"))
+        conn.execute(text(
+            "UPDATE dataset SET clinical_table = 'audit_clinical_data', "
+            "clinical_id_column = 'study_id', clinical_date_column = 'stroke_date', "
+            "timepoint_strategy = 'crisp2_puncture' WHERE slug = 'audit'"))
 
     yield engine
 
@@ -192,8 +192,8 @@ def test_end_to_end_two_patients(roots, scratch_engine, capsys):
         assert res["studyinstanceuids"] == [STUDY_UIDS[pid]]
         assert res["seriesinstanceuids"] == sorted(SERIES_UIDS[pid].values())
         assert res["skipped_existing_seriesinstanceuids"] == []
-    # 11-002 has no clinical_data row -> warned, still ingested.
-    assert "11-002 is not present in clinical_data" in out
+    # 11-002 has no clinical row -> warned, still ingested.
+    assert "11-002 has no row in audit_clinical_data" in out
 
     with scratch_engine.begin() as conn:
         series = conn.execute(text(
@@ -310,18 +310,17 @@ def test_batch_sync_mirrors_patients(roots, scratch_engine):
 
 
 def test_ingests_without_clinical_table(roots, scratch_engine):
-    """clinical_data is an optional import a deployment may not have.
+    """A dataset's registered clinical table may be missing (dropped by hand).
 
-    Absent it, `load_clinical_data_table` used to raise out of `read_sql_table`
-    and abort the whole run. It must instead disable clinical enrichment and let
-    ingestion complete; `_clinical_row` then returns None for every patient,
-    which the timepoint classifier already handles.
+    It must not abort the run: the registry skips it (with a warning), the
+    clinical match check is skipped, and timepoints fall back to the
+    thrombectomy study — the shape a patient with no clinical row already has.
     """
     from sqlalchemy import text
 
     pid = "11-001"  # the clinically-matched patient — the interesting one
     with scratch_engine.begin() as conn:
-        conn.execute(text("ALTER TABLE clinical_data RENAME TO clinical_hidden"))
+        conn.execute(text("ALTER TABLE audit_clinical_data RENAME TO clinical_hidden"))
     try:
         # A full protocol run, not a poke at one method: this is the path that
         # used to abort at `read_sql_table`. The series are already ingested by
@@ -340,7 +339,7 @@ def test_ingests_without_clinical_table(roots, scratch_engine):
         assert stroke.strftime("%Y%m%d") == ACQ_DATE[pid]
     finally:
         with scratch_engine.begin() as conn:
-            conn.execute(text("ALTER TABLE clinical_hidden RENAME TO clinical_data"))
+            conn.execute(text("ALTER TABLE clinical_hidden RENAME TO audit_clinical_data"))
 
 
 def test_study_modalities_initial_append_repeat_and_overwrite(roots, scratch_engine):
@@ -466,6 +465,14 @@ def test_same_id_in_another_dataset_is_another_patient(roots, scratch_engine):
     assert rows == [("audit__11-001", "audit__11-001", "audit"),
                     ("other__11-001", "other__11-001", "OTHER/DS")]
     assert tuple(owner) == ("other__11-001", "other__11-001")
+    # audit's 11-001 is anchored on its puncture (crisp2_puncture strategy);
+    # the other dataset's 11-001 is someone else and never sees that row.
+    with scratch_engine.connect() as conn:
+        anchors = dict(conn.execute(text(
+            "SELECT patient_key, timepoint_anchor_source FROM image_study "
+            "WHERE patient_id = '11-001'")).all())
+    assert anchors["audit__11-001"] == "femoral_sheath_time"
+    assert anchors["other__11-001"] != "femoral_sheath_time"
 
 
 def test_uid_owned_by_another_person_is_refused_before_any_delete(roots, scratch_engine):

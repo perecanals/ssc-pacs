@@ -36,6 +36,13 @@ These tables drive browsing in the Navigator UI:
     the prefix of every `patient_key`), `name` (unique display name — what
     users, grants, filters, saved exports and ingestion YAMLs use; renamed
     with `scripts/admin/manage_datasets.py rename`), `created_at`.
+  - clinical registration (Alembic `0027_dataset_clinical_tables`, all
+    nullable): `clinical_table` (unique, must match
+    `^[a-z][a-z0-9_]*_clinical_data$`), `clinical_id_column` (the column
+    holding the dataset's patient ids), `clinical_date_column` (the episode
+    date) — these three are all-or-none — and `timepoint_strategy` (NULL or
+    `crisp2_puncture`). Set by `manage_datasets.py import-clinical`, cleared by
+    `clear-clinical`; see per-dataset clinical tables below.
   - ingestion refuses an unregistered dataset; register with
     `manage_datasets.py add`. A dataset can be granted before anything is
     ingested into it.
@@ -44,7 +51,7 @@ These tables drive browsing in the Navigator UI:
     The same `patient_id` in two datasets is two rows — possibly two different
     people. Populated by the ingest pipeline (idempotent upsert) and by
     `scripts/admin/link_patients.py`. Comprehensive: a patient appears here
-    whether or not a clinical row exists in `clinical_data`.
+    whether or not its dataset has a clinical row for it.
   - fields: `patient_key` (PK, `<dataset slug>__<patient_id>`, e.g.
     `crisp2-lvo__11-001`), `patient_id` (the id as the dataset knows it),
     `dataset` (`text`, FK → `dataset.name` `ON UPDATE CASCADE`),
@@ -65,26 +72,38 @@ These tables drive browsing in the Navigator UI:
     as patient-level labels — see
     [`../operations/commands.md`](../operations/commands.md)
     (`scripts/admin/bulk_set_label_values.py`).
-- **`clinical_data`** (clinical side-table — *not* the patient spine; renamed
-  from `lvo_clinical_data` in revision `0020`)
-  - **Optional.** A clinical import a deployment may not have at all. Every
-    read is guarded (`common.table_exists` in the web app,
-    `inspect(...).has_table` in ingestion). Without it the patient tab shows the
-    imaging-derived `stroke_date` for everyone and the timepoint classifier
+- **Per-dataset clinical tables** (`<dataset slug with - as _>_clinical_data`,
+  e.g. `crisp2_lvo_clinical_data`, `precise_clinical_data`; registered on the
+  `dataset` row, Alembic `0027`) — clinical side-tables, *not* the patient spine
+  - **Optional.** A dataset may have no clinical table, and a deployment none
+    at all. Every read is resolved through the `dataset` row
+    (`web-app/clinical_sources.py`); a registered table or column that is
+    missing is skipped with a warning, never an error. Without one the patient
+    tab shows the imaging-derived `stroke_date` and the timepoint classifier
     anchors on each episode's own thrombectomy study — see below.
+  - Uploaded (CSV/Excel) or adopted from an existing table with
+    `scripts/admin/manage_datasets.py import-clinical` (see
+    [`../operations/linking_patients.md`](../operations/linking_patients.md)).
+    Keyed by the registered `clinical_id_column` (stored as text, unique index).
+  - **Belongs to one dataset**: a clinical row only ever matches enrollments
+    of that dataset (`patient.dataset = <its name>`) — a same-id patient from
+    another dataset is someone else.
   - clinical variables (demographics, outcomes, etc.). Retired as a roster: the
-    patient tab joins it only to prefer its `stroke_date` when a patient is
-    clinically matched.
+    patient tab joins it only to prefer its `clinical_date_column` when a
+    patient is clinically matched.
   - **Scoped exception (Alembic `0015`)**: the timepoint classifier reads three
     time columns — `femoral_sheath_time`, `receiving_arrival_time`,
     `time_recognized` — to anchor `image_study.timepoint` on the thrombectomy
-    puncture. That is the *only* other sanctioned read; do not widen it.
-  - key fields: `study_id` (the patient id; joined as `c.study_id = patient.patient_id`), `stroke_date` (TEXT)
-  - **Belongs to one dataset**, but has no dataset column: config.toml
-    `[web-app] clinical_data_dataset` names it, and every clinical join also
-    requires `patient.dataset = <that>` — otherwise a same-id patient from
-    another dataset is matched to someone else's clinical row. Imaging reads
-    it through the subject's enrollment in that dataset.
+    puncture, **only** from the table of the dataset with
+    `timepoint_strategy = 'crisp2_puncture'` (production `CRISP2/LVO`), via the
+    subject's enrollment in that dataset. CRISP2-specific on purpose; that is
+    the *only* other sanctioned read; do not widen it.
+  - **`clinical_data`** is the historical single table (renamed from
+    `lvo_clinical_data` in `0020`). Adopting it with `import-clinical
+    --from-table clinical_data` renames it to the convention name and leaves a
+    compatibility **view** `clinical_data` (`SELECT *`, same SELECT grants) so
+    existing researcher queries keep working — deprecated, to be dropped in a
+    later release.
   - Contains identifiable clinical data. Treat as sensitive: query it in the
     aggregate, and don't page through row values without a reason.
 - **`image_study`** (study-level imaging metadata)
@@ -93,7 +112,7 @@ These tables drive browsing in the Navigator UI:
   - **`modalities text[]`** (Alembic `0025_study_modalities`): machine-maintained, sorted distinct uppercase modalities from all persisted child series. Whitespace and blank values are removed; NULL means no known modality. Ingestion refreshes it transactionally after upserts (including appends and series reparenting); series deletion refreshes the surviving parent. The API presents this array as the existing `modality` string, e.g. `CT, SR`. Direct SQL series changes must explicitly refresh the rollup with `web-app/study_metadata.py`.
   - storage-size rollups (Alembic `0012`, `double precision`, decimal MB): `compressed_size_mb`, `decompressed_size_mb` — stay NULL until every child series has that size
   - classification: **`study_type`** — machine-derived from `StudyDescription` at ingest, plus `study_type_version` (Alembic `0015`). See [`image_ingestion_protocol.md`](image_ingestion_protocol.md) §How `series_type` and `study_type` are detected
-  - temporal (Alembic `0015`, extended `0016`): **`timepoint`** (`BL` / `THROMBECTOMY` / `FU` / NULL), `timepoint_anchor_source`, `hours_to_event` (signed), `timepoint_version`, **`episode`** (1-based, `0016`). Anchored **per episode** on the **femoral-sheath puncture** from `clinical_data` — *not* stroke onset, so `BL` means pre-thrombectomy — falling back to the episode's own `THROMBECTOMY` study when there is no clinical anchor (`timepoint_anchor_source = 'thrombectomy_study'`, covers non-LVO patients and later episodes). Episodes are computed **per subject** — over all of a person's studies across linked enrollments — after every ingest. (The "`11-*` multi-episode cohort" that motivated `0016` turned out to be pairs of different people merged under one id; `0026` + `split_merged_patients.py` separated them.) Only 59% of clinical rows carry a recorded puncture; the rest are `+5h`/`+10h` estimates, which is why `timepoint_anchor_source` exists — filter on it before trusting a timepoint. `acquisitiondatetime_source` (`0016`, `acquisition` | `study`) records which DICOM clock built `acquisitiondatetime`. See [`image_ingestion_protocol.md`](image_ingestion_protocol.md) §How `timepoint` is detected
+  - temporal (Alembic `0015`, extended `0016`): **`timepoint`** (`BL` / `THROMBECTOMY` / `FU` / NULL), `timepoint_anchor_source`, `hours_to_event` (signed), `timepoint_version`, **`episode`** (1-based, `0016`). Anchored **per episode** on the **femoral-sheath puncture** from the `crisp2_puncture` dataset's clinical table — *not* stroke onset, so `BL` means pre-thrombectomy — falling back to the episode's own `THROMBECTOMY` study when there is no clinical anchor (`timepoint_anchor_source = 'thrombectomy_study'`, covers non-LVO patients and later episodes). Episodes are computed **per subject** — over all of a person's studies across linked enrollments — after every ingest. (The "`11-*` multi-episode cohort" that motivated `0016` turned out to be pairs of different people merged under one id; `0026` + `split_merged_patients.py` separated them.) Only 59% of clinical rows carry a recorded puncture; the rest are `+5h`/`+10h` estimates, which is why `timepoint_anchor_source` exists — filter on it before trusting a timepoint. `acquisitiondatetime_source` (`0016`, `acquisition` | `study`) records which DICOM clock built `acquisitiondatetime`. See [`image_ingestion_protocol.md`](image_ingestion_protocol.md) §How `timepoint` is detected
 - **`image_series`** (series-level imaging metadata)
   - typical fields: `patient_id`, `studyinstanceuid`, `seriesinstanceuid`, `seriesdescription`, `modality`, `acquisitiondatetime`, `acquisitiondatetime_source` (`0016`)
   - ownership: `patient_key`, `subject_id` — always its study's (checked as `ownership_mismatches` by reconciliation)
@@ -361,7 +380,7 @@ unchanged. Names need not be unique.
 
 ## How the web app queries the DB
 
-- **Patients**: listed from the `patient` registry. One row per enrollment. When `clinical_data` exists it is LEFT JOINed on `c.study_id = p.patient_id` (and `p.dataset = clinical_data_dataset` when configured) to display `COALESCE(c.stroke_date, p.stroke_date::date::text)` — the clinical date when matched, the imaging-derived date otherwise. When it does not (`common.table_exists` is false), the join is dropped and the expression is just `p.stroke_date::date::text`. Filter, sort, and SELECT all reuse the one expression, so the two branches cannot drift.
+- **Patients**: listed from the `patient` registry. One row per enrollment. Each registered clinical table is LEFT JOINed on `<clinical_id_column> = p.patient_id AND p.dataset = <its dataset>` (one join per table, `clinical_sources.episode_date_sql`) to display `COALESCE(<its dataset's clinical date>, p.stroke_date::date::text)` — the enrollment's own dataset's clinical date when matched (date/timestamp columns as `YYYY-MM-DD`, text columns as-is), the imaging-derived date otherwise. With no clinical table registered (or a registered one missing, skipped with a warning) the expression is just `p.stroke_date::date::text`. Filter, sort, and SELECT all reuse the one expression, so the branches cannot drift. Only `/api/patients` uses it.
 - **Studies**: listed from `image_study`; the stored `modalities` array is rendered as the `modality` string by both study-list APIs. Study modality sorting uses that string with NULLs last; the existing case-insensitive substring filter still matches child series. Both study-list APIs also return `number_of_series`, counted live from all matching `image_series` rows using the study-UID index. This is a derived API field, with zero for empty studies; it is not a stored column and needs no migration or backfill. Browsing filters do not reduce the count, and imports/deletions are reflected on the next fetch.
 - **Series**: listed from `image_series` and LEFT JOINs `image_study` to include `study_type`.
 - **Annotations** are joined/attached per row and **inherit downward** (patient → study → series) in API responses.

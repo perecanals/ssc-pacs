@@ -48,7 +48,6 @@ load_dotenv(STACK_ROOT / ".env")
 sys.path.insert(0, str(STACK_ROOT / "web-app"))
 sys.path.insert(0, str(STACK_ROOT / "image_ingestion_protocols"))
 
-from common import table_exists  # noqa: E402
 from db import DB_CONFIG  # noqa: E402
 from patient_identity import (  # noqa: E402
     create_enrollment,
@@ -59,8 +58,6 @@ from patient_identity import (  # noqa: E402
     refresh_subjects,
     unlink,
 )
-
-from config import CLINICAL_DATA_DATASET  # noqa: E402
 
 LINK_COLUMNS = ("dataset", "patient_id", "link_dataset", "link_patient_id")
 UNLINK_COLUMNS = ("dataset", "patient_id")
@@ -180,11 +177,7 @@ def main() -> int:
                 conn.rollback()
                 print("\nDRY RUN — rolled back. Re-run with --apply to write.")
                 return 0
-            refresh_subjects(
-                cur, conn, touched,
-                has_clinical_table=table_exists(cur, "clinical_data"),
-                clinical_dataset=CLINICAL_DATA_DATASET,
-            )
+            refresh_subjects(cur, conn, touched)
         conn.commit()
     except Exception:
         conn.rollback()

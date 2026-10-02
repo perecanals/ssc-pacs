@@ -7,8 +7,8 @@ cold storage design see [`../cold_storage/design.md`](../cold_storage/design.md)
 Code lives under `stanford-stroke-pacs/image_ingestion_protocols/`. The
 pipeline is general: it walks a configured source DICOM tree and needs no
 particular site layout. Only the clinical-enrichment step is optional — it
-reads the `clinical_data` table when present and is skipped when a deployment
-has no clinical source.
+reads the batch dataset's registered clinical table (the `dataset` row,
+Alembic `0027`) and is skipped when that dataset has none.
 
 ---
 
@@ -18,7 +18,7 @@ Takes a directory of per-patient source DICOMs, and for each case:
 
 1. Discovers series by grouping every readable file under the case by its `SeriesInstanceUID` (not by folder)
 2. Groups series into studies
-3. Validates studies against `clinical_data` (clinical DB table)
+3. Validates studies against the dataset's clinical table (when one is registered)
 4. Copies DICOMs to the canonical layout under `dicom_data_root`
 5. Optionally compresses each series to a `*.tar.zst` archive under `cold_archive_root`
 6. Converts selected series to NIfTI alongside the DICOM tree
@@ -205,8 +205,8 @@ the tar.
 | 2 | `create_study_table` | Groups series by StudyInstanceUID, computes per-study metadata, and classifies `study_type` (BASELINE/FOLLOW_UP) from `stroke_date`. **Kept-dormant-by-design:** the classifier still runs and the value is stored, but nothing downstream currently consumes `study_type` beyond display — retained for planned future use, not an active feature. |
 | 2b | `_resolve_dataset` + `resolve_ownership` | Requires the batch `dataset` to be registered, then stamps every study/series row with its **owner** (`patient_key`, `subject_id`). A new study is owned by the incoming enrollment (`<slug>__<PatientID>`). A study already in the DB keeps its owner: if that owner is the same person (same subject — a linked dataset re-sending shared imaging) the rows take the owner's key and `patient_id`, so files land in the owner's tree; if it is a **different person**, the case is **refused** with the UIDs and both keys — before step 3, so an overwrite never deletes another person's files. |
 | 3 | `filter_existing_studies` | Decides per study/series what to do given the current DB state. Always loads both `image_study` and `image_series` for the scanned `StudyInstanceUID`s. **Append mode (`overwrite_if_exists=false`):** for studies already in DB, drops the study row from the working set so the persisted `import_id` / `import_label` / `study_path` are preserved; then per series, drops the series row if `(SeriesUID, number_of_slices)` matches DB, keeps it for re-ingest if the slice count drifted (and wipes the stale `dicom_dir_path` and `dicom_archive_path` from disk before re-copy), keeps it if the SeriesUID is new, or warns-and-skips if DB `number_of_slices` is NULL. **Overwrite mode (`overwrite_if_exists=true`):** calls `overwrite_existing_study()`, which deletes the on-disk DICOM directories, stale cold archives, and the rows in `image_study`, `image_series`, `image_study_labelled`, and `image_series_labelled` for that study, all in one transaction — orphan rows from series that no longer exist on disk cannot survive. |
-| 4 | `load_clinical_data_table` | Reads `clinical_data` |
-| 5 | `validate_studies_against_clinical_data` | Flags each study with `clinical_match_found` (does `patient_id` have a `clinical_data` row?) and warns per unmatched patient. Nothing is dropped. Skipped when config.toml `[web-app] clinical_data_dataset` names another dataset — `clinical_data.study_id` holds that dataset's ids, so a same-id patient here is someone else. |
+| 4 | `load_clinical_data_table` | Reads the batch dataset's registered clinical table (`dataset.clinical_table`, keyed by `clinical_id_column`); none registered → skipped with a note |
+| 5 | `validate_studies_against_clinical_data` | Flags each study with `clinical_match_found` (does `patient_id` have a row in the dataset's clinical table?) and warns per unmatched patient (`patient <id> has no row in <table>`). Nothing is dropped. Only the batch dataset's own table is consulted — another dataset's clinical rows describe other people. |
 | 6 | `assign_import_id` / `assign_import_label` | Tags all rows with the batch import_id/label |
 | 7 | `add_paths_and_copy_dicom_files` | **Copies DICOMs** from source → `{dicom_data_root}/{patient_id}/{studyUID}/{seriesDesc}/{seriesUID}/DICOM/`. Copies the series' aggregated file list (which may span several source folders); on a destination basename collision it **renames** the file (`…__dupN`) so nothing is overwritten. Optionally anonymizes (see `anonymize_files`; the headers were already anonymised in step 1 so DB and files agree). Sets `dicom_dir_path` and records the source→dest pairs for verification. |
 | 8 | `compress_cold_archives` | **Only if `cold_archive_root` is set.** For each series, creates `{cold_archive_root}/.../DICOM.tar.zst`. Sets `dicom_archive_path` on each row. **Per-series strict, batch soft**: each archive is built to a `.tmp` sibling, member-count verified, and atomically renamed — so a published archive is always valid. A failure on one series does NOT abort the case; the loop continues and failures are collected. After the loop, a WARNING is printed summarizing `N/M` failed, and a JSON report is written to `image_ingestion_protocols/logs/compression_failures_<timestamp>.json` (includes seriesinstanceuid, studyinstanceuid, dicom_dir_path, error). Failed rows keep `dicom_archive_path = NULL` — retriable via `scripts/cold_storage/archive_all_series.py --patient <id>`. Idempotent: existing archives are re-verified rather than rebuilt; corrupted ones are detected and rebuilt. |
@@ -376,9 +376,12 @@ can open a new episode or re-anchor an earlier one (the old per-batch assignment
 could not, which left a few timepoints stale). The classifier itself is
 `series_classification.assign_patient_timepoints()`, shared with
 `scripts/admin/recompute_timepoints.py`, `reclassify_series_types.py` and the
-link/split tools so they can't diverge. The clinical anchor comes from the
-subject's enrollment in config's `clinical_data_dataset` (any enrollment when
-unset).
+link/split tools so they can't diverge. The clinical anchor comes only from
+the clinical table of the dataset whose `timepoint_strategy` is
+`crisp2_puncture` (production `CRISP2/LVO`), joined to the subject's enrollment
+in that dataset — CRISP2-specific on purpose. Every other dataset (e.g.
+PRECISE) anchors only on each episode's own thrombectomy study; a future
+per-dataset rule would be a new `timepoint_strategy` value.
 
 > **The anchor is femoral-sheath puncture, NOT stroke onset.** `BL` means
 > *pre-thrombectomy*, not *post-onset*. `patient.stroke_date` is a different clock
@@ -400,9 +403,9 @@ own thrombectomy study:
 
 | Priority | Anchor | Offset | `timepoint_anchor_source` |
 |---|---|---|---|
-| 1 | `clinical_data.femoral_sheath_time` | none — recorded puncture | `femoral_sheath_time` |
-| 2 | `clinical_data.receiving_arrival_time` | **+5 h** (estimate) | `receiving_arrival_time` |
-| 3 | `clinical_data.time_recognized` | **+10 h** (estimate) | `time_recognized` |
+| 1 | `femoral_sheath_time` (crisp2_puncture table) | none — recorded puncture | `femoral_sheath_time` |
+| 2 | `receiving_arrival_time` (crisp2_puncture table) | **+5 h** (estimate) | `receiving_arrival_time` |
+| 3 | `time_recognized` (crisp2_puncture table) | **+10 h** (estimate) | `time_recognized` |
 | 4 | the episode's own `THROMBECTOMY` study acquisition time | none | `thrombectomy_study` |
 
 Priorities 1–3 are the clinical anchor (unchanged from rules-v2). Priority 4 is
@@ -410,9 +413,9 @@ new: it gives non-LVO patients (no clinical row) and the second episode of
 multi-episode patients a real anchor — the thrombectomy (XA) study's own
 acquisition time — instead of `NULL`.
 
-`clinical_data` is **optional**. Where the table does not exist, clinical
-enrichment is skipped (a note is printed) and priorities 1–3 are simply
-unavailable, so every episode resolves via priority 4. Episodes with no
+Clinical tables are **optional**. Where no dataset has `timepoint_strategy =
+'crisp2_puncture'` (or its registered table is missing), priorities 1–3 are
+simply unavailable, so every episode resolves via priority 4. Episodes with no
 `THROMBECTOMY` study then get `timepoint = NULL` — the same deliberate NULL a
 patient with no anchor already gets, not an error. `episode` is always computed
 (it is imaging-derived, gap-based) and `series_type` is never time-based, so
@@ -447,7 +450,8 @@ is undated.
 (RAPID/MIP/MPR) they are the day the derivative was *computed* — often months
 after the scan — which mis-dates the study and fabricates spurious episodes.
 
-> **Re-opens `clinical_data`.** That table was previously retired as a roster
+> **Re-opens the clinical table** (historically `clinical_data`, now the
+> `crisp2_puncture` dataset's table). It was previously retired as a roster
 > ("joined only to prefer its clinical `stroke_date` via COALESCE, never otherwise
 > queried"). Reading these three time columns is a deliberate reversal, scoped to
 > exactly them.
