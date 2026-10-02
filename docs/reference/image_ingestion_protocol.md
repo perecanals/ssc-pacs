@@ -206,7 +206,9 @@ the tar.
 | 13 | `verify_ingested_case` + `delete_original_case_dir` | **Only if `delete_originals_after_verification=true`.** Iterates the recorded source→dest pairs (so it survives the collision-rename case), byte-compares each copied file against its source, then removes the source case directory. |
 
 Return value: `{"studyinstanceuids": [...], "seriesinstanceuids": [...]}` —
-used by the driver to sync per-level labelled mirror tables after the batch.
+used by the driver to sync the labelled mirror tables after the batch: the study
+and series mirrors for those UIDs, and the patient mirror for the patients that
+own them.
 
 ### Study modalities
 

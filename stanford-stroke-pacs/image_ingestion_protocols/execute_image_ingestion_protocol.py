@@ -266,6 +266,18 @@ def execute_image_ingestion_protocol(
     return protocol.execute_image_ingestion_protocol(overwrite_if_exists=overwrite_if_exists)
 
 
+def batch_patient_ids(raw_conn, study_ids, series_ids):
+    """Patients owning the given studies/series, sorted (the patient mirror key)."""
+    with raw_conn.cursor() as cur:
+        cur.execute(
+            "SELECT patient_id FROM image_study WHERE studyinstanceuid = ANY(%s) "
+            "UNION "
+            "SELECT patient_id FROM image_series WHERE seriesinstanceuid = ANY(%s)",
+            (list(study_ids), list(series_ids)),
+        )
+        return sorted(row[0] for row in cur.fetchall() if row[0] is not None)
+
+
 def sync_batch_labelled_tables(postgres_engine, logger, study_ids, series_ids):
     if not study_ids and not series_ids:
         logger.info("No labelled-table sync needed for this batch")
@@ -273,6 +285,13 @@ def sync_batch_labelled_tables(postgres_engine, logger, study_ids, series_ids):
 
     raw_conn = postgres_engine.raw_connection()
     try:
+        # The patient mirror is keyed by patient, so resolve the patients the
+        # batch touched from its studies and series (a series-only append still
+        # refreshes its patient's stroke_date/dataset).
+        patient_ids = batch_patient_ids(raw_conn, study_ids, series_ids)
+        if patient_ids:
+            synced = sync_labelled_rows(raw_conn, "patient", patient_ids)
+            logger.info(f"Synced {synced} patient labelled row(s)")
         if study_ids:
             synced = sync_labelled_rows(raw_conn, "study", study_ids)
             logger.info(f"Synced {synced} study labelled row(s)")

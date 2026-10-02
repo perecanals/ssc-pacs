@@ -260,6 +260,35 @@ def test_drift_series_reingested_alone(roots, scratch_engine):
     assert n == 5
 
 
+def test_batch_sync_mirrors_patients(roots, scratch_engine):
+    """The end-of-batch mirror sync must cover the patient level too: before it
+    did, every patient first ingested after a full mirror rebuild was missing
+    from patient_labelled (and so from data exports)."""
+    import logging
+
+    from sqlalchemy import text
+
+    from execute_image_ingestion_protocol import sync_batch_labelled_tables
+    from labelled_table_sync import ensure_labelled_tables
+
+    # The mirrors are web-app-created at startup, not by Alembic.
+    raw = scratch_engine.raw_connection()
+    try:
+        ensure_labelled_tables(raw)
+        raw.commit()
+    finally:
+        raw.close()
+    # A series-only id list still resolves its patient.
+    sync_batch_labelled_tables(
+        scratch_engine, logging.getLogger("test"),
+        [STUDY_UIDS["11-001"]], [SERIES_UIDS["11-002"]["B"]],
+    )
+    with scratch_engine.begin() as conn:
+        mirrored = conn.execute(text(
+            "SELECT patient_id FROM patient_labelled ORDER BY patient_id")).scalars().all()
+    assert mirrored == ["11-001", "11-002"]
+
+
 def test_ingests_without_clinical_table(roots, scratch_engine):
     """clinical_data is an optional import a deployment may not have.
 
