@@ -24,8 +24,8 @@ from labelled_table_sync import sync_labelled_rows  # noqa: E402
 from study_metadata import refresh_study_modalities  # noqa: E402
 from tests.conftest import USER_NONE, insert_patient, login_as  # noqa: E402
 
-STUDY_UID = "1.2.999.del.study"
-SERIES_UIDS = ["1.2.999.del.study.1", "1.2.999.del.study.2"]
+STUDY_UID = "1.2.999.701"
+SERIES_UIDS = ["1.2.999.701.1", "1.2.999.701.2"]
 PATIENT_ID = "P-DEL"
 
 
@@ -209,15 +209,18 @@ def test_series_deletion_refreshes_parent_and_mirror(del_study, seeded_db, disti
 # --------------------------------------------------------------------------- #
 def test_path_safety_guards():
     root = Path("/media/x/imaging")
-    # Too shallow — would delete a whole patient / the root.
-    with pytest.raises(ValueError):
-        deletion._assert_within_root(root / "P-1", root)
+    # Too shallow — would delete the root, a dataset or a whole patient.
+    for shallow in (root, root / "P-1", root / "lvo", root / "lvo" / "P-1",
+                    root / "lvo" / "P-1" / "NOT_A_UID"):
+        with pytest.raises(ValueError):
+            deletion._assert_within_root(shallow, root)
     # Outside the root.
     with pytest.raises(ValueError):
         deletion._assert_within_root(Path("/etc/passwd"), root)
-    # Valid: <patient>/<study> tail.
-    ok = deletion._assert_within_root(root / "P-1" / "study.1", root)
-    assert ok == (root / "P-1" / "study.1")
+    # Valid: a study dir in either layout, or below one.
+    for ok in (root / "lvo" / "P-1" / "1.2.3", root / "P-1" / "1.2.3",
+               root / "lvo" / "P-1" / "1.2.3" / "CTA" / "1.2.3.4"):
+        assert deletion._assert_within_root(ok, root) == ok
 
 
 def test_remove_files_execute():
@@ -355,3 +358,78 @@ def test_delete_study_endpoint_ok(logged_in_client, del_study):
     assert body["indexer_error"] is None
     m_rm.assert_called_once()
     m_idx.assert_called_once()
+
+
+# --------------------------------------------------------------------------- #
+# Dataset layout (<root>/<slug>/<patient>/<study>) — plans use stored paths
+# --------------------------------------------------------------------------- #
+def _set_study_path(seeded_db, path):
+    conn = psycopg2.connect(**seeded_db)
+    try:
+        with conn.cursor() as cur:
+            cur.execute("UPDATE image_study SET study_path = %s WHERE studyinstanceuid = %s",
+                        (path, STUDY_UID))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def test_study_plan_uses_the_stored_path(del_study, seeded_db, tmp_path):
+    loose, cold = tmp_path / "imaging", tmp_path / "cold"
+    # Stored under crisp2 although owned by lvo (moved after ingestion): the
+    # plan removes where the files are, not where the layout would put them.
+    _set_study_path(seeded_db, str(loose / "crisp2" / PATIENT_ID / STUDY_UID))
+    conn = psycopg2.connect(**seeded_db)
+    try:
+        with patch.object(deletion, "DICOM_DATA_ROOT", loose), \
+             patch.object(deletion, "COLD_ARCHIVE_ROOT", cold), \
+             patch.object(deletion, "orthanc_study_id", return_value=None):
+            plan = deletion.build_study_deletion_plan(conn, STUDY_UID)
+            _set_study_path(seeded_db, "")
+            fallback = deletion.build_study_deletion_plan(conn, STUDY_UID)
+    finally:
+        conn.close()
+    assert plan["remove_dirs"] == [str(loose / "crisp2" / PATIENT_ID / STUDY_UID),
+                                   str(cold / "crisp2" / PATIENT_ID / STUDY_UID)]
+    # No stored path: the owner's slug.
+    assert fallback["remove_dirs"][0] == str(loose / "lvo" / PATIENT_ID / STUDY_UID)
+
+
+def test_series_plan_prunes_up_to_the_patient_dir(del_study, seeded_db):
+    conn = psycopg2.connect(**seeded_db)
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE image_series SET dicom_dir_path = %s, dicom_archive_path = %s "
+                "WHERE seriesinstanceuid = %s",
+                (f"/imaging/lvo/{PATIENT_ID}/{STUDY_UID}/CTA/{SERIES_UIDS[0]}/DICOM",
+                 f"/cold/lvo/{PATIENT_ID}/{STUDY_UID}/CTA/{SERIES_UIDS[0]}/DICOM.tar.zst",
+                 SERIES_UIDS[0]),
+            )
+        conn.commit()
+        with patch.object(deletion, "orthanc_series_id", return_value=None):
+            plan = deletion.build_series_deletion_plan(conn, SERIES_UIDS[0])
+    finally:
+        conn.close()
+    assert plan["prune_parents"] == [
+        (f"/imaging/lvo/{PATIENT_ID}/{STUDY_UID}/CTA", f"/imaging/lvo/{PATIENT_ID}"),
+        (f"/cold/lvo/{PATIENT_ID}/{STUDY_UID}/CTA", f"/cold/lvo/{PATIENT_ID}"),
+    ]
+
+
+def test_orphan_scan_reads_dataset_and_legacy_dirs(del_study, seeded_db, tmp_path):
+    loose, cold = tmp_path / "imaging", tmp_path / "cold"
+    known = loose / "lvo" / PATIENT_ID / STUDY_UID
+    orphan_new = loose / "lvo" / PATIENT_ID / "1.2.999.702"
+    orphan_legacy = loose / "P-OLD" / "1.2.999.703"
+    for d in (known, orphan_new, orphan_legacy, loose / "crisp2" / "P-0001"):
+        d.mkdir(parents=True)
+    conn = psycopg2.connect(**seeded_db)
+    try:
+        with patch.object(deletion, "DICOM_DATA_ROOT", loose), \
+             patch.object(deletion, "COLD_ARCHIVE_ROOT", cold):
+            orphans = deletion.find_orphan_study_dirs(conn)
+    finally:
+        conn.close()
+    # A dataset dir is never read as a patient (P-0001 is not an orphan study).
+    assert orphans == sorted([str(orphan_legacy), str(orphan_new)])

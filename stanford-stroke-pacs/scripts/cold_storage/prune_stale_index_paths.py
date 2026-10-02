@@ -224,14 +224,27 @@ def orthanc_inst2suid(session: requests.Session, orthanc_url: str, patient: str)
     return out
 
 
+def patient_prefixes(container_root: str, patient: str, slugs=()) -> list[str]:
+    """Container dirs a DICOM PatientID's files can sit under: one per dataset
+    (``<root>/<slug>/<pid>/``) plus the pre-v2.2 ``<root>/<pid>/``."""
+    return [f"{container_root}/{patient}/"] + [
+        f"{container_root}/{slug}/{patient}/" for slug in sorted(slugs)
+    ]
+
+
 def index_rows_for_patient(
-    idx: sqlite3.Connection, container_root: str, patient: str
+    idx: sqlite3.Connection, container_root: str, patient: str, slugs=()
 ) -> list[tuple[str, str]]:
-    cur = idx.execute(
-        "SELECT path, instanceId FROM Files WHERE isDicom = 1 AND path LIKE ?",
-        (f"{container_root}/{patient}/%",),
-    )
-    return [(p, i) for p, i in cur.fetchall()]
+    rows: list[tuple[str, str]] = []
+    for prefix in patient_prefixes(container_root, patient, slugs):
+        # substr, not LIKE: '_' and '%' in a path are literal.
+        cur = idx.execute(
+            "SELECT path, instanceId FROM Files "
+            "WHERE isDicom = 1 AND substr(path, 1, ?) = ?",
+            (len(prefix), prefix),
+        )
+        rows.extend((p, i) for p, i in cur.fetchall())
+    return rows
 
 
 def snapshot_index_db(container: str, dest: Path) -> None:
@@ -251,6 +264,7 @@ def analyze(
     container_root: str,
     quiet: bool,
     maps_cache: dict[str, tuple[dict[str, str], dict[str, str]]] | None = None,
+    slugs=(),
 ) -> dict[str, Any]:
     """Run detection over all patients; return aggregated results.
 
@@ -266,7 +280,7 @@ def analyze(
     tot_valid = tot_unknown = tot_orphan_series = 0
 
     for pat in patients:
-        rows = index_rows_for_patient(idx, container_root, pat)
+        rows = index_rows_for_patient(idx, container_root, pat, slugs)
         if not rows:
             continue
         if maps_cache is not None and pat in maps_cache:
@@ -366,7 +380,8 @@ def main() -> int:
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
     ap.add_argument("--execute", action="store_true", help="Apply changes (default: dry-run)")
-    ap.add_argument("--patient", help="Limit to a single patient_id")
+    ap.add_argument("--patient", help="Limit to one DICOM PatientID (every dataset "
+                    "folder it appears in)")
     ap.add_argument(
         "--delete-orphans",
         action="store_true",
@@ -416,10 +431,14 @@ def main() -> int:
         snapshot_index_db(args.container, snap)
         idx = sqlite3.connect(f"file:{snap}?mode=ro", uri=True)
         patients = list_patients(conn, args.patient)
+        with conn.cursor() as cur:
+            cur.execute("SELECT slug FROM dataset")
+            slugs = {r[0] for r in cur.fetchall()}
         print(f"Analyzing {len(patients)} patient(s) ...")
         maps_cache: dict[str, tuple[dict[str, str], dict[str, str]]] = {}
         result = analyze(conn, session, orthanc_url, idx, patients, host_root,
-                         container_root, quiet=False, maps_cache=maps_cache)
+                         container_root, quiet=False, maps_cache=maps_cache,
+                         slugs=slugs)
         idx.close()
 
         t = result["totals"]
@@ -496,7 +515,8 @@ def main() -> int:
             # so there is no snapshot gap.
             widx = sqlite3.connect(f"file:{working}?mode=ro", uri=True)
             wres = analyze(conn, session, orthanc_url, widx, patients, host_root,
-                           container_root, quiet=True, maps_cache=maps_cache)
+                           container_root, quiet=True, maps_cache=maps_cache,
+                           slugs=slugs)
             widx.close()
             stale_paths = wres["stale_paths"]
 
@@ -507,7 +527,8 @@ def main() -> int:
             # here, so this pass must not call it.
             vidx = sqlite3.connect(f"file:{working}?mode=ro", uri=True)
             vres = analyze(conn, session, orthanc_url, vidx, patients, host_root,
-                           container_root, quiet=True, maps_cache=maps_cache)
+                           container_root, quiet=True, maps_cache=maps_cache,
+                           slugs=slugs)
             vidx.close()
             remaining = vres["totals"]["stale_rows"]
             if remaining:

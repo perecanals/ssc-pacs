@@ -87,10 +87,11 @@ def _stuck_warming_rows(conn) -> list[dict[str, Any]]:
 # Warm extraction creates `.warming` temp dirs as siblings of a series' DICOM
 # dir (cache_manager.py: dicom_dir.with_name(name + ".warming")), i.e. at a
 # fixed depth below data_root:
-#   {patient}/{study}/{series-desc}/{series-uid}/DICOM.warming   (depth 5)
+#   {slug}/{patient}/{study}/{series-desc}/{series-uid}/DICOM.warming   (depth 6)
 # Do NOT add slack levels: descending one level deeper means listing every
-# extracted DICOM payload dir's entries (minutes on the warm cache).
-_WARMING_SCAN_MAX_DEPTH = 5
+# extracted DICOM payload dir's entries (minutes on the warm cache). (A tree
+# still in the pre-v2.2 {patient}/… layout is found too, one level early.)
+_WARMING_SCAN_MAX_DEPTH = 6
 
 
 def _scan_subdirs(path: str) -> tuple[list[str], list[str]]:

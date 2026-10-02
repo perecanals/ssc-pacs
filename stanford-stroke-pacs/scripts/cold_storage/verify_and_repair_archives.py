@@ -15,8 +15,10 @@ Repair (--repair):
   Refuses to repair if the loose dir is missing.
 
 Layout assumption (matches archive_all_series.py):
-  compressed: {cold_root}/{patient}/{study}/{study_name}/{series}/DICOM.tar.zst
-  loose:      {loose_root}/{patient}/{study}/{study_name}/{series}/DICOM/
+  compressed: {cold_root}/{slug}/{patient}/{study}/{study_name}/{series}/DICOM.tar.zst
+  loose:      {loose_root}/{slug}/{patient}/{study}/{study_name}/{series}/DICOM/
+  (pre-v2.2 trees lack the {slug} level; the loose dir mirrors the archive's
+  relative path either way)
 """
 
 from __future__ import annotations
@@ -112,8 +114,8 @@ def verify_worker(path_str: str) -> dict[str, Any]:
 def loose_dir_for_archive(
     archive: Path, cold_root: Path, loose_root: Path
 ) -> Path:
-    """archive = .../{patient}/.../{series}/DICOM.tar.zst
-    →       loose = .../{patient}/.../{series}/DICOM/
+    """archive = <cold_root>/<rel>/{series}/DICOM.tar.zst
+    →       loose = <loose_root>/<rel>/{series}/DICOM/
     """
     rel = archive.resolve().relative_to(cold_root.resolve())
     # Strip .tar.zst (two suffixes)
@@ -154,7 +156,8 @@ def main() -> int:
     )
     ap.add_argument(
         "--patient",
-        help="Limit to one patient (directory name under cold-root).",
+        help="Limit to one patient: a patient_key (<slug>__<patient_id>, i.e. "
+        "<cold-root>/<slug>/<patient_id>) or a pre-v2.2 directory name under cold-root.",
     )
     ap.add_argument(
         "--workers",
@@ -190,7 +193,11 @@ def main() -> int:
         print(f"Cold root missing: {cold_root}", file=sys.stderr)
         return 1
 
-    scan_root = cold_root / args.patient if args.patient else cold_root
+    if args.patient and "__" in args.patient:
+        slug, _, pid = args.patient.partition("__")
+        scan_root = cold_root / slug / pid
+    else:
+        scan_root = cold_root / args.patient if args.patient else cold_root
     if not scan_root.is_dir():
         print(f"Scan root missing: {scan_root}", file=sys.stderr)
         return 1

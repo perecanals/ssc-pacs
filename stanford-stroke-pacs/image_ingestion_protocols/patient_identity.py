@@ -118,9 +118,11 @@ def move_studies(cur, study_uids: list[str], owner_key: str) -> int:
     """Hand studies (and their series) to another enrollment as owner.
 
     They take its patient_key and subject_id. Their patient_id is left alone:
-    on imaging rows it is the DICOM PatientID and the on-disk folder name
-    (deletion and the audits build paths from it), and files are not moved.
-    Returns the number of studies moved.
+    on imaging rows it is the DICOM PatientID and the on-disk folder name. Files
+    are not moved: readers follow the stored paths, so the study keeps working
+    under its old ``<slug>/<patient_id>`` folder. ``storage_layout.
+    misplaced_studies`` lists it; scripts/migration/move_to_dataset_layout.py
+    relocates it (maintenance window). Returns the number of studies moved.
     """
     owner = enrollment(cur, owner_key)
     if owner is None:

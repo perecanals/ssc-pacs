@@ -97,3 +97,22 @@ def test_host_dir_to_container_rewrites_prefix():
 def test_host_dir_to_container_leaves_unrelated_path():
     out = prune.host_dir_to_container("/other/root/x", "/Volumes/Expansion", "/dicom-data")
     assert out == "/other/root/x"
+
+
+def test_index_rows_cover_every_dataset_folder_of_a_patient():
+    import sqlite3
+
+    idx = sqlite3.connect(":memory:")
+    idx.execute("CREATE TABLE Files(path TEXT PRIMARY KEY, time INT, size INT, "
+                "isDicom INT, instanceId TEXT)")
+    paths = {
+        "/dicom-data/11-001/S1/d/A/DICOM/1.dcm": "i1",           # legacy layout
+        "/dicom-data/precise/11-001/S2/d/B/DICOM/1.dcm": "i2",
+        "/dicom-data/crisp2-lvo/11-001/S3/d/C/DICOM/1.dcm": "i3",
+        "/dicom-data/precise/11-0010/S4/d/D/DICOM/1.dcm": "i4",  # another patient
+        "/dicom-data/11_001/S5/d/E/DICOM/1.dcm": "i5",           # '_' is literal
+    }
+    idx.executemany("INSERT INTO Files VALUES (?, 0, 0, 1, ?)", paths.items())
+    rows = prune.index_rows_for_patient(idx, "/dicom-data", "11-001",
+                                        {"precise", "crisp2-lvo"})
+    assert sorted(i for _p, i in rows) == ["i1", "i2", "i3"]
