@@ -49,6 +49,7 @@ sys.path.insert(0, str(STACK_ROOT / "web-app"))
 sys.path.insert(0, str(STACK_ROOT / "image_ingestion_protocols"))
 
 from db import DB_CONFIG  # noqa: E402
+from linked_view import after_identity_change  # noqa: E402
 from patient_identity import (  # noqa: E402
     create_enrollment,
     dataset_slug,
@@ -185,6 +186,12 @@ def main() -> int:
     finally:
         conn.close()
     print(f"\nCommitted; re-derived {len(touched)} subject(s).")
+    conn = psycopg2.connect(**DB_CONFIG)
+    try:
+        for line in after_identity_change(conn):
+            print(line)
+    finally:
+        conn.close()
     if args.command == "unlink":
         print("Restart the web app (sudo systemctl restart ssc-web-app): its DICOMweb "
               "access cache may otherwise keep the old cross-dataset access for up to "

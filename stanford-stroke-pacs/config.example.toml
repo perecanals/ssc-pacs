@@ -20,6 +20,12 @@ dicom_data_root = "/path/to/imaging_data"
 # REQUIRED — root of the *.tar.zst cold archives (cold_path_cache mode; still
 # required in legacy mode, where it only names the future archive location).
 cold_archive_root = "/path/to/imaging_data_compressed"
+# Both roots file imaging as <root>/<dataset slug>/<patient_id>/<StudyUID>/…
+# OPTIONAL — a generated symlink tree showing each enrollment the imaging it
+# shares with linked enrollments of the same person but does not own:
+# <linked_view_root>/<slug>/<patient_id>/<StudyUID> -> its archive dir. Must be
+# outside both roots; unset = disabled. (scripts/cold_storage/build_linked_view.py)
+# linked_view_root = "/path/to/imaging_linked_view"
 # Cold-cache tuning (benign defaults).
 eviction_ttl_hours = 168
 # Cold-storage warm watchdog: a `cache_state` row stuck in status='warming'
