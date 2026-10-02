@@ -10,7 +10,17 @@ Alembic `0027_dataset_clinical_tables` adds the registry columns (schema only). 
 Patient identity is now per dataset: a patient is an enrollment keyed `<dataset slug>__<patient_id>`, so the same id in two datasets is no longer merged into one patient (as the 12 CRISP2/LVO + PRECISE ids `11-*`/`12-*` were). Enrollments of one person share a subject and its imaging; patient labels stay per enrollment and users see only their datasets' identifiers. New `dataset` registry (`manage_datasets.py`, replacing `rename_dataset_value.py`), table-driven `link_patients.py`, and `split_merged_patients.py` for the merged ids; ingestion requires a registered `dataset` and refuses a study owned by another person.
 Alembic `0026_patient_identity` (irreversible once same-id patients exist — major release) adds the registry, re-keys `patient`, imaging ownership and patient-level annotations/history, and the mirrors. Set config.toml `[web-app] clinical_data_dataset`; timepoints, episodes and series ranks are now computed per person after every ingest. The patient labelled mirror is synced by ingestion again (it had fallen 128 rows behind).
 
-## Unreleased
+## v1.27 — 2026-10-01
+
+Study Instance UID and Series Instance UID are available in Displayed Columns, hidden by default, with substring filters in Study/Series views.
+Existing saved views keep the UID columns hidden until enabled; expanded rows can display them. No schema migration is required.
+
+## v1.26 — 2026-10-01
+
+Study modalities are stored as a sorted array and refreshed during ingestion and series deletion, including append imports and labelled mirrors. Existing API display/filter behavior is retained and study Modality sorting is supported.
+Alembic `0025_study_modalities` adds and backfills the column from series metadata; no imaging-file reread is required.
+
+Also first shipped in this tag (accumulated since v1.25):
 
 Ingestion tag extraction no longer fails a whole case on a malformed header element or on NUL bytes in header strings (both seen in the FlowCat corpus); the element is skipped or the NUL dropped.
 
@@ -29,16 +39,6 @@ Alembic `0024_data_exports_naming` and the host upgrade script preserve existing
 Staff can export permitted datasets through Data Exports and download DICOM ZIP or NIfTI; Alembic `0022_staff_role` adds the role without changing dataset grants.
 Data Exports adds instrument selection, nested filters, a codebook, and named exports that can be reopened for editing; `0023_export_names` adds required names while preserving history.
 Downloads support Unicode filenames and release temporary files on failed transfers. Export setup failures are recorded in history.
-
-## v1.27 — 2026-10-01
-
-Study Instance UID and Series Instance UID are available in Displayed Columns, hidden by default, with substring filters in Study/Series views.
-Existing saved views keep the UID columns hidden until enabled; expanded rows can display them. No schema migration is required.
-
-## v1.26 — 2026-10-01
-
-Study modalities are stored as a sorted array and refreshed during ingestion and series deletion, including append imports and labelled mirrors. Existing API display/filter behavior is retained and study Modality sorting is supported.
-Alembic `0025_study_modalities` adds and backfills the column from series metadata; no imaging-file reread is required.
 
 ## v1.25 — 2026-09-14
 
