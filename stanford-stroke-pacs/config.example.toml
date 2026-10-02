@@ -112,18 +112,6 @@ session_absolute_timeout_hours = 24
 cookie_secure = true
 # Per-IP cap for POST /api/login attempts inside a 5-minute rolling window.
 login_rate_limit_per_5min = 10
-# Which clinical_data column supplies the patient tab's "Episode Date"
-# (COALESCEd over the imaging-derived patient.stroke_date). Must be a bare SQL
-# identifier — the web-app refuses to start otherwise — and should exist on
-# clinical_data when the table is present (falls back to stroke_date with a
-# startup WARN if not). Irrelevant when the optional clinical table is absent.
-clinical_episode_date_column = "stroke_date"
-# The dataset (display name, e.g. "CRISP2/LVO") whose patient ids
-# clinical_data.study_id holds. clinical_data has no dataset column, so set this
-# whenever more than one dataset is ingested: the clinical join (episode date,
-# timepoint anchors) is then restricted to that dataset's patients. Empty =
-# unrestricted, safe only for a single-dataset deployment.
-clinical_data_dataset = ""
 # OHIF input shim: one wheel event per this many pixels of *trackpad* scroll
 # reaches the viewer (mouse wheels unaffected), and ArrowUp/Down reliably
 # step slices. 0 disables the shim. Tune live via

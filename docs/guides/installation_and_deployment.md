@@ -56,8 +56,8 @@ metadata layer. What you must supply is the *content*: real rows in the upstream
 `patient` / `image_study` / `image_series` tables (loaded from your source
 metadata or the ingestion pipeline — §5 Step 3d) and the matching DICOM tree on
 disk. `image_ingestion_protocols/` is the general pipeline for that; only its
-clinical-enrichment step (the optional `clinical_data` table) is skipped when a
-deployment has no clinical source.
+clinical-enrichment step (the batch dataset's optional clinical table) is
+skipped when the dataset has none registered.
 
 ---
 
@@ -247,7 +247,8 @@ The stack uses **two databases on one PostgreSQL server** (see
 [`../reference/configuration_sources.md`](../reference/configuration_sources.md)):
 
 - **`stanford-stroke`** — the research/app DB. Holds the upstream metadata
-  (`patient`, `image_study`, `image_series`, optional `clinical_data`) **and**
+  (`patient`, `image_study`, `image_series`, optional per-dataset
+  `*_clinical_data` tables) **and**
   the web-app-owned tables (`users`, `annotations`, `annotations_history`,
   `label_definitions`, `user_preferences`, `series_cache_state`, and the
   `*_labelled` mirrors).
@@ -288,8 +289,10 @@ Optionally tighten the runtime role afterwards: `ALTER ROLE "<DB_USER>" NOCREATE
 
 **3c. Create the schema in `stanford-stroke`.** Alembic is the single source of
 truth for the DDL — one `upgrade head` creates the upstream `patient` /
-`image_study` / `image_series` tables, the `clinical_data` side-table, and
-the web-app-owned tables. `web-app/app.py` runs `alembic upgrade head`
+`image_study` / `image_series` tables, the legacy (unregistered) `clinical_data`
+side-table, and the web-app-owned tables. A dataset's clinical table is
+registered separately with `scripts/admin/manage_datasets.py import-clinical`
+([`../operations/linking_patients.md`](../operations/linking_patients.md) §Clinical data). `web-app/app.py` runs `alembic upgrade head`
 automatically at first startup (Step 8), so you can skip ahead. Run it manually
 now only if you want the upstream spine to exist before loading data in Step 3d:
 
@@ -698,8 +701,8 @@ them.
 
 - the imaging-metadata ingestion pipeline — general, but only needed when
   ingesting new imaging data, not to deploy the PACS services themselves
-- its clinical-enrichment step reads the optional `clinical_data` table and is
-  skipped automatically when a deployment has no clinical source
+- its clinical-enrichment step reads the batch dataset's optional registered
+  clinical table and is skipped automatically when there is none
 
 ---
 

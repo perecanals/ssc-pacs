@@ -48,7 +48,7 @@ load_dotenv(STACK_ROOT / ".env")
 sys.path.insert(0, str(STACK_ROOT / "web-app"))
 sys.path.insert(0, str(STACK_ROOT / "image_ingestion_protocols"))
 
-from common import subject_for_patient_arg, table_exists  # noqa: E402
+from common import subject_for_patient_arg  # noqa: E402
 from series_classification import (  # noqa: E402
     RULES_VERSION,
     construct_acquisition_datetime,
@@ -57,8 +57,6 @@ from subject_timepoints import (  # noqa: E402
     clinical_anchor_sql,
     resolve_subject_timepoints,
 )
-
-from config import CLINICAL_DATA_DATASET  # noqa: E402
 
 
 def _fmt(value) -> str:
@@ -164,12 +162,10 @@ def main() -> int:
         study_params.append(subject_id)
 
     with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-        # clinical_data is optional (a deployment may not have it); without it
-        # every anchor reads NULL and each episode falls back to its own
-        # thrombectomy study.
-        clinical_cols, clinical_join, clinical_params = clinical_anchor_sql(
-            table_exists(cur, "clinical_data"), CLINICAL_DATA_DATASET
-        )
+        # The CRISP2 puncture anchors come from the clinical table of the
+        # 'crisp2_puncture' dataset (Alembic 0027); without one every anchor
+        # reads NULL and each episode falls back to its own thrombectomy study.
+        clinical_cols, clinical_join, clinical_params = clinical_anchor_sql(cur)
         cur.execute(
             f"""
             SELECT st.studyinstanceuid, st.subject_id, st.study_type,

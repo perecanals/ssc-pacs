@@ -114,7 +114,7 @@ def test_refresh_follows_the_subject(link_module, cur, db_conn):
     link_module["_link_rows"](cur, [_row(
         dataset="crisp2", patient_id="OL-3", link_dataset="lvo", link_patient_id="P-0002",
     )], "t.csv")
-    refresh(cur, db_conn, ["lvo__P-0002"], has_clinical_table=True, clinical_dataset=None)
+    refresh(cur, db_conn, ["lvo__P-0002"])
     cur.execute("SELECT stroke_date::date::text AS d FROM patient WHERE patient_key = 'crisp2__OL-3'")
     assert cur.fetchone()["d"] == "2024-03-03"
     cur.execute("SELECT 1 FROM patient_labelled WHERE patient_key = 'crisp2__OL-3'")

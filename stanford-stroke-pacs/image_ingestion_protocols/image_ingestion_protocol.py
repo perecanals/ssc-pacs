@@ -60,7 +60,7 @@ from study_metadata import (  # noqa: E402
     refresh_study_modalities_sqlalchemy,
 )
 
-from config import CLINICAL_DATA_DATASET, DICOM_DATA_ROOT, STORAGE_MODE  # noqa: E402
+from config import DICOM_DATA_ROOT, STORAGE_MODE  # noqa: E402
 
 warnings.filterwarnings(
     "ignore",
@@ -117,6 +117,8 @@ class ImageIngestionProtocol:
         self.image_study = None
         self.image_series = None
         self.clinical_data = None
+        self.clinical_source = None
+        self.clinical_loaded = False
 
         # Canonical destination for loose DICOMs.
         self.base_dir = str(DICOM_DATA_ROOT)
@@ -330,36 +332,41 @@ class ImageIngestionProtocol:
         )
 
     def load_clinical_data_table(self):
-        # clinical_data is an optional clinical import a deployment may not
-        # have. Absent it, the clinical match check is skipped; timepoints
-        # (subject_timepoints, after the upsert) then fall back to each
-        # episode's thrombectomy-study anchor.
-        if CLINICAL_DATA_DATASET and self.dataset != CLINICAL_DATA_DATASET:
-            # clinical_data.study_id holds another dataset's ids: a same-id
-            # patient here would be matched to someone else's clinical row.
+        """Load this batch dataset's clinical table, if one is registered.
+
+        Clinical data is per dataset (Alembic 0027): only the clinical table
+        registered on the batch's own dataset row is consulted, so a same-id
+        patient of another dataset is never matched to it. Normalised to two
+        columns, ``patient_id`` and ``episode_date``. With no registered table
+        the clinical match check is skipped; timepoints are unaffected (they are
+        computed per subject after the upsert, see subject_timepoints).
+        """
+        from clinical_sources import clinical_source_for  # web-app; on sys.path by now
+
+        raw = self.postgres_engine.raw_connection()
+        try:
+            with raw.cursor() as cur:
+                source = clinical_source_for(cur, self.dataset)
+        finally:
+            raw.close()
+        self.clinical_loaded = True
+        self.clinical_source = source
+        if source is None:
             print(
-                f"Note: clinical_data belongs to {CLINICAL_DATA_DATASET!r}, not "
-                f"{self.dataset!r} — clinical validation skipped for this batch."
+                f"Note: dataset {self.dataset!r} has no clinical table registered — "
+                "clinical match check skipped."
             )
             self.clinical_data = None
             return
-        if not inspect(self.postgres_engine).has_table("clinical_data"):
-            print(
-                "Note: table clinical_data not found — clinical enrichment "
-                "disabled. Timepoints will anchor on each episode's own "
-                "thrombectomy study where one exists."
-            )
-            self.clinical_data = None
-            return
-        self.clinical_data = pd.read_sql_table("clinical_data", self.postgres_engine)
-        if "study_id" in self.clinical_data.columns:
-            self.clinical_data["study_id"] = self.clinical_data["study_id"].apply(
+        table = pd.read_sql_table(source.table, self.postgres_engine)
+        self.clinical_data = pd.DataFrame({
+            "patient_id": table[source.id_column].apply(
                 lambda value: str(value).strip() if pd.notna(value) else None
-            )
-        if "stroke_date" in self.clinical_data.columns:
-            self.clinical_data["stroke_date"] = pd.to_datetime(
-                self.clinical_data["stroke_date"], errors="coerce"
-            ).dt.normalize()
+            ),
+            "episode_date": pd.to_datetime(
+                table[source.date_column], errors="coerce"
+            ).dt.normalize(),
+        })
 
     @staticmethod
     def _empty_series_table():
@@ -782,10 +789,11 @@ class ImageIngestionProtocol:
     def _lookup_stroke_date(self, patient_id):
         if self.clinical_data is None or self.clinical_data.empty:
             return pd.NaT
-        matches = self.clinical_data[self.clinical_data["study_id"] == str(patient_id)]
-        if matches.empty or "stroke_date" not in matches.columns:
+        matches = self.clinical_data[self.clinical_data["patient_id"] == str(patient_id)]
+        if matches.empty:
             return pd.NaT
-        return matches["stroke_date"].dropna().iloc[0] if matches["stroke_date"].notna().any() else pd.NaT
+        dates = matches["episode_date"].dropna()
+        return dates.iloc[0] if not dates.empty else pd.NaT
 
     def _resolve_dataset(self):
         """Require a registered dataset; remember its slug (the key prefix)."""
@@ -1180,33 +1188,32 @@ class ImageIngestionProtocol:
             current_path = os.path.dirname(current_path)
 
     def validate_studies_against_clinical_data(self):
-        if self.clinical_data is None:
+        if not self.clinical_loaded:
             self.load_clinical_data_table()
 
         if self.case_study_table.empty:
             return
 
-        # Still None => clinical_data does not exist here. There is nothing
-        # to validate against, so every study is trivially unmatched; skip
-        # rather than warn once per patient about an absent table.
+        # Still None => this dataset registers no clinical table. There is
+        # nothing to validate against; skip rather than warn once per patient.
         if self.clinical_data is None:
             return
 
-        clinical_study_ids = set(self.clinical_data["study_id"].dropna().astype(str))
+        clinical_ids = set(self.clinical_data["patient_id"].dropna().astype(str))
         self.case_study_table["clinical_match_found"] = self.case_study_table["patient_id"].astype(str).isin(
-            clinical_study_ids
+            clinical_ids
         )
 
         for idx, row in self.case_study_table.iterrows():
             patient_id = str(row["patient_id"])
             if row["clinical_match_found"]:
-                matches = self.clinical_data[self.clinical_data["study_id"] == patient_id]
-                if "stroke_date" in matches.columns and matches["stroke_date"].notna().any():
-                    self.case_study_table.loc[idx, "stroke_date"] = matches["stroke_date"].dropna().iloc[0]
+                episode_date = self._lookup_stroke_date(patient_id)
+                if pd.notna(episode_date):
+                    self.case_study_table.loc[idx, "stroke_date"] = episode_date
                 continue
 
             print(
-                f"Warning: study_id {patient_id} is not present in clinical_data. "
+                f"Warning: patient {patient_id} has no row in {self.clinical_source.table}. "
                 "The study will still be ingested, but remains clinically unmatched."
             )
 
@@ -1683,14 +1690,10 @@ class ImageIngestionProtocol:
                  "WHERE studyinstanceuid = ANY(:uids)"),
             {"uids": self.updated_study_uids},
         ).scalars().all()
-        has_clinical = inspect(connection).has_table("clinical_data")
         dbapi = connection.connection
         cur = dbapi.cursor(cursor_factory=RealDictCursor)
         try:
-            recompute_subject_timepoints(
-                cur, subject_ids,
-                has_clinical_table=has_clinical, clinical_dataset=CLINICAL_DATA_DATASET,
-            )
+            recompute_subject_timepoints(cur, subject_ids)
         finally:
             cur.close()
 

@@ -40,7 +40,7 @@ tree. The web-app is the *runner*, not the owner.
 stanford-stroke-pacs/
 ├── alembic.ini                  # CLI config; sqlalchemy.url is blank, env.py builds it
 └── alembic/
-    ├── env.py                   # builds DB URL from .env; include_object filter
+    ├── env.py                   # builds DB URL from .env; include_object filter (rules in web-app/schema_scope.py)
     ├── script.py.mako           # template for `alembic revision`
     └── versions/
         ├── 0001_baseline.py     # snapshot of prod schema as of 2026-04-15
@@ -67,7 +67,9 @@ stanford-stroke-pacs/
         ├── 0022_staff_role.py
         ├── 0023_export_names.py
         ├── 0024_data_exports_naming.py
-        └── 0025_study_modalities.py
+        ├── 0025_study_modalities.py
+        ├── 0026_patient_identity.py
+        └── 0027_dataset_clinical_tables.py
 ```
 
 The chain is linear. `alembic history` prints the live
@@ -87,11 +89,13 @@ production on 2026-04-15. They fall in three groups:
 | Group | Tables | Managed by |
 |---|---|---|
 | web-app-owned | `annotations`, `label_definitions`, `users`, `user_preferences`, `series_cache_state` | Future Alembic revisions (the per-study `cache_state` and dead `orthanc_resource_map` were replaced/dropped by `0010_series_cache_state`) |
-| Upstream raw | `patient`, `image_series`, `image_study`, `clinical_data` | External ingest pipeline (out of scope for Alembic; `patient` also has a `CREATE TABLE IF NOT EXISTS` bootstrap in revision `0006`) |
+| Upstream raw | `patient`, `image_series`, `image_study`, per-dataset `*_clinical_data` tables (and the legacy `clinical_data`) | External ingest pipeline (out of scope for Alembic; `patient` also has a `CREATE TABLE IF NOT EXISTS` bootstrap in revision `0006`) |
 | Dynamic labelled mirrors | `image_series_labelled`, `image_study_labelled`, `patient_labelled` | `web-app/labelled_table_sync.py`, based on `label_definitions`. Refreshed **in the background after each annotation write** (eventually consistent — not in the request transaction) plus on demand via the "Refresh Labelled Tables" button, bulk-label scripts, and image ingest. (The `snapshot_*` tables that once lived here were dropped by `0013_drop_snapshot_tables`.) |
 
 The upstream and dynamic groups are excluded from Alembic's `--autogenerate`
-proposals via `include_object` in `alembic/env.py` — autogenerate will
+proposals via `include_object` in `alembic/env.py`, whose rules live in
+`web-app/schema_scope.py` (importable, unit-tested; any table ending in
+`_clinical_data` is skipped too) — autogenerate will
 not suggest `DROP TABLE image_series` just because no Alembic revision
 mentions it.
 
@@ -202,7 +206,8 @@ diff <(grep -v -E '^(\\restrict|\\unrestrict|-- Dumped|-- PostgreSQL)' /tmp/prod
       raise NotImplementedError("Migration <NNNN> is irreversible: <reason>")
   ```
 - Touch only web-app-owned tables. Changes to upstream tables
-  (`image_*`, `clinical_data`) belong in the external ingest project.
+  (`image_*`, `*_clinical_data`) belong in the external ingest project
+  (clinical tables: `manage_datasets.py import-clinical`).
 
 ### Destructive downgrades — read before running `downgrade`
 

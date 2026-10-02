@@ -1,5 +1,10 @@
 # Changelog
 
+## v2.1 — not yet tagged
+
+Clinical data is per dataset: a dataset row registers its own clinical table (`<slug>_clinical_data`), patient-id column, episode-date column and timepoint strategy, uploaded and validated in one step with `manage_datasets.py import-clinical` (or adopted from an existing table, leaving a deprecated `clinical_data` view). The patient tab's episode date comes from each enrollment's own dataset; the CRISP2 puncture anchors are read only for the `crisp2_puncture` dataset. Ingestion checks the batch dataset once and offers to register a new one.
+Alembic `0027_dataset_clinical_tables` adds the registry columns (schema only). config.toml `[web-app] clinical_episode_date_column` / `clinical_data_dataset` are retired (ignored with a warning).
+
 ## v2.0 — 2026-10-02
 
 Patient identity is now per dataset: a patient is an enrollment keyed `<dataset slug>__<patient_id>`, so the same id in two datasets is no longer merged into one patient (as the 12 CRISP2/LVO + PRECISE ids `11-*`/`12-*` were). Enrollments of one person share a subject and its imaging; patient labels stay per enrollment and users see only their datasets' identifiers. New `dataset` registry (`manage_datasets.py`, replacing `rename_dataset_value.py`), table-driven `link_patients.py`, and `split_merged_patients.py` for the merged ids; ingestion requires a registered `dataset` and refuses a study owned by another person.

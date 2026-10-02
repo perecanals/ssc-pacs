@@ -1,9 +1,9 @@
 """Tests for the patient-level listing sourced from the `patient` registry.
 
 Regression coverage for the bug where patients with imaging but no
-clinical_data row were invisible at the patient level, plus the
+clinical row were invisible at the patient level, plus the
 clinical-preferred / imaging-fallback stroke_date behavior, plus the
-degradation when clinical_data does not exist at all.
+degradation when a registered clinical table does not exist.
 """
 
 import contextlib
@@ -11,9 +11,9 @@ import contextlib
 import psycopg2
 
 
-def _find(items, patient_id):
+def _find(items, patient_id, dataset=None):
     for it in items:
-        if it["patient_id"] == patient_id:
+        if it["patient_id"] == patient_id and dataset in (None, it.get("dataset")):
             return it
     return None
 
@@ -41,7 +41,7 @@ def _table_hidden(dsn, table):
 
 class TestPatientListing:
     def test_clinically_unmatched_patient_appears(self, logged_in_client):
-        """P-0002 has imaging but no clinical_data row — must be listed."""
+        """P-0002 has imaging but no clinical row — must be listed."""
         resp = logged_in_client.get("/api/patients", params={"patient_id": "P-0002"})
         assert resp.status_code == 200
         items = resp.json()["items"]
@@ -57,17 +57,13 @@ class TestPatientListing:
     def test_matched_patient_prefers_clinical_stroke_date(self, logged_in_client):
         """P-0001's clinical date (2025-01-01) wins over its imaging date (2025-02-02)."""
         resp = logged_in_client.get("/api/patients", params={"patient_id": "P-0001"})
-        row = _find(resp.json()["items"], "P-0001")
+        row = _find(resp.json()["items"], "P-0001", "lvo")
         assert row is not None
         assert str(row["stroke_date"]).startswith("2025-01-01")
 
-    def test_clinical_row_restricted_to_its_dataset(self, logged_in_client, monkeypatch):
-        """clinical_data.study_id has no dataset: with clinical_data_dataset set,
-        only that dataset's enrollment of P-0001 takes the clinical date — a
-        same-id patient elsewhere keeps its imaging date."""
-        import routes.studies as studies_mod
-
-        monkeypatch.setattr(studies_mod, "CLINICAL_DATA_DATASET", "lvo")
+    def test_clinical_row_only_for_its_dataset(self, logged_in_client):
+        """The clinical table is lvo's: only lvo's enrollment of P-0001 takes
+        its date — the linked crisp2 enrollment keeps the imaging date."""
         resp = logged_in_client.get("/api/patients", params={"patient_id": "P-0001"})
         dates = {r["patient_key"]: str(r["stroke_date"])[:10] for r in resp.json()["items"]}
         assert dates == {"lvo__P-0001": "2025-01-01", "crisp2__P-0001": "2025-02-02"}
@@ -150,7 +146,7 @@ class TestPatientListing:
 
 
 class TestWithoutClinicalTable:
-    """clinical_data is an optional import a deployment may not have.
+    """A registered clinical table may go missing (dropped by hand).
 
     Without it the patient tab must still work, degrading to the imaging-derived
     stroke_date for everyone — the same value a clinically-unmatched patient
@@ -158,7 +154,7 @@ class TestWithoutClinicalTable:
     """
 
     def test_patients_listed_without_clinical_table(self, logged_in_client, seeded_db):
-        with _table_hidden(seeded_db, "clinical_data"):
+        with _table_hidden(seeded_db, "lvo_clinical_data"):
             resp = logged_in_client.get("/api/patients")
             assert resp.status_code == 200
             items = resp.json()["items"]
@@ -168,15 +164,15 @@ class TestWithoutClinicalTable:
     def test_stroke_date_falls_back_to_imaging(self, logged_in_client, seeded_db):
         """P-0001 prefers its clinical date (2025-01-01) only while the table
         exists; without it, its imaging date (2025-02-02) shows instead."""
-        with _table_hidden(seeded_db, "clinical_data"):
+        with _table_hidden(seeded_db, "lvo_clinical_data"):
             resp = logged_in_client.get("/api/patients", params={"patient_id": "P-0001"})
-            row = _find(resp.json()["items"], "P-0001")
+            row = _find(resp.json()["items"], "P-0001", "lvo")
             assert str(row["stroke_date"]).startswith("2025-02-02")
 
     def test_stroke_date_filter_and_sort_still_work(self, logged_in_client, seeded_db):
         """Filter and sort reuse the same expression as the SELECT, so they must
         follow it into the no-clinical-table branch."""
-        with _table_hidden(seeded_db, "clinical_data"):
+        with _table_hidden(seeded_db, "lvo_clinical_data"):
             resp = logged_in_client.get(
                 "/api/patients", params={"stroke_date": "2025-02-02"}
             )
@@ -196,5 +192,5 @@ class TestWithoutClinicalTable:
     def test_clinical_preference_restored_afterwards(self, logged_in_client):
         """Guard against the hide/restore helper leaking into other tests."""
         resp = logged_in_client.get("/api/patients", params={"patient_id": "P-0001"})
-        row = _find(resp.json()["items"], "P-0001")
+        row = _find(resp.json()["items"], "P-0001", "lvo")
         assert str(row["stroke_date"]).startswith("2025-01-01")

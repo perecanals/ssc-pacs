@@ -139,8 +139,7 @@ def move_studies(cur, study_uids: list[str], owner_key: str) -> int:
     return moved
 
 
-def refresh_subjects(cur, conn, subject_ids, *, has_clinical_table: bool,
-                     clinical_dataset: str | None) -> None:
+def refresh_subjects(cur, conn, subject_ids) -> None:
     """Re-derive everything that follows a subject's membership or imaging.
 
     stroke_date of each enrollment (MIN acquisition over the subject's studies),
@@ -162,10 +161,7 @@ def refresh_subjects(cur, conn, subject_ids, *, has_clinical_table: bool,
     )
     cur.execute(ASSIGN_RANKS_SQL)
     cur.execute(CLEAR_RANKS_SQL)
-    recompute_subject_timepoints(
-        cur, subject_ids,
-        has_clinical_table=has_clinical_table, clinical_dataset=clinical_dataset,
-    )
+    recompute_subject_timepoints(cur, subject_ids)
     for level, sql in (
         ("patient", "SELECT patient_key FROM patient WHERE subject_id = ANY(%s)"),
         ("study", "SELECT studyinstanceuid FROM image_study WHERE subject_id = ANY(%s)"),

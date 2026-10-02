@@ -225,8 +225,14 @@ def seeded_db(test_db):
             # P-0001: clinically matched. Its clinical stroke_date (2025-01-01)
             # differs from its imaging date (2025-02-02) so we can assert the tab
             # prefers the clinical value via COALESCE.
+            # The lvo dataset's clinical table (Alembic 0027), registered on
+            # its dataset row below.
             cur.execute(
-                "INSERT INTO clinical_data (study_id, stroke_date) "
+                "CREATE TABLE IF NOT EXISTS lvo_clinical_data "
+                "(study_id text PRIMARY KEY, stroke_date text, enroll_date text)"
+            )
+            cur.execute(
+                "INSERT INTO lvo_clinical_data (study_id, stroke_date) "
                 "VALUES ('P-0001', '2025-01-01') ON CONFLICT DO NOTHING"
             )
             # The machine-derived columns (series_type / timepoint and their
@@ -275,6 +281,11 @@ def seeded_db(test_db):
             insert_patient(cur, "P-0001", "crisp2", subject_id="lvo__P-0001",
                            stroke_date="2025-02-02")
             insert_patient(cur, "P-0002", "lvo", stroke_date="2024-03-03")
+            cur.execute(
+                "UPDATE dataset SET clinical_table = 'lvo_clinical_data', "
+                "clinical_id_column = 'study_id', clinical_date_column = 'stroke_date' "
+                "WHERE name = 'lvo'"
+            )
             from study_metadata import refresh_study_modalities
 
             refresh_study_modalities(cur, ["1.2.3.4.5", "2.2.2.2.2"])
@@ -282,16 +293,6 @@ def seeded_db(test_db):
     finally:
         conn.close()
     return test_db
-
-
-@pytest.fixture(autouse=True)
-def _unrestricted_clinical_join(monkeypatch):
-    """The host config.toml may restrict the clinical join to one dataset
-    ([web-app] clinical_data_dataset); tests must not depend on it. Tests of
-    the restriction patch it explicitly."""
-    import routes.studies as studies_mod
-
-    monkeypatch.setattr(studies_mod, "CLINICAL_DATA_DATASET", None)
 
 
 # ---------------------------------------------------------------------------
