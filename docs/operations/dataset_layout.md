@@ -107,6 +107,7 @@ python scripts/migration/move_to_dataset_layout.py
 ! sudo systemctl stop ssc-web-app pg-backup-stanford-stroke.timer pg-backup-orthanc.timer \
     pg-backup-freshness.timer orthanc-storage-backup.timer pacs-remote-backup-tier1.timer \
     pacs-remote-backup-imaging.timer cold-storage-health.timer
+# (or simply: sudo scripts/linux/stop_stack.sh, which also stops the remote freshness/maintain timers)
 scripts/orthanc/dc.sh down
 
 # 2. Back up both databases and the Orthanc storage volume (indexer DB + OHIF SRs)

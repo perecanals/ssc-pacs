@@ -70,6 +70,8 @@ UNITS = (
     "pg-backup-stanford-stroke.timer", "pg-backup-orthanc.timer",
     "pg-backup-freshness.timer", "orthanc-storage-backup.timer",
     "pacs-remote-backup-tier1.timer", "pacs-remote-backup-imaging.timer",
+    "pacs-remote-freshness.timer", "pacs-remote-maintain-tier1.timer",
+    "pacs-remote-maintain-imaging.timer",
     "cold-storage-health.timer", "cold-archive-mirror.timer",
 )
 
@@ -168,7 +170,8 @@ def active_stack() -> list[str]:
             active.append(unit)
     r = subprocess.run(
         ["systemctl", "list-units", "--state=active", "--no-legend", "--plain",
-         "pacs-remote-backup@*.service", "pg-backup-*.service", "orthanc-storage-backup.service",
+         "pacs-remote-backup@*.service", "pacs-remote-maintain@*.service",
+         "pacs-remote-freshness.service", "pg-backup-*.service", "orthanc-storage-backup.service",
          "cold-archive-mirror.service", "cold-storage-health.service"],
         capture_output=True, text=True)
     active += [line.split()[0] for line in r.stdout.splitlines() if line.strip()]
