@@ -56,10 +56,14 @@ For each study, three steps run in order. Each is written to a journal at
 2. **Orthanc indexer.** It rewrites the `indexer-plugin.db` `Files.path`
    prefixes, `/dicom-data/<old>/` → `/dicom-data/<new>/`. This runs in a
    throwaway `python:3.12-slim` container (`scripts/migration/indexer_paths.py`).
-   - It first backs the DB up inside the volume as
-     `indexer-plugin.db.pre-layout-<ts>`.
-   - Checks: row count unchanged, every attachment still has its file row,
-     `integrity_check` ok.
+   - The DB holds tens of millions of rows, so it is rebuilt rather than updated
+     in place: a new file with the rewritten paths, written in key order, is
+     swapped in.
+   - The original file stays in the volume as `indexer-plugin.db.pre-layout-<ts>`.
+     That is the backup; delete it once the stack is verified.
+   - Checks before the swap: row counts per table unchanged, every moved row
+     under its new prefix, every attachment still has its file row,
+     `quick_check` ok.
    - Attachments resolve uuid → instanceId (a hash of the DICOM UIDs) → path,
      so this is all Orthanc needs; `orthanc_db` stores no paths.
 3. **stanford-stroke.** It rewrites the stored path columns in one transaction:
@@ -81,6 +85,16 @@ place and stay in the old dir.
 It checks with `systemctl`, `docker` and `pgrep`, and never runs sudo.
 
 ### Maintenance window (production)
+
+The rehearsal on a full copy of production (13,485 studies, 23.6M indexer rows)
+took about 8.5 minutes forward: renames ~1 min, indexer rebuild ~7.5 min,
+database ~1 min. Rollback took about 6 minutes. Production has about 24,600
+renames, so allow roughly 15 minutes plus backups.
+
+**Disk.** The indexer rebuild needs a second copy of `indexer-plugin.db`
+(~18 GB) on the Docker volume's disk, plus sort space next to it. The
+`.pre-layout` file holds that space until you delete it. The dry run's
+indexer count reads the live DB and takes about 5 minutes.
 
 From the stack root, in the `ssc-pacs` conda env. The steps you run with sudo
 are marked `!`.
@@ -132,7 +146,8 @@ imaging backup re-reads the whole archive tree once. Plan for its duration.
 python scripts/migration/move_to_dataset_layout.py --rollback maintenance/layout-move/<timestamp>
 ```
 
-The rollback replays the journal backwards. It undoes only the steps the
+The rollback replays the journal backwards (rehearsed: both the path columns
+and the indexer paths came back byte-identical). It undoes only the steps the
 journal shows were done (an interrupted run may not have reached the indexer or
 the DB commit). The backups from step 2 are the last resort.
 
