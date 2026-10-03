@@ -88,15 +88,15 @@ static bool ComputeInstanceId(std::string& instanceId,
       s.Assign(OrthancPluginDicomBufferToJson(OrthancPlugins::GetGlobalContext(), dicom, size,
                                               OrthancPluginDicomToJsonFormat_Short,
                                               OrthancPluginDicomToJsonFlags_None, 256));
-    
+
       Json::Value json;
       s.ToJson(json);
-    
+
       static const char* const PATIENT_ID = "0010,0020";
       static const char* const STUDY_INSTANCE_UID = "0020,000d";
       static const char* const SERIES_INSTANCE_UID = "0020,000e";
       static const char* const SOP_INSTANCE_UID = "0008,0018";
-    
+
       Orthanc::DicomInstanceHasher hasher(
         json.isMember(PATIENT_ID) ? Orthanc::SerializationToolbox::ReadString(json, PATIENT_ID) : "",
         Orthanc::SerializationToolbox::ReadString(json, STUDY_INSTANCE_UID),
@@ -188,9 +188,9 @@ static void LookupDeletedFiles()
   {
   private:
     typedef std::pair<std::string, std::string>  DeletedDicom;
-    
+
     std::list<DeletedDicom>  deletedDicom_;
-    
+
   public:
     virtual void VisitInstance(const std::string& path,
                                bool isDicom,
@@ -213,15 +213,25 @@ static void LookupDeletedFiles()
 
         if (database_.RemoveFile(path))
         {
-          OrthancPlugins::RestApiDelete("/instances/" + instanceId, false);      
+          OrthancPlugins::RestApiDelete("/instances/" + instanceId, false);
         }
       }
     }
-  };  
+  };
 
   Visitor visitor;
   database_.Apply(visitor);
   visitor.ExecuteDelete();
+}
+
+
+// SSC fork: cold-storage warm temp dirs end in ".warming" (web-app/cache_manager.py).
+static bool IsWarmingDirectory(const boost::filesystem::path& p)
+{
+  static const std::string suffix = ".warming";
+  const std::string name = p.filename().string();
+  return name.size() >= suffix.size() &&
+         name.compare(name.size() - suffix.size(), suffix.size(), suffix) == 0;
 }
 
 
@@ -297,7 +307,14 @@ static void ScanFolders(const std::list<std::string>& folders,
             break;
 
           case boost::filesystem::directory_file:
-            s.push(current->path());
+            // SSC fork: never descend into a cold-storage warm's temp dir
+            // (`<series>/DICOM.warming`, renamed to `DICOM` when complete). A
+            // scan overlapping a warm otherwise registers the temp paths, which
+            // with RemoveMissingFiles=false stay behind as stale duplicates.
+            if (!IsWarmingDirectory(current->path()))
+            {
+              s.push(current->path());
+            }
             break;
 
           default:
@@ -374,7 +391,7 @@ static OrthancPluginErrorCode StorageCreate(const char *uuid,
       // This attachment must be stored in the internal storage area
       storageArea_->Create(uuid, content, size);
     }
-    
+
     return OrthancPluginErrorCode_Success;
   }
   catch (Orthanc::OrthancException& e)
@@ -415,7 +432,7 @@ static OrthancPluginErrorCode StorageReadRange(OrthancPluginMemoryBuffer64 *targ
     {
       storageArea_->ReadRange(target, uuid, rangeStart);
     }
-    
+
     return OrthancPluginErrorCode_Success;
   }
   catch (Orthanc::OrthancException& e)
@@ -475,7 +492,7 @@ static OrthancPluginErrorCode StorageRemove(const char *uuid,
       database_.RemoveAttachment(uuid);
       storageArea_->RemoveAttachment(uuid);
     }
-    
+
     return OrthancPluginErrorCode_Success;
   }
   catch (Orthanc::OrthancException& e)
@@ -695,7 +712,7 @@ static OrthancPluginErrorCode OnChangeCallback(OrthancPluginChangeType changeTyp
 
   return OrthancPluginErrorCode_Success;
 }
-      
+
 
 extern "C"
 {
@@ -787,7 +804,7 @@ extern "C"
           Orthanc::SystemToolbox::MakeDirectory(folder);
           path = (boost::filesystem::path(folder) / "indexer-plugin.db").string();
         }
-        
+
         LOG(WARNING) << "Path to the database of the Indexer plugin: " << path;
         database_.Open(path);
 

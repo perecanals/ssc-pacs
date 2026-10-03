@@ -1,7 +1,7 @@
 # SSC fork patches to the Orthanc Folder Indexer
 
 This is a fork of the upstream Orthanc **Folder Indexer** plugin with two SSC-specific
-changes. Every edit in the source is marked with a `// SSC fork:` comment — run
+changes (three patches below). Every edit in the source is marked with a `// SSC fork:` comment — run
 `grep -rn "SSC fork" src/Sources/` to see them all.
 
 Image tag: **`ssc-orthanc:patched-indexer`** (built by `Dockerfile`; plugin version
@@ -84,3 +84,20 @@ pipeline and by `scripts/cold_storage/reindex_missing_series.py`).
 `"Indexer": { "Enable": true, "Folders": [], "RemoveMissingFiles": false,
 "ScanRoots": ["/dicom-data"] }`. Startup banner (with empty Folders):
 `no static 'Folders' configured — continuous monitor idle; use POST /indexer/scan …`.
+
+## Patch 3 — skip cold-storage warm temp dirs (`*.warming`)
+
+**Problem.** A warm (`web-app/cache_manager.py`) extracts a series archive into a
+sibling temp dir `<series>/DICOM.warming`, then renames it to `DICOM`. Any scan that
+overlapped a warm (an ingestion scan, `reindex_missing_series.py`, a deletion purge,
+or the old continuous monitor) registered the temp paths too. With
+`RemoveMissingFiles=false` those rows never go away: they become a second `Files` row
+for each instance, pointing at a path that no longer exists, and the plugin's "first
+row on lookup" may serve it (Orthanc 500, blank OHIF pane). In production, almost all
+of the stale duplicate rows that `scripts/cold_storage/prune_stale_index_paths.py`
+removed were `DICOM.warming/…` twins of valid `DICOM/…` rows.
+
+**Change.** `ScanFolders` never descends into a directory whose name ends in
+`.warming` (`IsWarmingDirectory`), in both the continuous monitor and on-demand scans.
+Nothing legitimate lives there: it is always a partial copy that becomes `DICOM/` a
+moment later and is then picked up by the next scan.
