@@ -344,7 +344,7 @@ response body is:
   "error": "insufficient_disk_space",
   "required_bytes": 12345678,
   "available_bytes":   234567,
-  "target": "<dicom_data_root>/<patient>/<study>/<series>"
+  "target": "<dicom_data_root>/<slug>/<patient>/<study>/<series>"
 }}
 ```
 
@@ -437,7 +437,7 @@ log repeats:
 
 ```
 The specified path does not point to a regular file: The path does not point
-to a regular file: /dicom-data/<patient>/<study>/<series>/DICOM/IM-....dcm
+to a regular file: /dicom-data/<slug>/<patient>/<study>/<series>/DICOM/IM-....dcm
 ```
 
 **Cause:** not cold storage — the container lost sight of the DICOM tree. The

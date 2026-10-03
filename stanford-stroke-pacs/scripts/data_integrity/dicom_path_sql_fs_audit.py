@@ -30,6 +30,7 @@ load_dotenv(REPO_ROOT / ".env")
 
 sys.path.insert(0, str(REPO_ROOT / "web-app"))
 from db import DB_CONFIG  # noqa: E402
+from storage_layout import misplaced_studies  # noqa: E402
 
 from config import DICOM_DATA_ROOT  # noqa: E402
 
@@ -279,6 +280,18 @@ def main() -> int:
                     shown += 1
                 if shown >= 5:
                     break
+
+            # Layout: <root>/<owner's dataset slug>/<patient_id>/<StudyUID>.
+            misplaced = misplaced_studies(cur, DICOM_DATA_ROOT)
+            print("\n--- Dataset layout (image_study.study_path vs owner) ---")
+            print(f"  Misplaced studies: {len(misplaced)}")
+            for m in misplaced[:5]:
+                print(f"    {m['patient_key']} {m['studyinstanceuid']}")
+                print(f"      stored:   {m['current']}")
+                print(f"      expected: {m['expected']}")
+            if misplaced:
+                print("  Relocate with: python scripts/migration/move_to_dataset_layout.py "
+                      "(dry run first; maintenance window)")
     finally:
         conn.close()
 

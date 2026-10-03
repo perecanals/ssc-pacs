@@ -211,8 +211,9 @@ def test_end_to_end_two_patients(roots, scratch_engine, capsys):
 
     assert len(series) == 4
     for row in series:
-        assert row["dicom_dir_path"].startswith(str(roots / "dicom_root"))
-        assert row["dicom_archive_path"].startswith(str(roots / "cold_root"))
+        # <root>/<dataset slug>/<patient_id>/<StudyUID>/… in both trees.
+        assert row["dicom_dir_path"].startswith(str(roots / "dicom_root" / "audit") + "/")
+        assert row["dicom_archive_path"].startswith(str(roots / "cold_root" / "audit") + "/")
         ImageIngestionProtocol._verify_archive(
             row["dicom_archive_path"], row["number_of_slices"])
         # Sizes recorded (synthetic files are tiny -> may round to 0.0 MB).
@@ -516,7 +517,8 @@ def test_linked_enrollment_resending_shared_study_keeps_owner(roots, scratch_eng
             "SELECT patient_key FROM image_series WHERE seriesinstanceuid = :u"),
             {"u": series}).scalar()
     assert tuple(study)[:3] == ("11-002", "audit__11-002", "audit__11-002")
-    assert f"/11-002/{owned}" in study.study_path
+    # Filed under the owner's dataset, not the batch's (other/OL-7).
+    assert f"/audit/11-002/{owned}" in study.study_path
     assert series_owner == "audit__11-002"
 
 

@@ -12,7 +12,9 @@ A study/series exists in three independent places, none of which cascade:
    separately via a Force ``POST /indexer/scan`` of the now-empty loose subtree
    (see :func:`purge_indexer_rows`).
 3. On disk — the loose ``dicom_dir_path`` tree and the cold ``dicom_archive_path``
-   archives, both under ``<root>/<patient>/<studyUID>/<series>/…``.
+   archives, both under ``<root>/<slug>/<patient>/<studyUID>/<series>/…``
+   (``storage_layout``; legacy trees lack the ``<slug>`` level). Plans use the
+   stored paths, never a path rebuilt from the patient id.
 
 This module is the single source of truth for that removal, imported by both the
 admin CLI (``scripts/admin/delete_study.py``) and the admin HTTP endpoints
@@ -22,8 +24,8 @@ admin CLI (``scripts/admin/delete_study.py``) and the admin HTTP endpoints
 roots (it already deletes loose files during cold-cache eviction), so the same
 process can run every layer — Orthanc, DB, and on-disk file removal. The safety
 gate for irreversible file deletion is the path-safety guard in
-:func:`_assert_within_root` (target must be ≥ ``<patient>/<studyUID>`` under a
-configured root), plus admin-only auth on the endpoint — not OS permissions.
+:func:`_assert_within_root` (target must be a study directory or deeper
+under a configured root), plus admin-only auth on the endpoint — not OS permissions.
 
 **Annotations are discarded, not migrated.** Deleting the ``annotations`` rows
 fires the append-only ``annotations_history`` trigger, so every removed value is
@@ -55,6 +57,13 @@ from orthanc_client import (
     orthanc_series_id,
     orthanc_study_id,
 )
+from storage_layout import (
+    archive_dir_for,
+    expected_study_dir,
+    patient_dirs,
+    registered_slugs,
+    study_dir_depth_ok,
+)
 from study_metadata import lock_study_rows, refresh_study_modalities
 
 logger = logging.getLogger(__name__)
@@ -74,19 +83,20 @@ _SERIES_SIDE_TABLES = ("series_cache_state", "series_dicom_tags")
 def _assert_within_root(path: Path, root: Path) -> Path:
     """Return ``path`` resolved, or raise if it is not safely under ``root``.
 
-    Guards against ever removing a storage root or a whole-patient directory:
-    the target must be a strict descendant of ``root`` with **at least** a
-    ``<patient>/<studyUID>`` tail (≥2 path components below the root).
+    Guards against ever removing a storage root, a dataset or a whole-patient
+    directory: the target must be a study directory (named by its
+    StudyInstanceUID, at ``<slug>/<patient>/<studyUID>`` or the legacy
+    ``<patient>/<studyUID>``) or something below one.
     """
     resolved = path.resolve()
     root = root.resolve()
     if not resolved.is_relative_to(root):
         raise ValueError(f"refusing to remove {resolved}: not under {root}")
     rel_parts = resolved.relative_to(root).parts
-    if len(rel_parts) < 2:
+    if not study_dir_depth_ok(rel_parts):
         raise ValueError(
             f"refusing to remove {resolved}: too shallow "
-            f"(would delete a storage root or a whole patient)"
+            f"(would delete a storage root, a dataset or a whole patient)"
         )
     return resolved
 
@@ -122,7 +132,8 @@ def build_study_deletion_plan(conn, studyinstanceuid: str) -> dict[str, Any] | N
     """
     with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
         cur.execute(
-            "SELECT studyinstanceuid, patient_id, studydescription "
+            "SELECT studyinstanceuid, patient_id, patient_key, study_path, "
+            "       studydescription "
             "FROM image_study WHERE studyinstanceuid = %s",
             (studyinstanceuid,),
         )
@@ -140,8 +151,15 @@ def build_study_deletion_plan(conn, studyinstanceuid: str) -> dict[str, Any] | N
         n_annotations = _count_annotations(cur, studyinstanceuid, series_uids)
 
     patient_id = study["patient_id"]
-    loose_study_dir = DICOM_DATA_ROOT / str(patient_id) / studyinstanceuid
-    archive_study_dir = COLD_ARCHIVE_ROOT / str(patient_id) / studyinstanceuid
+    # Where the study is (its stored path) — not where the layout would put it:
+    # a study whose owner changed after ingestion was not moved.
+    if study["study_path"]:
+        loose_study_dir = Path(study["study_path"])
+    else:
+        loose_study_dir = expected_study_dir(
+            DICOM_DATA_ROOT, study["patient_key"], patient_id, studyinstanceuid
+        )
+    archive_study_dir = archive_dir_for(loose_study_dir, DICOM_DATA_ROOT, COLD_ARCHIVE_ROOT)
 
     return {
         "level": "study",
@@ -187,18 +205,17 @@ def build_series_deletion_plan(conn, seriesinstanceuid: str) -> dict[str, Any] |
     prune_parents: list[tuple[str, str]] = []
 
     # Loose + archive series subtree = the <seriesUID> dir (parent of DICOM /
-    # DICOM.tar.zst). Prune now-empty ancestors up to (not incl.) the patient dir.
+    # DICOM.tar.zst). Prune now-empty ancestors up to (not incl.) the patient dir,
+    # <patient>/<study>/<desc>/<series>: the series dir's third ancestor.
     if row["dicom_dir_path"]:
         series_dir = Path(row["dicom_dir_path"]).parent
         remove_dirs.append(str(series_dir))
         indexer_dirs.append(str(series_dir))  # loose tree is the indexed one
-        if patient_id:
-            prune_parents.append((str(series_dir.parent), str(DICOM_DATA_ROOT / str(patient_id))))
+        prune_parents.append((str(series_dir.parent), str(series_dir.parents[2])))
     if row["dicom_archive_path"]:
         archive_dir = Path(row["dicom_archive_path"]).parent
         remove_dirs.append(str(archive_dir))
-        if patient_id:
-            prune_parents.append((str(archive_dir.parent), str(COLD_ARCHIVE_ROOT / str(patient_id))))
+        prune_parents.append((str(archive_dir.parent), str(archive_dir.parents[2])))
 
     return {
         "level": "series",
@@ -342,7 +359,7 @@ def remove_files(plan: dict[str, Any], *, execute: bool) -> dict[str, Any]:
     """Remove the study/series directories from both storage roots.
 
     Every target is validated to sit safely under ``DICOM_DATA_ROOT`` /
-    ``COLD_ARCHIVE_ROOT`` (and at least ``<patient>/<studyUID>`` deep) before
+    ``COLD_ARCHIVE_ROOT`` (and to be a study directory or deeper) before
     removal — that guard, not OS privilege, is what prevents a stray delete.
     """
     result = remove_dir_list(plan["remove_dirs"], execute=execute)
@@ -358,8 +375,8 @@ def remove_dir_list(dirs: list[str], *, execute: bool) -> dict[str, Any]:
     """Safely remove a list of directories under the storage roots.
 
     Shared by :func:`remove_files` and the CLI's orphan-sweep. Every path is
-    validated under a storage root with a ``<patient>/<studyUID>`` (or deeper)
-    tail before removal, so it can never delete a root or a whole patient.
+    validated to be a study directory (or deeper) under a storage root before
+    removal, so it can never delete a root, a dataset or a whole patient.
     """
     removed: list[str] = []
     missing: list[str] = []
@@ -497,7 +514,8 @@ def _root_for(path: Path) -> Path:
 # Mode 2: orphan file sweep (files whose DB rows are already gone)
 # --------------------------------------------------------------------------- #
 def find_orphan_study_dirs(conn) -> list[str]:
-    """``<root>/<patient>/<studyUID>`` dirs with no ``image_study`` row.
+    """Study dirs (``<root>/<slug>/<patient>/<studyUID>``, or the legacy
+    ``<root>/<patient>/<studyUID>``) with no ``image_study`` row.
 
     These are what a UI (index+DB) delete leaves behind for the sudo CLI to sweep.
     A study directory is orphaned iff its name (the StudyInstanceUID) is unknown
@@ -506,14 +524,13 @@ def find_orphan_study_dirs(conn) -> list[str]:
     with conn.cursor() as cur:
         cur.execute("SELECT studyinstanceuid FROM image_study")
         known = {r[0] for r in cur.fetchall()}
+        # Dataset dirs must never be read as patients (their patients would all
+        # look like orphan studies).
+        slugs = registered_slugs(cur)
 
     orphans: list[str] = []
     for root in (DICOM_DATA_ROOT, COLD_ARCHIVE_ROOT):
-        if not root.is_dir():
-            continue
-        for patient_dir in root.iterdir():
-            if not patient_dir.is_dir():
-                continue
+        for _slug, _pid, patient_dir in patient_dirs(root, slugs):
             for study_dir in patient_dir.iterdir():
                 if study_dir.is_dir() and study_dir.name not in known:
                     orphans.append(str(study_dir))

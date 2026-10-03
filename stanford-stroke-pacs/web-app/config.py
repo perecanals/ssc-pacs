@@ -129,6 +129,31 @@ STORAGE_MODE = _storage["mode"]
 DICOM_DATA_ROOT = Path(str(_storage["dicom_data_root"])).resolve()
 COLD_ARCHIVE_ROOT = Path(str(_storage["cold_archive_root"])).resolve()
 
+
+def _linked_view_root(raw) -> Path | None:
+    """Optional symlink view of linked imaging (web-app/linked_view.py).
+
+    Must sit outside both storage roots (and they outside it): anything that
+    walks a root — Orthanc, the audits, deletion's orphan sweep, backups —
+    would otherwise meet every shared study twice.
+    """
+    if raw in (None, ""):
+        return None
+    path = Path(str(raw))
+    if not path.is_absolute():
+        raise RuntimeError(f"config.toml [storage] linked_view_root must be absolute (got {raw!r})")
+    path = path.resolve()
+    for root in (DICOM_DATA_ROOT, COLD_ARCHIVE_ROOT):
+        if path == root or path.is_relative_to(root) or root.is_relative_to(path):
+            raise RuntimeError(
+                f"config.toml [storage] linked_view_root ({path}) must be outside "
+                f"the storage roots (overlaps {root})."
+            )
+    return path
+
+
+LINKED_VIEW_ROOT = _linked_view_root(_storage.get("linked_view_root"))
+
 # Benign knobs — present via the defaults overlay.
 EVICTION_TTL_HOURS = float(_storage["eviction_ttl_hours"])
 WARMING_TIMEOUT_MINUTES = float(_storage["warming_timeout_minutes"])
@@ -176,6 +201,7 @@ def effective_config_summary() -> dict:
         "storage_mode": STORAGE_MODE,
         "dicom_data_root": str(DICOM_DATA_ROOT),
         "cold_archive_root": str(COLD_ARCHIVE_ROOT),
+        "linked_view_root": str(LINKED_VIEW_ROOT) if LINKED_VIEW_ROOT else None,
         "eviction_ttl_hours": EVICTION_TTL_HOURS,
         "warm_workers": WARM_WORKERS,
         "session_timeout_hours": SESSION_TIMEOUT_HOURS,

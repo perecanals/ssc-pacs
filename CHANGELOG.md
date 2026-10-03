@@ -1,5 +1,10 @@
 # Changelog
 
+## v2.2 — not yet tagged
+
+Imaging is filed under its owner's dataset: `<root>/<dataset slug>/<patient_id>/<StudyUID>/…` in both storage roots, so same-id patients of different datasets (the split `11-*`/`12-*` ids) no longer share a folder. Ingestion files new studies under the owner's slug. Deletion, the audits and the cold-storage tools follow the stored paths and read both layouts.
+The one-off move is `scripts/migration/move_to_dataset_layout.py`. It renames the study dirs, rewrites Orthanc's indexer `Files.path` and the stored path columns in a maintenance window, and keeps a journal for `--rollback`; it also relocates studies re-owned by linking later. There is no Alembic migration. Optional `[storage].linked_view_root` adds a symlink view of imaging shared across linked enrollments (`build_linked_view.py`).
+
 ## v2.1 — 2026-10-02
 
 Clinical data is per dataset: a dataset row registers its own clinical table (`<slug>_clinical_data`), patient-id column, episode-date column and timepoint strategy, uploaded and validated in one step with `manage_datasets.py import-clinical` (or adopted from an existing table, leaving a deprecated `clinical_data` view). The patient tab's episode date comes from each enrollment's own dataset; the CRISP2 puncture anchors are read only for the `crisp2_puncture` dataset. Ingestion checks the batch dataset once and offers to register a new one.

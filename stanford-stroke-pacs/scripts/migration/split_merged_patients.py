@@ -40,6 +40,7 @@ sys.path.insert(0, str(STACK_ROOT / "web-app"))
 sys.path.insert(0, str(STACK_ROOT / "image_ingestion_protocols"))
 
 from db import DB_CONFIG  # noqa: E402
+from linked_view import after_identity_change  # noqa: E402
 from patient_identity import move_studies, refresh_subjects, unlink  # noqa: E402
 
 # Linked enrollments of `dataset` and the studies of their subject, owned by
@@ -115,6 +116,12 @@ def main() -> int:
         conn.close()
     print(f"\nCommitted; re-derived {len(touched)} subject(s). Now run "
           "scripts/data_integrity/reconcile.py and restart the web app.")
+    conn = psycopg2.connect(**DB_CONFIG)
+    try:
+        for line in after_identity_change(conn):
+            print(line)
+    finally:
+        conn.close()
     return 0
 
 

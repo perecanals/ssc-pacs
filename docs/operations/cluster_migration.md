@@ -230,7 +230,10 @@ UPDATE series_cache_state SET status='cold', warming_started_at=NULL, error_mess
 *tail* identical. The new prefix must equal the bind-mount host source, so that
 `<new prefix>/<tail>` still maps to the same `/dicom-data/<tail>` the ported
 index expects. Mismatched tails make warmed files unreachable by Orthanc even
-though they exist on disk.
+though they exist on disk. (The indexer stores **full** paths in
+`indexer-plugin.db` `Files.path`. Changing a tail, as the v2.2 dataset layout
+move did, therefore needs those rows rewritten too; that is
+`move_to_dataset_layout.py`'s job, see [`dataset_layout.md`](dataset_layout.md).)
 
 > For the **macOS** runtime that follows this port (Colima instead of Docker
 > Desktop, headless LaunchDaemons, Full Disk Access for external volumes), see

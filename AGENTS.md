@@ -52,13 +52,13 @@ ssc-pacs/                     # git checkout root (Makefile, CI, root scripts)
 │   ├── scripts/              # utility scripts (see scripts/README.md); _lib.sh = shared helpers
 │   │   ├── admin/            # manage_users.py, manage_readonly_db_users.py, rotate_service_account.py, rotate_db_password.py, manage_datasets.py, link_patients.py, bulk_set_label_values.*, remove_label.*, teardown.sh
 │   │   ├── backup/           # backup_pg_db.sh, backup_orthanc_storage.sh, check_backup_freshness.sh
-│   │   ├── cold_storage/     # archive, cleanup, health, scoped_index, reindex_missing_series, prune_stale_index_paths, verify_and_repair
+│   │   ├── cold_storage/     # archive, cleanup, health, scoped_index, reindex_missing_series, prune_stale_index_paths, verify_and_repair, build_linked_view
 │   │   ├── connectivity/     # tunnel/{linux,macos,windows}/
 │   │   ├── data_integrity/   # reconcile.py, dicom_path_sql_fs_audit.py, disk_vs_db_series_audit.py, detect_mixed_dirs.py
 │   │   ├── dicom/            # dicom_to_nifti.py
 │   │   ├── orthanc/          # dc.sh, check_status.sh
 │   │   ├── linux/ · macos/   # install_systemd.sh · install_launchd.sh, colima helpers, stop_stack.sh/start_stack.sh
-│   │   └── migration/        # reconcile_migration.py, split_merged_patients.py
+│   │   └── migration/        # reconcile_migration.py, split_merged_patients.py, move_to_dataset_layout.py
 │   ├── deploy/               # systemd/ + launchd/ service + timer templates (*.in), rendered by the installers
 │   ├── orthanc_users.json    # Service account + admin users only (managed by manage_users.py — never edit manually)
 │   └── image_ingestion_protocols/  # Imaging-data ingestion pipeline (clinical enrichment optional)
@@ -150,7 +150,7 @@ Two services and two databases. Full topology + request/ingest flows: `docs/refe
 
 **Web App** is a FastAPI app that reads research metadata from the `stanford-stroke` PostgreSQL DB and stores multi-level annotations, serving a Vite + Tailwind React frontend. In production one uvicorn process on `:8043` serves both the API and the pre-built `web-app/dist/`; Node is build-time only.
 
-**Backend modules** (`web-app/`): `app.py` (lifespan pool+migrations, middleware, router registration); `db.py` (SSOT for `DB_CONFIG` + pool + `audit_user_var`); `auth.py` (JWT); `orthanc_client.py`; `common.py` (SQL builders, annotation helpers); `config.py` (config.toml); `cache_manager.py` (cold-storage warm/evict); `reconciliation.py`; `rate_limit.py`; `dataset_access.py`; `dataset_registry.py` (resolve/offer-to-register a dataset); `clinical_sources.py` (per-dataset clinical tables); `schema_scope.py` (Alembic autogenerate scope); `labelled_table_sync.py`; `metrics.py`; `routes/` (auth, preferences, studies, cold_storage, annotations, labels, admin, static, proxy). Frontend detail: `docs/reference/web_app_frontend.md`.
+**Backend modules** (`web-app/`): `app.py` (lifespan pool+migrations, middleware, router registration); `db.py` (SSOT for `DB_CONFIG` + pool + `audit_user_var`); `auth.py` (JWT); `orthanc_client.py`; `common.py` (SQL builders, annotation helpers); `config.py` (config.toml); `cache_manager.py` (cold-storage warm/evict); `reconciliation.py`; `rate_limit.py`; `dataset_access.py`; `dataset_registry.py` (resolve/offer-to-register a dataset); `clinical_sources.py` (per-dataset clinical tables); `storage_layout.py` (on-disk layout); `linked_view.py`; `schema_scope.py` (Alembic autogenerate scope); `labelled_table_sync.py`; `metrics.py`; `routes/` (auth, preferences, studies, cold_storage, annotations, labels, admin, static, proxy). Frontend detail: `docs/reference/web_app_frontend.md`.
 
 **Two-database model:**
 - `orthanc_db` — Orthanc's internal index; do not query/mutate except explicit enrichment. (Sanctioned exception: reconciliation bulk-reads series UIDs read-only via `PG_ORTHANC_*` creds — one query instead of ~100k REST calls.)
@@ -163,6 +163,8 @@ Two services and two databases. Full topology + request/ingest flows: `docs/refe
 **Storage modes** (`config.toml [storage].mode`):
 - `legacy` — the Folder Indexer reads loose DICOMs from `dicom_data_root`.
 - `cold_path_cache` (production) — canonical series are `*.tar.zst` archives under `cold_archive_root`. Warm extracts them back to the original `dicom_dir_path`; the patched index keeps pointing there even when files are absent, so OHIF works the moment files return. Evict deletes the extracted files; the index stays. **Requires the patched image + `"RemoveMissingFiles": false`.** See `docs/cold_storage/`.
+
+**Layout** (v2.2, `web-app/storage_layout.py`): both roots file imaging as `<root>/<owner's dataset slug>/<patient_id>/<StudyUID>/<series desc>/<SeriesUID>/…`. The **stored** paths (`image_study.study_path`, `image_series.dicom_dir_path`/`dicom_archive_path`) are the source of truth, so never rebuild a path from `patient_id`. Linking/splitting re-owns studies without moving files ("misplaced", still working); `scripts/migration/move_to_dataset_layout.py` relocates them (stack stopped; it also rewrites the indexer's `Files.path`). The optional `[storage].linked_view_root` holds a generated symlink view of shared imaging. See `docs/operations/dataset_layout.md`.
 
 **Auth:**
 - End users live in the PostgreSQL `users` table (bcrypt, SSOT); login returns an HttpOnly JWT cookie.

@@ -205,6 +205,18 @@ python scripts/admin/link_patients.py link links.csv --apply
 python scripts/admin/link_patients.py unlink mistakes.csv --apply # dataset,patient_id
 ```
 
+Imaging is filed as `<root>/<owner's slug>/<patient_id>/<StudyUID>`. Linking or
+splitting never moves files. Relocate misplaced studies, and rebuild the
+optional linked view, in a maintenance window; see
+[`dataset_layout.md`](dataset_layout.md):
+
+```bash
+python scripts/migration/move_to_dataset_layout.py              # dry run: plan + preflight
+python scripts/migration/move_to_dataset_layout.py --apply      # stack stopped (it checks)
+python scripts/migration/move_to_dataset_layout.py --rollback maintenance/layout-move/<ts>
+python scripts/cold_storage/build_linked_view.py [--apply]      # [storage].linked_view_root
+```
+
 Dataset grants control which patients a non-admin user sees in the web app
 (enrollments in the granted datasets, plus all imaging of those people; admins
 bypass). They can also be edited in the

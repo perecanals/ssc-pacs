@@ -46,6 +46,7 @@ sys.path.insert(0, str(REPO_ROOT / "web-app"))
 
 from db import DB_CONFIG  # noqa: E402
 from orthanc_client import ORTHANC_PASS, ORTHANC_URL, ORTHANC_USER  # noqa: E402
+from storage_layout import select_patient_dirs  # noqa: E402
 
 from config import DICOM_DATA_ROOT  # noqa: E402
 
@@ -127,7 +128,8 @@ def main() -> int:
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     g = ap.add_mutually_exclusive_group()
     g.add_argument("--patients",
-                   help="Comma-separated patient_ids to scan (required unless --all)")
+                   help="Comma-separated patient_keys (<slug>__<id>) or patient_ids "
+                        "(every dataset folder of that id) to scan (required unless --all)")
     g.add_argument("--all", action="store_true",
                    help="Scan every patient dir present under dicom_data_root (slow)")
     ap.add_argument("--show-clean", action="store_true",
@@ -137,28 +139,29 @@ def main() -> int:
     args = ap.parse_args()
 
     root = str(DICOM_DATA_ROOT)
-    if args.all:
-        patients = sorted(e.name for e in os.scandir(root) if e.is_dir())
-    elif args.patients:
-        patients = [p.strip() for p in args.patients.split(",") if p.strip()]
-    else:
+    if not (args.all or args.patients):
         ap.error("provide --patients <id,...> or --all")
+    selectors = None if args.all else [
+        p.strip() for p in args.patients.split(",") if p.strip()]
 
     session = None if args.no_orthanc else requests.Session()
     if session is not None:
         session.auth = (ORTHANC_USER, ORTHANC_PASS)
 
     conn = psycopg2.connect(**DB_CONFIG)
+    with conn.cursor() as cur:
+        cur.execute("SELECT slug FROM dataset")
+        slugs = {r[0] for r in cur.fetchall()}
+    # <root>/<slug>/<patient_id> (or a pre-v2.2 <root>/<patient_id>). Imaging
+    # rows carry the folder's patient_id, so the per-id DB lookup is unchanged.
+    patients = select_patient_dirs(DICOM_DATA_ROOT, slugs, selectors)
     print(f"READ-ONLY mixed-dir scan  dicom_data_root={root}  patients={len(patients)}"
           f"  orthanc={'off' if args.no_orthanc else ORTHANC_URL}")
 
     n_mixed = n_secondary = n_clean = 0
     try:
-        for patient in patients:
-            proot = os.path.join(root, patient)
-            if not os.path.isdir(proot):
-                continue
-            dbrows = db_series(conn, patient)
+        for patient, patient_id, proot in patients:
+            dbrows = db_series(conn, patient_id)
             header_printed = False
             for dirname_uid, desc_folder, dicom_dir in iter_series_dirs(proot):
                 groups = group_dir_by_uid(dicom_dir)

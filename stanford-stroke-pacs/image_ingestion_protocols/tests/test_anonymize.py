@@ -177,6 +177,7 @@ def test_copied_files_are_anonymised(tmp_path):
         case_dir=str(case), postgres_engine=None, anonymize_files=True
     )
     p.base_dir = str(tmp_path / "dest")
+    p.dataset_slug = "lvo"
     p.create_series_table()
     p.create_study_table()
     p.add_paths_and_copy_dicom_files()

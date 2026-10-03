@@ -189,7 +189,7 @@ the whole snapshot:
 ```bash
 python scripts/backup/remote_backup.py restore imaging \
   --snapshot SNAPSHOT_ID --target /path/to/new-dir \
-  --include /cold/root/<patient>/<study>/<series-dir>/<series>/DICOM.tar.zst
+  --include /cold/root/<slug>/<patient>/<study>/<series-dir>/<series>/DICOM.tar.zst
 ```
 Tier 1 sidecars currently contain the producer's absolute paths: compare the
 digest with the **restored** artifact, rather than running `sha256sum -c` against

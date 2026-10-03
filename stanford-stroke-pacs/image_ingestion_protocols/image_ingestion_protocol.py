@@ -55,6 +55,7 @@ if str(_WEB_APP_DIR) not in sys.path:
     sys.path.insert(0, str(_WEB_APP_DIR))
 import warnings  # noqa: E402
 
+from storage_layout import slug_of, study_relpath  # noqa: E402
 from study_metadata import (  # noqa: E402
     lock_study_rows_sqlalchemy,
     refresh_study_modalities_sqlalchemy,
@@ -1088,8 +1089,13 @@ class ImageIngestionProtocol:
                     print(f"Removing stale archive: {os.path.abspath(archive)}")
 
         if not study_rows.empty:
+            # Prune from where the study was stored (its patient dir, and the
+            # dataset dir above it, if now empty).
+            stored = self._safe_text(study_rows.iloc[0].get("study_path"))
             patient_id = self._safe_text(study_rows.iloc[0].get("patient_id"))
-            if patient_id is not None:
+            if stored:
+                self._remove_empty_parent_dirs(stored)
+            elif patient_id is not None:
                 self._remove_empty_parent_dirs(
                     os.path.join(self.base_dir, patient_id, str(study_instance_uid))
                 )
@@ -1319,6 +1325,16 @@ class ImageIngestionProtocol:
         if "copied_pairs" not in self.case_series_table.columns:
             self.case_series_table["copied_pairs"] = None
         self.case_study_table["study_path"] = ""
+        # New series under an already stored study join their siblings, even
+        # when the study's owner changed after it was filed.
+        stored_study_paths = {}
+        if self.image_study is not None and "study_path" in getattr(self.image_study, "columns", ()):
+            stored_study_paths = {
+                str(uid): path
+                for uid, path in zip(self.image_study["studyinstanceuid"],
+                                     self.image_study["study_path"], strict=True)
+                if isinstance(path, str) and path
+            }
 
         for idx, row in self.case_series_table.iterrows():
             action = "Copying and anonymizing" if self.anonymize_files else "Copying"
@@ -1327,9 +1343,18 @@ class ImageIngestionProtocol:
                 f"{row['patient_id']} (series {idx + 1} of {len(self.case_series_table)})"
             )
 
-            study_path = os.path.join(
-                self.base_dir, str(row["patient_id"]), row["studyinstanceuid"]
-            )
+            study_path = stored_study_paths.get(str(row["studyinstanceuid"]))
+            if study_path is None:
+                # <base>/<owner's dataset slug>/<patient_id>/<StudyUID>: the
+                # owner, which resolve_ownership stamped, not the batch dataset.
+                key = row.get("patient_key")
+                slug = slug_of(key) if isinstance(key, str) and key else self.dataset_slug
+                if not slug:
+                    raise RuntimeError("no dataset slug for the study path (dataset not resolved)")
+                study_path = os.path.join(
+                    self.base_dir,
+                    str(study_relpath(slug, str(row["patient_id"]), row["studyinstanceuid"])),
+                )
             dicom_dir_path = os.path.join(
                 study_path,
                 row["seriesdescription_"],

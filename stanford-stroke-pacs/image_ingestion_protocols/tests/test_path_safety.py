@@ -181,3 +181,18 @@ def test_overwrite_skips_out_of_root_paths(tmp_path, monkeypatch, capsys):
     assert (outside_dicom / "IM-0.dcm").exists()
     out = capsys.readouterr().out
     assert "refusing to remove path outside base_dir" in out
+
+
+def test_overwrite_prunes_from_the_stored_dataset_path(tmp_path, monkeypatch):
+    """<base>/<slug>/<pid>/<study>: emptied patient and dataset dirs go too."""
+    base = tmp_path / "pacs_imaging_data"
+    study_dir = base / "precise" / "4-0551" / "STUDY1"
+    dicom_dir = study_dir / "desc" / "SER1" / "DICOM"
+    dicom_dir.mkdir(parents=True)
+    (base / "crisp2-lvo" / "4-0551").mkdir(parents=True)
+
+    proto = _overwrite_fixture(tmp_path, monkeypatch, str(study_dir), str(dicom_dir))
+    proto.overwrite_existing_study("STUDY1")
+
+    assert not (base / "precise").exists()
+    assert (base / "crisp2-lvo" / "4-0551").exists()

@@ -61,7 +61,8 @@ def target_container_dir(t: SeriesTarget, host_root: str, granularity: str) -> s
 
     granularity: 'series' -> .../{seriesuid}/DICOM ; 'study' -> .../{patient}/{studyuid} ;
     'patient' -> .../{patient}. dicom_dir_path is
-    {root}/{patient}/{studyuid}/{seriesdesc}/{seriesuid}/DICOM.
+    {root}/{slug}/{patient}/{studyuid}/{seriesdesc}/{seriesuid}/DICOM (pre-v2.2:
+    no {slug}); the levels are counted from the series end, so both work.
     """
     cpath = host_dir_to_container(t.dicom_dir_path, host_root).rstrip("/")
     if granularity == "series":

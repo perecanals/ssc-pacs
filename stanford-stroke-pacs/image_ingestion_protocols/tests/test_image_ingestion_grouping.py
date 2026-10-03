@@ -112,6 +112,7 @@ def test_copy_handles_basename_collision(tmp_path):
 
     p = _protocol(case)
     p.base_dir = str(tmp_path / "dest")
+    p.dataset_slug = "lvo"
     p.create_series_table()
     p.create_study_table()
     p.add_paths_and_copy_dicom_files()
