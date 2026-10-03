@@ -1,9 +1,10 @@
 # Changelog
 
-## v2.2 — not yet tagged
+## v2.2 — 2026-10-03
 
 Imaging is filed under its owner's dataset: `<root>/<dataset slug>/<patient_id>/<StudyUID>/…` in both storage roots, so same-id patients of different datasets (the split `11-*`/`12-*` ids) no longer share a folder. Ingestion files new studies under the owner's slug. Deletion, the audits and the cold-storage tools follow the stored paths and read both layouts.
 The one-off move is `scripts/migration/move_to_dataset_layout.py`. It renames the study dirs, rewrites Orthanc's indexer `Files.path` and the stored path columns in a maintenance window, and keeps a journal for `--rollback`; it also relocates studies re-owned by linking later. There is no Alembic migration. Optional `[storage].linked_view_root` adds a symlink view of imaging shared across linked enrollments (`build_linked_view.py`).
+The patched Orthanc indexer skips cold-storage warm temp dirs (`*.warming`; rebuild `ssc-orthanc:patched-indexer`): scans overlapping a warm had left stale duplicate index rows, now removed with `prune_stale_index_paths.py --execute`.
 
 ## v2.1 — 2026-10-02
 

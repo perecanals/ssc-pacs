@@ -130,7 +130,7 @@ python scripts/migration/move_to_dataset_layout.py             # "Nothing to mov
 python scripts/data_integrity/dicom_path_sql_fs_audit.py       # 0 misplaced; sample paths exist
 python scripts/data_integrity/disk_vs_db_series_audit.py --all
 python scripts/data_integrity/reconcile.py
-python scripts/cold_storage/prune_stale_index_paths.py         # dry run: nothing stale
+python scripts/cold_storage/prune_stale_index_paths.py         # dry run; then --execute if it finds stale rows
 ```
 
 Then open a few studies in OHIF, including a formerly shared id such as
