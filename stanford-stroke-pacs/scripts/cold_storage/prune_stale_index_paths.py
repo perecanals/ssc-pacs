@@ -237,11 +237,13 @@ def index_rows_for_patient(
 ) -> list[tuple[str, str]]:
     rows: list[tuple[str, str]] = []
     for prefix in patient_prefixes(container_root, patient, slugs):
-        # substr, not LIKE: '_' and '%' in a path are literal.
+        # A primary-key range, [<dir>/, <dir>0) ('0' sorts right after '/'):
+        # indexed, unlike LIKE / substr (a full scan of Files per patient), and
+        # '_' / '%' in a path stay literal.
         cur = idx.execute(
             "SELECT path, instanceId FROM Files "
-            "WHERE isDicom = 1 AND substr(path, 1, ?) = ?",
-            (len(prefix), prefix),
+            "WHERE isDicom = 1 AND path >= ? AND path < ?",
+            (prefix, prefix[:-1] + "0"),
         )
         rows.extend((p, i) for p, i in cur.fetchall())
     return rows
