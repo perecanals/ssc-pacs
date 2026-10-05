@@ -98,7 +98,13 @@ def recompute_subject_timepoints(cur, subject_ids):
         f"FROM image_study st {join} WHERE st.subject_id = ANY(%s)",
         params + [subject_ids],
     )
-    results = resolve_subject_timepoints(cur.fetchall())
+    # Name the columns here rather than rely on the caller's cursor factory:
+    # link_patients.py passes a plain tuple cursor, ingestion a RealDictCursor.
+    names = [d[0] for d in cur.description]
+    results = resolve_subject_timepoints(
+        row if isinstance(row, dict) else dict(zip(names, row, strict=True))
+        for row in cur.fetchall()
+    )
     for suid, res in results.items():
         cur.execute(
             "UPDATE image_study SET episode = %s, timepoint = %s, "
