@@ -1,8 +1,8 @@
 """Tests for the unified build_label_filter_sql() function.
 
 Pins the SQL for every (entity_level, label_level) combination. Patient labels
-belong to an enrollment (patient_key) and reach imaging through its subject
-(Alembic 0026).
+belong to an enrollment (patient_key) and reach the imaging that enrollment sees
+through study_visibility (Alembic 0028).
 """
 
 from __future__ import annotations
@@ -23,19 +23,20 @@ from common import VALID_LEVELS, build_label_filter_sql  # noqa: E402
 # ---------------------------------------------------------------------------
 
 # _label_filter_sql equivalents (operator="IN", no value_predicate)
-_PATIENT_LABEL_SUBJECTS = (
-    "SELECT q.subject_id FROM annotations a "
+_PATIENT_LABEL_STUDIES = (
+    "SELECT sv.studyinstanceuid FROM annotations a "
     "JOIN patient q ON q.patient_key = a.patient_key "
+    "JOIN study_visibility sv ON sv.patient_key = a.patient_key "
     "WHERE a.level = 'patient' AND a.label = %s"
 )
 _EXPECTED_EXISTS = {
     ("patient", "patient"): "{expr} IN (SELECT patient_key FROM annotations WHERE level = 'patient' AND label = %s)",
-    ("patient", "study"): "p.subject_id IN (SELECT subject_id FROM image_study WHERE studyinstanceuid IN (SELECT studyinstanceuid FROM annotations WHERE level = 'study' AND label = %s))",
-    ("patient", "series"): "p.subject_id IN (SELECT subject_id FROM image_series WHERE seriesinstanceuid IN (SELECT seriesinstanceuid FROM annotations WHERE level = 'series' AND label = %s))",
-    ("study", "patient"): f"st.subject_id IN ({_PATIENT_LABEL_SUBJECTS})",
+    ("patient", "study"): "p.patient_key IN (SELECT patient_key FROM study_visibility WHERE studyinstanceuid IN (SELECT studyinstanceuid FROM annotations WHERE level = 'study' AND label = %s))",
+    ("patient", "series"): "p.patient_key IN (SELECT sv.patient_key FROM study_visibility sv JOIN image_series ds ON ds.studyinstanceuid = sv.studyinstanceuid WHERE ds.seriesinstanceuid IN (SELECT seriesinstanceuid FROM annotations WHERE level = 'series' AND label = %s))",
+    ("study", "patient"): f"st.studyinstanceuid IN ({_PATIENT_LABEL_STUDIES})",
     ("study", "study"): "{expr} IN (SELECT studyinstanceuid FROM annotations WHERE level = 'study' AND label = %s)",
     ("study", "series"): "{expr} IN (SELECT studyinstanceuid FROM image_series WHERE seriesinstanceuid IN (SELECT seriesinstanceuid FROM annotations WHERE level = 'series' AND label = %s))",
-    ("series", "patient"): f"s.subject_id IN ({_PATIENT_LABEL_SUBJECTS})",
+    ("series", "patient"): f"s.studyinstanceuid IN ({_PATIENT_LABEL_STUDIES})",
     ("series", "study"): "s.studyinstanceuid IN (SELECT studyinstanceuid FROM annotations WHERE level = 'study' AND label = %s)",
     ("series", "series"): "{expr} IN (SELECT seriesinstanceuid FROM annotations WHERE level = 'series' AND label = %s)",
 }
@@ -129,7 +130,7 @@ class TestScopedPatientLabels:
         for el, col in (("study", "st"), ("series", "s")):
             result = build_label_filter_sql(el, "patient", "x", scope_lit=self.SCOPE)
             assert result == (
-                f"{col}.subject_id IN ({_PATIENT_LABEL_SUBJECTS} "
+                f"{col}.studyinstanceuid IN ({_PATIENT_LABEL_STUDIES} "
                 f"AND q.dataset = ANY({self.SCOPE}))"
             )
 
@@ -141,7 +142,7 @@ class TestScopedPatientLabels:
 
     def test_scope_ignored_where_it_cannot_leak(self):
         # Same-level patient filters run on already-scoped patient rows; study
-        # and series labels are shared across a subject's enrollments.
+        # and series labels belong to the imaging itself.
         for el, ll in (("patient", "patient"), ("patient", "study"), ("study", "series")):
             expr = _ENTITY_EXPR[el]
             assert build_label_filter_sql(el, ll, expr, scope_lit=self.SCOPE) == (

@@ -432,18 +432,20 @@ Beyond authentication, every non-admin user carries a **dataset scope**:
 `users.allowed_datasets text[]`, a subset of the registered dataset names
 (`dataset.name`, e.g. `PRECISE`, `CRISP2/LVO`).
 
-Scope follows the identity model (Alembic `0026`, see
+Scope follows the identity model (Alembic `0026`/`0028`, see
 [`data_stores.md`](data_stores.md)): a `patient` row is an **enrollment** — one
 patient id in one dataset, keyed by `patient_key` — and enrollments of the same
-person share a `subject_id`. Each study/series is owned by one enrollment but
-belongs to the whole subject. So a user sees:
+person share a `subject_id` (identity only). Each study/series is owned by one
+enrollment; an enrollment sees what it owns plus the studies it is a *member*
+of (a linked enrollment that re-sent the same StudyInstanceUID) — the
+`study_visibility` view. So a user sees:
 
 - patient rows (and their patient-level labels) of enrollments in their
   datasets — never another dataset's identifiers or patient labels;
-- every study/series of those enrollments' subjects, wherever it was ingested
-  (study/series labels are shared, being properties of the imaging);
+- every study/series those enrollments see (study/series labels are shared,
+  being properties of the imaging) — not a linked person's other studies;
 - on study/series rows, the `patient_id`/`dataset` columns list only the
-  in-scope enrollments of the subject.
+  in-scope enrollments that see the study.
 
 - **Deny by default** — an empty grant set (the default for new users) means
   the user sees *no* patient data until an admin grants datasets.
@@ -452,8 +454,8 @@ belongs to the whole subject. So a user sees:
   patient-derived data:
   - the list endpoints (`/api/patients`, `/api/studies`, `/api/series`, plus
     sidebar option endpoints) filter patient rows by `dataset = ANY(allowed)`
-    and imaging by "some enrollment of the subject is in scope"
-    (`common.subject_scope_sql`); label filters on patient labels from a
+    and imaging by "some enrollment that sees the study is in scope"
+    (`common.study_scope_sql`); label filters on patient labels from a
     study/series only match in-scope enrollments;
   - detail endpoints keyed by a patient/study/series id (sub-row listings,
     `/api/ohif-link`, warm/evict/cache-status, annotation reads/writes)

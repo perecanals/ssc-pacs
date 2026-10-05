@@ -3,7 +3,9 @@
 A `patient` row is an enrollment — one (dataset, patient_id) pair, keyed by
 patient_key — and enrollments of the same person share a subject_id. Each study
 (and its series) is owned by one enrollment (patient_key) and carries that
-enrollment's subject. These helpers are the only sanctioned way to change a
+enrollment's subject. Linking is identity only: an enrollment sees the studies
+it owns plus those it is a member of (`study_member`, Alembic 0028 — written by
+ingestion when a linked enrollment re-sends a UID another one owns). These helpers are the only sanctioned way to change a
 subject or an owner after ingestion; they keep the invariants reconciliation
 checks (a series has its study's owner and subject; a study has its owner's
 subject).
@@ -107,6 +109,15 @@ def unlink(cur, patient_key: str) -> tuple[str, str | None]:
     rest = [r["patient_key"] if isinstance(r, dict) else r[0] for r in cur.fetchall()]
     if not rest:
         return subject, None
+    # Memberships exist only between enrollments of one person; drop those
+    # that cross the new boundary, both ways.
+    cur.execute(
+        "DELETE FROM study_member m USING image_study st "
+        "WHERE st.studyinstanceuid = m.studyinstanceuid "
+        "AND ((m.patient_key = %s AND st.patient_key = ANY(%s)) "
+        "  OR (st.patient_key = %s AND m.patient_key = ANY(%s)))",
+        (patient_key, rest, patient_key, rest),
+    )
     if subject == patient_key:
         # The others keep their imaging under a subject named after one of them.
         _set_subject(cur, rest[0], where="subject_id = %s AND patient_key <> %s",
@@ -131,6 +142,11 @@ def move_studies(cur, study_uids: list[str], owner_key: str) -> int:
         raise ValueError(f"unknown enrollment: {owner_key}")
     if not study_uids:
         return 0
+    # The new owner no longer needs to be a member of what it owns.
+    cur.execute(
+        "DELETE FROM study_member WHERE patient_key = %s AND studyinstanceuid = ANY(%s)",
+        (owner["patient_key"], list(study_uids)),
+    )
     moved = 0
     for table in ("image_study", "image_series"):
         cur.execute(
@@ -237,8 +253,8 @@ def apply_links(cur, rows, source_name: str) -> tuple[list[str], set[str]]:
 def refresh_subjects(cur, conn, subject_ids) -> None:
     """Re-derive everything that follows a subject's membership or imaging.
 
-    stroke_date of each enrollment (MIN acquisition over the subject's studies),
-    per-subject series ranks, episodes/timepoints, and the three labelled
+    stroke_date of each enrollment (MIN acquisition over the studies it sees),
+    series ranks, episodes/timepoints (per owner), and the three labelled
     mirrors for the affected rows. ``conn`` is the cursor's connection (the
     mirror sync takes a connection).
     """
@@ -248,8 +264,9 @@ def refresh_subjects(cur, conn, subject_ids) -> None:
     cur.execute(
         "UPDATE patient p SET stroke_date = sub.first_study, updated_at = now() "
         "FROM (SELECT q.patient_key, "
-        "             (SELECT MIN(st.acquisitiondatetime) FROM image_study st "
-        "              WHERE st.subject_id = q.subject_id) AS first_study "
+        "             (SELECT MIN(st.acquisitiondatetime) FROM study_visibility v "
+        "              JOIN image_study st USING (studyinstanceuid) "
+        "              WHERE v.patient_key = q.patient_key) AS first_study "
         "      FROM patient q WHERE q.subject_id = ANY(%s)) sub "
         "WHERE p.patient_key = sub.patient_key",
         (subject_ids,),

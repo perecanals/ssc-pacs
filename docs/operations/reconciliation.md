@@ -201,8 +201,10 @@ for good). Patient-level annotations are matched on `patient_key` (Alembic
 Imaging whose ownership breaks the identity model (see
 [`linking_patients.md`](linking_patients.md)): a study whose owner
 (`patient_key`) does not exist (`owner_missing`) or whose `subject_id` differs
-from its owner's (`subject_mismatch`), or a series whose owner/subject differs
-from its study's (`differs_from_study`). Ingestion and
+from its owner's (`subject_mismatch`), a series whose owner/subject differs
+from its study's (`differs_from_study`), or a `study_member` row (Alembic
+`0028`) held by the study's own owner (`member_is_owner`) or by another person
+(`member_other_person`; entity id `<StudyUID> / <patient_key>`). Ingestion and
 `scripts/admin/link_patients.py` maintain these columns; a non-zero count means
 a manual SQL change bypassed them.
 

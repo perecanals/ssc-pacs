@@ -158,11 +158,13 @@ def _get_orphaned_annotations(conn) -> list[dict[str, Any]]:
 
 
 def _get_ownership_mismatches(conn) -> list[dict[str, Any]]:
-    """Imaging whose ownership violates the identity model (Alembic 0026).
+    """Imaging whose ownership violates the identity model (Alembic 0026/0028).
 
     A study is owned by an existing enrollment and carries that enrollment's
-    subject; a series is owned by its study's owner. Ingestion and
-    scripts/admin/link_patients.py maintain this; anything else is drift.
+    subject; a series is owned by its study's owner. A membership
+    (``study_member``) is held by an enrollment other than the owner, of the
+    same person. Ingestion and scripts/admin/link_patients.py maintain this;
+    anything else is drift.
     """
     with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
         cur.execute(
@@ -179,6 +181,15 @@ def _get_ownership_mismatches(conn) -> list[dict[str, Any]]:
             "JOIN image_study st ON st.studyinstanceuid = s.studyinstanceuid "
             "WHERE s.patient_key IS DISTINCT FROM st.patient_key "
             "   OR s.subject_id IS DISTINCT FROM st.subject_id "
+            "UNION ALL "
+            "SELECT 'study', m.studyinstanceuid || ' / ' || m.patient_key, "
+            "       CASE WHEN m.patient_key = st.patient_key THEN 'member_is_owner' "
+            "            ELSE 'member_other_person' END "
+            "FROM study_member m "
+            "JOIN image_study st ON st.studyinstanceuid = m.studyinstanceuid "
+            "JOIN patient q ON q.patient_key = m.patient_key "
+            "WHERE m.patient_key = st.patient_key "
+            "   OR q.subject_id IS DISTINCT FROM st.subject_id "
             "ORDER BY 1, 2"
         )
         return [dict(r) for r in cur.fetchall()]

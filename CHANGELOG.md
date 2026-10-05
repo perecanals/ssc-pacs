@@ -1,5 +1,10 @@
 # Changelog
 
+## v2.3 — 2026-10-05
+
+Linking patients is identity only: an enrollment sees the studies it owns plus those it is a member of — the very same StudyInstanceUID re-sent by a linked dataset — no longer all of the person's imaging, so re-exports with new UIDs (OUTER LIMITS) no longer show every study twice. Series ranks, timepoints and `patient.stroke_date` are per enrollment; display, access, DICOMweb, data exports and the linked view follow. Ingestion takes an optional `patient_links` JSON file (also accepted by `link_patients.py`), applied before the first case.
+Alembic `0028_study_membership` adds `study_member` and the `study_visibility` view and re-ranks series per owner. After upgrading: `recompute_timepoints.py --execute`, `manage_data_exports_db.py sync` (the reader needs the view), `build_linked_view.py --apply`.
+
 ## v2.2 — 2026-10-03
 
 Imaging is filed under its owner's dataset: `<root>/<dataset slug>/<patient_id>/<StudyUID>/…` in both storage roots, so same-id patients of different datasets (the split `11-*`/`12-*` ids) no longer share a folder. Ingestion files new studies under the owner's slug. Deletion, the audits and the cold-storage tools follow the stored paths and read both layouts.

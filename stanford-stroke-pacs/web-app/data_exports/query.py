@@ -7,7 +7,7 @@ from pglast import ast, parse_sql
 from pglast.stream import RawStream
 from pglast.visitors import Visitor
 
-from data_exports.policy import RELATIONSHIPS
+from data_exports.policy import RELATIONSHIPS, VISIBILITY_JOINS, VISIBILITY_VIEW
 
 FUNCTIONS = set(
     "count sum avg min max lower upper length char_length trim btrim ltrim rtrim "
@@ -151,7 +151,18 @@ def build_query(config, catalog):
         left, lc, right, rc = match
         if lc not in tables[left] or rc not in tables[right]:
             raise ValueError("Relationship columns are unavailable")
-        joins.append(f"LEFT JOIN ONLY public.{quote(right)} ON {quote(left)}.{quote(lc)} = {quote(right)}.{quote(rc)}")
+        if frozenset((left, right)) in VISIBILITY_JOINS:
+            # patient (lc = patient_key) <-> imaging (rc = studyinstanceuid),
+            # in whichever order the user picked them.
+            patient, imaging = (left, right) if left == "patient_labelled" else (right, left)
+            on = (
+                f"EXISTS (SELECT 1 FROM public.{VISIBILITY_VIEW} AS data_exports_sv "
+                f"WHERE data_exports_sv.patient_key = {quote(patient)}.patient_key "
+                f"AND data_exports_sv.studyinstanceuid = {quote(imaging)}.studyinstanceuid)"
+            )
+        else:
+            on = f"{quote(left)}.{quote(lc)} = {quote(right)}.{quote(rc)}"
+        joins.append(f"LEFT JOIN ONLY public.{quote(right)} ON {on}")
         selected_tables.append(target)
 
     def column(ref):

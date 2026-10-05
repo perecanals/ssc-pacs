@@ -384,15 +384,14 @@ def warn_unlinked_enrollments(postgres_engine, dataset, logger):
 
 
 def batch_patient_keys(raw_conn, study_ids, series_ids):
-    """Every enrollment of the subjects owning the given studies/series, sorted
-    (the patient mirror key). All of a subject's enrollments: their
-    stroke_date follows the subject's imaging."""
+    """Every enrollment that sees the given studies/series (owner or member),
+    sorted (the patient mirror key): their stroke_date follows that imaging."""
     with raw_conn.cursor() as cur:
         cur.execute(
-            "SELECT patient_key FROM patient WHERE subject_id IN ("
-            "  SELECT subject_id FROM image_study WHERE studyinstanceuid = ANY(%s) "
+            "SELECT DISTINCT patient_key FROM study_visibility WHERE studyinstanceuid IN ("
+            "  SELECT unnest(%s::text[]) "
             "  UNION "
-            "  SELECT subject_id FROM image_series WHERE seriesinstanceuid = ANY(%s))",
+            "  SELECT studyinstanceuid FROM image_series WHERE seriesinstanceuid = ANY(%s))",
             (list(study_ids), list(series_ids)),
         )
         return sorted(row[0] for row in cur.fetchall())

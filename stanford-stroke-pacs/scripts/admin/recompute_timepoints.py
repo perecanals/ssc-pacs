@@ -168,7 +168,7 @@ def main() -> int:
         clinical_cols, clinical_join, clinical_params = clinical_anchor_sql(cur)
         cur.execute(
             f"""
-            SELECT st.studyinstanceuid, st.subject_id, st.study_type,
+            SELECT st.studyinstanceuid, st.subject_id, st.patient_key, st.study_type,
                    st.acquisitiondatetime,
                    st.timepoint AS current_timepoint, st.episode AS current_episode,
                    {clinical_cols}

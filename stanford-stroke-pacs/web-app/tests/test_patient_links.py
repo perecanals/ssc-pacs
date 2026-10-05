@@ -105,20 +105,49 @@ def test_link_rejects_a_source_listed_twice(link_module, cur):
         link_module["apply_links"](cur, [_row(**row), {**_row(**row), "line": 3}], "t.csv")
 
 
-def test_refresh_follows_the_subject(link_module, cur, db_conn):
-    """After linking, the new enrollment takes the subject's imaging-derived
-    stroke date and gets a patient mirror row."""
-    refresh = runpy.run_path(
+def _identity():
+    return runpy.run_path(
         str(Path(__file__).resolve().parents[2] / "image_ingestion_protocols" / "patient_identity.py")
-    )["refresh_subjects"]
+    )
+
+
+def test_refresh_follows_what_the_enrollment_sees(link_module, cur, db_conn):
+    """Linking is identity only (Alembic 0028): a linked enrollment with no
+    imaging of its own gets no stroke date from the other's studies — only from
+    a study it is a member of. It gets a patient mirror row either way."""
+    refresh = _identity()["refresh_subjects"]
     link_module["apply_links"](cur, [_row(
         dataset="crisp2", patient_id="OL-3", link_dataset="lvo", link_patient_id="P-0002",
     )], "t.csv")
     refresh(cur, db_conn, ["lvo__P-0002"])
-    cur.execute("SELECT stroke_date::date::text AS d FROM patient WHERE patient_key = 'crisp2__OL-3'")
-    assert cur.fetchone()["d"] == "2024-03-03"
+    cur.execute("SELECT stroke_date FROM patient WHERE patient_key = 'crisp2__OL-3'")
+    assert cur.fetchone()["stroke_date"] is None
     cur.execute("SELECT 1 FROM patient_labelled WHERE patient_key = 'crisp2__OL-3'")
     assert cur.fetchone() is not None
+    cur.execute("INSERT INTO study_member VALUES ('2.2.2.2.2', 'crisp2__OL-3')")
+    refresh(cur, db_conn, ["lvo__P-0002"])
+    cur.execute("SELECT stroke_date::date::text AS d FROM patient WHERE patient_key = 'crisp2__OL-3'")
+    assert cur.fetchone()["d"] == "2024-03-03"
+
+
+def _members(cur):
+    cur.execute("SELECT studyinstanceuid, patient_key FROM study_member ORDER BY 1, 2")
+    return [(r["studyinstanceuid"], r["patient_key"]) for r in cur.fetchall()]
+
+
+def test_unlink_drops_memberships_across_the_new_boundary(link_module, cur):
+    """crisp2__P-0001 is a member of lvo's study (conftest); unlinked, they are
+    two people, so the membership goes."""
+    assert ("1.2.3.4.5", "crisp2__P-0001") in _members(cur)
+    _identity()["unlink"](cur, "crisp2__P-0001")
+    assert ("1.2.3.4.5", "crisp2__P-0001") not in _members(cur)
+
+
+def test_move_drops_the_new_owners_membership(cur):
+    _identity()["move_studies"](cur, ["1.2.3.4.5"], "crisp2__P-0001")
+    assert ("1.2.3.4.5", "crisp2__P-0001") not in _members(cur)
+    cur.execute("SELECT patient_key FROM image_study WHERE studyinstanceuid = '1.2.3.4.5'")
+    assert cur.fetchone()["patient_key"] == "crisp2__P-0001"
 
 
 def test_refresh_with_a_plain_cursor(link_module, db_conn):
@@ -189,3 +218,27 @@ def test_link_from_json_file(link_module, cur, tmp_path):
     # Applying the same file again (a resumed ingestion run) changes nothing.
     report, _ = link_module["apply_links"](cur, rows, path.name)
     assert "already linked" in report[0]
+
+
+def test_ranks_are_per_owner(link_module, cur):
+    """Two enrollments of one person each owning a copy of the same NCCT: both
+    are NCCT_1 (Alembic 0028), not NCCT_1 / NCCT_2 across the person."""
+    from series_classification import ASSIGN_RANKS_SQL  # on sys.path via link_module
+
+    link_module["apply_links"](cur, [_row(
+        dataset="crisp2", patient_id="OL-6", link_dataset="lvo", link_patient_id="P-0002",
+    )], "t.csv")
+    cur.execute("INSERT INTO image_study (patient_id, patient_key, subject_id, studyinstanceuid) "
+                "VALUES ('OL-6', 'crisp2__OL-6', 'lvo__P-0002', '6.6.6.6.6')")
+    for key, study, series in (("lvo__P-0002", "2.2.2.2.2", "2.2.2.2.2.1"),
+                               ("crisp2__OL-6", "6.6.6.6.6", "6.6.6.6.6.1")):
+        cur.execute(
+            "INSERT INTO image_series (patient_id, patient_key, subject_id, studyinstanceuid, "
+            "seriesinstanceuid, series_type) VALUES ('x', %s, 'lvo__P-0002', %s, %s, 'NCCT')",
+            (key, study, series),
+        )
+        cur.execute("INSERT INTO series_dicom_tags (seriesinstanceuid) VALUES (%s)", (series,))
+    cur.execute(ASSIGN_RANKS_SQL)
+    cur.execute("SELECT series_label FROM image_series WHERE seriesinstanceuid IN "
+                "('2.2.2.2.2.1', '6.6.6.6.6.1')")
+    assert [r["series_label"] for r in cur.fetchall()] == ["NCCT_1", "NCCT_1"]

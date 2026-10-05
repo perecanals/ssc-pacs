@@ -186,3 +186,53 @@ class TestSameIdDifferentPerson:
         login_as(client, USER_LVO)
         assert client.get(f"/api/studies/{TWIN_STUDY}/series").status_code == 404
         assert client.get(f"/api/studies/{P2_STUDY}/series").status_code == 200
+
+
+COPY_STUDY = "7.7.7.7.7"
+
+
+@pytest.fixture()
+def linked_copy(db_conn):
+    """P-0002 enrolled in crisp2 too, *linked* (same person as lvo__P-0002),
+    whose export carried its own copy of the study under a new UID — the
+    OUTER LIMITS case. No membership: nothing is shared (Alembic 0028)."""
+    with db_conn.cursor() as cur:
+        key = insert_patient(cur, "P-0002", "crisp2", subject_id="lvo__P-0002")
+        cur.execute(
+            "INSERT INTO image_study (patient_id, patient_key, subject_id, studyinstanceuid, "
+            "acquisitiondatetime) VALUES ('P-0002', %s, 'lvo__P-0002', %s, '2024-03-03')",
+            (key, COPY_STUDY),
+        )
+    db_conn.commit()
+    yield key
+    with db_conn.cursor() as cur:
+        cur.execute("DELETE FROM image_study WHERE studyinstanceuid = %s", (COPY_STUDY,))
+        cur.execute("DELETE FROM patient WHERE patient_key = %s", (key,))
+    db_conn.commit()
+
+
+class TestLinkingIsIdentityOnly:
+    def test_each_enrollment_sees_only_its_own_copy(self, client, linked_copy):
+        login_as(client, USER_CRISP)
+        sub = client.get(f"/api/patients/{linked_copy}/studies").json()
+        assert [r["studyinstanceuid"] for r in sub] == [COPY_STUDY]
+        uids = {r["studyinstanceuid"] for r in client.get("/api/studies").json()["items"]}
+        assert COPY_STUDY in uids and P2_STUDY not in uids
+        assert client.get(f"/api/studies/{P2_STUDY}/series").status_code == 404
+        login_as(client, USER_LVO)
+        sub = client.get("/api/patients/lvo__P-0002/studies").json()
+        assert [r["studyinstanceuid"] for r in sub] == [P2_STUDY]
+        assert client.get(f"/api/studies/{COPY_STUDY}/series").status_code == 404
+
+    def test_rows_name_only_the_enrollments_that_see_them(self, logged_in_client, linked_copy):
+        rows = logged_in_client.get("/api/studies").json()["items"]
+        assert (_study(rows, P2_STUDY)["patient_id"], _study(rows, P2_STUDY)["dataset"]) == (
+            "P-0002", "lvo")
+        assert _study(rows, COPY_STUDY)["dataset"] == "crisp2"
+
+    def test_dicomweb_datasets_follow_visibility(self, linked_copy):
+        import dataset_access
+
+        assert dataset_access.fetch_study_datasets(P2_STUDY) == {"lvo"}
+        assert dataset_access.fetch_study_datasets(COPY_STUDY) == {"crisp2"}
+        assert dataset_access.fetch_study_datasets(P1_STUDY) == {"lvo", "crisp2"}  # member

@@ -510,18 +510,19 @@ def classify_series(
 
 # --- Preference ranking (his NCCT_1 / CTA_2 / ...) -----------------------------
 #
-# His labels are ranked within a person — a subject, which may span several
-# dataset enrollments (Alembic 0026) — so rank 1 is *the* NCCT/CTA/DWI to use.
+# His labels are ranked within the owning enrollment (image_study.patient_key;
+# Alembic 0028) — not the whole person, whose other enrollments may hold
+# re-exported copies of the same series — so rank 1 is *the* NCCT/CTA/DWI to use.
 # Ordering per modality_finder.py: CTA thinnest-slice first, NCCT thickest first,
 # the rest chronological; tie-broken by his map_imagetype (original > secondary >
-# derived), then time. SQL because the rank is a window over the subject's other
+# derived), then time. SQL because the rank is a window over the owner's other
 # series — ingest and reclassify call the same statement and cannot disagree.
 
 ASSIGN_RANKS_SQL = """
 WITH ranked AS (
     SELECT s.seriesinstanceuid,
            row_number() OVER (
-               PARTITION BY s.subject_id, s.series_type
+               PARTITION BY s.patient_key, s.series_type
                ORDER BY
                    CASE WHEN s.series_type = 'CTA'  THEN t.slice_thickness END ASC  NULLS LAST,
                    CASE WHEN s.series_type = 'NCCT' THEN t.slice_thickness END DESC NULLS LAST,

@@ -96,12 +96,13 @@ def column_exists(cur, table: str, column: str) -> bool:
 # matches nothing). Always bind scope lists as %s::text[] so psycopg2 adapts
 # empty lists to a typed empty array.
 #
-# Identity model (Alembic 0026): a `patient` row is an *enrollment* — one
+# Identity model (Alembic 0026/0028): a `patient` row is an *enrollment* — one
 # (dataset, patient_id) pair keyed by `patient_key` — and the enrollments of one
-# person share a `subject_id`. A study/series is owned by one enrollment but
-# belongs to the whole subject, so imaging is in scope when *any* enrollment of
-# its subject is, while patient rows and patient-level labels are scoped by
-# their own dataset.
+# person share a `subject_id`, which records identity only. A study is seen by
+# the enrollment that owns it plus its members (`study_visibility`: owners UNION
+# members — a linked enrollment that re-sent the very same StudyInstanceUID), so
+# imaging is in scope when one of *those* enrollments is; a series follows its
+# study. Patient rows and patient-level labels are scoped by their own dataset.
 # ---------------------------------------------------------------------------
 
 
@@ -152,12 +153,14 @@ def subject_for_patient_arg(ref: str) -> str:
         conn.close()
 
 
-def subject_scope_sql(subject_expr: str) -> str:
-    """WHERE fragment: some enrollment of the subject is in the caller's scope.
-    One ``%s`` placeholder: the scope list (text[])."""
+def study_scope_sql(study_uid_expr: str) -> str:
+    """WHERE fragment: some enrollment that sees the study (owner or member) is
+    in the caller's scope. One ``%s`` placeholder: the scope list (text[])."""
     return (
-        "EXISTS (SELECT 1 FROM patient dsp "
-        f"WHERE dsp.subject_id = {subject_expr} AND dsp.dataset = ANY(%s::text[]))"
+        "EXISTS (SELECT 1 FROM study_visibility dsv "
+        "JOIN patient dsp ON dsp.patient_key = dsv.patient_key "
+        f"WHERE dsv.studyinstanceuid = {study_uid_expr} "
+        "AND dsp.dataset = ANY(%s::text[]))"
     )
 
 
@@ -174,37 +177,44 @@ def scope_literal(cur, scope: list[str] | None) -> str | None:
     return cur.mogrify("%s::text[]", (list(scope),)).decode().replace("%", "%%")
 
 
-def _enrollments_where(subject_expr: str, scope_lit: str | None) -> str:
-    where = f"q.subject_id = {subject_expr}"
-    if scope_lit is not None:
-        where += f" AND q.dataset = ANY({scope_lit})"
-    return where
+def _study_enrollments(cur, study_uids, scope: list[str] | None) -> dict[str, list]:
+    """studyinstanceuid → the in-scope enrollments that see it (owner or
+    member), as patient rows (patient_key, patient_id, dataset), by key."""
+    if not study_uids:
+        return {}
+    sql = ("SELECT sv.studyinstanceuid, q.patient_key, q.patient_id, q.dataset "
+           "FROM study_visibility sv JOIN patient q ON q.patient_key = sv.patient_key "
+           "WHERE sv.studyinstanceuid = ANY(%s)")
+    params: list = [list(study_uids)]
+    if scope is not None:
+        sql += " AND q.dataset = ANY(%s::text[])"
+        params.append(list(scope))
+    cur.execute(sql + " ORDER BY q.patient_key", params)
+    by_study: dict[str, list] = {}
+    for r in cur.fetchall():
+        if not isinstance(r, dict):
+            r = dict(zip(("studyinstanceuid", "patient_key", "patient_id", "dataset"), r,
+                         strict=True))
+        by_study.setdefault(r["studyinstanceuid"], []).append(r)
+    return by_study
 
 
 def attach_enrollment_display(cur, rows, scope: list[str] | None) -> None:
     """Set a study/series row's ``patient_id`` and ``dataset`` to the in-scope
-    enrollments of its subject, comma-joined in the same order, owner first.
+    enrollments that see its study (owner and members), comma-joined in the
+    same order, owner first.
 
     A user only ever sees identifiers from their own datasets. Rows come in
     carrying their owner's ``patient_id`` (the sort key) and ``patient_key``;
     one query covers the whole page — done here rather than per row in SQL so
     it costs nothing for the rows a page skips.
     """
-    subjects = list({r["subject_id"] for r in rows if r.get("subject_id")})
-    by_subject: dict[str, list] = {}
-    if subjects:
-        sql = ("SELECT subject_id, patient_key, patient_id, dataset FROM patient "
-               "WHERE subject_id = ANY(%s)")
-        params: list = [subjects]
-        if scope is not None:
-            sql += " AND dataset = ANY(%s::text[])"
-            params.append(list(scope))
-        cur.execute(sql + " ORDER BY patient_key", params)
-        for r in cur.fetchall():
-            by_subject.setdefault(r["subject_id"], []).append(r)
+    by_study = _study_enrollments(
+        cur, {r["studyinstanceuid"] for r in rows if r.get("studyinstanceuid")}, scope
+    )
     for row in rows:
         enrollments = sorted(
-            by_subject.get(row.get("subject_id"), []),
+            by_study.get(row.get("studyinstanceuid"), []),
             key=lambda e: (e["patient_key"] != row.get("patient_key"), e["patient_key"]),
         )
         if enrollments:
@@ -214,11 +224,16 @@ def attach_enrollment_display(cur, rows, scope: list[str] | None) -> None:
             row["dataset"] = None
 
 
-def enrollment_match_sql(subject_expr: str, scope_lit: str | None, predicate: str) -> str:
-    """WHERE fragment: some in-scope enrollment of the subject satisfies
+def enrollment_match_sql(study_uid_expr: str, scope_lit: str | None, predicate: str) -> str:
+    """WHERE fragment: some in-scope enrollment that sees the study satisfies
     ``predicate`` (over alias ``q``; its placeholders are the caller's)."""
-    where = _enrollments_where(subject_expr, scope_lit)
-    return f"EXISTS (SELECT 1 FROM patient q WHERE {where} AND {predicate})"
+    where = f"sv.studyinstanceuid = {study_uid_expr}"
+    if scope_lit is not None:
+        where += f" AND q.dataset = ANY({scope_lit})"
+    return (
+        "EXISTS (SELECT 1 FROM study_visibility sv "
+        f"JOIN patient q ON q.patient_key = sv.patient_key WHERE {where} AND {predicate})"
+    )
 
 
 def _ensure_access(cur, sql: str, entity_id: str, scope: list[str] | None, detail: str):
@@ -243,7 +258,7 @@ def ensure_study_access(cur, studyinstanceuid: str, scope: list[str] | None) -> 
     _ensure_access(
         cur,
         "SELECT 1 FROM image_study st WHERE st.studyinstanceuid = %s AND "
-        + subject_scope_sql("st.subject_id"),
+        + study_scope_sql("st.studyinstanceuid"),
         studyinstanceuid, scope, "Study not found",
     )
 
@@ -252,7 +267,7 @@ def ensure_series_access(cur, seriesinstanceuid: str, scope: list[str] | None) -
     _ensure_access(
         cur,
         "SELECT 1 FROM image_series s WHERE s.seriesinstanceuid = %s AND "
-        + subject_scope_sql("s.subject_id"),
+        + study_scope_sql("s.studyinstanceuid"),
         seriesinstanceuid, scope, "Series not found",
     )
 
@@ -373,11 +388,11 @@ _ANNOTATION_KEY = {
 
 # When the entity level is BELOW the label level (filtering UP), use the
 # entity table's parent-column to reach the annotation level directly. A
-# patient label reaches imaging through the subject: a study matches when any
-# (in-scope) enrollment of its subject carries the label.
+# patient label reaches imaging through study_visibility: a study matches when
+# an (in-scope) enrollment that sees it carries the label.
 _PARENT_COL: dict[tuple[str, str], str] = {
-    ("study", "patient"): "st.subject_id",
-    ("series", "patient"): "s.subject_id",
+    ("study", "patient"): "st.studyinstanceuid",
+    ("series", "patient"): "s.studyinstanceuid",
     ("series", "study"): "s.studyinstanceuid",
 }
 
@@ -385,8 +400,13 @@ _PARENT_COL: dict[tuple[str, str], str] = {
 # through an intermediate table.
 # key → (entity_column, intermediate_table, column_to_select, column_to_match_annotation)
 _DOWN_JOIN: dict[tuple[str, str], tuple[str, str, str, str]] = {
-    ("patient", "study"): ("p.subject_id", "image_study", "subject_id", "studyinstanceuid"),
-    ("patient", "series"): ("p.subject_id", "image_series", "subject_id", "seriesinstanceuid"),
+    ("patient", "study"): ("p.patient_key", "study_visibility", "patient_key", "studyinstanceuid"),
+    ("patient", "series"): (
+        "p.patient_key",
+        "study_visibility sv JOIN image_series ds ON ds.studyinstanceuid = sv.studyinstanceuid",
+        "sv.patient_key",
+        "ds.seriesinstanceuid",
+    ),
     ("study", "series"): (None, "image_series", "studyinstanceuid", "seriesinstanceuid"),
 }
 
@@ -428,16 +448,17 @@ def build_label_filter_sql(
     if key in _PARENT_COL:
         parent_col = _PARENT_COL[key]
         if ll == "patient":
-            subject_subq = (
-                "SELECT q.subject_id FROM annotations a "
+            study_subq = (
+                "SELECT sv.studyinstanceuid FROM annotations a "
                 "JOIN patient q ON q.patient_key = a.patient_key "
+                "JOIN study_visibility sv ON sv.patient_key = a.patient_key "
                 "WHERE a.level = 'patient' AND a.label = %s"
             )
             if value_predicate:
-                subject_subq += f" {value_predicate}"
+                study_subq += f" {value_predicate}"
             if scope_lit is not None:
-                subject_subq += f" AND q.dataset = ANY({scope_lit})"
-            return f"{parent_col} {operator} ({subject_subq})"
+                study_subq += f" AND q.dataset = ANY({scope_lit})"
+            return f"{parent_col} {operator} ({study_subq})"
         return f"{parent_col} {operator} ({ann_subq})"
 
     # Filtering DOWN: entity is above the annotation level.
@@ -579,26 +600,19 @@ def attach_annotations(cur, rows, level, id_col):
         r["annotations"] = ann_map.get(r[id_col], [])
 
 
-def _subject_enrollment_keys(cur, subject_ids, scope, context_key):
-    """subject_id → keys of the enrollments whose patient labels a row inherits.
+def _study_enrollment_keys(cur, study_uids, scope, context_key):
+    """studyinstanceuid → keys of the enrollments whose patient labels a row inherits.
 
-    Normally every in-scope enrollment of the subject. Under an expanded patient
-    row (``context_key``) only that enrollment: the child rows are shown on its
-    behalf.
+    Normally every in-scope enrollment that sees the study (owner and members).
+    Under an expanded patient row (``context_key``) only that enrollment: the
+    child rows are shown on its behalf.
     """
     if context_key is not None:
-        return {s: [context_key] for s in subject_ids}
-    sql = "SELECT subject_id, patient_key FROM patient WHERE subject_id = ANY(%s)"
-    params: list = [subject_ids]
-    if scope is not None:
-        sql += " AND dataset = ANY(%s::text[])"
-        params.append(list(scope))
-    cur.execute(sql + " ORDER BY patient_key", params)
-    keys: dict[str, list] = {}
-    for r in cur.fetchall():
-        sid, pkey = (r["subject_id"], r["patient_key"]) if isinstance(r, dict) else r
-        keys.setdefault(sid, []).append(pkey)
-    return keys
+        return {u: [context_key] for u in study_uids}
+    return {
+        uid: [e["patient_key"] for e in enrollments]
+        for uid, enrollments in _study_enrollments(cur, study_uids, scope).items()
+    }
 
 
 def _patient_anns_by_key(cur, keys):
@@ -622,8 +636,8 @@ def _patient_anns_by_key(cur, keys):
 def attach_inherited_annotations(cur, rows, child_level, *, scope, context_key=None):
     """Attach parent-level annotations inherited from above.
 
-    Patient labels come from the subject's in-scope enrollments (``scope`` is the
-    caller's dataset scope; None = admin) — or only ``context_key``'s when the
+    Patient labels come from the in-scope enrollments that see the row's study
+    (``scope`` is the caller's dataset scope; None = admin) — or only ``context_key``'s when the
     rows are an expanded patient's children. Each study/series row also gets
     ``edit_patient_key``: the one enrollment a patient-label edit on that row
     would write to, or None when several are in view (read-only there).
@@ -635,12 +649,12 @@ def attach_inherited_annotations(cur, rows, child_level, *, scope, context_key=N
             r["inherited_annotations"] = []
         return
 
-    subject_ids = list({r["subject_id"] for r in rows if r.get("subject_id")})
-    keys_by_subject = (
-        _subject_enrollment_keys(cur, subject_ids, scope, context_key) if subject_ids else {}
+    row_study_uids = list({r["studyinstanceuid"] for r in rows if r.get("studyinstanceuid")})
+    keys_by_study = (
+        _study_enrollment_keys(cur, row_study_uids, scope, context_key) if row_study_uids else {}
     )
     patient_anns = _patient_anns_by_key(
-        cur, {k for keys in keys_by_subject.values() for k in keys}
+        cur, {k for keys in keys_by_study.values() for k in keys}
     )
 
     study_anns: dict[str, list] = {}
@@ -657,7 +671,7 @@ def attach_inherited_annotations(cur, rows, child_level, *, scope, context_key=N
                 study_anns.setdefault(a["studyinstanceuid"], []).append(format_ann(a))
 
     for r in rows:
-        keys = keys_by_subject.get(r.get("subject_id"), [])
+        keys = keys_by_study.get(r.get("studyinstanceuid"), [])
         inherited = [a for k in keys for a in patient_anns.get(k, [])]
         inherited.extend(study_anns.get(r.get("studyinstanceuid", ""), []))
         r["inherited_annotations"] = inherited

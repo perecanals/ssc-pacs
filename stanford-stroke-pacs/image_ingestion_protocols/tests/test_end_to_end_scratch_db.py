@@ -498,7 +498,9 @@ def test_uid_owned_by_another_person_is_refused_before_any_delete(roots, scratch
 
 def test_linked_enrollment_resending_shared_study_keeps_owner(roots, scratch_engine):
     """Once linked (same subject), a second dataset may carry the same imaging
-    under its own id: the study keeps its owner and the owner's tree."""
+    under its own id: the study keeps its owner and the owner's tree, and the
+    re-sending enrollment becomes a member of it (Alembic 0028) — also when the
+    re-send is fully ingested already and filtered out of the tables."""
     from sqlalchemy import text
 
     with scratch_engine.begin() as conn:
@@ -520,6 +522,24 @@ def test_linked_enrollment_resending_shared_study_keeps_owner(roots, scratch_eng
     # Filed under the owner's dataset, not the batch's (other/OL-7).
     assert f"/audit/11-002/{owned}" in study.study_path
     assert series_owner == "audit__11-002"
+
+    def members():
+        with scratch_engine.connect() as conn:
+            return conn.execute(text(
+                "SELECT patient_key FROM study_member WHERE studyinstanceuid = :u"),
+                {"u": owned}).scalars().all()
+
+    assert members() == ["other__OL-7"]
+    with scratch_engine.connect() as conn:
+        # Both see the one (re-written) study, so both dates follow it.
+        assert conn.execute(text(
+            "SELECT m.stroke_date IS NOT DISTINCT FROM o.stroke_date FROM patient m, patient o "
+            "WHERE m.patient_key = 'other__OL-7' AND o.patient_key = 'audit__11-002'"
+        )).scalar()
+    with scratch_engine.begin() as conn:
+        conn.execute(text("DELETE FROM study_member WHERE studyinstanceuid = :u"), {"u": owned})
+    _run_case(roots, scratch_engine, "OL-7", dataset="OTHER/DS", case_dir=case)
+    assert members() == ["other__OL-7"]
 
 
 def test_unregistered_or_missing_dataset_is_refused(roots, scratch_engine):

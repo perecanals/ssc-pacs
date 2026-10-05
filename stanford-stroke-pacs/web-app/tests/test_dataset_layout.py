@@ -314,6 +314,11 @@ class TestLinkedView:
                         "WHERE patient_key = 'crisp2__P-LAY'")
             cur.execute("UPDATE image_study SET subject_id = 'lvo__P-LAY' "
                         "WHERE studyinstanceuid = %s", (STUDY_B,))
+            # Linking alone shares nothing (Alembic 0028)...
+            assert linked_view.desired_links(cur, data_root, cold_root) == {}
+            # ...each enrollment re-sent the other's study (same UID): members.
+            cur.execute("INSERT INTO study_member (studyinstanceuid, patient_key) "
+                        "VALUES (%s, 'crisp2__P-LAY'), (%s, 'lvo__P-LAY')", (STUDY_A, STUDY_B))
             (view / "lvo" / "STALE").mkdir(parents=True)
             (view / "lvo" / "STALE" / "1.9").symlink_to(tmp_path / "gone")
             dry = linked_view.rebuild(cur, view, data_root, cold_root, apply=False)

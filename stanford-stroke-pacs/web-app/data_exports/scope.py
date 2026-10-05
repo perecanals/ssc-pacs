@@ -3,7 +3,7 @@
 from pglast import ast, parse_sql
 from pglast.stream import RawStream
 
-from data_exports.policy import TABLES
+from data_exports.policy import TABLES, VISIBILITY_VIEW
 
 
 def scoped_table(table, dataset_literal=None, allowed_literal=None):
@@ -16,19 +16,24 @@ def scoped_table(table, dataset_literal=None, allowed_literal=None):
     if allowed_literal is not None:
         checks.append(f"data_exports_patient.dataset = ANY({allowed_literal}::text[])")
     condition = " AND ".join(checks) or "TRUE"
-    # A patient row is its own enrollment; imaging belongs to the whole subject,
-    # so it is in the cohort when any enrollment of its subject is.
+    # A patient row is its own enrollment; a study (and its series) is in the
+    # cohort when an enrollment that sees it — owner or member, Alembic 0028 —
+    # is.
+    visible = (
+        "public.study_visibility AS data_exports_visible "
+        "JOIN ONLY public.patient AS data_exports_patient "
+        "ON data_exports_patient.patient_key = data_exports_visible.patient_key"
+    )
     if table == "patient_labelled":
         source = "ONLY public.patient AS data_exports_patient"
         link = "data_exports_patient.patient_key = data_exports_row.patient_key"
     elif table in ("image_study_labelled", "image_series_labelled"):
-        source = "ONLY public.patient AS data_exports_patient"
-        link = "data_exports_patient.subject_id = data_exports_row.subject_id"
+        source = visible
+        link = "data_exports_visible.studyinstanceuid = data_exports_row.studyinstanceuid"
     else:
         source = (
-            "ONLY public.image_series_labelled AS data_exports_series "
-            "JOIN ONLY public.patient AS data_exports_patient "
-            "ON data_exports_patient.subject_id = data_exports_series.subject_id"
+            f"ONLY public.image_series_labelled AS data_exports_series JOIN {visible} "
+            "ON data_exports_visible.studyinstanceuid = data_exports_series.studyinstanceuid"
         )
         link = "data_exports_series.seriesinstanceuid = data_exports_row.seriesinstanceuid"
     predicate = f"EXISTS (SELECT 1 FROM {source} WHERE {link} AND {condition})"
@@ -47,7 +52,11 @@ def apply_dataset_scope(source, dataset_literal=None, allowed_literal=None):
             return tuple(rewrite(child) for child in node)
         if not isinstance(node, ast.Node):
             return node
-        if isinstance(node, ast.RangeVar) and node.schemaname == "public":
+        if (
+            isinstance(node, ast.RangeVar)
+            and node.schemaname == "public"
+            and node.relname != VISIBILITY_VIEW  # builder join SQL; validate_sql rejects it
+        ):
             return ast.RangeSubselect(
                 subquery=parse_sql(scoped_table(node.relname, dataset_literal, allowed_literal))[0].stmt,
                 alias=node.alias or ast.Alias(aliasname=node.relname),

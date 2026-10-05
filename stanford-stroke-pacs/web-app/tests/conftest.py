@@ -280,6 +280,13 @@ def seeded_db(test_db):
             insert_patient(cur, "P-0001", "lvo", stroke_date="2025-02-02")
             insert_patient(cur, "P-0001", "crisp2", subject_id="lvo__P-0001",
                            stroke_date="2025-02-02")
+            # ...and crisp2 re-sent the very same study (same UID), so it is a
+            # member of it (Alembic 0028): linked AND shared. Linking alone
+            # shares nothing.
+            cur.execute(
+                "INSERT INTO study_member (studyinstanceuid, patient_key) "
+                "VALUES ('1.2.3.4.5', 'crisp2__P-0001') ON CONFLICT DO NOTHING"
+            )
             insert_patient(cur, "P-0002", "lvo", stroke_date="2024-03-03")
             cur.execute(
                 "UPDATE dataset SET clinical_table = 'lvo_clinical_data', "

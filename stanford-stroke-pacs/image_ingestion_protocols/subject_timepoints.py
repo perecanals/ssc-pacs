@@ -1,11 +1,14 @@
-"""Per-subject study timepoints: the DB side of `assign_patient_timepoints`.
+"""Study timepoints: the DB side of `assign_patient_timepoints`.
 
 Timepoints, episodes and hours_to_event are properties of a study, computed over
-all imaging of one *person* — a subject (Alembic 0026), which may span several
-enrollments (the same person in several datasets). The clinical anchor (the
-CRISP2 puncture columns) comes from the clinical table of the dataset whose
-`timepoint_strategy` is 'crisp2_puncture' (Alembic 0027), joined to the
-subject's enrollment in that dataset. That rule is CRISP2-specific on purpose;
+the imaging its owning *enrollment* (``image_study.patient_key``) ingested — not
+over the whole person (Alembic 0028): a dataset re-exported with new UIDs
+carries copies of the same acquisitions, which must not form one series of
+episodes with the originals. A study another enrollment is only a member of
+keeps its owner's values. The clinical anchor (the CRISP2 puncture columns) is a
+fact about the person, so it still comes via the subject: the clinical table of
+the dataset whose `timepoint_strategy` is 'crisp2_puncture' (Alembic 0027),
+joined to the subject's enrollment in that dataset. That rule is CRISP2-specific on purpose;
 everyone else anchors on each episode's own thrombectomy study.
 
 Shared by ingestion (after each case's upsert), scripts/admin/recompute_timepoints.py,
@@ -53,21 +56,21 @@ def clinical_anchor_sql(cur, study_alias: str = "st"):
 
 
 def resolve_subject_timepoints(study_rows, study_type=None, acquisition=None):
-    """Group study rows by subject and run the episode/timepoint classifier.
+    """Group study rows by owning enrollment and run the episode/timepoint classifier.
 
-    ``study_rows`` carry studyinstanceuid, subject_id, study_type,
+    ``study_rows`` carry studyinstanceuid, patient_key (the owner), study_type,
     acquisitiondatetime and the clinical anchor columns. ``study_type`` /
     ``acquisition`` optionally override those per studyinstanceuid (the
     reclassify/recompute scripts propose new values before writing them).
     Returns {studyinstanceuid: assign_patient_timepoints() result}.
     """
-    by_subject, clinical = defaultdict(list), {}
+    by_owner, clinical = defaultdict(list), {}
     for row in study_rows:
-        key = row["subject_id"] or f"study:{row['studyinstanceuid']}"
-        by_subject[key].append(row)
+        key = row["patient_key"] or f"study:{row['studyinstanceuid']}"
+        by_owner[key].append(row)
         clinical.setdefault(key, {c: row[c] for c in CLINICAL_ANCHOR_COLUMNS})
     results = {}
-    for key, rows in by_subject.items():
+    for key, rows in by_owner.items():
         studies = [
             {
                 "studyinstanceuid": r["studyinstanceuid"],
@@ -93,7 +96,7 @@ def recompute_subject_timepoints(cur, subject_ids):
         return 0
     cols, join, params = clinical_anchor_sql(cur)
     cur.execute(
-        f"SELECT st.studyinstanceuid, st.subject_id, st.study_type, "
+        f"SELECT st.studyinstanceuid, st.patient_key, st.study_type, "
         f"st.acquisitiondatetime, {cols} "
         f"FROM image_study st {join} WHERE st.subject_id = ANY(%s)",
         params + [subject_ids],

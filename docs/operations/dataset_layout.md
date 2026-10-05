@@ -154,9 +154,10 @@ the DB commit). The backups from step 2 are the last resort.
 
 ## Linked view
 
-A person enrolled in two datasets (one subject) sees the studies another of
-their enrollments owns, but only through the database. For browsing the files,
-the linked view gives each enrollment symlinks to that shared imaging:
+A linked enrollment that re-sent a study another enrollment of the same person
+owns (same StudyInstanceUID) is a *member* of it (Alembic `0028`) and sees it
+only through the database. For browsing the files, the linked view gives each
+enrollment a symlink per membership:
 
 ```
 <linked_view_root>/<slug>/<patient_id>/<StudyUID>  ->  <cold_archive_root>/<owner's study dir>
@@ -165,6 +166,8 @@ the linked view gives each enrollment symlinks to that shared imaging:
 - It is enabled by `config.toml [storage] linked_view_root`, an absolute path
   outside both storage roots (enforced at startup). It is unset by default.
 - Targets are the archive tree, which is canonical in `cold_path_cache`.
+- Linking alone creates no links: a linked enrollment's studies with other
+  UIDs are its own and live in its own tree.
 - It is a **convenience view, not a source of truth**: generated, rebuildable
   at any time, and never walked by Orthanc, the audits, deletion or the backups.
 - It is rebuilt after `link_patients.py`, `split_merged_patients.py` and

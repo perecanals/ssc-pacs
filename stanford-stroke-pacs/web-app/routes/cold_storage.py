@@ -28,7 +28,7 @@ from common import (
     check_patient_access,
     check_series_access,
     check_study_access,
-    subject_scope_sql,
+    study_scope_sql,
 )
 from config import STORAGE_MODE
 from db import get_conn
@@ -48,7 +48,7 @@ def _filter_in_scope(uids: list[str], patient_keys: list[str], scope: list[str])
                 cur.execute(
                     "SELECT st.studyinstanceuid FROM image_study st "
                     "WHERE st.studyinstanceuid = ANY(%s) AND "
-                    + subject_scope_sql("st.subject_id"),
+                    + study_scope_sql("st.studyinstanceuid"),
                     (uids, scope),
                 )
                 uids = [r[0] for r in cur.fetchall()]
@@ -65,7 +65,7 @@ def _filter_in_scope(uids: list[str], patient_keys: list[str], scope: list[str])
 
 
 def _filter_series_in_scope(series_uids: list[str], scope: list[str]) -> list[str]:
-    """Narrow batch series ids to those whose subject is within scope."""
+    """Narrow batch series ids to those whose study is within scope."""
     if not series_uids:
         return series_uids
     conn = get_conn()
@@ -74,7 +74,7 @@ def _filter_series_in_scope(series_uids: list[str], scope: list[str]) -> list[st
             cur.execute(
                 "SELECT s.seriesinstanceuid FROM image_series s "
                 "WHERE s.seriesinstanceuid = ANY(%s) AND "
-                + subject_scope_sql("s.subject_id"),
+                + study_scope_sql("s.studyinstanceuid"),
                 (series_uids, scope),
             )
             return [r[0] for r in cur.fetchall()]
@@ -251,7 +251,7 @@ async def api_warm_patient(
     request: Request,
     scope: list[str] | None = Depends(get_dataset_scope),
 ):
-    """Queue every study of a patient (its subject's imaging) for warming, one
+    """Queue every study a patient sees (owned or member) for warming, one
     executor task per study. Disk prechecks run inside each worker, so one study
     failing for space does not block the rest."""
     check_patient_access(patient_key, scope)

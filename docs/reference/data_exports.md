@@ -36,15 +36,15 @@ checks the current role; research data is read-only.
 ### Relationships
 
 The builder uses predefined left joins between labelled patients, studies and
-series, plus series-to-DICOM-tags. Patient and series (or study) join directly on
-`subject_id` — the person (Alembic `0026`) — in either direction; study is not
-required. When study and series are both selected, their join uses
+series, plus series-to-DICOM-tags. Patient and series (or study) join on the
+imaging the enrollment sees — `study_visibility`, owner or member (Alembic
+`0028`) — in either direction; study is not required. When study and series are both selected, their join uses
 `studyinstanceuid` to avoid matching unrelated studies from the same patient.
 `patient_id` is not a join key: the same id can be different people in
 different datasets. A person enrolled in several datasets has one
-`patient_labelled` row per enrollment, so a patient↔imaging join yields **one
-row per enrollment** in the cohort — choose a cohort (dataset) to get one per
-person in that dataset.
+`patient_labelled` row per enrollment, and each joins only the imaging it sees:
+a shared (same-UID) study yields one row per in-cohort enrollment that sees it;
+copies re-exported under new UIDs are separate studies of separate enrollments.
 
 Unmatched base rows remain in a left join, and multiple matches produce multiple
 output rows. Choose the base table for the desired patient/study/series level.
@@ -138,8 +138,9 @@ These internal tables cannot be selected in the UI or submitted SQL.
 
 Dataset restrictions are applied to every physical table reference before
 aggregates and limits, including CTEs, subqueries and joins. Studies and series
-are in a cohort when any enrollment of their subject is (so linked imaging is
-included); patient rows by their own dataset; tags link through their series.
+are in a cohort when an enrollment that sees them (owner or member) is; patient
+rows by their own dataset; tags link through their series. The Data Exports
+reader role needs SELECT on the `study_visibility` view (`manage_data_exports_db.py sync`).
 Scoped queries exclude rows without a matching patient. User conditions can narrow this scope.
 
 **SQL query** accepts one SELECT using approved tables, functions, types and

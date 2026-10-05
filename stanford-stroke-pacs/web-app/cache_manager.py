@@ -293,15 +293,13 @@ def _series_for_studies(study_uids: list[str]) -> list[str]:
 
 
 def list_patient_study_uids(patient_key: str) -> list[str]:
-    """Every studyinstanceuid of an enrollment's subject (warm-all fan-out) —
-    including imaging owned by a linked enrollment."""
+    """Every studyinstanceuid the enrollment sees (warm-all fan-out): owned,
+    or shared with it as a member."""
     conn = get_conn()
     try:
         with conn.cursor() as cur:
             cur.execute(
-                "SELECT st.studyinstanceuid FROM patient p "
-                "JOIN image_study st ON st.subject_id = p.subject_id "
-                "WHERE p.patient_key = %s",
+                "SELECT studyinstanceuid FROM study_visibility WHERE patient_key = %s",
                 (patient_key,),
             )
             return [r[0] for r in cur.fetchall()]
@@ -529,7 +527,7 @@ def get_batch_cache_status(uids: list[str]) -> dict[str, str]:
 
 def _patient_status_counts(patient_keys: list[str]) -> dict[str, dict[str, int]]:
     """Per-enrollment {status: study_count} aggregated over each study's series
-    (the studies of the enrollment's subject).
+    (the studies the enrollment sees: owned or member).
 
     Two-level aggregation done in Python for clarity: collapse each study's series
     to a binary study status, then count studies by status per patient. A study
@@ -546,8 +544,8 @@ def _patient_status_counts(patient_keys: list[str]) -> dict[str, dict[str, int]]
         with conn.cursor() as cur:
             cur.execute(
                 f"SELECT p.patient_key, st.studyinstanceuid, {effective_status_sql()} AS eff "
-                "FROM patient p "
-                "JOIN image_study st ON st.subject_id = p.subject_id "
+                "FROM study_visibility p "
+                "JOIN image_study st ON st.studyinstanceuid = p.studyinstanceuid "
                 "LEFT JOIN image_series s ON s.studyinstanceuid = st.studyinstanceuid "
                 "LEFT JOIN series_cache_state cs ON cs.seriesinstanceuid = s.seriesinstanceuid "
                 "WHERE p.patient_key = ANY(%s)",

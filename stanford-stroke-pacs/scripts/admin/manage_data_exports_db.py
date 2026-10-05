@@ -62,7 +62,7 @@ def provision(*, rotate=True):
             cur.execute(sql.SQL("REVOKE ALL ON ALL TABLES IN SCHEMA public FROM {}").format(ident))
             cur.execute(
                 "SELECT c.relname FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace "
-                "WHERE n.nspname='public' AND c.relkind='r' AND c.relname=ANY(%s)",
+                "WHERE n.nspname='public' AND c.relkind IN ('r','v') AND c.relname=ANY(%s)",
                 (list(READER_TABLES),),
             )
             for (table,) in cur.fetchall():

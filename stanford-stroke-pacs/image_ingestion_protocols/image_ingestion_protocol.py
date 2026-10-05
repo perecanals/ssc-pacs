@@ -199,8 +199,9 @@ class ImageIngestionProtocol:
         self.validate_studies_against_clinical_data()
         print(f"Validated clinical matches in {time.perf_counter() - step_started:.2f}s")
 
-        # Timepoints/episodes are assigned per subject in update_postgres_tables,
-        # once this case's studies are in the DB next to the subject's others.
+        # Timepoints/episodes are assigned per owning enrollment in
+        # update_postgres_tables, once this case's studies are in the DB next to
+        # the enrollment's others.
 
         step_started = time.perf_counter()
         self.assign_import_id()
@@ -340,7 +341,7 @@ class ImageIngestionProtocol:
         patient of another dataset is never matched to it. Normalised to two
         columns, ``patient_id`` and ``episode_date``. With no registered table
         the clinical match check is skipped; timepoints are unaffected (they are
-        computed per subject after the upsert, see subject_timepoints).
+        computed per owning enrollment after the upsert, see subject_timepoints).
         """
         from clinical_sources import clinical_source_for  # web-app; on sys.path by now
 
@@ -823,7 +824,10 @@ class ImageIngestionProtocol:
         A study already in the DB keeps its owner: when that owner is the same
         person (same subject — e.g. a linked dataset re-sending shared imaging)
         the rows take the owner's patient_key / patient_id, so files land in the
-        owner's tree; when it is a *different* person the case is refused, since
+        owner's tree, and the incoming enrollment becomes a *member* of the study
+        (``study_member``, Alembic 0028 — it sees the study from then on; written
+        here because filter_existing_studies drops a fully ingested re-send from
+        the tables); when it is a *different* person the case is refused, since
         one StudyInstanceUID cannot belong to two people — either the two
         enrollments must be linked first (scripts/admin/link_patients.py) or the
         source data is wrong. Raised before filter_existing_studies, so an
@@ -856,7 +860,7 @@ class ImageIngestionProtocol:
             }
 
         self.incoming_patient_keys = {}
-        owners, conflicts = {}, []
+        owners, conflicts, members = {}, [], set()
         for _, row in self.case_study_table.iterrows():
             pid, uid = str(row["patient_id"]), str(row["studyinstanceuid"])
             key = f"{self.dataset_slug}__{pid}"
@@ -867,6 +871,8 @@ class ImageIngestionProtocol:
                 owners[uid] = (pid, key, subject)
             elif owner.subject_id is not None and owner.subject_id == subject:
                 owners[uid] = (owner.patient_id, owner.patient_key, owner.subject_id)
+                if owner.patient_key != key:
+                    members.add((uid, key))
             else:
                 conflicts.append((uid, owner.patient_key, key))
         if conflicts:
@@ -881,11 +887,34 @@ class ImageIngestionProtocol:
                 "scripts/admin/link_patients.py); otherwise the source data "
                 "carries a UID clash."
             )
+        self.study_members = sorted(members)
+        if self.study_members:
+            with self.postgres_engine.begin() as connection:
+                self._insert_study_members(connection)
+            print(f"Linked re-send: {len(self.study_members)} study membership(s) "
+                  "recorded (the studies stay with their owner)")
         for table in (self.case_study_table, self.case_series_table):
             uids = table["studyinstanceuid"].astype(str)
             table["patient_id"] = uids.map(lambda u: owners[u][0])
             table["patient_key"] = uids.map(lambda u: owners[u][1])
             table["subject_id"] = uids.map(lambda u: owners[u][2])
+
+    def _insert_study_members(self, connection):
+        """Write the memberships resolve_ownership found. Also re-run after the
+        study upsert: an overwrite deletes and re-creates the study, and its
+        memberships go with it (ON DELETE CASCADE). A same-subject owner implies
+        the incoming enrollment exists (it was linked), so the FK holds."""
+        members = getattr(self, "study_members", None) or []
+        if not members:
+            return
+        connection.execute(
+            text(
+                "INSERT INTO study_member (studyinstanceuid, patient_key) "
+                "SELECT * FROM unnest(CAST(:uids AS text[]), CAST(:keys AS text[])) "
+                "ON CONFLICT DO NOTHING"
+            ),
+            {"uids": [u for u, _ in members], "keys": [k for _, k in members]},
+        )
 
     def filter_existing_studies(self, overwrite_if_exists=False):
         # Series found on disk but skipped because they are already in
@@ -1662,9 +1691,11 @@ class ImageIngestionProtocol:
         its own subject. import_id/import_label keep ORIGIN (first-seen)
         semantics — preserved on conflict; updated_at advances on every touch.
 
-        stroke_date is imaging-derived: MIN(acquisitiondatetime) over all of the
-        subject's studies, written to every enrollment of that subject. Must run
-        AFTER the image_study upsert so the new studies count.
+        stroke_date is imaging-derived: MIN(acquisitiondatetime) over the studies
+        an enrollment sees (owned or member; Alembic 0028), refreshed for the
+        incoming enrollments and every enrollment that sees a study this case
+        wrote (an owner whose study a linked re-send overwrote). Must run AFTER
+        the image_study upsert so the new studies count.
         """
         keys = getattr(self, "incoming_patient_keys", None) or {}
         if not keys:
@@ -1695,21 +1726,25 @@ class ImageIngestionProtocol:
         connection.execute(
             text(
                 "UPDATE patient p SET stroke_date = sub.first_study "
-                "FROM (SELECT st.subject_id, MIN(st.acquisitiondatetime) AS first_study "
-                "      FROM image_study st "
-                "      WHERE st.subject_id IN (SELECT subject_id FROM patient "
-                "                              WHERE patient_key = ANY(:keys)) "
-                "      GROUP BY st.subject_id) sub "
-                "WHERE p.subject_id = sub.subject_id"
+                "FROM (SELECT v.patient_key, MIN(st.acquisitiondatetime) AS first_study "
+                "      FROM study_visibility v "
+                "      JOIN image_study st USING (studyinstanceuid) "
+                "      WHERE v.patient_key = ANY(:keys) "
+                "         OR v.patient_key IN (SELECT patient_key FROM study_visibility "
+                "                              WHERE studyinstanceuid = ANY(:uids)) "
+                "      GROUP BY v.patient_key) sub "
+                "WHERE p.patient_key = sub.patient_key"
             ),
-            {"keys": [keys[p] for p in pids]},
+            {"keys": [keys[p] for p in pids],
+             "uids": list(getattr(self, "updated_study_uids", None) or [])},
         )
 
     def _recompute_timepoints(self, connection):
         """Episodes/timepoints of every study of the subjects this case touched.
 
-        Per subject, over all of its studies (not just this case's): a new study
-        can open a new episode or move an existing study's anchor.
+        Over all studies of those people (not just this case's), grouped per
+        owning enrollment: a new study can open a new episode or move an
+        existing study's anchor.
         """
         subject_ids = connection.execute(
             text("SELECT DISTINCT subject_id FROM image_study "
@@ -1757,10 +1792,11 @@ class ImageIngestionProtocol:
                 "image_study", "studyinstanceuid", self.case_study_table, connection
             )
             refresh_study_modalities_sqlalchemy(connection, self.updated_study_uids)
+            self._insert_study_members(connection)
             self._upsert_patient(connection)
             self._rollup_study_storage_sizes(connection)
 
-            # Ranks are a window over each subject's series, so this must run
+            # Ranks are a window over each owner's series, so this must run
             # after the image_series upsert — the new rows have to be visible.
             connection.execute(text(ASSIGN_RANKS_SQL))
             connection.execute(text(CLEAR_RANKS_SQL))

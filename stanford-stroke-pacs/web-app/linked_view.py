@@ -1,14 +1,15 @@
 """The linked view: a browsable symlink tree of imaging shared across enrollments.
 
 Imaging is filed once, under the enrollment that owns it
-(``<root>/<slug>/<patient_id>/<StudyUID>``, see ``storage_layout``). A person
-enrolled in several datasets (one subject, linked with link_patients.py) sees
-studies owned by another of their enrollments only through the database. This
-tree gives the same view on disk:
+(``<root>/<slug>/<patient_id>/<StudyUID>``, see ``storage_layout``). A linked
+enrollment that re-sent a study another enrollment of the same person owns is a
+*member* of it (``study_member``, Alembic 0028) and sees it only through the
+database. This tree gives the same view on disk:
 
     <linked_view_root>/<slug>/<patient_id>/<StudyUID>  ->  <cold_archive_root>/<owner's study dir>
 
-one link per (enrollment, study of its subject it does not own). Targets are the
+one link per membership. Linked enrollments' *other* studies (e.g. copies
+re-exported under new UIDs) are their own and are not linked. Targets are the
 archive tree — canonical in cold_path_cache mode (the loose tree is only a
 cache). The tree is a **convenience view, not a source of truth**: generated,
 rebuildable at any time, and kept outside the storage roots (config.py checks)
@@ -26,11 +27,12 @@ from pathlib import Path
 
 from storage_layout import study_relpath
 
-# Every enrollment whose subject has imaging it does not own, with that imaging.
+# Every membership: an enrollment and a study it sees without owning it.
 _SHARED_SQL = """
 SELECT p.patient_key, p.dataset_slug, p.patient_id, st.studyinstanceuid, st.study_path
 FROM (SELECT pt.*, d.slug AS dataset_slug FROM patient pt JOIN dataset d ON d.name = pt.dataset) p
-JOIN image_study st ON st.subject_id = p.subject_id AND st.patient_key <> p.patient_key
+JOIN study_member m ON m.patient_key = p.patient_key
+JOIN image_study st ON st.studyinstanceuid = m.studyinstanceuid
 WHERE coalesce(st.study_path, '') <> ''
 ORDER BY p.patient_key, st.studyinstanceuid
 """

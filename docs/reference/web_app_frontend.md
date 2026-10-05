@@ -306,8 +306,9 @@ The Navigator page is decomposed into focused React components:
   entity+label); `created_by` is shown as a tooltip for audit traceability.
   A **patient-level** value belongs to one enrollment (dataset + patient id;
   Alembic `0026`): every row carries `edit_patient_key` — a patient row's own
-  `patient_key`, or on a study/series row the one enrollment of its person in
-  the user's view — and writes go to that key. When several enrollments are in
+  `patient_key`, or on a study/series row the one enrollment that sees its
+  study (owner or member, Alembic `0028`) in the user's view — and writes go to
+  that key. When several enrollments are in
   view (`edit_patient_key` null) the cell is read-only
   (`AmbiguousPatientValue`: distinct values joined ` | `, tooltip says whose is
   whose). Patient rows are keyed by `patient_key` (`LEVEL_CONFIG.patient.idCol`),

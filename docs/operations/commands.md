@@ -219,7 +219,7 @@ python scripts/cold_storage/build_linked_view.py [--apply]      # [storage].link
 ```
 
 Dataset grants control which patients a non-admin user sees in the web app
-(enrollments in the granted datasets, plus all imaging of those people; admins
+(enrollments in the granted datasets, plus the imaging they see; admins
 bypass). They can also be edited in the
 web app's `/admin` page (admin-only). Changes take effect immediately — no
 restart needed.

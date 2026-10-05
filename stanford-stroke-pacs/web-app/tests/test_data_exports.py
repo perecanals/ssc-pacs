@@ -355,7 +355,7 @@ def data_exports(logged_in_client, seeded_db, monkeypatch, tmp_path):
         cur.execute(sql.SQL("CREATE ROLE {} LOGIN PASSWORD %s").format(sql.Identifier(name)), (password,))
         cur.execute(sql.SQL("GRANT USAGE ON SCHEMA public TO {}").format(sql.Identifier(name)))
         cur.execute(
-            "SELECT relname FROM pg_class WHERE relnamespace='public'::regnamespace AND relkind='r' AND relname=ANY(%s)",
+            "SELECT relname FROM pg_class WHERE relnamespace='public'::regnamespace AND relkind IN ('r','v') AND relname=ANY(%s)",
             (list(READER_TABLES),),
         )
         for (table,) in cur.fetchall():
@@ -445,10 +445,23 @@ def test_catalog_preview_join_and_shared_report(data_exports):
     assert client.delete(ROOT + "/reports/" + report["id"]).status_code == 200
 
 
-def test_direct_patient_series_relationship_without_study(data_exports):
+def test_direct_patient_series_relationship_without_study(data_exports, request):
     client, worker = data_exports
-    relation = ["patient_labelled", "subject_id", "image_series_labelled", "subject_id"]
+    relation = ["patient_labelled", "patient_key", "image_series_labelled", "studyinstanceuid"]
     assert relation in client.get(ROOT + "/catalog").json()["relationships"]
+    # The study exists (and crisp2 shares it, as for P1) but has no
+    # image_study_labelled mirror row: the patient<->series join must not need one.
+    database.records(
+        "INSERT INTO image_study (patient_id, studyinstanceuid) VALUES ('P-0001', 'missing-study')"
+    )
+    # Committed outside the per-test transaction: later mirror rebuilds would
+    # pick it up. (The study_member row goes with it, ON DELETE CASCADE.)
+    request.addfinalizer(lambda: database.records(
+        "DELETE FROM image_study WHERE studyinstanceuid = 'missing-study'"))
+    database.records(
+        "INSERT INTO study_member (studyinstanceuid, patient_key) "
+        "VALUES ('missing-study', 'crisp2__P-0001')"
+    )
     database.records(
         "INSERT INTO image_series_labelled "
         "(patient_id, patient_key, subject_id, studyinstanceuid, seriesinstanceuid) "
@@ -500,8 +513,9 @@ def test_adding_study_to_direct_patient_series_join_uses_series_study_uid(data_e
         }
         response = client.post(ROOT + "/preview", json=config)
         assert response.status_code == 200, response.text
-        # Joining through the patient yields one row per enrollment of the
-        # subject (P-0001: lvo + crisp2) — never the unrelated study.
+        # Joining through the patient yields one row per enrollment that sees
+        # the study (P-0001: lvo owns it, crisp2 is a member) — never the
+        # unrelated study.
         assert response.json()["rows"] == [["1.2.3.4.5.6", "1.2.3.4.5"]] * 2
 
 

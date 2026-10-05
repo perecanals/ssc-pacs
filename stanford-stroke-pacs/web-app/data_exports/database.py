@@ -84,7 +84,7 @@ def check_role():
 
         cur.execute(
             "SELECT relname FROM pg_class WHERE relnamespace='public'::regnamespace "
-            "AND relkind='r' AND relname=ANY(%s) AND has_table_privilege(oid, 'SELECT')",
+            "AND relkind IN ('r','v') AND relname=ANY(%s) AND has_table_privilege(oid, 'SELECT')",
             (sorted(METADATA_TABLES),),
         )
         if {row[0] for row in cur.fetchall()} != METADATA_TABLES:

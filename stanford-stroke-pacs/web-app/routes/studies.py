@@ -36,7 +36,7 @@ from common import (
     ensure_study_access,
     parse_label_filters,
     scope_literal,
-    subject_scope_sql,
+    study_scope_sql,
 )
 from config import STORAGE_MODE
 from db import get_conn
@@ -102,21 +102,22 @@ def list_patients(
                 params.append(scope)
 
             # The Auto filters are series-/study-level, so at the patient level
-            # they ask "has one": a patient matches if any of their series (or
-            # studies) does — including imaging owned by a linked enrollment
-            # of the same subject.
+            # they ask "has one": a patient matches if any series (or study)
+            # it sees does — owned, or shared with it as a member.
             st_sql, st_params = auto_match_sql(SERIES_TYPE_MATCH_EXPR, series_type)
             if st_sql:
                 conditions.append(
-                    "EXISTS (SELECT 1 FROM image_series s "
-                    f"WHERE s.subject_id = p.subject_id AND {st_sql})"
+                    "EXISTS (SELECT 1 FROM study_visibility v "
+                    "JOIN image_series s ON s.studyinstanceuid = v.studyinstanceuid "
+                    f"WHERE v.patient_key = p.patient_key AND {st_sql})"
                 )
                 params.extend(st_params)
             tp_sql, tp_params = auto_match_sql(TIMEPOINT_MATCH_EXPR, timepoint)
             if tp_sql:
                 conditions.append(
-                    "EXISTS (SELECT 1 FROM image_study st "
-                    f"WHERE st.subject_id = p.subject_id AND {tp_sql})"
+                    "EXISTS (SELECT 1 FROM study_visibility v "
+                    "JOIN image_study st ON st.studyinstanceuid = v.studyinstanceuid "
+                    f"WHERE v.patient_key = p.patient_key AND {tp_sql})"
                 )
                 params.extend(tp_params)
 
@@ -139,10 +140,11 @@ def list_patients(
             sil = (study_import_label or "").strip()
             if sil:
                 conditions.append(
-                    "p.subject_id IN ("
-                    "SELECT subject_id FROM image_study st WHERE st.import_label = %s "
+                    "p.patient_key IN (SELECT v.patient_key FROM study_visibility v "
+                    "WHERE v.studyinstanceuid IN ("
+                    "SELECT studyinstanceuid FROM image_study st WHERE st.import_label = %s "
                     "UNION "
-                    "SELECT subject_id FROM image_series s WHERE s.import_label = %s)"
+                    "SELECT studyinstanceuid FROM image_series s WHERE s.import_label = %s))"
                 )
                 params.append(sil)
                 params.append(sil)
@@ -177,13 +179,15 @@ def list_patients(
                 "COALESCE(("
                 "  SELECT string_agg(lbl, ', ' ORDER BY lbl) FROM ("
                 "    SELECT DISTINCT TRIM(sti.import_label) AS lbl "
-                "    FROM image_study sti "
-                "    WHERE sti.subject_id = p.subject_id "
+                "    FROM study_visibility v "
+                "    JOIN image_study sti ON sti.studyinstanceuid = v.studyinstanceuid "
+                "    WHERE v.patient_key = p.patient_key "
                 "      AND sti.import_label IS NOT NULL AND TRIM(sti.import_label) <> '' "
                 "    UNION "
                 "    SELECT DISTINCT TRIM(s.import_label) AS lbl "
-                "    FROM image_series s "
-                "    WHERE s.subject_id = p.subject_id "
+                "    FROM study_visibility v "
+                "    JOIN image_series s ON s.studyinstanceuid = v.studyinstanceuid "
+                "    WHERE v.patient_key = p.patient_key "
                 "      AND s.import_label IS NOT NULL AND TRIM(s.import_label) <> '' "
                 "  ) u"
                 "), '') AS study_import_labels"
@@ -235,9 +239,10 @@ def patient_studies(
 ):
     """Studies for a patient (expandable sub-rows).
 
-    Every study of the enrollment's subject — including imaging owned by a
-    linked enrollment in another dataset. Inherited patient labels are this
-    enrollment's only (the rows are shown on its behalf).
+    The studies the enrollment sees: those it owns plus those it is a member
+    of (the same UID re-sent by this linked enrollment; Alembic 0028) — not
+    every study of the person. Inherited patient labels are this enrollment's
+    only (the rows are shown on its behalf).
 
     Optionally narrowed by the sidebar quick filters (import_label, the Auto
     `series_type` / `timepoint` columns, and select-value annotation labels) so
@@ -250,14 +255,14 @@ def patient_studies(
     try:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             ensure_patient_access(cur, patient_key, scope)
-            cur.execute(
-                "SELECT subject_id FROM patient WHERE patient_key = %s", (patient_key,)
-            )
-            patient = cur.fetchone()
-            if patient is None:
+            cur.execute("SELECT 1 FROM patient WHERE patient_key = %s", (patient_key,))
+            if cur.fetchone() is None:
                 raise HTTPException(status_code=404, detail="Patient not found")
-            conditions = ["st.subject_id = %s"]
-            params: list = [patient["subject_id"]]
+            conditions = [
+                "st.studyinstanceuid IN "
+                "(SELECT studyinstanceuid FROM study_visibility WHERE patient_key = %s)"
+            ]
+            params: list = [patient_key]
             sil = (study_import_label or "").strip()
             if sil:
                 conditions.append(
@@ -324,8 +329,8 @@ def list_study_import_labels(scope: list[str] | None = Depends(get_dataset_scope
             scope_st = scope_s = ""
             params: list = []
             if scope is not None:
-                scope_st = " AND " + subject_scope_sql("image_study.subject_id")
-                scope_s = " AND " + subject_scope_sql("image_series.subject_id")
+                scope_st = " AND " + study_scope_sql("image_study.studyinstanceuid")
+                scope_s = " AND " + study_scope_sql("image_series.studyinstanceuid")
                 params = [scope, scope]
             cur.execute(
                 "SELECT import_label FROM ("
@@ -376,8 +381,8 @@ def list_classification_values(scope: list[str] | None = Depends(get_dataset_sco
             params: list = []
             scope_s = scope_t = ""
             if scope is not None:
-                scope_s = f" AND {subject_scope_sql('s.subject_id')}"
-                scope_t = f" AND {subject_scope_sql('st.subject_id')}"
+                scope_s = f" AND {study_scope_sql('s.studyinstanceuid')}"
+                scope_t = f" AND {study_scope_sql('st.studyinstanceuid')}"
 
             cur.execute(
                 "SELECT s.series_type, COUNT(*) FROM image_series s "
@@ -419,8 +424,8 @@ def list_studies(
     dataset: str | None = Query(
         None,
         description=(
-            "Exact match on a dataset name; study included if any in-scope "
-            "enrollment of its subject is in that dataset."
+            "Exact match on a dataset name; study included if an in-scope "
+            "enrollment that sees it (owner or member) is in that dataset."
         ),
     ),
     modality: str | None = Query(None),
@@ -455,7 +460,7 @@ def list_studies(
 
             scope_lit = scope_literal(cur, scope)
             if scope is not None:
-                conditions.append(subject_scope_sql("st.subject_id"))
+                conditions.append(study_scope_sql("st.studyinstanceuid"))
                 params.append(scope)
 
             if studyinstanceuid:
@@ -463,7 +468,7 @@ def list_studies(
                 params.append(f"%{studyinstanceuid}%")
             if patient_id:
                 conditions.append(
-                    enrollment_match_sql("st.subject_id", scope_lit, "q.patient_id LIKE %s")
+                    enrollment_match_sql("st.studyinstanceuid", scope_lit, "q.patient_id LIKE %s")
                 )
                 params.append(f"%{patient_id}%")
             if import_id:
@@ -475,7 +480,7 @@ def list_studies(
             ds = (dataset or "").strip()
             if ds:
                 conditions.append(
-                    enrollment_match_sql("st.subject_id", scope_lit, "q.dataset = %s")
+                    enrollment_match_sql("st.studyinstanceuid", scope_lit, "q.dataset = %s")
                 )
                 params.append(ds)
             if study_type:
@@ -541,8 +546,8 @@ def list_studies(
             }.get(sort_by, f"st.{col}")
             direction = "DESC" if sort_dir.lower() == "desc" else "ASC"
 
-            # patient_id / dataset are replaced by the subject's in-scope
-            # enrollments below; sorting by patient_id orders by the owner's id.
+            # patient_id / dataset are replaced by the in-scope enrollments
+            # that see the study (owner, members) below; sorting by patient_id orders by the owner's id.
             cur.execute(
                 f"SELECT st.patient_key, st.subject_id, st.import_id, st.import_label, "
                 f"st.acquisitiondatetime, "
@@ -659,8 +664,8 @@ def list_series(
     dataset: str | None = Query(
         None,
         description=(
-            "Exact match on a dataset name; series included if any in-scope "
-            "enrollment of its subject is in that dataset."
+            "Exact match on a dataset name; series included if an in-scope "
+            "enrollment that sees its study (owner or member) is in that dataset."
         ),
     ),
     modality: str | None = Query(None),
@@ -699,7 +704,7 @@ def list_series(
 
             scope_lit = scope_literal(cur, scope)
             if scope is not None:
-                conditions.append(subject_scope_sql("s.subject_id"))
+                conditions.append(study_scope_sql("s.studyinstanceuid"))
                 params.append(scope)
 
             if label:
@@ -717,7 +722,7 @@ def list_series(
                 params.append(f"%{seriesinstanceuid}%")
             if patient_id:
                 conditions.append(
-                    enrollment_match_sql("s.subject_id", scope_lit, "q.patient_id LIKE %s")
+                    enrollment_match_sql("s.studyinstanceuid", scope_lit, "q.patient_id LIKE %s")
                 )
                 params.append(f"%{patient_id}%")
             if import_id:
@@ -729,7 +734,7 @@ def list_series(
             ds = (dataset or "").strip()
             if ds:
                 conditions.append(
-                    enrollment_match_sql("s.subject_id", scope_lit, "q.dataset = %s")
+                    enrollment_match_sql("s.studyinstanceuid", scope_lit, "q.dataset = %s")
                 )
                 params.append(ds)
             if modality:

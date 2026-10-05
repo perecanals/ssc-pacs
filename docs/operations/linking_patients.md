@@ -4,7 +4,7 @@ How the stack tells patients apart, and how to declare that patients of two
 datasets are the same person. Schema: [`../reference/data_stores.md`](../reference/data_stores.md)
 (`dataset`, `patient`); access rules: [`../reference/architecture.md`](../reference/architecture.md) §5.4.
 
-## The model (Alembic `0026_patient_identity`)
+## The model (Alembic `0026_patient_identity`, `0028_study_membership`)
 
 - **Dataset** — a registry row: an immutable `slug` (e.g. `crisp2-lvo`) and a
   display `name` (e.g. `CRISP2/LVO`). Ingestion, grants, filters and exports use
@@ -15,31 +15,47 @@ datasets are the same person. Schema: [`../reference/data_stores.md`](../referen
   are two patients, and here they are in fact two different people.
 - **Subject** — `subject_id`, shared by the enrollments of one person. An
   enrollment starts as its own subject (`subject_id = patient_key`); linking
-  makes several enrollments one subject.
+  makes several enrollments one subject. It records **identity only**: linking
+  does not share imaging.
 - **Ownership** — every study/series is owned by exactly one enrollment
   (`image_study.patient_key`), the one that ingested it first, and carries its
   subject. Imaging is stored once, in the owner's tree —
   `<root>/<owner's slug>/<patient_id>/<StudyUID>` ([dataset layout](dataset_layout.md));
   the patient_id on imaging rows is the DICOM PatientID / folder name.
+- **Membership** — when a linked enrollment ingests a study whose
+  StudyInstanceUID another enrollment of the same person already owns (the very
+  same object), it becomes a *member* of that study (`study_member`). The study
+  keeps its owner and files.
+- **Visibility** — an enrollment sees the studies it owns plus those it is a
+  member of: the `study_visibility` view (owners ∪ members), the one definition
+  every reader uses.
+
+So a dataset re-exported with **new UIDs** (e.g. OUTER LIMITS copies of
+CRISP2/LVO studies) keeps its own copies: each enrollment shows only its own
+studies, and the copies are stored twice. Only exact same-UID studies are shared.
 
 What linking changes — and what it does not:
 
-| | Shared across a subject's enrollments | Separate per enrollment |
+| | Shared between linked enrollments | Separate per enrollment |
 |---|---|---|
-| Imaging (studies, series, OHIF) | yes — visible from every enrollment | |
-| Study / series labels | yes (they describe the imaging) | |
-| Timepoints, episodes, series ranks (`NCCT_1`) | yes — computed per subject | |
+| Identity (`subject_id`) | yes | |
+| Imaging (studies, series, OHIF) | only same-UID studies (membership) | yes — each sees what it owns + its memberships |
+| Study / series labels | yes, on a shared study (they describe the imaging) | |
+| Timepoints, episodes, series ranks (`NCCT_1`) | | yes — computed per owning enrollment; a shared study keeps its owner's |
+| Clinical timepoint anchor (CRISP2 puncture time) | yes — a fact about the person | |
+| `patient.stroke_date` | | yes — earliest study the enrollment sees (NULL when none) |
 | Patient labels | | yes — each dataset keeps its own |
 | Patient rows, ids | | yes — one row per identifier |
-| Who sees what | a user granted dataset A sees A's enrollments, A's patient labels, and **all imaging of those people** (including imaging another dataset ingested) — never B's identifiers or patient labels | |
+| Who sees what | | a user granted dataset A sees A's enrollments, A's patient labels and **the imaging A's enrollments see** — never B's identifiers, patient labels or B-only imaging |
 
 In the web app a person enrolled in two datasets you can see appears as two
-patient rows; their studies list both ids (`11-001, OL-0001`) and both datasets
-in the Patient ID / Dataset columns. Patient labels shown on a study/series row
-are editable only when exactly one enrollment of that person is in view;
-otherwise the cell is read-only (hover for whose value is whose) — edit it from
-the patient row. Data exports produce one row per enrollment when a patient
-table is joined to imaging.
+patient rows, each expanding to its own studies. A shared (same-UID) study lists
+both ids (`11-001, OL-0001`) and both datasets in the Patient ID / Dataset
+columns; patient labels shown on its rows are editable only when exactly one of
+those enrollments is in view; otherwise the cell is read-only (hover for whose
+value is whose) — edit it from the patient row. Data exports join a patient
+table to the imaging each enrollment sees, so a shared study yields one row per
+enrollment that sees it.
 
 ## Linking patients (`scripts/admin/link_patients.py`)
 
@@ -76,32 +92,34 @@ ingested anyway, put the JSON file's path in the ingestion YAML as
 `patient_links`: the run applies the links once, before the first case, then
 ingests. The keys must be the DICOM `PatientID`s the new files carry. Details:
 [`../reference/image_ingestion_protocol.md`](../reference/image_ingestion_protocol.md).
-At the end of the run the linked view is rebuilt, so imaging the batch brought
-to a linked person appears under the other enrollment too.
+At the end of the run the linked view is rebuilt, so same-UID studies the batch
+re-sent appear under the re-sending enrollment too.
 
 - The `link_*` enrollment must exist (ingested). The other is **created** when
   missing — an enrollment with no imaging of its own, `import_label =
-  link:<file>` — so a dataset that only *references* existing imaging needs no
-  ingestion at all.
-- If it already exists, its whole subject — including any imaging it owns —
-  joins the other's; nothing moves on disk.
+  link:<file>`; it sees nothing until it ingests (its same-UID studies then
+  become memberships).
+- If it already exists, its whole subject joins the other's; each keeps the
+  imaging it owns, nothing moves on disk, and no imaging is shared by the link
+  itself.
 - After `--apply` the [linked view](dataset_layout.md#linked-view) is rebuilt
-  (when `[storage].linked_view_root` is set), so each enrollment shows the
-  imaging it now shares as symlinks.
+  (when `[storage].linked_view_root` is set): it holds one symlink per membership.
 - The run validates every row first (registered datasets, existing target, no
   self-links, no source listed twice) and writes nothing if any row fails. With
   `--apply` everything is one transaction, followed by re-deriving what follows
   from a person's imaging: stroke dates, series ranks, timepoints, the labelled
   mirrors.
 - Grant the new dataset to its users (`manage_users.py set-datasets` or the
-  `/admin` page) to make the linked imaging visible to them.
+  `/admin` page) to make its imaging visible to them.
 
 **Link before ingesting shared imaging.** If dataset B's export contains the
 same studies (same StudyInstanceUIDs) that dataset A already ingested,
 ingestion refuses them unless the two enrollments are linked: one study cannot
 belong to two people, so an unlinked clash means either a missing link or a UID
 clash in the source data. Once linked, re-sent studies keep their owner and
-the owner's files; B's genuinely new studies are owned by B's enrollment.
+the owner's files, and B's enrollment becomes a member of them; B's studies with
+new UIDs are owned by B's enrollment (and seen only by it). Linking *after*
+ingestion is fine too: link, then re-run the ingestion for the refused cases.
 
 ### Undoing a link
 
@@ -112,7 +130,8 @@ python scripts/admin/link_patients.py unlink unlink.csv --apply
 ```
 
 The enrollment becomes its own person again, taking the imaging it owns; the
-rest of the subject keeps the rest. Then **restart the web app**
+rest of the subject keeps the rest. Memberships between it and the others are
+dropped (they were only valid for one person). Then **restart the web app**
 (`sudo systemctl restart ssc-web-app`): its DICOMweb access cache otherwise keeps
 the old cross-dataset access for up to 5 minutes.
 
@@ -197,6 +216,10 @@ Linked people, from SQL:
 ```sql
 SELECT subject_id, array_agg(patient_key ORDER BY patient_key) AS enrollments
 FROM patient GROUP BY subject_id HAVING count(*) > 1;
+-- which studies each enrollment sees (owner or member)
+SELECT patient_key, count(*) FILTER (WHERE is_owner) AS owned,
+       count(*) FILTER (WHERE NOT is_owner) AS shared
+FROM study_visibility GROUP BY patient_key ORDER BY patient_key;
 ```
 
 Scripts' `--patient` options take a `patient_key`, or a bare patient id when it

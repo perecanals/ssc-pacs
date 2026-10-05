@@ -1,12 +1,13 @@
 """Per-user dataset (cohort) access scopes.
 
 Each ``patient`` row is an enrollment in one dataset (``patient.dataset``);
-enrollments of the same person share a ``subject_id``, and a study belongs to
-the whole subject. A user's scope is the set of dataset names they may see,
-from ``users.allowed_datasets``:
+enrollments of the same person share a ``subject_id`` (identity only), and a
+study is seen by its owning enrollment plus its members (``study_visibility``,
+Alembic 0028). A user's scope is the set of dataset names they may see, from
+``users.allowed_datasets``:
 
  - admins are unrestricted — their scope is the ``None`` sentinel;
- - non-admins see a study when any enrollment of its subject is in a granted
+ - non-admins see a study when an enrollment that sees it is in a granted
    dataset;
  - an empty grant set (the default) means deny-by-default: no patient data.
 
@@ -101,13 +102,15 @@ def fetch_user_scope(username: str) -> Scope:
 
 
 def fetch_study_datasets(studyinstanceuid: str) -> frozenset | None:
-    """Datasets of every enrollment of the study's subject; None if unknown."""
+    """Datasets of the enrollments that see the study (owner and members;
+    Alembic 0028); None if unknown."""
     conn = get_conn()
     try:
         with conn.cursor() as cur:
             cur.execute(
                 "SELECT st.studyinstanceuid, q.dataset FROM image_study st "
-                "LEFT JOIN patient q ON q.subject_id = st.subject_id "
+                "LEFT JOIN study_visibility sv ON sv.studyinstanceuid = st.studyinstanceuid "
+                "LEFT JOIN patient q ON q.patient_key = sv.patient_key "
                 "WHERE st.studyinstanceuid = %s",
                 (studyinstanceuid,),
             )
@@ -120,13 +123,14 @@ def fetch_study_datasets(studyinstanceuid: str) -> frozenset | None:
 
 
 def fetch_patient_id_subjects(patient_id: str) -> tuple | None:
-    """Per subject with imaging under a DICOM PatientID: its datasets and studies.
+    """Per study under a DICOM PatientID: the datasets that see it, and it.
 
     OHIF's study browser searches QIDO by PatientID (0010,0020). That is the
     bare id in the files, and Orthanc groups patients by it alone — so one
     PatientID can cover *different people* from different datasets (same id,
-    separate enrollments and subjects). Returns a tuple of
-    ``(datasets, study_uids)`` frozenset pairs, one per subject, or None when
+    separate enrollments). Each study is visible to the datasets of the
+    enrollments that see it (owner and members; Alembic 0028). Returns a tuple
+    of ``(datasets, study_uids)`` frozenset pairs, one per study, or None when
     no study carries that PatientID (a QIDO wildcard pattern matches nothing
     and is therefore denied for non-admins).
     """
@@ -134,11 +138,11 @@ def fetch_patient_id_subjects(patient_id: str) -> tuple | None:
     try:
         with conn.cursor() as cur:
             cur.execute(
-                "SELECT st.subject_id, array_agg(DISTINCT st.studyinstanceuid), "
-                "       (SELECT array_agg(DISTINCT q.dataset) FROM patient q "
-                "        WHERE q.subject_id = st.subject_id) "
-                "FROM image_study st WHERE st.patient_id = %s "
-                "GROUP BY st.subject_id",
+                "SELECT st.studyinstanceuid, ARRAY[st.studyinstanceuid], "
+                "       (SELECT array_agg(DISTINCT q.dataset) FROM study_visibility sv "
+                "        JOIN patient q ON q.patient_key = sv.patient_key "
+                "        WHERE sv.studyinstanceuid = st.studyinstanceuid) "
+                "FROM image_study st WHERE st.patient_id = %s",
                 (patient_id,),
             )
             rows = cur.fetchall()
@@ -148,7 +152,7 @@ def fetch_patient_id_subjects(patient_id: str) -> tuple | None:
         return None
     return tuple(
         (frozenset(datasets or []), frozenset(study_uids or []))
-        for _subject, study_uids, datasets in rows
+        for _study, study_uids, datasets in rows
     )
 
 
@@ -203,8 +207,8 @@ def scope_allows(scope: Scope, datasets: frozenset | None) -> bool:
 def visible_patient_id_studies(scope: Scope, subjects: tuple | None) -> tuple[frozenset, bool]:
     """Studies under a PatientID the scope may see, and whether that is all of them.
 
-    ``subjects`` comes from :func:`get_patient_id_subjects_cached`. A subject is
-    visible when any of its enrollments is in scope.
+    ``subjects`` comes from :func:`get_patient_id_subjects_cached` (one entry
+    per study). A study is visible when an enrollment that sees it is in scope.
     """
     if not subjects:
         return frozenset(), False
