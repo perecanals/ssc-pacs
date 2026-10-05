@@ -23,9 +23,11 @@ if str(WEB_APP_DIR) not in sys.path:
     sys.path.insert(0, str(WEB_APP_DIR))
 
 from dataset_registry import resolve_or_offer_dataset  # noqa: E402
+from linked_view import after_identity_change  # noqa: E402
 
 from config import COLD_ARCHIVE_ROOT, DICOM_DATA_ROOT, STORAGE_MODE  # noqa: E402
 from labelled_table_sync import sync_labelled_rows  # noqa: E402
+from patient_identity import apply_links, load_links_json, refresh_subjects  # noqa: E402
 
 DEFAULT_ENV_PATH = str(ROOT_DIR / ".env")
 
@@ -173,6 +175,7 @@ def load_config(config_path):
         "compress_workers": 4,
         "pipeline_indexing": True,
         "skip_dir_names": [],
+        "patient_links": None,
     }
     merged_config = {**defaults, **config}
     if not merged_config.get("src_dir"):
@@ -197,6 +200,21 @@ def load_config(config_path):
             f"(no '/'), got {merged_config['skip_dir_names']!r}: {config_path}"
         )
     merged_config["skip_dir_names"] = list(skip_dir_names)
+    merged_config["_patient_link_rows"] = []
+    if merged_config["patient_links"]:
+        # Read and checked here, before any DB work; applied once per run by
+        # apply_patient_links (scripts/admin/link_patients.py takes the same file).
+        links_path = Path(str(merged_config["patient_links"])).expanduser()
+        if not links_path.is_absolute():
+            links_path = config_path.parent / links_path
+        rows = load_links_json(links_path)
+        if rows[0]["dataset"] != str(merged_config["dataset"]).strip():
+            raise ValueError(
+                f"patient_links file {links_path} is for dataset {rows[0]['dataset']!r}, "
+                f"but this batch is dataset {merged_config['dataset']!r}: {config_path}"
+            )
+        merged_config["patient_links"] = str(links_path)
+        merged_config["_patient_link_rows"] = rows
     merged_config["compress_workers"] = max(
         1, int(merged_config["compress_workers"] or 1))
     if merged_config["overwrite_if_exists"] and merged_config["pipeline_indexing"]:
@@ -291,6 +309,78 @@ def ensure_dataset_registered(postgres_engine, name, logger, stdin=None, stdout=
     if created:
         logger.info(f"Registered new dataset {name!r} (slug {slug!r}) on confirmation")
     return slug
+
+
+def apply_patient_links(postgres_engine, rows, source_name, logger):
+    """Preflight, once per run: apply the YAML's patient_links before any case.
+
+    Links each listed patient of this batch's dataset to an already-ingested
+    patient of the reference dataset, so studies the two share are accepted
+    (ingestion refuses a study owned by a different, unlinked person). One
+    transaction; any invalid row aborts the run with nothing written. Re-running
+    is a no-op for links already in place (resume-safe).
+    """
+    raw = postgres_engine.raw_connection()
+    try:
+        with raw.cursor() as cur:
+            cur.execute("SET LOCAL app.audit_user = %s", (f"link:{source_name}",))
+            try:
+                report, touched = apply_links(cur, rows, source_name)
+            except ValueError as exc:
+                raw.rollback()
+                raise RuntimeError(
+                    f"patient_links {source_name}: {exc}. Nothing was linked; fix the "
+                    "file (or check it with scripts/admin/link_patients.py link <file>)."
+                ) from exc
+            refresh_subjects(cur, raw, touched)
+        raw.commit()
+    except Exception:
+        raw.rollback()
+        raise
+    finally:
+        raw.close()
+    logger.info(f"Patient links ({source_name}): {len(rows)} row(s)\n" + "\n".join(report))
+
+
+def refresh_linked_view(postgres_engine, logger):
+    """End of run: rebuild the linked view so imaging this batch brought to a
+    linked person shows up under that person's other enrollments. Non-fatal
+    (the view is rebuildable: scripts/cold_storage/build_linked_view.py)."""
+    raw = postgres_engine.raw_connection()
+    try:
+        for line in after_identity_change(raw):
+            logger.info(line)
+    except Exception as e:
+        logger.warning(f"Linked view not rebuilt ({e}); run "
+                       "scripts/cold_storage/build_linked_view.py --apply")
+    finally:
+        raw.close()
+
+
+def warn_unlinked_enrollments(postgres_engine, dataset, logger):
+    """End of a run with patient_links: list the batch dataset's enrollments
+    that are nobody else's person. Usually a PatientID in the files that is not
+    a key of the link file (e.g. the files carry the reference dataset's id),
+    which leaves that imaging on a separate, unlinked patient."""
+    raw = postgres_engine.raw_connection()
+    try:
+        with raw.cursor() as cur:
+            cur.execute(
+                "SELECT p.patient_key FROM patient p WHERE p.dataset = %s AND NOT EXISTS "
+                "(SELECT 1 FROM patient q WHERE q.subject_id = p.subject_id "
+                " AND q.patient_key <> p.patient_key) ORDER BY 1",
+                (dataset,),
+            )
+            unlinked = [r[0] for r in cur.fetchall()]
+    finally:
+        raw.close()
+    if unlinked:
+        logger.warning(
+            f"{len(unlinked)} enrollment(s) of {dataset!r} are not linked to anyone: "
+            f"{', '.join(unlinked)} — if they should be, check the patient_links keys "
+            "against the files' DICOM PatientID and link them "
+            "(scripts/admin/link_patients.py)."
+        )
 
 
 def batch_patient_keys(raw_conn, study_ids, series_ids):
@@ -730,6 +820,9 @@ if __name__ == "__main__":
     # Once, before any case: an unregistered dataset would otherwise fail (or,
     # mistyped, misfile) every case of the batch.
     ensure_dataset_registered(postgres_engine, config["dataset"].strip(), logger)
+    if config["_patient_link_rows"]:
+        apply_patient_links(postgres_engine, config["_patient_link_rows"],
+                            Path(config["patient_links"]).name, logger)
     run_import_id = ImageIngestionProtocol.get_next_import_id(postgres_engine)
 
     src_dir = config["src_dir"]
@@ -749,6 +842,7 @@ if __name__ == "__main__":
     logger.info(f"Compression workers: {config['compress_workers']}")
     logger.info(f"Pipelined Orthanc indexing: {config['pipeline_indexing']}")
     logger.info(f"Skip directory names: {config['skip_dir_names']}")
+    logger.info(f"Patient links: {config['patient_links']}")
     logger.info(f"Storage mode (config.toml): {config['_storage_mode']}")
     logger.info(f"DICOM data root (config.toml): {config['_dicom_data_root']}")
     logger.info(f"Cold archive root (resolved): {config.get('cold_archive_root')}")
@@ -984,6 +1078,11 @@ if __name__ == "__main__":
         logger.error(f"End-of-run sanity pass failed (data is safe on disk/DB; "
                      f"run reindex_missing_series.py to backfill): {e}")
         sanity_still_missing = None  # unknown state
+
+    if synced_study_ids or config["_patient_link_rows"]:
+        refresh_linked_view(postgres_engine, logger)
+    if config["_patient_link_rows"]:
+        warn_unlinked_enrollments(postgres_engine, config["dataset"].strip(), logger)
 
     # Log final summary
     logger.info("=" * 60)

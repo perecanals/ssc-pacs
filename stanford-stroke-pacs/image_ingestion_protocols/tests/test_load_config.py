@@ -131,3 +131,52 @@ def test_legacy_mode_archive_root_warns_but_keeps(legacy_mode, tmp_path, capsys)
 
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "-v"]))
+
+
+def _write_links(tmp_path, body):
+    p = tmp_path / "links.json"
+    p.write_text(body, encoding="utf-8")
+    return p
+
+
+def test_patient_links_default_off(cold_mode, tmp_path):
+    cfg, _ = load_config(_write_yaml(tmp_path, "src_dir: /data/b\n"))
+    assert cfg["patient_links"] is None
+    assert cfg["_patient_link_rows"] == []
+
+
+def test_patient_links_relative_to_yaml(cold_mode, tmp_path):
+    _write_links(tmp_path, '{"dataset": "TEST", "link_dataset": "CRISP2/LVO", '
+                           '"links": {"OL-1": "4-1391", "OL-2": "2-456"}}')
+    cfg, _ = load_config(_write_yaml(tmp_path, "src_dir: /data/b\npatient_links: links.json\n"))
+    assert cfg["patient_links"] == str(tmp_path / "links.json")
+    assert [(r["patient_id"], r["link_dataset"], r["link_patient_id"])
+            for r in cfg["_patient_link_rows"]] == [
+        ("OL-1", "CRISP2/LVO", "4-1391"), ("OL-2", "CRISP2/LVO", "2-456")]
+    assert {r["dataset"] for r in cfg["_patient_link_rows"]} == {"TEST"}
+
+
+def test_patient_links_dataset_must_match_batch(cold_mode, tmp_path):
+    _write_links(tmp_path, '{"dataset": "OTHER", "link_dataset": "CRISP2/LVO", '
+                           '"links": {"OL-1": "4-1391"}}')
+    with pytest.raises(ValueError, match="is for dataset 'OTHER'"):
+        load_config(_write_yaml(tmp_path, "src_dir: /data/b\npatient_links: links.json\n"))
+
+
+@pytest.mark.parametrize("body, message", [
+    ("not json", "cannot read"),
+    ('{"dataset": "TEST", "links": {"OL-1": "4-1391"}}', "link_dataset"),
+    ('{"dataset": "TEST", "link_dataset": "X", "links": {}}', "non-empty object"),
+    ('{"dataset": "TEST", "link_dataset": "X", "links": {"OL-1": 41391}}', "as strings"),
+    ('{"dataset": "TEST", "link_dataset": "X", "links": {"OL-1": "a", "OL-1": "b"}}',
+     "more than once"),
+])
+def test_patient_links_malformed(cold_mode, tmp_path, body, message):
+    _write_links(tmp_path, body)
+    with pytest.raises(ValueError, match=message):
+        load_config(_write_yaml(tmp_path, "src_dir: /data/b\npatient_links: links.json\n"))
+
+
+def test_patient_links_missing_file(cold_mode, tmp_path):
+    with pytest.raises(ValueError, match="cannot read"):
+        load_config(_write_yaml(tmp_path, "src_dir: /data/b\npatient_links: nope.json\n"))

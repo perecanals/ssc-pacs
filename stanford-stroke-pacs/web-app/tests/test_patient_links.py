@@ -42,7 +42,7 @@ def _subject(cur, table, key_col, key):
 
 
 def test_link_creates_missing_enrollment_in_target_subject(link_module, cur):
-    report, touched = link_module["_link_rows"](cur, [_row(
+    report, touched = link_module["apply_links"](cur, [_row(
         dataset="crisp2", patient_id="OL-1", link_dataset="lvo", link_patient_id="P-0002",
     )], "t.csv")
     assert _subject(cur, "patient", "patient_key", "crisp2__OL-1") == "lvo__P-0002"
@@ -57,7 +57,7 @@ def test_link_merges_existing_subject_keeping_owners(link_module, cur):
         "VALUES ('P-0009', %s, %s, '9.0.0.9')",
         (key, key),
     )
-    link_module["_link_rows"](cur, [_row(
+    link_module["apply_links"](cur, [_row(
         dataset="crisp2", patient_id="P-0009", link_dataset="lvo", link_patient_id="P-0002",
     )], "t.csv")
     cur.execute("SELECT patient_key, subject_id FROM image_study WHERE studyinstanceuid = '9.0.0.9'")
@@ -96,13 +96,13 @@ def test_unlink_member_takes_its_owned_imaging(link_module, cur):
 ])
 def test_link_rejects_bad_rows(link_module, cur, row, message):
     with pytest.raises(ValueError, match=message):
-        link_module["_link_rows"](cur, [_row(**row)], "t.csv")
+        link_module["apply_links"](cur, [_row(**row)], "t.csv")
 
 
 def test_link_rejects_a_source_listed_twice(link_module, cur):
     row = dict(dataset="crisp2", patient_id="OL-2", link_dataset="lvo", link_patient_id="P-0002")
     with pytest.raises(ValueError, match="twice"):
-        link_module["_link_rows"](cur, [_row(**row), {**_row(**row), "line": 3}], "t.csv")
+        link_module["apply_links"](cur, [_row(**row), {**_row(**row), "line": 3}], "t.csv")
 
 
 def test_refresh_follows_the_subject(link_module, cur, db_conn):
@@ -111,7 +111,7 @@ def test_refresh_follows_the_subject(link_module, cur, db_conn):
     refresh = runpy.run_path(
         str(Path(__file__).resolve().parents[2] / "image_ingestion_protocols" / "patient_identity.py")
     )["refresh_subjects"]
-    link_module["_link_rows"](cur, [_row(
+    link_module["apply_links"](cur, [_row(
         dataset="crisp2", patient_id="OL-3", link_dataset="lvo", link_patient_id="P-0002",
     )], "t.csv")
     refresh(cur, db_conn, ["lvo__P-0002"])
@@ -119,6 +119,21 @@ def test_refresh_follows_the_subject(link_module, cur, db_conn):
     assert cur.fetchone()["d"] == "2024-03-03"
     cur.execute("SELECT 1 FROM patient_labelled WHERE patient_key = 'crisp2__OL-3'")
     assert cur.fetchone() is not None
+
+
+def test_refresh_with_a_plain_cursor(link_module, db_conn):
+    """link_patients.py --apply drives refresh_subjects with a plain (tuple)
+    cursor; the timepoint recompute must not assume dict rows."""
+    refresh = runpy.run_path(
+        str(Path(__file__).resolve().parents[2] / "image_ingestion_protocols" / "patient_identity.py")
+    )["refresh_subjects"]
+    with db_conn.cursor() as plain:
+        link_module["apply_links"](plain, [_row(
+            dataset="crisp2", patient_id="OL-4", link_dataset="lvo", link_patient_id="P-0002",
+        )], "t.csv")
+        refresh(plain, db_conn, ["lvo__P-0002"])
+        plain.execute("SELECT subject_id FROM patient WHERE patient_key = 'crisp2__OL-4'")
+        assert plain.fetchone()[0] == "lvo__P-0002"
 
 
 def test_split_dry_run_plans_and_rolls_back(client, db_conn, monkeypatch, capsys):
@@ -142,3 +157,35 @@ def test_split_dry_run_plans_and_rolls_back(client, db_conn, monkeypatch, capsys
         with db_conn.cursor() as c:
             c.execute("UPDATE image_study SET import_label = NULL WHERE studyinstanceuid = '1.2.3.4.5'")
         db_conn.commit()
+
+
+def test_recompute_timepoints_same_with_either_cursor(link_module, db_conn):
+    """recompute_subject_timepoints writes the same values whether its caller
+    passes a plain or a RealDictCursor."""
+    import subject_timepoints  # on sys.path via link_module
+
+    ns = vars(subject_timepoints)
+    written = []
+    for factory in (None, psycopg2.extras.RealDictCursor):
+        with db_conn.cursor(cursor_factory=factory) as c:
+            assert ns["recompute_subject_timepoints"](c, ["lvo__P-0002"]) == 1
+            c.execute("SELECT episode, timepoint, timepoint_anchor_source, hours_to_event, "
+                      "timepoint_version FROM image_study WHERE studyinstanceuid = '2.2.2.2.2'")
+            row = c.fetchone()
+            written.append(tuple(row.values()) if isinstance(row, dict) else row)
+    assert written[0] == written[1]
+    assert written[0][-1] == ns["RULES_VERSION"]
+
+
+def test_link_from_json_file(link_module, cur, tmp_path):
+    """The JSON link file (also ingestion's patient_links) links like the CSV."""
+    path = tmp_path / "links.json"
+    path.write_text('{"dataset": "crisp2", "link_dataset": "lvo", '
+                    '"links": {"OL-5": "P-0002"}}', encoding="utf-8")
+    rows = link_module["_load"](path, link_module["LINK_COLUMNS"])
+    report, touched = link_module["apply_links"](cur, rows, path.name)
+    assert _subject(cur, "patient", "patient_key", "crisp2__OL-5") == "lvo__P-0002"
+    assert touched == {"lvo__P-0002"}
+    # Applying the same file again (a resumed ingestion run) changes nothing.
+    report, _ = link_module["apply_links"](cur, rows, path.name)
+    assert "already linked" in report[0]

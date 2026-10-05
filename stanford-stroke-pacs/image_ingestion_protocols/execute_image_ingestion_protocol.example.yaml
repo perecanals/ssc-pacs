@@ -42,9 +42,17 @@ import_label: my_batch_1
 # <slug>__<PatientID>), so the same id in two datasets stays two patients. It is
 # also what per-user dataset permissions filter on (users.allowed_datasets).
 # To declare that a patient here is the same person as one already ingested in
-# another dataset, link them (scripts/admin/link_patients.py) — before
-# ingesting, if the two share imaging.
+# another dataset, link them — with patient_links below, or beforehand with
+# scripts/admin/link_patients.py — before ingesting, if the two share imaging.
 dataset: my_cohort
+
+# Optional: a JSON file (absolute, or relative to this YAML) linking patients of
+# this batch's dataset to already-ingested patients of a reference dataset.
+# Applied once, before the first case; an invalid row stops the run with
+# nothing linked. Keys are the DICOM PatientIDs of this batch:
+#   {"dataset": "my_cohort", "link_dataset": "CRISP2/LVO",
+#    "links": {"MC-001": "4-1391", "MC-002": "2-456"}}
+# patient_links: my_cohort_links.json
 
 # Resume a previously interrupted run: skip cases that a prior log with a
 # matching src_dir proves were successfully completed (union across all prior

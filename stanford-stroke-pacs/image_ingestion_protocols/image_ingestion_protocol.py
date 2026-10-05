@@ -877,8 +877,9 @@ class ImageIngestionProtocol:
             raise RuntimeError(
                 "Refusing case: StudyInstanceUID(s) already belong to a different "
                 f"patient — {details}. If they are the same person, link the "
-                "enrollments first (scripts/admin/link_patients.py); otherwise the "
-                "source data carries a UID clash."
+                "enrollments first (YAML patient_links, or "
+                "scripts/admin/link_patients.py); otherwise the source data "
+                "carries a UID clash."
             )
         for table in (self.case_study_table, self.case_series_table):
             uids = table["studyinstanceuid"].astype(str)

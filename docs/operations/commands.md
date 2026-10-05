@@ -202,6 +202,7 @@ Link a patient of one dataset to the same person already ingested in another
 ```bash
 python scripts/admin/link_patients.py link links.csv            # dataset,patient_id,link_dataset,link_patient_id
 python scripts/admin/link_patients.py link links.csv --apply
+python scripts/admin/link_patients.py link links.json           # {"dataset","link_dataset","links":{id: link_id}}; or YAML patient_links at ingestion
 python scripts/admin/link_patients.py unlink mistakes.csv --apply # dataset,patient_id
 ```
 

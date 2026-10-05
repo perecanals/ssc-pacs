@@ -60,6 +60,25 @@ python scripts/admin/link_patients.py link outerlimits_links.csv            # dr
 python scripts/admin/link_patients.py link outerlimits_links.csv --apply
 ```
 
+The same links as a JSON file — one dataset linked to one reference dataset —
+which `link_patients.py link` accepts too:
+
+```json
+{
+  "dataset": "OUTERLIMITS",
+  "link_dataset": "CRISP2/LVO",
+  "links": {"OL-0001": "2-076", "OL-0002": "2-118"}
+}
+```
+
+**Linking together with ingestion.** When the new dataset's imaging is being
+ingested anyway, put the JSON file's path in the ingestion YAML as
+`patient_links`: the run applies the links once, before the first case, then
+ingests. The keys must be the DICOM `PatientID`s the new files carry. Details:
+[`../reference/image_ingestion_protocol.md`](../reference/image_ingestion_protocol.md).
+At the end of the run the linked view is rebuilt, so imaging the batch brought
+to a linked person appears under the other enrollment too.
+
 - The `link_*` enrollment must exist (ingested). The other is **created** when
   missing — an enrollment with no imaging of its own, `import_label =
   link:<file>` — so a dataset that only *references* existing imaging needs no

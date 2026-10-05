@@ -110,8 +110,9 @@ keyed `<dataset slug>__<PatientID>` (Alembic `0026`) — so a case may hold seve
 patients (each its own enrollment, directory tree and Orthanc patient), the same
 patient may span several cases, and **the same PatientID in another dataset is
 another patient**, never merged into this one. To declare that a patient here
-is the same person as one in another dataset, link them with
-`scripts/admin/link_patients.py` (see
+is the same person as one in another dataset, link them: pass a JSON link file
+as `patient_links` (applied before the first case) or run
+`scripts/admin/link_patients.py` beforehand (see
 [`../operations/linking_patients.md`](../operations/linking_patients.md)) —
 before ingesting, when both datasets carry the same imaging.
 
@@ -126,6 +127,7 @@ before ingesting, when both datasets carry the same imaging.
 | `delete_originals_after_verification` | After verifying every file copied successfully, remove the source case directory |
 | `import_label` | Free-text tag written to `import_label` column in both tables — useful for filtering a batch later |
 | `dataset` | **Required.** The dataset (its display name, e.g. `CRISP2/LVO`) this batch is ingested into. The driver raises `ValueError` at config load when it is missing, then checks it once before any case: an **unregistered** name — a new dataset, or a typo, which would file every patient of the batch as a new, unlinked person — is offered for creation only when the run was started from a terminal (`Create it now as a new dataset (slug '<slug>', permanent)? [y/N]`, listing similar existing names); a background run stops with the `scripts/admin/manage_datasets.py add` command instead. Each PatientID becomes an enrollment in it (`patient.dataset`); it is also what users' dataset grants filter on. |
+| `patient_links` | **Optional.** Path (absolute, or relative to the YAML) to a JSON link file `{"dataset": "<this batch's dataset>", "link_dataset": "<reference dataset>", "links": {"<PatientID here>": "<patient_id there>", ...}}`. Read and validated at config load (the file's `dataset` must equal `dataset`). Applied once per run, right after the dataset check and **before any case**, in one transaction: each listed patient is enrolled in (or linked to) the reference patient's subject, so studies the two datasets share are accepted instead of refused. Any invalid row (unregistered dataset, reference patient not ingested, id listed twice) stops the run with nothing linked. Re-running (resume) is a no-op for links already in place. Keys must be the **DICOM `PatientID`** the files carry, or the link and the ingested enrollment are two different patients. The same file works with `scripts/admin/link_patients.py link <file>` (dry-run validation). |
 | `cold_archive_root` | **Optional override.** Defaults to `[storage].cold_archive_root` from `config.toml` when `mode = "cold_path_cache"`, or `null` in legacy mode. The script warns if you override and the override differs from `config.toml`. |
 | `cleanup_loose_after_indexing` | `cold_path_cache` only (ignored with a warning in legacy mode). Default `true`: after each case's Orthanc indexing verifies, delete its series' loose `DICOM/` dirs (same safety checks as `cleanup_loose_dicoms.py`; NIFTI siblings preserved). Set `false` to keep loose files until a manual cleanup pass. See "Cleanup of loose DICOMs after ingestion". |
 | `resume` | Default `true`. Skip cases that prior logs for this `src_dir` prove were successfully completed; failed/interrupted cases re-run (see "Resume"). CLI `--no-resume` overrides. |

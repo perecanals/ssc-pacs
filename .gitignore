@@ -78,6 +78,7 @@ stanford-stroke-pacs/config.toml
 
 # Site/run-specific ingestion config (use the .example.yaml template)
 stanford-stroke-pacs/image_ingestion_protocols/execute_image_ingestion_protocol.yaml
+stanford-stroke-pacs/image_ingestion_protocols/*_links.json
 # Per-batch configs derived from the base YAML by run_all_batches.sh
 stanford-stroke-pacs/image_ingestion_protocols/batch_configs/
 # Host-specific, temporary batch-run driver (not part of the shipped pipeline)

@@ -14,6 +14,12 @@ person as that already-ingested one":
     dataset,patient_id,link_dataset,link_patient_id
     OUTERLIMITS,OL-0001,CRISP2/LVO,2-076
 
+``link`` also takes the JSON link file that ingestion accepts as
+``patient_links`` (one dataset linked to one reference dataset):
+
+    {"dataset": "OUTERLIMITS", "link_dataset": "CRISP2/LVO",
+     "links": {"OL-0001": "2-076"}}
+
 The ``link_dataset`` / ``link_patient_id`` enrollment must exist. The
 ``dataset`` / ``patient_id`` one is created when it does not exist yet (with no
 imaging of its own); when it does, its whole subject — including imaging it
@@ -28,6 +34,7 @@ the labelled mirrors). See docs/operations/linking_patients.md.
 Usage:
     python scripts/admin/link_patients.py link outerlimits_links.csv
     python scripts/admin/link_patients.py link outerlimits_links.csv --apply
+    python scripts/admin/link_patients.py link outerlimits_links.json --apply
     python scripts/admin/link_patients.py unlink mistakes.csv --apply
 
 Link *before* ingesting a dataset that carries the same imaging as an existing
@@ -51,11 +58,9 @@ sys.path.insert(0, str(STACK_ROOT / "image_ingestion_protocols"))
 from db import DB_CONFIG  # noqa: E402
 from linked_view import after_identity_change  # noqa: E402
 from patient_identity import (  # noqa: E402
-    create_enrollment,
-    dataset_slug,
-    enrollment,
+    apply_links,
     enrollment_key,
-    link,
+    load_links_json,
     refresh_subjects,
     unlink,
 )
@@ -65,6 +70,13 @@ UNLINK_COLUMNS = ("dataset", "patient_id")
 
 
 def _load(path: Path, columns) -> list[dict]:
+    if path.suffix.lower() == ".json":
+        if columns != LINK_COLUMNS:
+            sys.exit(f"Error: {path}: a JSON link file is for 'link'; unlink takes a CSV.")
+        try:
+            return load_links_json(path)
+        except ValueError as exc:
+            sys.exit(f"Error: {exc}")
     # Deferred: only reading the table needs pandas (not installed in the
     # web-app test environment, which imports this module).
     import pandas as pd  # noqa: PLC0415
@@ -86,43 +98,6 @@ def _load(path: Path, columns) -> list[dict]:
             sys.exit(f"Error: line {number}: empty {blank}.")
         rows.append({"line": number, **values})
     return rows
-
-
-def _link_rows(cur, rows, source_name: str) -> tuple[list[str], set[str]]:
-    report, touched = [], set()
-    pairs = set()
-    for row in rows:
-        where = f"line {row['line']}"
-        for ds in (row["dataset"], row["link_dataset"]):
-            if dataset_slug(cur, ds) is None:
-                raise ValueError(f"{where}: dataset {ds!r} is not registered "
-                                 "(scripts/admin/manage_datasets.py add)")
-        if (row["dataset"], row["patient_id"]) == (row["link_dataset"], row["link_patient_id"]):
-            raise ValueError(f"{where}: a patient cannot be linked to itself")
-        if (row["dataset"], row["patient_id"]) in pairs:
-            raise ValueError(f"{where}: {row['dataset']}/{row['patient_id']} appears twice")
-        pairs.add((row["dataset"], row["patient_id"]))
-        target_key = enrollment_key(cur, row["link_dataset"], row["link_patient_id"])
-        if target_key is None:
-            raise ValueError(f"{where}: {row['link_dataset']}/{row['link_patient_id']} "
-                             "is not enrolled — ingest it first")
-        target = enrollment(cur, target_key)
-        source_key = enrollment_key(cur, row["dataset"], row["patient_id"])
-        if source_key is None:
-            source_key = create_enrollment(
-                cur, row["dataset"], row["patient_id"], target["subject_id"],
-                import_label=f"link:{source_name}",
-            )
-            report.append(f"  enroll {source_key} as {target_key}'s person (new)")
-            touched.add(target["subject_id"])
-            continue
-        old, new = link(cur, source_key, target_key)
-        if old == new:
-            report.append(f"  {source_key} already linked to {target_key}")
-        else:
-            report.append(f"  link {source_key} -> {target_key} (subject {old} joins {new})")
-            touched.update((old, new))
-    return report, touched
 
 
 def _unlink_rows(cur, rows) -> tuple[list[str], set[str]]:
@@ -165,7 +140,7 @@ def main() -> int:
             cur.execute("SET LOCAL app.audit_user = %s", (f"link:{args.file.name}",))
             try:
                 if args.command == "link":
-                    report, touched = _link_rows(cur, rows, args.file.name)
+                    report, touched = apply_links(cur, rows, args.file.name)
                 else:
                     report, touched = _unlink_rows(cur, rows)
             except ValueError as exc:

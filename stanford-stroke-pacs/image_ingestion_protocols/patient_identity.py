@@ -15,6 +15,8 @@ touched, so stroke_date, ranks, timepoints and the mirrors follow.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from labelled_table_sync import sync_labelled_rows
 from series_classification import ASSIGN_RANKS_SQL, CLEAR_RANKS_SQL
 from subject_timepoints import recompute_subject_timepoints
@@ -139,6 +141,97 @@ def move_studies(cur, study_uids: list[str], owner_key: str) -> int:
         if table == "image_study":
             moved = cur.rowcount
     return moved
+
+
+def load_links_json(path) -> list[dict]:
+    """Read a JSON link file into ``apply_links`` rows.
+
+    One file links one dataset to one reference dataset::
+
+        {"dataset": "OUTER LIMITS", "link_dataset": "CRISP2/LVO",
+         "links": {"OL-SU001": "4-1391", "OL-SU002": "2-456"}}
+
+    Each ``links`` entry reads "<patient_id in dataset> is the same person as
+    <patient_id in link_dataset>". Raises ValueError on a malformed file.
+    """
+    import json  # noqa: PLC0415
+
+    def _no_duplicates(pairs):
+        # json would keep only the last of a repeated key: a patient listed
+        # twice must be an error, not a silent pick.
+        keys = [k for k, _ in pairs]
+        repeated = sorted({k for k in keys if keys.count(k) > 1})
+        if repeated:
+            raise ValueError(f"{path}: listed more than once: {repeated}")
+        return dict(pairs)
+
+    try:
+        data = json.loads(Path(path).read_text(encoding="utf-8"),
+                          object_pairs_hook=_no_duplicates)
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError(f"cannot read link file {path}: {exc}") from exc
+    if not isinstance(data, dict):
+        raise ValueError(f"{path}: expected an object with dataset, link_dataset, links")
+    dataset, link_dataset, links = (data.get(k) for k in ("dataset", "link_dataset", "links"))
+    for name, value in (("dataset", dataset), ("link_dataset", link_dataset)):
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError(f"{path}: {name!r} must be a non-empty dataset name")
+    if not isinstance(links, dict) or not links:
+        raise ValueError(f"{path}: 'links' must be a non-empty object "
+                         '{"<patient_id>": "<link_patient_id>", ...}')
+    rows = []
+    for number, (pid, link_pid) in enumerate(links.items(), start=1):
+        if not str(pid).strip() or not isinstance(link_pid, str) or not link_pid.strip():
+            raise ValueError(f"{path}: link #{number} ({pid!r}: {link_pid!r}) needs two "
+                             "non-empty patient ids (as strings)")
+        rows.append({"line": number, "dataset": dataset.strip(), "patient_id": str(pid).strip(),
+                     "link_dataset": link_dataset.strip(), "link_patient_id": link_pid.strip()})
+    return rows
+
+
+def apply_links(cur, rows, source_name: str) -> tuple[list[str], set[str]]:
+    """Validate and apply link rows (dataset, patient_id, link_dataset,
+    link_patient_id, line) in the caller's transaction.
+
+    The ``link_*`` enrollment must exist; the other is created (no imaging of
+    its own, ``import_label = link:<source_name>``) or, when it exists, its
+    whole subject joins the target's. Raises ValueError on the first bad row —
+    the caller rolls back. Returns (report lines, subjects to refresh).
+    """
+    report, touched = [], set()
+    pairs = set()
+    for row in rows:
+        where = f"line {row['line']}"
+        for ds in (row["dataset"], row["link_dataset"]):
+            if dataset_slug(cur, ds) is None:
+                raise ValueError(f"{where}: dataset {ds!r} is not registered "
+                                 "(scripts/admin/manage_datasets.py add)")
+        if (row["dataset"], row["patient_id"]) == (row["link_dataset"], row["link_patient_id"]):
+            raise ValueError(f"{where}: a patient cannot be linked to itself")
+        if (row["dataset"], row["patient_id"]) in pairs:
+            raise ValueError(f"{where}: {row['dataset']}/{row['patient_id']} appears twice")
+        pairs.add((row["dataset"], row["patient_id"]))
+        target_key = enrollment_key(cur, row["link_dataset"], row["link_patient_id"])
+        if target_key is None:
+            raise ValueError(f"{where}: {row['link_dataset']}/{row['link_patient_id']} "
+                             "is not enrolled — ingest it first")
+        target = enrollment(cur, target_key)
+        source_key = enrollment_key(cur, row["dataset"], row["patient_id"])
+        if source_key is None:
+            source_key = create_enrollment(
+                cur, row["dataset"], row["patient_id"], target["subject_id"],
+                import_label=f"link:{source_name}",
+            )
+            report.append(f"  enroll {source_key} as {target_key}'s person (new)")
+            touched.add(target["subject_id"])
+            continue
+        old, new = link(cur, source_key, target_key)
+        if old == new:
+            report.append(f"  {source_key} already linked to {target_key}")
+        else:
+            report.append(f"  link {source_key} -> {target_key} (subject {old} joins {new})")
+            touched.update((old, new))
+    return report, touched
 
 
 def refresh_subjects(cur, conn, subject_ids) -> None:
