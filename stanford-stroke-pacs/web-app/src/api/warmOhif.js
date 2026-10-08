@@ -139,30 +139,46 @@ export async function queueWarmPatient(patientKey) {
   return res.json();
 }
 
+// Server-side cap per id list on /api/cache-status/batch (413 above it).
+export const BATCH_CACHE_STATUS_MAX_IDS = 500;
+
 /**
- * Cache status for many studies, patients, and/or series in one request.
+ * Cache status for many studies, patients, and/or series.
  * Returns {studies: {uid: status}, patients: {patient_key: {total, cold,
  * warming, hot, error}}, series: {uid: status}}.
+ *
+ * The server rejects more than BATCH_CACHE_STATUS_MAX_IDS per list, so a
+ * large page is split into as many requests as the longest list needs
+ * (sent in parallel) and the maps merged back together.
  */
 export async function getBatchCacheStatus(
   uids = [],
   patientKeys = [],
   seriesUids = [],
 ) {
-  if (
-    uids.length === 0 &&
-    patientKeys.length === 0 &&
-    seriesUids.length === 0
-  ) {
-    return { studies: {}, patients: {}, series: {} };
+  const merged = { studies: {}, patients: {}, series: {} };
+  const n = BATCH_CACHE_STATUS_MAX_IDS;
+  const chunks = Math.ceil(
+    Math.max(uids.length, patientKeys.length, seriesUids.length) / n,
+  );
+  if (chunks === 0) return merged;
+  const results = await Promise.all(
+    Array.from({ length: chunks }, async (_, i) => {
+      const res = await apiPost("/api/cache-status/batch", {
+        uids: uids.slice(i * n, (i + 1) * n),
+        patient_keys: patientKeys.slice(i * n, (i + 1) * n),
+        series_uids: seriesUids.slice(i * n, (i + 1) * n),
+      });
+      if (!res.ok) throw new Error(`Batch cache-status failed: ${res.status}`);
+      return res.json();
+    }),
+  );
+  for (const data of results) {
+    Object.assign(merged.studies, data.studies);
+    Object.assign(merged.patients, data.patients);
+    Object.assign(merged.series, data.series);
   }
-  const res = await apiPost("/api/cache-status/batch", {
-    uids,
-    patient_keys: patientKeys,
-    series_uids: seriesUids,
-  });
-  if (!res.ok) throw new Error(`Batch cache-status failed: ${res.status}`);
-  return res.json();
+  return merged;
 }
 
 /**

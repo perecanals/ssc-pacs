@@ -419,7 +419,7 @@ The probe exits non-zero on any critical condition; the JSON report
 | `GET /api/series/{seriesinstanceuid}/cache-status` | — | `series_cache_state` row for the series |
 | `POST /api/series/{seriesinstanceuid}/warm` | yes | Warm a single series (its own row); returns **202**. |
 | `POST /api/series/{seriesinstanceuid}/evict` | yes | Evict a single series |
-| `POST /api/cache-status/batch` | — | Accepts `study_uids`, `patient_uids`, `series_uids`; returns `studies`, `patients`, `series` `{uid: status}` maps |
+| `POST /api/cache-status/batch` | — | Accepts `uids`, `patient_keys`, `series_uids` (max 500 each, else **413**; the frontend's `getBatchCacheStatus` splits larger pages into several requests); returns `studies`, `patients`, `series` `{uid: status}` maps |
 | `GET /api/ohif-link/{uid}` | — | Returns `{status: 'cold' \| 'warming' \| 'ready' \| 'error', url}`; with stale-state FS probe |
 
 The frontend's `warmOhif.resolveOhifViewerUrl()` consumes these and handles

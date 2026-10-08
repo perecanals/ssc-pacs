@@ -109,3 +109,70 @@ describe("resolveOhifViewerUrl sibling warm queueing", () => {
     expect(calls.some((c) => c.url === "/api/cache-status/batch")).toBe(true);
   });
 });
+
+describe("getBatchCacheStatus chunking", () => {
+  beforeEach(() => vi.unstubAllGlobals());
+  afterEach(() => vi.unstubAllGlobals());
+
+  function stubBatch() {
+    const bodies = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url, options = {}) => {
+        if (url !== "/api/cache-status/batch") {
+          throw new Error(`unexpected fetch: ${url}`);
+        }
+        const body = JSON.parse(options.body);
+        bodies.push(body);
+        return jsonResponse({
+          studies: Object.fromEntries(body.uids.map((u) => [u, "hot"])),
+          patients: Object.fromEntries(
+            body.patient_keys.map((p) => [p, { total: 1, hot: 1 }]),
+          ),
+          series: Object.fromEntries(body.series_uids.map((s) => [s, "cold"])),
+        });
+      }),
+    );
+    return bodies;
+  }
+
+  it("sends one request when every list fits the server cap", async () => {
+    const bodies = stubBatch();
+    const { getBatchCacheStatus, BATCH_CACHE_STATUS_MAX_IDS } =
+      await freshModule();
+    const uids = Array.from(
+      { length: BATCH_CACHE_STATUS_MAX_IDS },
+      (_, i) => `s${i}`,
+    );
+    const data = await getBatchCacheStatus(uids, ["p1"], []);
+    expect(bodies).toHaveLength(1);
+    expect(Object.keys(data.studies)).toHaveLength(BATCH_CACHE_STATUS_MAX_IDS);
+    expect(data.patients).toEqual({ p1: { total: 1, hot: 1 } });
+  });
+
+  it("splits lists above the cap into several requests and merges the maps", async () => {
+    const bodies = stubBatch();
+    const { getBatchCacheStatus, BATCH_CACHE_STATUS_MAX_IDS } =
+      await freshModule();
+    const n = BATCH_CACHE_STATUS_MAX_IDS;
+    const uids = Array.from({ length: 2 * n + 1 }, (_, i) => `s${i}`);
+    const series = Array.from({ length: n + 1 }, (_, i) => `se${i}`);
+    const data = await getBatchCacheStatus(uids, ["p1"], series);
+    expect(bodies).toHaveLength(3);
+    for (const b of bodies) {
+      expect(b.uids.length).toBeLessThanOrEqual(n);
+      expect(b.series_uids.length).toBeLessThanOrEqual(n);
+    }
+    expect(Object.keys(data.studies)).toHaveLength(2 * n + 1);
+    expect(Object.keys(data.series)).toHaveLength(n + 1);
+    expect(data.patients).toEqual({ p1: { total: 1, hot: 1 } });
+  });
+
+  it("makes no request when all lists are empty", async () => {
+    const bodies = stubBatch();
+    const { getBatchCacheStatus } = await freshModule();
+    const data = await getBatchCacheStatus([], [], []);
+    expect(bodies).toHaveLength(0);
+    expect(data).toEqual({ studies: {}, patients: {}, series: {} });
+  });
+});
