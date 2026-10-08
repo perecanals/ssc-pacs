@@ -5,11 +5,11 @@ health probe at `/healthz`, and serves Prometheus metrics at `/metrics`.
 This document is the operator-facing reference for all three.
 
 > **Scope note.** §§1–3 (logging, `/healthz`, `/metrics`) describe what the
-> **running web app** exposes today — all live. §§4–5 (Prometheus + Grafana
-> scraping stack) are a **future-install template, not currently deployed**
-> (decision 2026-07-07: not reinstalling the `~/monitoring/` stack). The web
-> app emits metrics regardless; nothing is scraping them. `grafana_dashboard.json`
-> is kept as the importable template for when a stack is stood up again.
+> **running web app** exposes. §4 is the Prometheus + Grafana stack that
+> scrapes `/metrics` on the production host (Docker Compose under
+> `~/monitoring/`, outside this repo). Only the web app is scraped — Orthanc,
+> PostgreSQL and the host itself have no exporters, so what you can see is
+> web-app traffic, errors, latency and the cold-storage cache.
 
 ---
 
@@ -196,7 +196,7 @@ Unauthenticated, same as `/healthz`.
 | `http_requests_total`                                        | counter   | `method`, `path_template`, `status`    | Total HTTP requests by matched route template and status. |
 | `http_request_duration_seconds`                              | histogram | `method`, `path_template`              | Request latency. Buckets tuned for fast JSON + long warm/evict. |
 | `cold_storage_warm_total`                                    | counter   | `result` ∈ {`success`, `failure`, `insufficient_disk_space`} | `POST /api/studies/{uid}/warm` outcomes. |
-| `cold_storage_evict_total`                                   | counter   | `result` ∈ {`success`, `failure`}      | `POST /api/studies/{uid}/evict` outcomes. |
+| `cold_storage_evict_total`                                   | counter   | `trigger` ∈ {`manual`, `ttl`}, `result` ∈ {`success`, `failure`} | Per-series evictions. `manual` = the study/series `POST …/evict` routes; `ttl` = the background eviction loop (`eviction_ttl_hours`), which is where almost all evictions happen. |
 | `cold_storage_warming_rows`                                  | gauge     | —                                      | `series_cache_state` rows currently in `status='warming'`, refreshed on scrape (no new label). |
 | `cold_storage_disk_free_bytes`                               | gauge     | —                                      | Free bytes on the filesystem holding `dicom_data_root`, refreshed on scrape. |
 
@@ -206,7 +206,8 @@ so UIDs don't explode cardinality.
 
 The `/metrics` handler refreshes the two gauges on every scrape
 (`metrics.refresh_cold_storage_gauges`). The evict counter is
-incremented in the route handler; `cold_storage_warm_total` is
+incremented in the route handlers (`manual`) and per series inside
+`cache_manager.run_eviction` (`ttl`); `cold_storage_warm_total` is
 incremented from the **worker thread** that runs the extraction
 (`routes/cold_storage._run_warm_with_metrics`) so the `success` /
 `failure` label reflects the actual extraction outcome rather than
@@ -231,48 +232,61 @@ shows them as 0 / absent. See
 
 ### Scraping and alerting
 
-Nothing scrapes `/metrics` today (see the scope note at the top). When a stack
-is stood up again, a Prometheus scrape target and a starter set of alert rules
-(web app down, 5xx error rate, p95 latency, cold-storage warm failures,
-warming stuck, low disk) are part of that reinstall — see §4.
+The stack in §4 scrapes `/metrics` every 30 s. **No alert rules or
+Alertmanager are configured** (deliberately, as of 2026-10-08): the data is
+there to look at, nothing pages anyone. The queries in §4 are the ones to
+run by hand.
 
 ---
 
-## 4. Future: Prometheus + Grafana stack (NOT DEPLOYED)
+## 4. Prometheus + Grafana stack
 
-> **Not currently deployed.** The `~/monitoring/` Docker Compose stack
-> (Prometheus + Grafana) was retired (decision 2026-07-07: not reinstalling).
-> Nothing scrapes the web app's `/metrics` today. This section is the
-> reinstall template for standing it back up.
+Runs on the production host as a Docker Compose project outside this repo:
 
-The importable Grafana dashboard is kept in the repo:
+| | |
+|---|---|
+| Compose dir | `~/monitoring/` of the deploying user (`docker-compose.yml`, `prometheus.yml`, `provisioning/`, `dashboards/`) |
+| Containers | `ssc-prometheus` (`prom/prometheus`), `ssc-grafana` (`grafana/grafana`) |
+| Ports | Grafana **3000**, Prometheus **9090** — both bound on all interfaces, so reach them directly or tunnel: `ssh -L 3000:localhost:3000 -L 9090:localhost:9090 <host>` |
+| Scrape | one job, `ssc-companion` → `host.docker.internal:8043/metrics`, every 30 s |
+| Retention | 30 days (`docker exec ssc-prometheus prometheus --version`; check with `curl -s localhost:9090/api/v1/status/runtimeinfo`) |
+| Dashboard | provisioned from `~/monitoring/dashboards/ssc-companion.json`; `docs/operations/grafana_dashboard.json` is the portable copy with a `${DS_PROMETHEUS}` variable — note its queries say `job="ssc-web-app"`, so rename the job when importing elsewhere |
 
-| File | Purpose |
-|------|---------|
-| `docs/operations/grafana_dashboard.json` | Portable **SSC Web App** dashboard with a `${DS_PROMETHEUS}` datasource variable — import into any Grafana. Panels: request rate, p50/p95 latency, warm/evict success rate, cold-storage disk free, warming rows over time. |
+Status at a glance:
 
-A minimal reinstall would recreate a `~/monitoring/` (or equivalent) with:
-
+```bash
+docker ps --filter name=ssc-grafana --filter name=ssc-prometheus
+curl -s localhost:3000/api/health
+curl -s 'localhost:9090/api/v1/targets' | jq '.data.activeTargets[] | {job: .labels.job, health, lastError}'
 ```
-docker-compose.yml   # Prometheus + Grafana services
-prometheus.yml       # scrape target host.docker.internal:8043 (see §3)
-provisioning/         # Grafana datasource (Prometheus) + dashboard loader
-dashboards/           # a copy of grafana_dashboard.json, datasource UID filled in
+
+Useful ad-hoc queries (paste into Prometheus at `:9090/graph` or a Grafana
+Explore panel):
+
+```promql
+# what is being hit, last 24 h
+topk(10, sum by (path_template, method) (increase(http_requests_total[24h])))
+# server errors by route
+sum by (path_template, status) (increase(http_requests_total{status=~"5.."}[24h])) > 0
+# p95 latency by route
+histogram_quantile(0.95, sum by (le, path_template) (rate(http_request_duration_seconds_bucket[1h])))
+# cold-storage cache churn: warms vs TTL evictions
+sum by (result) (increase(cold_storage_warm_total[24h]))
+sum by (trigger, result) (increase(cold_storage_evict_total[24h]))
+# free space on the DICOM root, GB
+cold_storage_disk_free_bytes / 1e9
 ```
 
-The `prometheus.yml` scrape target is `host.docker.internal:8043` (the web app
-as seen from inside the container), scraped every 30 s. Provision a starter
-alert set alongside it: web app down (`up == 0`), 5xx error rate
-(`http_requests_total{status=~"5.."}` share > 5%), p95 latency
-(`http_request_duration_seconds` > 2 s), cold-storage warm failures
-(`cold_storage_warm_total{result!="success"}`), warming stuck
-(`cold_storage_warming_rows > 3`), and low disk (`cold_storage_disk_free_bytes`).
+What the data cannot tell you: anything about Orthanc, PostgreSQL or the host
+(no exporters), and the reconciliation gauges (see §3 — they only exist in the
+`reconcile.py` process). Prometheus `rate()`/`increase()` handle the counter
+resets from a web-app restart, so no operator action is needed across restarts.
 
-Bring it up with `docker compose up -d`, reach Grafana at
-`http://localhost:3000` (default `admin`/`admin`) and Prometheus at
-`http://localhost:9090`, tunnelling those ports over SSH as needed.
-Prometheus `rate()` handles the counter resets from a web app restart, so no
-operator action is needed across restarts.
+If the stack needs rebuilding, the Compose dir needs: `docker-compose.yml`
+(the two services, data on named volumes), `prometheus.yml` (the scrape
+job above), `provisioning/datasources/` (Prometheus datasource) and
+`provisioning/dashboards/` pointing at a `dashboards/` copy of
+`grafana_dashboard.json`. Grafana's first login is `admin`/`admin`.
 
 ---
 
