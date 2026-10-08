@@ -44,6 +44,7 @@ from config import (
     WARMING_TIMEOUT_MINUTES,
 )
 from db import get_conn
+from metrics import cold_storage_evict_total
 from orthanc_client import (
     orthanc_series_id,
     rebuild_series_metadata_cache,
@@ -1077,7 +1078,9 @@ def run_eviction() -> list[str]:
         try:
             evict_series([uid])
             evicted.append(uid)
+            cold_storage_evict_total.labels(trigger="ttl", result="success").inc()
         except Exception as e:
+            cold_storage_evict_total.labels(trigger="ttl", result="failure").inc()
             logger.warning(
                 "run_eviction: evict_series failed: %s", e,
                 extra=_log_extra_series(uid),

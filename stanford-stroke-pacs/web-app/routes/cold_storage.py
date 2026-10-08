@@ -167,12 +167,12 @@ def api_evict_study(
     try:
         result = evict_study(studyinstanceuid)
     except Exception as e:
-        cold_storage_evict_total.labels(result="failure").inc()
+        cold_storage_evict_total.labels(trigger="manual", result="failure").inc()
         raise HTTPException(
             status_code=500,
             detail={"error": "evict_failed", "reason": str(e)[:500]},
         )
-    cold_storage_evict_total.labels(result="success").inc()
+    cold_storage_evict_total.labels(trigger="manual", result="success").inc()
     return result
 
 
@@ -227,12 +227,12 @@ def api_evict_series(
     try:
         evict_series([seriesinstanceuid])
     except Exception as e:
-        cold_storage_evict_total.labels(result="failure").inc()
+        cold_storage_evict_total.labels(trigger="manual", result="failure").inc()
         raise HTTPException(
             status_code=500,
             detail={"error": "evict_failed", "reason": str(e)[:500]},
         )
-    cold_storage_evict_total.labels(result="success").inc()
+    cold_storage_evict_total.labels(trigger="manual", result="success").inc()
     return {"ok": True, "evicted": seriesinstanceuid}
 
 

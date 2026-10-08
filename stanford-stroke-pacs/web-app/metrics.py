@@ -5,7 +5,7 @@ Metric catalogue (see `docs/operations/observability.md`):
   * `http_requests_total{method, path_template, status}`
   * `http_request_duration_seconds{method, path_template}`
   * `cold_storage_warm_total{result}`
-  * `cold_storage_evict_total{result}`
+  * `cold_storage_evict_total{trigger, result}`
   * `cold_storage_warming_rows` (gauge, refreshed on scrape)
   * `cold_storage_disk_free_bytes` (gauge, refreshed on scrape)
 
@@ -48,8 +48,9 @@ cold_storage_warm_total = Counter(
 
 cold_storage_evict_total = Counter(
     "cold_storage_evict_total",
-    "Cold-storage evict attempts, labelled by result.",
-    labelnames=("result",),
+    "Cold-storage evict attempts, labelled by trigger (manual API call or "
+    "TTL eviction loop) and result.",
+    labelnames=("trigger", "result"),
     registry=REGISTRY,
 )
 

@@ -528,3 +528,55 @@ def test_ohif_link_hot_series_returns_ready_url(cold_env, logged_in_client):
     body = resp.json()
     assert body["status"] == "ready"
     assert series_uid in body["url"]
+
+
+def test_run_eviction_counts_ttl_evictions(cold_env, seeded_db):
+    """The TTL loop reports its evictions on cold_storage_evict_total{trigger="ttl"}."""
+    import psycopg2
+
+    import cache_manager as cm
+    from metrics import cold_storage_evict_total
+
+    study_uid = cold_env["study_uid"]
+    series_uid = cold_env["series_uid"]
+    dicom_dir = cold_env["dicom_dir"]
+
+    with (
+        patch.object(cm, "STORAGE_MODE", "cold_path_cache"),
+        patch.object(cm, "DICOM_DATA_ROOT", cold_env["dicom_root"]),
+        patch.object(cm, "COLD_ARCHIVE_ROOT", cold_env["cold_root"]),
+        patch.object(cm, "EVICTION_TTL_HOURS", 1.0),
+    ):
+        assert cm.warm_study(study_uid)["ok"] is True
+        assert dicom_dir.is_dir()
+
+        before = cold_storage_evict_total.labels(
+            trigger="ttl", result="success"
+        )._value.get()
+
+        # Still within the TTL: nothing to do, nothing counted.
+        assert cm.run_eviction() == []
+        assert (
+            cold_storage_evict_total.labels(trigger="ttl", result="success")._value.get()
+            == before
+        )
+
+        # Age the hot row past the TTL.
+        conn = psycopg2.connect(**seeded_db)
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "UPDATE series_cache_state SET last_accessed_at = now() - interval '2 hours'"
+                    " WHERE seriesinstanceuid = %s",
+                    (series_uid,),
+                )
+            conn.commit()
+        finally:
+            conn.close()
+
+        assert cm.run_eviction() == [series_uid]
+        assert not dicom_dir.exists()
+        assert (
+            cold_storage_evict_total.labels(trigger="ttl", result="success")._value.get()
+            == before + 1
+        )
