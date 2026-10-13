@@ -11,6 +11,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import pydicom
+import requests
 import zstandard as zstd
 from psycopg2.extras import RealDictCursor
 from sqlalchemy import MetaData, Table, func, inspect, select, text
@@ -1065,6 +1066,37 @@ class ImageIngestionProtocol:
             f"{len(self.case_series_table)} series row(s) after filtering"
         )
 
+    @staticmethod
+    def _reset_orthanc_study_for_overwrite(study_instance_uid):
+        """Remove the old index/cache before changing any local files or rows.
+
+        Fail closed when Orthanc is unavailable: treating a failed lookup as
+        absent would preserve stale paths and silently defeat overwrite.
+        Ownership has already been checked by resolve_ownership.
+        """
+        if STORAGE_MODE != "cold_path_cache":
+            return
+        from orthanc_client import ORTHANC_PASS, ORTHANC_URL, ORTHANC_USER
+
+        with requests.Session() as session:
+            session.auth = (ORTHANC_USER, ORTHANC_PASS)
+            response = session.post(
+                f"{ORTHANC_URL}/tools/lookup", data=str(study_instance_uid), timeout=30,
+            )
+            response.raise_for_status()
+            entries = response.json()
+            if not isinstance(entries, list):
+                raise RuntimeError("Invalid Orthanc lookup response; overwrite aborted")
+            for entry in entries:
+                if entry.get("Type") != "Study":
+                    continue
+                deleted = session.delete(
+                    f"{ORTHANC_URL}/studies/{entry['ID']}", timeout=60,
+                )
+                if deleted.status_code != 404:
+                    deleted.raise_for_status()
+                print(f"Removed old Orthanc registration for study {study_instance_uid}")
+
     def overwrite_existing_study(self, study_instance_uid):
         if self.image_study is None or self.image_series is None:
             self._load_case_rows_from_db([study_instance_uid], include_series=True)
@@ -1099,6 +1131,11 @@ class ImageIngestionProtocol:
             for uid in series_rows["seriesinstanceuid"].dropna().astype(str).unique()
             if str(uid)
         ]
+
+        # Clear Orthanc's old paths and DICOMweb metadata before deleting the
+        # canonical files. Registration later uses Force to clear orphaned
+        # indexer rows as well (Orthanc deletion alone can leave those behind).
+        self._reset_orthanc_study_for_overwrite(study_instance_uid)
 
         for path in sorted(set(paths_to_remove), key=len, reverse=True):
             # Path safety: these paths come from the DB — never rmtree

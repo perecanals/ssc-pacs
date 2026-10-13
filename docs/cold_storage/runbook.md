@@ -206,13 +206,15 @@ curl      -b cookies.txt http://localhost:8043/api/ohif-link/$SUID
 ### 5. Remove loose files (the point of no return)
 
 Once you're satisfied that warm/evict cycles work in the UI, run the
-cleanup script. It only deletes a series' loose dir when ALL three of these
+cleanup script. It only deletes a series' loose dir when all four of these
 hold:
 
 1. The archive exists at `dicom_archive_path` and is non-empty
 2. The archive's file count matches the loose dir's file count
 3. The series' `SeriesInstanceUID` is present in Orthanc's `dicomidentifiers`
    table (i.e. the patched Folder Indexer has indexed it)
+4. Cached DICOMweb metadata contains distinct instances matching both Orthanc's
+   indexed count and the loose-file count
 
 With `--execute` it also deletes the cleaned series' `series_cache_state`
 rows (absence reads as cold), so the UI immediately reflects the removal.
@@ -510,12 +512,25 @@ Series that were already warm are left warm; only ones the script warmed itself
 are evicted again. A single affected series also self-heals the next time a user
 warms it (`cache_manager` rebuilds the cache on warm).
 
-Spot-check one series by hand:
+A nonempty cache can also be incomplete: OHIF then shows only a subset of the
+slices. Size alone does not establish health. The warm and cleanup checks now
+compare distinct cached instance counts with the Orthanc index, without reading
+DICOM files. The repair script above discovers missing/empty caches by size;
+it does not discover partial caches. Stale filenames may require targeted
+re-registration even after warming and rebuilding metadata. See
+[partial metadata diagnosis and the efficient fleet audit plan](../operations/reconciliation.md#partial-dicomweb-metadata-and-stale-filenames).
+
+Spot-check one series without creating a cache while cold (from the stack root):
 
 ```bash
-# 57 bytes == the poisoned empty-array form; a healthy cache is >1 KB
-curl -su "$ORTHANC_ADMIN_USER:$ORTHANC_ADMIN_PASSWORD" \
-  "http://localhost:8042/series/<orthanc-series-id>/attachments/4301/info"
+python - <<'PYTHON'
+import sys
+sys.path.insert(0, "web-app")
+from orthanc_client import orthanc_series_id, series_metadata_cache_is_healthy
+
+oid = orthanc_series_id("<SeriesInstanceUID>")
+print("complete cached instance count:", bool(oid) and series_metadata_cache_is_healthy(oid))
+PYTHON
 ```
 
 ---

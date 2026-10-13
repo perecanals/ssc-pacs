@@ -37,6 +37,16 @@ SERIES_UIDS = {
 ACQ_DATE = {"11-001": "20260102", "11-002": "20260205"}
 
 
+@pytest.fixture(autouse=True)
+def no_live_orthanc(monkeypatch):
+    from image_ingestion_protocol import ImageIngestionProtocol
+
+    monkeypatch.setattr(
+        ImageIngestionProtocol, "_reset_orthanc_study_for_overwrite",
+        staticmethod(lambda uid: None),
+    )
+
+
 def _env_creds():
     from dotenv import load_dotenv
 

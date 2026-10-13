@@ -1,5 +1,10 @@
 # Changelog
 
+## v2.4 — 2026-10-13
+
+DICOMweb cache checks now require complete, distinct instance metadata matching the Orthanc index; cleanup also checks the loose-file count. Partial caches no longer pass as healthy, and failed or incomplete rebuilds are reported.
+Overwrite ingestion now resets the old Orthanc study registration before local deletion, and per-case forced scans target only ingested series, preserving cold siblings. Documented stale-filename repair and a resumable metadata-only fleet audit plan. No schema migration.
+
 ## v2.3 — 2026-10-05
 
 Linking patients is identity only: an enrollment sees the studies it owns plus those it is a member of — the very same StudyInstanceUID re-sent by a linked dataset — no longer all of the person's imaging, so re-exports with new UIDs (OUTER LIMITS) no longer show every study twice. Series ranks, timepoints and `patient.stroke_date` are per enrollment; display, access, DICOMweb, data exports and the linked view follow. Ingestion takes an optional `patient_links` JSON file (also accepted by `link_patients.py`), applied before the first case.

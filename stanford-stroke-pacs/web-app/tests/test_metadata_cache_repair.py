@@ -12,7 +12,9 @@ request 400s and OHIF hangs. These tests pin the two halves of the fix:
 
 from __future__ import annotations
 
+import gzip
 import importlib.util
+import json
 from pathlib import Path
 from unittest.mock import Mock, patch
 
@@ -48,49 +50,77 @@ def _info_response(size: int | None):
 
 # --- the "is this cache poisoned?" predicate --------------------------------
 
-@pytest.mark.parametrize(
-    "size,healthy",
-    [
-        (57, False),     # the empty-array payload: '<rev>;<sig>;' + gzip('[]')
-        (64, False),     # boundary — still the empty form
-        (1506, True),    # a real single-instance cache
-        (None, False),   # no cache at all
-    ],
-)
-def test_cache_health_predicate(size, healthy):
-    with patch.object(orthanc_client.requests, "get", return_value=_info_response(size)):
+def _metadata(n):
+    return [{"00080018": {"Value": [f"1.2.{i}"], "vr": "UI"}} for i in range(n)]
+
+
+def _cache_responses(body, indexed=72, payload=None):
+    data = Mock(status_code=200)
+    data.content = payload if payload is not None else b"2;signature;" + gzip.compress(json.dumps(body).encode())
+    series = Mock(status_code=200)
+    series.json.return_value = {"Instances": [str(i) for i in range(indexed)]}
+    return [_info_response(1506), data, series]
+
+
+@pytest.mark.parametrize("size", [57, 64, None])
+def test_empty_cache_fast_rejection(size):
+    with patch.object(orthanc_client.requests, "get", return_value=_info_response(size)) as get:
+        assert not orthanc_client.series_metadata_cache_is_healthy("oid")
+        assert get.call_count == 1
+
+
+@pytest.mark.parametrize("cached,indexed,healthy", [(1, 72, False), (72, 72, True), (1, 1, True), (73, 72, False)])
+def test_cache_health_checks_instance_count(cached, indexed, healthy):
+    with patch.object(orthanc_client.requests, "get", side_effect=_cache_responses(_metadata(cached), indexed)) as get:
         assert orthanc_client.series_metadata_cache_is_healthy("oid") is healthy
+    assert all("/dicom-web/" not in call.args[0] for call in get.call_args_list)
 
 
-# --- rebuild = DELETE + GET, and it must verify the result ------------------
+@pytest.mark.parametrize("body,payload", [
+    (_metadata(1) * 2, None),
+    ([{}], None),
+    ([{"00080018": {"Value": "1.2.3"}}], None),
+    ([{"00080018": {"Value": ["1.2.3", "1.2.4"]}}], None),
+    ([], None),
+    (None, b"3;signature;unknown"),
+    (None, b"2;signature;broken-gzip"),
+])
+def test_invalid_cache_fails_closed(body, payload):
+    with patch.object(orthanc_client.requests, "get", side_effect=_cache_responses(body, payload=payload)):
+        assert not orthanc_client.series_metadata_cache_is_healthy("oid")
 
-def test_rebuild_deletes_then_rebuilds_and_reports_success():
+
+def test_cleanup_expected_count_rejects_incomplete_index():
+    with patch.object(orthanc_client.requests, "get", side_effect=_cache_responses(_metadata(1), 1)):
+        assert not orthanc_client.series_metadata_cache_is_healthy("oid", expected_instances=72)
+
+
+@pytest.mark.parametrize("complete", [True, False])
+def test_rebuild_checks_completeness(complete):
     metadata = Mock(status_code=200)
-    metadata.json.return_value = [{"00080018": {}}]  # one instance
-    with patch.object(orthanc_client.requests, "delete") as delete, \
-         patch.object(orthanc_client.requests, "get", return_value=metadata) as get:
-        ok = orthanc_client.rebuild_series_metadata_cache("1.2.study", "1.2.series", "oid")
-
-    assert ok is True
-    # The DELETE must come first: a GET against a poisoned cache just re-serves it.
-    assert "attachments/4301" in delete.call_args[0][0]
-    assert "/dicom-web/studies/1.2.study/series/1.2.series/metadata" in get.call_args[0][0]
+    metadata.json.return_value = _metadata(1)
+    with patch.object(orthanc_client.requests, "delete", return_value=Mock(status_code=200)) as delete, \
+         patch.object(orthanc_client.requests, "get", return_value=metadata) as get, \
+         patch.object(orthanc_client, "series_metadata_cache_is_healthy", return_value=complete):
+        assert orthanc_client.rebuild_series_metadata_cache("st", "se", "oid") is complete
+    assert "attachments/4301" in delete.call_args.args[0]
+    assert "/dicom-web/" in get.call_args.args[0]
 
 
-def test_rebuild_reports_failure_when_result_is_still_empty():
-    """An empty array back means the files were NOT on disk — the caller must
-    not treat that as repaired."""
-    metadata = Mock(status_code=200)
-    metadata.json.return_value = []
-    with patch.object(orthanc_client.requests, "delete"), \
+@pytest.mark.parametrize("status,body", [(200, []), (400, None)])
+def test_rebuild_reports_failure(status, body):
+    metadata = Mock(status_code=status)
+    metadata.json.return_value = body
+    with patch.object(orthanc_client.requests, "delete", return_value=Mock(status_code=200)), \
          patch.object(orthanc_client.requests, "get", return_value=metadata):
-        assert orthanc_client.rebuild_series_metadata_cache("st", "se", "oid") is False
+        assert not orthanc_client.rebuild_series_metadata_cache("st", "se", "oid")
 
 
-def test_rebuild_reports_failure_on_http_400():
-    with patch.object(orthanc_client.requests, "delete"), \
-         patch.object(orthanc_client.requests, "get", return_value=Mock(status_code=400)):
-        assert orthanc_client.rebuild_series_metadata_cache("st", "se", "oid") is False
+def test_rebuild_stops_on_failed_delete():
+    with patch.object(orthanc_client.requests, "delete", return_value=Mock(status_code=500)), \
+         patch.object(orthanc_client.requests, "get") as get:
+        assert not orthanc_client.rebuild_series_metadata_cache("st", "se", "oid")
+    get.assert_not_called()
 
 
 # --- the warm-path safety net ----------------------------------------------

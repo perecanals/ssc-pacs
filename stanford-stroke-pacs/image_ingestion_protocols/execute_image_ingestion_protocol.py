@@ -464,9 +464,10 @@ def index_case_into_orthanc(postgres_engine, logger, series_ids):
     each scan is naturally bounded (a case is one source directory, usually
     one patient; oversized cases go through bounded passes — OOM-safe) and the
     case is viewable in OHIF while the batch is still running. The endpoint scans
-    exactly the case's study subtrees (see orthanc-indexer-patched/PATCHES.md and
+    exactly the ingested series directories (see orthanc-indexer-patched/PATCHES.md and
     scripts/cold_storage/scoped_index.py) — no config edits, no restarts. An
-    oversized case is routed through bounded passes. Returns the verified
+    oversized case is routed through bounded passes. Force clears orphaned
+    indexer rows after overwrite and re-registers changed files. Returns the verified
     SeriesInstanceUIDs.
     """
     if STORAGE_MODE != "cold_path_cache" or not series_ids:
@@ -480,7 +481,7 @@ def index_case_into_orthanc(postgres_engine, logger, series_ids):
 
     session, orthanc_url = _orthanc_session()
     kwargs = dict(host_root=str(DICOM_DATA_ROOT), orthanc_url=orthanc_url,
-                  session=session, force=False, granularity="study",
+                  session=session, force=True, granularity="series",
                   poll_s=3, log=logger.info)
     total_instances = sum(t.n_instances for t in targets)
     logger.info(f"Indexing case into Orthanc ({len(targets)} series, "

@@ -18,6 +18,7 @@ Run with: pytest tests/test_path_safety.py
 from types import SimpleNamespace
 
 import pandas as pd
+import pytest
 
 import image_ingestion_protocol as iip_mod
 from image_ingestion_protocol import ImageIngestionProtocol
@@ -130,6 +131,7 @@ def _overwrite_fixture(tmp_path, monkeypatch, study_path, dicom_dir_path):
     base = tmp_path / "pacs_imaging_data"
     proto = _bare_protocol(base)
     proto.cold_archive_root = None
+    monkeypatch.setattr(proto, "_reset_orthanc_study_for_overwrite", lambda uid: None)
     proto.postgres_engine = SimpleNamespace(begin=lambda: _FakeBegin())
     proto.image_study = pd.DataFrame(
         [{"studyinstanceuid": "STUDY1", "patient_id": "4-0551", "study_path": study_path}]
@@ -196,3 +198,20 @@ def test_overwrite_prunes_from_the_stored_dataset_path(tmp_path, monkeypatch):
 
     assert not (base / "precise").exists()
     assert (base / "crisp2-lvo" / "4-0551").exists()
+
+
+def test_overwrite_stops_before_local_deletion_if_orthanc_reset_fails(tmp_path, monkeypatch):
+    base = tmp_path / "pacs_imaging_data"
+    dicom_dir = base / "4-0551" / "STUDY1" / "desc" / "SER1" / "DICOM"
+    dicom_dir.mkdir(parents=True)
+    proto = _overwrite_fixture(tmp_path, monkeypatch, None, str(dicom_dir))
+
+    def fail(uid):
+        assert dicom_dir.exists()
+        raise RuntimeError("Orthanc unavailable")
+
+    monkeypatch.setattr(proto, "_reset_orthanc_study_for_overwrite", fail)
+    with pytest.raises(RuntimeError, match="Orthanc unavailable"):
+        proto.overwrite_existing_study("STUDY1")
+    assert dicom_dir.exists()
+    assert len(proto.image_series) == 1

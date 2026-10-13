@@ -249,3 +249,75 @@ The CLI keeps the most recent 30 JSON reports in
   patients.
 - `scripts/cold_storage/cold_storage_health.py` — health probe for cold-storage
   subsystem (stuck warming, orphan dirs, disk free).
+
+## Partial DICOMweb metadata and stale filenames
+
+A series can exist in both databases with the correct instance count while OHIF
+shows only a subset. Inspect the existing Orthanc attachment `4301` directly
+(`GET /series/<orthanc-id>/attachments/4301/data`): revision 2 stores
+`2;<signature>;` followed by gzip-compressed DICOM JSON. Count its distinct
+`00080018` (SOPInstanceUID) entries and compare with Orthanc's `Instances` list.
+Do not request `/dicom-web/.../metadata` during a cold audit: a missing cache
+can be generated from absent files and become poisoned.
+
+The health check now rejects missing, empty, malformed, duplicate-instance and
+partial caches. It uses at most three small REST requests (attachment info,
+compressed attachment data, index summary), with no DICOM reads or archive
+extraction. Cleanup additionally requires this count to equal the loose-file
+count; multiframe instances count once, regardless of NumberOfFrames. Rebuilds
+verify completeness and fail if attachment deletion fails. Unsupported cache
+revisions fail closed and keep loose files for investigation.
+
+For a warm series, rebuilding metadata can still return a subset if the Folder
+Indexer resolves stale filenames. A re-export may preserve SOPInstanceUIDs but
+rename the files. `RemoveMissingFiles: false` retains the old `Files.path` rows,
+and the indexer can select an old nonexistent filename even alongside a valid
+new one. Check Orthanc logs for `Not a regular file or file not found`, and
+compare those paths with actual warm files. A normal scan, or a metadata-only
+rebuild, does not necessarily repair this.
+
+For targeted repair, verify the warm files' SOPInstanceUIDs against the archive
+and index first. Preserve any Orthanc-only labels/metadata you need before
+removing the affected Orthanc series registration (research annotations remain
+in the separate research database). Re-register that series using a scoped
+scan with `Force: true` to discard orphaned indexer rows, rebuild metadata while
+warm, then verify the complete SOP set and file retrieval. Keep files warm until
+verification finishes. This is a repair operation, not part of the audit.
+
+### Efficient fleet audit plan
+
+1. Bulk-read the research series roster and Orthanc series identifiers, indexed
+   instance counts, and attachment `4301` UUID/size in read-only database queries.
+   Join by SeriesInstanceUID. Report missing index entries and missing/empty
+   attachments immediately. Existing reconciliation checks series presence;
+   the empty-cache repair script's size filter does not detect partial caches.
+2. For remaining attachments, read only existing compressed metadata, using
+   four concurrent workers and a reusable HTTP session per worker. Parse distinct
+   SOPInstanceUIDs and compare the count with the bulk index count. Avoid per-file
+   HTTP calls, filesystem existence checks on cold series, WADO metadata requests,
+   warming, and archive extraction. Classify missing, empty, partial, duplicate,
+   malformed/unsupported, index-versus-research disagreement, and request errors
+   separately. Research slice counts are only a secondary signal: multiframe
+   series need not have one indexed instance per frame.
+3. Persist results incrementally with SeriesInstanceUID, Orthanc ID, attachment
+   UUID, indexed count, cached count, status and elapsed time. Resume interrupted
+   runs; reuse prior results only when attachment UUID and indexed count match.
+   Recheck a sample of unchanged entries to detect unexpected cache behavior.
+   Measure a representative pilot (for example 1,000 series) and estimate total
+   runtime from measured throughput before a full pass. Bound request timeouts
+   and retries; retain failures for retry rather than counting them as healthy.
+4. For mismatches, bulk-fetch indexed SOPInstanceUIDs for just the affected
+   series and compare sets, then investigate archive/warm-file parity and stale
+   indexer paths. A same-count wrong-SOP cache requires this stronger set audit;
+   run set comparison on a sample of count-matching series too. A separate
+   read-only snapshot of the indexer's SQLite database can identify duplicate
+   paths, but missing files alone are expected for cold series. Do not treat
+   cold paths as corruption or modify the running indexer database.
+5. Repair separately, in bounded batches: prioritize already-warm series,
+   rebuild metadata, and re-register only those with confirmed path/index drift.
+   Warm cold candidates one batch at a time and keep them warm through metadata
+   and pixel verification. Record outcomes and preserve prior warm/cold state.
+
+This plan reads metadata proportional to the number of indexed instances rather
+than decompressing the imaging corpus. The audit is read-only until an explicit
+repair pass is requested.

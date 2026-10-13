@@ -218,10 +218,10 @@ def clean_series_loose_dir(
                 f"{series_uid}: could not resolve Orthanc series ID"
             )
         if not wait_for_series_metadata_cache(
-            oid, timeout_s=metadata_cache_timeout_s
+            oid, timeout_s=metadata_cache_timeout_s, expected_instances=loose_count
         ):
             return "metadata_cache_not_ready", 0, (
-                f"{series_uid}: Orthanc has not built a non-empty DICOMweb "
+                f"{series_uid}: Orthanc has not built a complete DICOMweb "
                 f"metadata cache after {metadata_cache_timeout_s:.0f}s — keeping "
                 f"loose files (deleting now would strand the series in OHIF)"
             )
