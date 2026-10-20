@@ -180,3 +180,24 @@ def test_patient_links_malformed(cold_mode, tmp_path, body, message):
 def test_patient_links_missing_file(cold_mode, tmp_path):
     with pytest.raises(ValueError, match="cannot read"):
         load_config(_write_yaml(tmp_path, "src_dir: /data/b\npatient_links: nope.json\n"))
+
+
+def test_on_patient_mismatch_defaults_to_refuse(cold_mode, tmp_path):
+    cfg, _ = load_config(_write_yaml(tmp_path, "src_dir: /data/b\n"))
+    assert cfg["on_patient_mismatch"] == "refuse"
+
+
+def test_reassign_requires_overwrite(cold_mode, tmp_path):
+    with pytest.raises(ValueError, match="requires overwrite_if_exists"):
+        load_config(_write_yaml(
+            tmp_path, "src_dir: /data/b\non_patient_mismatch: reassign\n"))
+    cfg, _ = load_config(_write_yaml(
+        tmp_path,
+        "src_dir: /data/b\non_patient_mismatch: reassign\noverwrite_if_exists: true\n"))
+    assert cfg["on_patient_mismatch"] == "reassign"
+
+
+def test_invalid_on_patient_mismatch_raises(cold_mode, tmp_path):
+    with pytest.raises(ValueError, match="on_patient_mismatch"):
+        load_config(_write_yaml(
+            tmp_path, "src_dir: /data/b\non_patient_mismatch: merge\n"))

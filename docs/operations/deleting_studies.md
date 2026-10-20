@@ -38,6 +38,10 @@ deletion. Whole-study deletion removes the study and its mirror as before.
 > moves to another study/series. Decide up front whether any labels need copying
 > elsewhere first.
 
+> **Fixing a wrong PatientID?** Don't delete: re-ingest the corrected files with
+> `overwrite_if_exists: true` + `on_patient_mismatch: reassign`, which keeps the study/series
+> annotations. See [Correcting a wrong PatientID](../reference/image_ingestion_protocol.md#correcting-a-wrong-patientid-on-re-ingestion).
+
 ## No sudo required
 
 The web-app service user **owns both storage roots** — it already

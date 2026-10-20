@@ -173,13 +173,14 @@ def roots(tmp_path_factory):
 
 
 def _run_case(scratch, engine, patient_id, import_id=1, overwrite=False,
-              dataset="audit", case_dir=None):
+              dataset="audit", case_dir=None, on_patient_mismatch="refuse"):
     from image_ingestion_protocol import ImageIngestionProtocol
 
     proto = ImageIngestionProtocol(
         str(case_dir or scratch / "src" / patient_id), engine,
         import_id=import_id, import_label="audit_batch", dataset=dataset,
         cold_archive_root=str(scratch / "cold_root"), compress_workers=2,
+        on_patient_mismatch=on_patient_mismatch,
     )
     proto.base_dir = str(scratch / "dicom_root")
     return proto.execute_image_ingestion_protocol(overwrite_if_exists=overwrite)
@@ -608,3 +609,139 @@ def test_dataset_preflight(scratch_engine):
 
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "-v"]))
+
+
+def _annotate(conn, level, label, **ids):
+    from sqlalchemy import text
+
+    cols = ["level", "label", "value", "created_by", *ids]
+    conn.execute(
+        text(f"INSERT INTO annotations ({', '.join(cols)}) VALUES "
+             f"({', '.join(':' + c for c in cols)})"),
+        {"level": level, "label": label, "value": "v", "created_by": "tester", **ids},
+    )
+
+
+def test_reassign_moves_study_to_corrected_patient(roots, scratch_engine, capsys):
+    """A wrong PatientID corrected in the files, UIDs unchanged: with
+    on_patient_mismatch=reassign (+ overwrite) the study is re-owned to the
+    enrollment named in the files; study/series annotations survive (keyed by
+    UID, their patient_id copy follows); the old enrollment keeps its
+    patient-level label so it is kept and reported; files move trees."""
+    from sqlalchemy import text
+
+    study, series = "7.1.1", "7.1.1.1"
+    wrong = _write_study(roots / "src_ra" / "RA-1", "RA-1", study, series)
+    _write_study(roots / "src_ra" / "RA-2", "RA-2", "7.2.1", "7.2.1.1")
+    _run_case(roots, scratch_engine, "RA-1", case_dir=wrong)
+    _run_case(roots, scratch_engine, "RA-2", case_dir=roots / "src_ra" / "RA-2")
+    with scratch_engine.begin() as conn:
+        _annotate(conn, "study", "lbl", studyinstanceuid=study, patient_id="RA-1")
+        _annotate(conn, "series", "lbl", seriesinstanceuid=series,
+                  studyinstanceuid=study, patient_id="RA-1")
+        _annotate(conn, "patient", "lbl", patient_key="audit__RA-1", patient_id="RA-1")
+        # A person linked to RA-1 had been given the study.
+        conn.execute(text(
+            "INSERT INTO patient (patient_key, subject_id, patient_id, dataset) "
+            "VALUES ('other__RA-M', 'audit__RA-1', 'RA-M', 'OTHER/DS')"))
+        conn.execute(text(
+            "INSERT INTO study_member (studyinstanceuid, patient_key) "
+            "VALUES (:s, 'other__RA-M')"), {"s": study})
+    assert list((roots / "cold_root" / "audit" / "RA-1" / study).rglob("*.tar.zst"))
+
+    # The corrected export: same UIDs, PatientID RA-2.
+    fixed = _write_study(roots / "src_ra_fixed" / "RA-2", "RA-2", study, series)
+    with pytest.raises(RuntimeError, match="already belong to a different patient"):
+        _run_case(roots, scratch_engine, "RA-2", case_dir=fixed, overwrite=True)
+
+    _run_case(roots, scratch_engine, "RA-2", case_dir=fixed, overwrite=True,
+              on_patient_mismatch="reassign")
+    out = capsys.readouterr().out
+    assert f"Reassigning study {study}: audit__RA-1 -> audit__RA-2" in out
+    assert "enrollment audit__RA-1 kept" in out
+
+    with scratch_engine.connect() as conn:
+        st = conn.execute(text(
+            "SELECT patient_key, subject_id, patient_id FROM image_study "
+            "WHERE studyinstanceuid = :s"), {"s": study}).one()
+        se = conn.execute(text(
+            "SELECT DISTINCT patient_key, patient_id FROM image_series "
+            "WHERE studyinstanceuid = :s"), {"s": study}).all()
+        anns = conn.execute(text(
+            "SELECT level, patient_id FROM annotations "
+            "WHERE level IN ('study', 'series') AND label = 'lbl' "
+            "AND (studyinstanceuid = :s) ORDER BY level"), {"s": study}).all()
+        old_patient = conn.execute(text(
+            "SELECT count(*) FROM patient WHERE patient_key = 'audit__RA-1'")).scalar()
+        old_label = conn.execute(text(
+            "SELECT count(*) FROM annotations "
+            "WHERE level = 'patient' AND patient_key = 'audit__RA-1'")).scalar()
+        members = conn.execute(text(
+            "SELECT count(*) FROM study_member WHERE studyinstanceuid = :s"),
+            {"s": study}).scalar()
+        old_stroke = conn.execute(text(
+            "SELECT stroke_date FROM patient WHERE patient_key = 'audit__RA-1'")).scalar()
+    assert tuple(st) == ("audit__RA-2", "audit__RA-2", "RA-2")
+    assert se == [("audit__RA-2", "RA-2")]
+    assert anns == [("series", "RA-2"), ("study", "RA-2")]
+    assert (old_patient, old_label) == (1, 1)   # kept: patient-level label
+    assert members == 0                          # cross-subject member dropped
+    assert old_stroke is None                    # no imaging left on the old owner
+    assert not (roots / "cold_root" / "audit" / "RA-1" / study).exists()
+    assert list((roots / "cold_root" / "audit" / "RA-2" / study).rglob("*.tar.zst"))
+
+
+def test_reassign_removes_old_enrollment_when_empty(roots, scratch_engine, capsys):
+    from sqlalchemy import text
+
+    study, series = "7.3.1", "7.3.1.1"
+    wrong = _write_study(roots / "src_rb" / "RB-1", "RB-1", study, series)
+    _run_case(roots, scratch_engine, "RB-1", case_dir=wrong)
+    fixed = _write_study(roots / "src_rb_fixed" / "RB-2", "RB-2", study, series)
+    _run_case(roots, scratch_engine, "RB-2", case_dir=fixed, overwrite=True,
+              on_patient_mismatch="reassign")
+    assert "Removed empty enrollment audit__RB-1" in capsys.readouterr().out
+    with scratch_engine.connect() as conn:
+        keys = conn.execute(text(
+            "SELECT patient_key FROM patient WHERE patient_id LIKE 'RB-%' "
+            "ORDER BY patient_key")).scalars().all()
+    assert keys == ["audit__RB-2"]
+
+
+def test_reassign_refuses_across_datasets(roots, scratch_engine):
+    """The owner lives in dataset 'audit'; a batch for another dataset never
+    re-owns it, even in reassign mode."""
+    owned = STUDY_UIDS["11-002"]
+    case = _write_study(roots / "src_xds" / "X-8", "X-8", owned, SERIES_UIDS["11-002"]["A"])
+    with pytest.raises(RuntimeError, match="already belong to a different patient"):
+        _run_case(roots, scratch_engine, "X-8", dataset="OTHER/DS", case_dir=case,
+                  overwrite=True, on_patient_mismatch="reassign")
+
+
+def test_overwrite_keeps_same_person_memberships(roots, scratch_engine):
+    """Plain overwrite deletes and re-creates the study row; the memberships
+    that cascaded away with it must come back."""
+    from sqlalchemy import text
+
+    study, series = "7.4.1", "7.4.1.1"
+    case = _write_study(roots / "src_rc" / "RC-1", "RC-1", study, series)
+    _run_case(roots, scratch_engine, "RC-1", case_dir=case)
+    with scratch_engine.begin() as conn:
+        conn.execute(text(
+            "INSERT INTO patient (patient_key, subject_id, patient_id, dataset) "
+            "VALUES ('other__RC-M', 'audit__RC-1', 'RC-M', 'OTHER/DS')"))
+        conn.execute(text(
+            "INSERT INTO study_member (studyinstanceuid, patient_key) "
+            "VALUES (:s, 'other__RC-M')"), {"s": study})
+    _run_case(roots, scratch_engine, "RC-1", case_dir=case, overwrite=True)
+    with scratch_engine.connect() as conn:
+        assert conn.execute(text(
+            "SELECT patient_key FROM study_member WHERE studyinstanceuid = :s"),
+            {"s": study}).scalars().all() == ["other__RC-M"]
+
+
+def test_reassign_without_overwrite_is_rejected(roots, scratch_engine):
+    case = _write_study(roots / "src_rd" / "RD-1", "RD-1", "7.5.1", "7.5.1.1")
+    with pytest.raises(ValueError, match="requires overwrite_if_exists"):
+        _run_case(roots, scratch_engine, "RD-1", case_dir=case,
+                  on_patient_mismatch="reassign")

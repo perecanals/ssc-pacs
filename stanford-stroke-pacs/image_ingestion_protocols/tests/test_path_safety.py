@@ -116,7 +116,7 @@ def test_remove_empty_parents_keeps_nonempty_dirs(tmp_path):
 
 class _FakeConn:
     def execute(self, *args, **kwargs):
-        return None
+        return SimpleNamespace(scalars=lambda: iter(()))
 
 
 class _FakeBegin:

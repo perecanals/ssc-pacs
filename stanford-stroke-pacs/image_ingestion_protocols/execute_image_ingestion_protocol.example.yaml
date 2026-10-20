@@ -19,6 +19,15 @@ src_dir: /path/to/source/DICOMS
 # Re-ingest studies already present in the DB.
 overwrite_if_exists: false
 
+# What to do when a re-ingested StudyInstanceUID now carries a different
+# PatientID than the enrollment that owns it (a corrected export).
+#   refuse (default) — fail the case, nothing is deleted.
+#   reassign         — trust the UID: re-own the study to the PatientID in the
+#                      files (same dataset only). Requires overwrite_if_exists:
+#                      true. Study/series annotations are kept; the old
+#                      enrollment is removed only if nothing is left on it.
+# on_patient_mismatch: refuse
+
 # Strip patient identifiers from DICOM headers before copying (UIDs, dates and
 # descriptions are preserved; PatientID/StudyID are set to the patient id; see
 # docs/reference/image_ingestion_protocol.md for the tag list).

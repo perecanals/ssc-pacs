@@ -1,5 +1,10 @@
 # Changelog
 
+## v2.5 — 2026-10-20
+
+Ingestion can correct a wrong PatientID in place: with `overwrite_if_exists: true` and the new `on_patient_mismatch: reassign` the StudyInstanceUID is trusted and the study is re-owned to the PatientID in the files (same dataset only; default `refuse` is unchanged). Study/series annotations are kept, the old owner is refreshed and removed only when empty. Overwrite now also restores `study_member` rows that cascaded away with the study row, and prunes empty cold-archive directories.
+No schema migration.
+
 ## v2.4 — 2026-10-13
 
 DICOMweb cache checks now require complete, distinct instance metadata matching the Orthanc index; cleanup also checks the loose-file count. Partial caches no longer pass as healthy, and failed or incomplete rebuilds are reported.

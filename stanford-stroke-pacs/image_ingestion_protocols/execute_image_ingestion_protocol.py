@@ -13,7 +13,7 @@ from pathlib import Path
 
 import yaml
 
-from image_ingestion_protocol import ImageIngestionProtocol
+from image_ingestion_protocol import PATIENT_MISMATCH_MODES, ImageIngestionProtocol
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
 if str(ROOT_DIR) not in sys.path:
@@ -176,6 +176,7 @@ def load_config(config_path):
         "pipeline_indexing": True,
         "skip_dir_names": [],
         "patient_links": None,
+        "on_patient_mismatch": "refuse",
     }
     merged_config = {**defaults, **config}
     if not merged_config.get("src_dir"):
@@ -217,6 +218,19 @@ def load_config(config_path):
         merged_config["_patient_link_rows"] = rows
     merged_config["compress_workers"] = max(
         1, int(merged_config["compress_workers"] or 1))
+    if merged_config["on_patient_mismatch"] not in PATIENT_MISMATCH_MODES:
+        raise ValueError(
+            f"on_patient_mismatch must be one of {list(PATIENT_MISMATCH_MODES)}, "
+            f"got {merged_config['on_patient_mismatch']!r}: {config_path}"
+        )
+    if (
+        merged_config["on_patient_mismatch"] == "reassign"
+        and not merged_config["overwrite_if_exists"]
+    ):
+        raise ValueError(
+            "on_patient_mismatch: reassign requires overwrite_if_exists: true "
+            f"(re-owning a study replaces its files and rows): {config_path}"
+        )
     if merged_config["overwrite_if_exists"] and merged_config["pipeline_indexing"]:
         print(
             "WARNING: pipeline_indexing disabled because overwrite_if_exists "
@@ -275,6 +289,7 @@ def execute_image_ingestion_protocol(
     cold_archive_root=None,
     compress_workers=None,
     skip_dir_names=None,
+    on_patient_mismatch="refuse",
 ):
     # Create an instance of the ImageIngestionProtocol class
     protocol = ImageIngestionProtocol(
@@ -288,6 +303,7 @@ def execute_image_ingestion_protocol(
         cold_archive_root=cold_archive_root,
         compress_workers=compress_workers or 1,
         skip_dir_names=skip_dir_names,
+        on_patient_mismatch=on_patient_mismatch,
     )
     # Execute the protocol
     return protocol.execute_image_ingestion_protocol(overwrite_if_exists=overwrite_if_exists)
@@ -838,6 +854,7 @@ if __name__ == "__main__":
         f"{config['delete_originals_after_verification']}"
     )
     logger.info(f"Overwrite existing studies: {config['overwrite_if_exists']}")
+    logger.info(f"On PatientID mismatch: {config['on_patient_mismatch']}")
     logger.info(f"Cleanup loose after indexing: {config['cleanup_loose_after_indexing']}")
     logger.info(f"Compression workers: {config['compress_workers']}")
     logger.info(f"Pipelined Orthanc indexing: {config['pipeline_indexing']}")
@@ -968,6 +985,7 @@ if __name__ == "__main__":
                         cold_archive_root=config.get("cold_archive_root"),
                         compress_workers=config["compress_workers"],
                         skip_dir_names=config["skip_dir_names"],
+                        on_patient_mismatch=config["on_patient_mismatch"],
                     )
                     synced_study_ids.update(result["studyinstanceuids"])
                     synced_series_ids.update(result["seriesinstanceuids"])

@@ -63,11 +63,18 @@ from study_metadata import (  # noqa: E402
 )
 
 from config import DICOM_DATA_ROOT, STORAGE_MODE  # noqa: E402
+from patient_identity import refresh_subjects  # noqa: E402
 
 warnings.filterwarnings(
     "ignore",
     message=r"The value length .* exceeds the maximum length of .* allowed for VR LO\.",
 )
+
+
+# What to do when a re-ingested StudyInstanceUID now carries a different
+# PatientID than the enrollment that owns it: ``refuse`` (default) fails the
+# case; ``reassign`` trusts the UID and re-owns the study (overwrite only).
+PATIENT_MISMATCH_MODES = ("refuse", "reassign")
 
 
 class ImageIngestionProtocol:
@@ -85,7 +92,14 @@ class ImageIngestionProtocol:
         cold_archive_root=None,
         compress_workers=4,
         skip_dir_names=None,
+        on_patient_mismatch="refuse",
     ):
+        if on_patient_mismatch not in PATIENT_MISMATCH_MODES:
+            raise ValueError(
+                f"on_patient_mismatch must be one of {PATIENT_MISMATCH_MODES}, "
+                f"got {on_patient_mismatch!r}"
+            )
+        self.on_patient_mismatch = on_patient_mismatch
         self.case_dir = case_dir
         self.postgres_engine = postgres_engine
         self.anonymize_files = anonymize_files
@@ -126,6 +140,11 @@ class ImageIngestionProtocol:
         self.base_dir = str(DICOM_DATA_ROOT)
 
     def execute_image_ingestion_protocol(self, overwrite_if_exists=False):
+        if self.on_patient_mismatch == "reassign" and not overwrite_if_exists:
+            raise ValueError(
+                "on_patient_mismatch='reassign' requires overwrite_if_exists=True: "
+                "re-owning a study replaces its files and rows"
+            )
         case_name = os.path.basename(os.path.normpath(self.case_dir))
         protocol_start = time.perf_counter()
         print(f"Starting image ingestion for case {case_name}")
@@ -853,14 +872,19 @@ class ImageIngestionProtocol:
                 row.studyinstanceuid: row
                 for row in connection.execute(
                     text(
-                        "SELECT studyinstanceuid, patient_id, patient_key, subject_id "
-                        "FROM image_study WHERE studyinstanceuid = ANY(:uids)"
+                        "SELECT s.studyinstanceuid, s.patient_id, s.patient_key, "
+                        "       s.subject_id, p.dataset AS owner_dataset "
+                        "FROM image_study s "
+                        "LEFT JOIN patient p ON p.patient_key = s.patient_key "
+                        "WHERE s.studyinstanceuid = ANY(:uids)"
                     ),
                     {"uids": study_uids},
                 )
             }
 
         self.incoming_patient_keys = {}
+        self.reassigned = {}
+        reassign = self.on_patient_mismatch == "reassign"
         owners, conflicts, members = {}, [], set()
         for _, row in self.case_study_table.iterrows():
             pid, uid = str(row["patient_id"]), str(row["studyinstanceuid"])
@@ -874,6 +898,18 @@ class ImageIngestionProtocol:
                 owners[uid] = (owner.patient_id, owner.patient_key, owner.subject_id)
                 if owner.patient_key != key:
                     members.add((uid, key))
+            elif (
+                reassign
+                and owner.patient_key != key
+                and owner.owner_dataset == self.dataset
+            ):
+                # The UID is trusted over the PatientID: the study moves to the
+                # enrollment named in the files (overwrite replaces its rows
+                # and files; see _finish_reassignment for the old owner).
+                owners[uid] = (pid, key, subject)
+                self.reassigned[uid] = (
+                    owner.patient_key, owner.subject_id, owner.patient_id)
+                print(f"Reassigning study {uid}: {owner.patient_key} -> {key}")
             else:
                 conflicts.append((uid, owner.patient_key, key))
         if conflicts:
@@ -885,8 +921,10 @@ class ImageIngestionProtocol:
                 "Refusing case: StudyInstanceUID(s) already belong to a different "
                 f"patient — {details}. If they are the same person, link the "
                 "enrollments first (YAML patient_links, or "
-                "scripts/admin/link_patients.py); otherwise the source data "
-                "carries a UID clash."
+                "scripts/admin/link_patients.py); if the PatientID in the files "
+                "is the correct one, use on_patient_mismatch: reassign (with "
+                "overwrite_if_exists, same dataset only); otherwise the source "
+                "data carries a UID clash."
             )
         self.study_members = sorted(members)
         if self.study_members:
@@ -1154,6 +1192,10 @@ class ImageIngestionProtocol:
             for archive in sorted(set(archives_to_remove)):
                 if self._remove_file_under(self.cold_archive_root, archive):
                     print(f"Removing stale archive: {os.path.abspath(archive)}")
+                    # Leave no empty skeleton behind (matters when the study
+                    # moves to another patient's tree).
+                    self._remove_empty_parent_dirs(
+                        os.path.abspath(archive), root=self.cold_archive_root)
 
         if not study_rows.empty:
             # Prune from where the study was stored (its patient dir, and the
@@ -1174,6 +1216,17 @@ class ImageIngestionProtocol:
         db_inspector = inspect(self.postgres_engine)
         with self.postgres_engine.begin() as connection:
             lock_study_rows_sqlalchemy(connection, [str(study_instance_uid)])
+            # study_member rows cascade away with the study row; remember who
+            # was a member so update_postgres_tables can restore them.
+            member_rows = connection.execute(
+                text("SELECT patient_key FROM study_member "
+                     "WHERE studyinstanceuid = :uid"),
+                {"uid": str(study_instance_uid)},
+            )
+            if member_rows is not None:
+                if not hasattr(self, "_saved_members"):
+                    self._saved_members = {}
+                self._saved_members[str(study_instance_uid)] = list(member_rows.scalars())
             connection.execute(
                 text("DELETE FROM image_series WHERE studyinstanceuid = :uid"),
                 {"uid": str(study_instance_uid)},
@@ -1248,9 +1301,10 @@ class ImageIngestionProtocol:
             return True
         return False
 
-    def _remove_empty_parent_dirs(self, path):
+    def _remove_empty_parent_dirs(self, path, root=None):
+        root = self.base_dir if root is None else root
         current_path = os.path.dirname(path)
-        while self._is_strictly_inside_base_dir(current_path):
+        while self._strictly_inside(root, current_path):
             if not os.path.isdir(current_path):
                 current_path = os.path.dirname(current_path)
                 continue
@@ -1795,6 +1849,117 @@ class ImageIngestionProtocol:
         finally:
             cur.close()
 
+    def _restore_saved_members(self, connection):
+        """Re-add the memberships an overwrite cascaded away.
+
+        Only those still valid: the member must be an enrollment of the study's
+        (possibly new) owner's subject and not the owner itself — memberships
+        exist only between enrollments of one person (patient_identity.unlink).
+        Dropped ones are reported.
+        """
+        saved = getattr(self, "_saved_members", None) or {}
+        for uid, keys in saved.items():
+            if not keys:
+                continue
+            kept = set(
+                connection.execute(
+                    text(
+                        "INSERT INTO study_member (studyinstanceuid, patient_key) "
+                        "SELECT st.studyinstanceuid, p.patient_key "
+                        "FROM image_study st "
+                        "JOIN patient p ON p.subject_id = st.subject_id "
+                        "                AND p.patient_key <> st.patient_key "
+                        "WHERE st.studyinstanceuid = :uid "
+                        "  AND p.patient_key = ANY(:keys) "
+                        "ON CONFLICT DO NOTHING RETURNING patient_key"
+                    ),
+                    {"uid": uid, "keys": list(keys)},
+                ).scalars()
+            )
+            dropped = sorted(set(keys) - kept)
+            if dropped:
+                print(f"WARNING: study {uid} no longer shared with {dropped} "
+                      "(not the same person as its new owner)")
+        self._saved_members = {}
+
+    def _finish_reassignment(self, connection):
+        """After a study was re-owned (on_patient_mismatch='reassign'): bring
+        the old owner and everything denormalised from the old PatientID up to
+        date, inside the upsert transaction.
+
+        Study/series annotations are keyed by UID and survive; only their
+        copy of ``patient_id`` is rewritten. The old enrollment is deleted when
+        nothing at all is left on it (no studies, memberships, annotations, or
+        linked enrollments); otherwise it is kept and reported — patient-level
+        labels are never moved (which person they describe is ambiguous).
+        """
+        reassigned = getattr(self, "reassigned", None) or {}
+        if not reassigned:
+            return
+        uids = sorted(reassigned)
+        connection.execute(text("SELECT set_config('app.audit_user', "
+                                "'ingestion:reassign', true)"))
+        for table, level, uid_col in (
+            ("image_study", "study", "studyinstanceuid"),
+            ("image_series", "series", "seriesinstanceuid"),
+        ):
+            connection.execute(
+                text(
+                    f"UPDATE annotations a SET patient_id = t.patient_id "
+                    f"FROM {table} t "
+                    f"WHERE a.level = '{level}' AND a.{uid_col} = t.{uid_col} "
+                    f"  AND t.studyinstanceuid = ANY(:uids) "
+                    f"  AND a.patient_id IS DISTINCT FROM t.patient_id"
+                ),
+                {"uids": uids},
+            )
+        old_keys = sorted({old[0] for old in reassigned.values()})
+        subjects = {old[1] for old in reassigned.values() if old[1]}
+        subjects.update(
+            connection.execute(
+                text("SELECT DISTINCT subject_id FROM image_study "
+                     "WHERE studyinstanceuid = ANY(:uids)"),
+                {"uids": uids},
+            ).scalars()
+        )
+        dbapi = connection.connection
+        cur = dbapi.cursor(cursor_factory=RealDictCursor)
+        try:
+            refresh_subjects(cur, dbapi, subjects)
+        finally:
+            cur.close()
+        deleted = set(
+            connection.execute(
+                text(
+                    "DELETE FROM patient p WHERE p.patient_key = ANY(:keys) "
+                    "AND NOT EXISTS (SELECT 1 FROM image_study WHERE patient_key = p.patient_key) "
+                    "AND NOT EXISTS (SELECT 1 FROM study_member WHERE patient_key = p.patient_key) "
+                    "AND NOT EXISTS (SELECT 1 FROM annotations "
+                    "                WHERE level = 'patient' AND patient_key = p.patient_key) "
+                    "AND NOT EXISTS (SELECT 1 FROM patient o "
+                    "                WHERE o.subject_id = p.subject_id "
+                    "                  AND o.patient_key <> p.patient_key) "
+                    "RETURNING p.patient_key"
+                ),
+                {"keys": old_keys},
+            ).scalars()
+        )
+        for key in old_keys:
+            if key in deleted:
+                print(f"Removed empty enrollment {key} (its study moved)")
+                continue
+            studies, annotations = connection.execute(
+                text(
+                    "SELECT (SELECT count(*) FROM image_study WHERE patient_key = :k), "
+                    "       (SELECT count(*) FROM annotations "
+                    "        WHERE level = 'patient' AND patient_key = :k)"
+                ),
+                {"k": key},
+            ).one()
+            print(f"WARNING: enrollment {key} kept after reassignment "
+                  f"({studies} study(ies) still owned, {annotations} patient-level "
+                  "annotation(s), or linked enrollments) — review manually")
+
     def update_postgres_tables(self):
         # One transaction for all three tables: image_study must be committed
         # together with the patient registry, else a crash between them leaves
@@ -1830,6 +1995,7 @@ class ImageIngestionProtocol:
             )
             refresh_study_modalities_sqlalchemy(connection, self.updated_study_uids)
             self._insert_study_members(connection)
+            self._restore_saved_members(connection)
             self._upsert_patient(connection)
             self._rollup_study_storage_sizes(connection)
 
@@ -1838,6 +2004,7 @@ class ImageIngestionProtocol:
             connection.execute(text(ASSIGN_RANKS_SQL))
             connection.execute(text(CLEAR_RANKS_SQL))
             self._recompute_timepoints(connection)
+            self._finish_reassignment(connection)
 
     # GUARDS ONLY, not schema management: Alembic is the canonical home of
     # these columns (rev 0001 baseline has dicom_archive_path, rev 0012 the
