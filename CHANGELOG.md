@@ -1,5 +1,10 @@
 # Changelog
 
+## v2.6 — 2026-10-27
+
+All users can save OHIF measurement reports (SR) and segmentations (SEG) within their permitted datasets. DICOMweb uploads validate every object's study and study references before forwarding; bounded temporary spooling supports larger segmentations without buffering the full upload in memory.
+Added `[web-app].ohif_annotation_max_upload_bytes` (default 256 MiB); install the updated Python requirements and restart the web app. No schema migration.
+
 ## v2.5 — 2026-10-20
 
 Ingestion can correct a wrong PatientID in place: with `overwrite_if_exists: true` and the new `on_patient_mismatch: reassign` the StudyInstanceUID is trusted and the study is re-owned to the PatientID in the files (same dataset only; default `refuse` is unchanged). Study/series annotations are kept, the old owner is refreshed and removed only when empty. Overwrite now also restores `study_member` rows that cascaded away with the study row, and prunes empty cold-archive directories.

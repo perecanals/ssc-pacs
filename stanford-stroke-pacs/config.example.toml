@@ -123,6 +123,8 @@ login_rate_limit_per_5min = 10
 # step slices. 0 disables the shim. Tune live via
 # localStorage.sscTrackpadPxPerSlice; see architecture.md §5.1.
 ohif_trackpad_px_per_slice = 50
+# Maximum non-admin OHIF SR/SEG upload size, including multipart framing (256 MiB).
+ohif_annotation_max_upload_bytes = 268435456
 
 # Optional staff/admin research-table browser/exporter. Requires dedicated credentials
 # DATA_EXPORTS_DB_USER / DATA_EXPORTS_DB_PASSWORD in .env; see docs/operations/data_exports.md.

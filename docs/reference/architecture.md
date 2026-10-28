@@ -478,6 +478,18 @@ of (a linked enrollment that re-sent the same StudyInstanceUID) — the
     (`scripts/admin/link_patients.py`) can take up to 5 min to revoke access
     in a running app unless it is restarted. QIDO searches with neither
     identifier are denied for non-admins.
+    **OHIF annotation uploads** use a separate STOW-RS check: every authenticated
+    user can save measurement reports (Enhanced/Comprehensive/Comprehensive 3D SR)
+    and binary/fractional SEG objects for permitted studies, without staff/admin
+    status. On `POST /dicom-web/studies` or `/dicom-web/studies/{uid}`, the proxy
+    reads every multipart DICOM object's StudyInstanceUID and any nested study
+    references, authorizes them through study visibility, and checks any URL/query
+    study identifiers agree with the object's study. It validates the entire batch
+    before forwarding the original bytes to Orthanc. Unknown/out-of-scope studies
+    return 403; invalid content 400; unsupported media, SOP classes or transfer
+    syntaxes 415; exceeded upload limits 413. Admins retain the existing bypass.
+    These objects live in Orthanc storage, independently of the Web App's SQL
+    annotation labels; no `image_series` or cache-state rows are created.
   - The proxy also strips `Modality` (0008,0060) from `includefield` on
     study-level QIDO searches (`routes/proxy.py:sanitize_study_search_query`):
     it is a series-level tag, so Orthanc answers it by opening one stored

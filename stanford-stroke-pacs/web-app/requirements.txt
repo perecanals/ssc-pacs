@@ -19,3 +19,4 @@ pglast==7.21
 XlsxWriter==3.2.9
 SimpleITK==2.5.3
 pydicom==3.0.1
+python-multipart==0.0.32

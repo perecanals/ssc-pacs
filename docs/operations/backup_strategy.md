@@ -35,7 +35,7 @@ and how to recover. Restore steps live in
 | `orthanc_db` PostgreSQL DB | host PostgreSQL (≥ 16) | **Yes — Tier 1, daily** | Orthanc's index — rebuildable from disk but slow; cheap to back up |
 | Cold DICOM archives (`cold_archive_root`) | local disk | **Not yet** — mirror script implemented (Tier 2, dormant) | Re-ingest from source is currently acceptable; a mirror needs a destination |
 | Uncompressed/warm DICOM tree (`dicom_data_root`) | local disk | No | Reconstructible from cold archives on demand |
-| Orthanc storage volume (`…_ssc-orthanc-storage` at `/var/lib/orthanc/db`) | docker volume | **Yes — Tier 1, daily** | Holds OHIF-authored DICOM SR annotations (**no other copy**) + the Folder Indexer `indexer-plugin.db` (rebuild = full cold-archive decompression + reindex) |
+| Orthanc storage volume (`…_ssc-orthanc-storage` at `/var/lib/orthanc/db`) | docker volume | **Yes — Tier 1, daily** | Holds OHIF-authored DICOM SR/SEG annotations (**no other copy**) + the Folder Indexer `indexer-plugin.db` (rebuild = full cold-archive decompression + reindex) |
 | Orthanc container filesystem (rootfs) | docker | No | Stateless; rebuilt from `docker compose up` + the `ssc-orthanc:patched-indexer` image |
 | Web App `dist/` build output | local | No | Reproducible via `npm run build` |
 | `.env`, `config.toml`, `orthanc.json`, `orthanc_users.json` | repo / host | Out of scope here | Tracked separately (git for non-secrets, secret management for `.env`) |
@@ -132,7 +132,7 @@ When the server is upgraded, install the matching client major.
 payloads in the Orthanc storage Docker volume (`<project>_ssc-orthanc-storage`,
 i.e. `stanford-stroke-pacs_ssc-orthanc-storage` here — Compose prefixes the
 `docker-compose.yml` `volumes:` key with the project name) — including the
-**only copy** of OHIF-authored SR annotations. `backup_orthanc_storage.sh`
+**only copy** of OHIF-authored SR and SEG annotations. `backup_orthanc_storage.sh`
 captures that volume **without pausing Orthanc**:
 
 - a throwaway helper container mounts the volume **read-only** and runs

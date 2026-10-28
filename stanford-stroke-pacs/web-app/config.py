@@ -51,6 +51,7 @@ _DEFAULT_WEB_APP = {
     # (routes/proxy.py): pixels of trackpad scroll per slice. 0 disables
     # injection.
     "ohif_trackpad_px_per_slice": 50,
+    "ohif_annotation_max_upload_bytes": 256 * 1024 * 1024,
 }
 
 
@@ -104,6 +105,9 @@ def _load_and_validate(path: Path) -> tuple[dict, dict, list[str]]:
 
     storage = merge("storage", _DEFAULT_STORAGE)
     web_app = merge("web-app", _DEFAULT_WEB_APP)
+    upload_limit = web_app["ohif_annotation_max_upload_bytes"]
+    if type(upload_limit) is not int or upload_limit <= 0:
+        raise RuntimeError("config.toml [web-app].ohif_annotation_max_upload_bytes must be a positive integer")
 
     mode = str(storage["mode"]).strip().lower()
     if mode not in _VALID_STORAGE_MODES:
@@ -181,6 +185,8 @@ for _key in _RETIRED_WEB_APP_KEYS:
             "Remove the key.", _key,
         )
 
+OHIF_ANNOTATION_MAX_UPLOAD_BYTES = _web_app["ohif_annotation_max_upload_bytes"]
+
 OHIF_TRACKPAD_PX_PER_SLICE = int(_web_app["ohif_trackpad_px_per_slice"])
 if OHIF_TRACKPAD_PX_PER_SLICE < 0:
     raise RuntimeError(
@@ -209,4 +215,5 @@ def effective_config_summary() -> dict:
         "cookie_secure": COOKIE_SECURE,
         "login_rate_limit_per_5min": LOGIN_RATE_LIMIT_PER_5MIN,
         "ohif_trackpad_px_per_slice": OHIF_TRACKPAD_PX_PER_SLICE,
+        "ohif_annotation_max_upload_bytes": OHIF_ANNOTATION_MAX_UPLOAD_BYTES,
     }

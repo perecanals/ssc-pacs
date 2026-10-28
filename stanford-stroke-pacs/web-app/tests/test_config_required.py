@@ -58,6 +58,21 @@ cold_archive_root = "/data/compressed"
 
 
 class TestBenignDefaults:
+    @pytest.mark.parametrize("value", ["0", "-1", "true", '"256"', "1.5"])
+    def test_invalid_annotation_upload_limit(self, tmp_path, value):
+        with pytest.raises(RuntimeError, match="ohif_annotation_max_upload_bytes"):
+            config_mod._load_and_validate(_write(
+                tmp_path, VALID + f"\nohif_annotation_max_upload_bytes = {value}\n",
+            ))
+
+    def test_annotation_upload_limit_default_and_override(self, tmp_path):
+        _, web_app, _ = config_mod._load_and_validate(_write(tmp_path, VALID))
+        assert web_app["ohif_annotation_max_upload_bytes"] == 268435456
+        _, web_app, _ = config_mod._load_and_validate(_write(
+            tmp_path, VALID + "\nohif_annotation_max_upload_bytes = 1024\n",
+        ))
+        assert web_app["ohif_annotation_max_upload_bytes"] == 1024
+
     def test_missing_benign_key_falls_back_without_error(self, tmp_path):
         storage, web_app, fellback = config_mod._load_and_validate(
             _write(tmp_path, VALID)

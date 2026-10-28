@@ -91,6 +91,21 @@ full ordered sequence is in
 
 ## Precedence rules
 
+### OHIF annotation uploads
+
+`[web-app].ohif_annotation_max_upload_bytes` is a positive integer, default
+`268435456` (256 MiB), limiting the complete non-admin SR/SEG multipart request.
+The proxy checks received bytes even without a Content-Length header. Requests
+also have fixed limits of 64 objects and 16 KiB of headers per part; spools spill
+to temporary disk above 8 MiB. Ensure the service's temporary directory has room
+for the request and one extracted part. Compressed HTTP bodies and deflated or
+compressed DICOM transfer syntaxes are unsupported; OHIF's native uncompressed
+exports are accepted. Admin uploads retain the existing proxy behavior.
+Changing the byte limit requires a web-app restart. No Orthanc restart or
+database migration is required.
+
+### General precedence
+
 - **Secrets** → always `.env`. Never commit them; never duplicate a secret into a
   non-secret file by hand (the one mirror, `orthanc_users.json`, is tool-managed).
 - **Non-secret ops** → always `config.toml`. `web-app/config.py` and the shell

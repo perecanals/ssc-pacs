@@ -21,6 +21,7 @@ from starlette.responses import Response, StreamingResponse
 
 import cache_manager
 import dataset_access
+from annotation_upload import CHUNK_BYTES, validated_upload
 from auth import get_current_user
 from config import OHIF_TRACKPAD_PX_PER_SLICE
 from orthanc_client import ORTHANC_PASS, ORTHANC_URL, ORTHANC_USER
@@ -29,6 +30,7 @@ router = APIRouter()
 
 # WADO-RS/QIDO-RS path form: /dicom-web/studies/{StudyInstanceUID}[/...]
 _STUDY_PATH_RE = re.compile(r"^/dicom-web/studies/([^/]+)")
+_STOW_PATH_RE = re.compile(r"^/dicom-web/studies(?:/([^/]+))?/?$")
 
 # Webpack emits OHIF's assets with a 20-hex [contenthash] as a whole
 # dot-delimited segment: app.bundle.<hash>.js, <hash>.woff2, <hash>.wasm. The
@@ -553,6 +555,11 @@ async def dicomweb_dataset_guard(
     scope = await run_in_threadpool(dataset_access.get_user_scope_cached, user)
     if scope is None:
         return
+    stow = _STOW_PATH_RE.fullmatch(request.url.path)
+    if request.method == "POST" and stow:
+        request.state.annotation_scope = scope
+        request.state.annotation_path_uid = stow.group(1)
+        return
     m = _STUDY_PATH_RE.match(request.url.path)
     uid = m.group(1) if m else (
         request.query_params.get("StudyInstanceUID")
@@ -780,6 +787,15 @@ def _filtered_response_headers(upstream: httpx.Response) -> dict[str, str]:
 
 
 async def _proxy(request: Request) -> Response:
+    if hasattr(request.state, "annotation_scope"):
+        async with validated_upload(
+            request, request.state.annotation_scope, request.state.annotation_path_uid,
+        ) as (upload, size):
+            return await _proxy_forward(request, upload, size)
+    return await _proxy_forward(request)
+
+
+async def _proxy_forward(request: Request, upload=None, upload_size=None) -> Response:
     client = _get_client()
     series_metadata = _SERIES_METADATA_RE.match(request.url.path)
     if series_metadata:
@@ -792,7 +808,14 @@ async def _proxy(request: Request) -> Response:
         upstream_url = f"{upstream_url}?{query}"
 
     headers = _filtered_request_headers(request)
-    body = await request.body() if request.method not in ("GET", "HEAD") else None
+    if upload is not None:
+        async def upload_chunks():
+            while chunk := await run_in_threadpool(upload.read, CHUNK_BYTES):
+                yield chunk
+        body = upload_chunks()
+        headers["content-length"] = str(upload_size)
+    else:
+        body = await request.body() if request.method not in ("GET", "HEAD") else None
 
     upstream_req = client.build_request(
         request.method,

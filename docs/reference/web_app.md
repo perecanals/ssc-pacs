@@ -320,6 +320,20 @@ cascading filter drops cached expansion state so the next expand refetches.
 
 ## 6. OHIF Integration Behavior
 
+All authenticated users can save OHIF measurement reports (DICOM SR) and
+segmentations (binary/fractional DICOM SEG) for studies in their permitted
+datasets. Staff/admin status is not required. Use OHIF's report or segmentation
+save action, then reopen the study in OHIF to load the saved objects. These are
+new DICOM instances in Orthanc, separate from the table's SQL annotation labels.
+The Orthanc storage-volume backup preserves them.
+
+For non-admin saves, uploads must contain native uncompressed Part 10 DICOM
+objects, with at most 64 instances and 256 MiB including multipart framing by
+default. The byte limit is configurable through
+`[web-app].ohif_annotation_max_upload_bytes`; see
+[`configuration_sources.md`](configuration_sources.md). A mixed batch containing
+an unauthorized study is rejected before any object is sent to Orthanc.
+
 The Web App does not talk directly to DICOMweb from the browser. Instead, it
 asks its backend to construct OHIF URLs after validating the requested study or
 series against local metadata and Orthanc lookup.
