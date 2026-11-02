@@ -570,3 +570,106 @@ it("edits a past export with its name, dataset, columns and nested conditions re
     source_export_id: "past-export",
   });
 });
+
+it("renames and deletes the creator's export from history", async () => {
+  let jobs = [
+    {
+      id: "owned",
+      name: "Original",
+      username: "admin",
+      format: "csv",
+      status: "completed",
+      created_at: "2026-11-02",
+      row_count: 2,
+      configuration: {},
+    },
+  ];
+  const original = apiFetch.getMockImplementation();
+  apiFetch.mockImplementation(async (path, options) => {
+    if (path.includes("/exports?")) return { ok: true, json: async () => jobs };
+    if (path.endsWith("/exports/owned")) {
+      if (options.method === "PATCH") {
+        jobs = [{ ...jobs[0], ...JSON.parse(options.body) }];
+        return { ok: true, json: async () => jobs[0] };
+      }
+      if (options.method === "DELETE") jobs = [];
+      return { ok: true, json: async () => ({ ok: true }) };
+    }
+    return original(path, options);
+  });
+  const prompt = vi.spyOn(window, "prompt").mockReturnValue(" Renamed ");
+  const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+  try {
+    mount();
+    await screen.findByText("Patients with labels");
+    fireEvent.click(screen.getByRole("button", { name: "Export history" }));
+    await screen.findByText("Original");
+    fireEvent.click(
+      screen.getByRole("button", { name: "Rename", exact: true }),
+    );
+    await screen.findByText("Renamed");
+    expect(
+      apiFetch.mock.calls.some(
+        ([path, options]) =>
+          path.endsWith("/exports/owned") &&
+          options.method === "PATCH" &&
+          JSON.parse(options.body).name === "Renamed",
+      ),
+    ).toBe(true);
+    fireEvent.click(
+      screen.getByRole("button", { name: "Delete", exact: true }),
+    );
+    expect(
+      apiFetch.mock.calls.some(([, options]) => options.method === "DELETE"),
+    ).toBe(false);
+    confirm.mockReturnValue(true);
+    fireEvent.click(
+      screen.getByRole("button", { name: "Delete", exact: true }),
+    );
+    await screen.findByText("Export deleted.");
+    expect(screen.queryByText("Renamed")).not.toBeInTheDocument();
+  } finally {
+    prompt.mockRestore();
+    confirm.mockRestore();
+  }
+});
+
+it("hides rename and delete for another creator and delete for active jobs", async () => {
+  const original = apiFetch.getMockImplementation();
+  apiFetch.mockImplementation(async (path, options) => {
+    if (path.includes("/exports?"))
+      return {
+        ok: true,
+        json: async () =>
+          [
+            {
+              id: "other",
+              name: "Other export",
+              username: "someone",
+              status: "completed",
+            },
+            {
+              id: "active",
+              name: "Active export",
+              username: "admin",
+              status: "running",
+            },
+          ].map((job) => ({
+            ...job,
+            format: "csv",
+            created_at: "2026-11-02",
+            row_count: 0,
+          })),
+      };
+    return original(path, options);
+  });
+  mount();
+  await screen.findByText("Patients with labels");
+  fireEvent.click(screen.getByRole("button", { name: "Export history" }));
+  const other = within((await screen.findByText("Other export")).closest("tr"));
+  expect(other.queryByText("Rename")).not.toBeInTheDocument();
+  expect(other.queryByText("Delete")).not.toBeInTheDocument();
+  const active = within(screen.getByText("Active export").closest("tr"));
+  expect(active.getByText("Rename")).toBeInTheDocument();
+  expect(active.queryByText("Delete")).not.toBeInTheDocument();
+});

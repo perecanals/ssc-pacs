@@ -175,7 +175,11 @@ Jobs move from queued to running, then completed, failed or cancelled.
 Cancellation interrupts active SQL and is checked between batches. Failures
 remove partial files. On restart, queued/running jobs become failed with an
 interruption reason; **Edit export** can rerun them. Expired files and orphaned
-UUID job directories are cleaned automatically. Reports and audit history remain.
+UUID job directories are cleaned automatically. Reports and audit history remain unless the creator explicitly deletes an export
+from history. Deletion removes that job, its download records and its spool
+directory; only finished jobs can be deleted. Rename and delete API requests
+(`PATCH` / `DELETE /api/data-exports/exports/{id}`) require creator ownership,
+including for admins. Rename accepts a JSON object with a `name` field.
 Completed files survive restarts until expiration. Back up PostgreSQL metadata;
 exclude temporary exports from long-term backups.
 

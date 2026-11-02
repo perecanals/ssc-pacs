@@ -1,5 +1,10 @@
 # Changelog
 
+## v2.7 — 2026-11-02
+
+Export creators can rename exports and delete finished exports from history, including their download records and retained files. Creator ownership is enforced for staff and admins.
+No schema migration. Rebuild the frontend and restart the web app.
+
 ## v2.6 — 2026-10-27
 
 All users can save OHIF measurement reports (SR) and segmentations (SEG) within their permitted datasets. DICOMweb uploads validate every object's study and study references before forwarding; bounded temporary spooling supports larger segmentations without buffering the full upload in memory.

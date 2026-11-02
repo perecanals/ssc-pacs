@@ -3,6 +3,7 @@ import { ROOT } from "./api";
 
 export default function ExportHistory({
   jobs,
+  currentUser,
   detail,
   busy,
   historyOffset,
@@ -12,6 +13,8 @@ export default function ExportHistory({
   onCloseDetails,
   onEdit,
   onCancel,
+  onRename,
+  onDelete,
 }) {
   return (
     <section className="data-exports__history">
@@ -22,8 +25,8 @@ export default function ExportHistory({
         </button>
       </div>
       <p>
-        Audit history records who exported, when, and the exact query
-        configuration. A rerun reads current data.
+        History records who exported, when, and the exact query configuration.
+        You can rename or delete your own exports. A rerun reads current data.
       </p>
       <div className="data-exports__results">
         <table>
@@ -76,6 +79,26 @@ export default function ExportHistory({
                     >
                       Edit export
                     </button>
+                    {j.username === currentUser && (
+                      <>
+                        <button
+                          className="btn-outline"
+                          disabled={busy}
+                          onClick={() => onRename(j)}
+                        >
+                          Rename
+                        </button>
+                        {!["running", "queued"].includes(j.status) && (
+                          <button
+                            className="btn-outline"
+                            disabled={busy}
+                            onClick={() => onDelete(j)}
+                          >
+                            Delete
+                          </button>
+                        )}
+                      </>
+                    )}
                     {["running", "queued"].includes(j.status) && (
                       <button
                         className="btn-outline"
@@ -153,6 +176,7 @@ export default function ExportHistory({
 
 ExportHistory.propTypes = {
   jobs: PropTypes.array.isRequired,
+  currentUser: PropTypes.string,
   detail: PropTypes.object,
   busy: PropTypes.bool.isRequired,
   historyOffset: PropTypes.number.isRequired,
@@ -162,4 +186,6 @@ ExportHistory.propTypes = {
   onCloseDetails: PropTypes.func.isRequired,
   onEdit: PropTypes.func.isRequired,
   onCancel: PropTypes.func.isRequired,
+  onRename: PropTypes.func.isRequired,
+  onDelete: PropTypes.func.isRequired,
 };

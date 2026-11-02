@@ -32,6 +32,8 @@ ENDPOINTS = [
     ("GET", "/exports"),
     ("POST", "/exports"),
     ("GET", f"/exports/{ID}"),
+    ("PATCH", f"/exports/{ID}"),
+    ("DELETE", f"/exports/{ID}"),
     ("GET", f"/exports/{ID}/download"),
     ("POST", f"/exports/{ID}/cancel"),
 ]
@@ -1010,3 +1012,59 @@ def test_preview_compiles_from_one_catalog_snapshot(data_exports, monkeypatch):
     assert response.json()["rows"] == [["P-0001"]]
     assert "crisp2" not in response.json()["base_sql"]
     assert "crisp2" in response.json()["sql"]
+
+
+@pytest.mark.parametrize("name", [None, "", "   ", "x" * 121])
+def test_rename_export_rejects_invalid_names(data_exports, name):
+    client, _ = data_exports
+    job = submit(client)
+    assert client.patch(ROOT + f"/exports/{job['id']}", json={"name": name}).status_code == 422
+    assert client.get(ROOT + f"/exports/{job['id']}").json()["name"] == job["name"]
+
+
+def test_creator_can_rename_and_delete_export(staff_data_exports):
+    client, worker, user = staff_data_exports
+    job = submit(client)
+    url = ROOT + f"/exports/{job['id']}"
+    assert run_job(worker, job)["status"] == "completed"
+    before = client.get(url).json()
+    original_file = client.get(url + "/download").content
+    response = client.patch(url, json={"name": "  Renamed cohort  "})
+    assert response.status_code == 200
+    assert response.json()["name"] == "Renamed cohort"
+    after = client.get(url).json()
+    for field in ("configuration", "sql", "parameters", "created_at", "username", "status"):
+        assert after[field] == before[field]
+    download = client.get(url + "/download")
+    assert download.content == original_file
+    assert "Renamed_cohort" in download.headers["content-disposition"]
+    assert (worker.root / job["id"]).is_dir()
+    # Even admins who can inspect this job cannot rename/delete another creator's export.
+    login_as(client, TEST_USER)
+    assert client.get(url).status_code == 200
+    assert client.patch(url, json={"name": "Other"}).status_code == 404
+    assert client.delete(url).status_code == 404
+    login_as(client, USER_LVO)
+    database.records("UPDATE users SET is_staff=true WHERE username=%s", (USER_LVO,))
+    try:
+        assert client.patch(url, json={"name": "Other"}).status_code == 404
+        assert client.delete(url).status_code == 404
+    finally:
+        database.records("UPDATE users SET is_staff=false WHERE username=%s", (USER_LVO,))
+    login_as(client, user)
+    assert client.delete(url).status_code == 200
+    assert not (worker.root / job["id"]).exists()
+    assert client.get(url).status_code == 404
+    assert client.get(url + "/download").status_code == 404
+    assert client.delete(url).status_code == 404
+    assert client.get(ROOT + "/exports").json() == []
+    assert database.records("SELECT * FROM data_exports_downloads WHERE export_id=%s", (job["id"],)) == []
+
+
+@pytest.mark.parametrize("status", ["queued", "running", "failed", "cancelled", "expired"])
+def test_delete_only_finished_exports(data_exports, status):
+    client, _ = data_exports
+    job = submit(client)
+    database.records("UPDATE data_exports_jobs SET status=%s WHERE id=%s", (status, job["id"]))
+    response = client.delete(ROOT + f"/exports/{job['id']}")
+    assert response.status_code == (409 if status in ("queued", "running") else 200)

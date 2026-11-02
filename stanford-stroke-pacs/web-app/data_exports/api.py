@@ -2,6 +2,7 @@
 
 import json
 import logging
+import shutil
 import threading
 from dataclasses import dataclass
 from uuid import UUID, uuid4
@@ -35,10 +36,8 @@ class QuerySpec(BaseModel):
     dataset: str | None = Field(default=None, min_length=1, max_length=2000)
 
 
-class ExportSpec(QuerySpec):
+class ExportNameSpec(BaseModel):
     name: str = Field(min_length=1, max_length=120)
-    format: str = "csv"
-    source_export_id: UUID | None = None
 
     @field_validator("name")
     @classmethod
@@ -47,6 +46,11 @@ class ExportSpec(QuerySpec):
         if not value:
             raise ValueError("Export name is required")
         return value
+
+
+class ExportSpec(QuerySpec, ExportNameSpec):
+    format: str = "csv"
+    source_export_id: UUID | None = None
 
 
 class ReportSpec(BaseModel):
@@ -322,6 +326,47 @@ def get_export(job_id, access):
     if not row:
         raise HTTPException(404, "Export not found")
     return row
+
+
+@router.patch("/exports/{job_id}")
+def rename_export(job_id: UUID, spec: ExportNameSpec, worker=Depends(available), access=Depends(get_access)):
+    row = database.records(
+        "UPDATE data_exports_jobs SET name=%s WHERE id=%s AND username=%s RETURNING *",
+        (spec.name, str(job_id), access["user"]),
+        one=True,
+    )
+    if not row:
+        raise HTTPException(404, "Export not found")
+    return row
+
+
+@router.delete("/exports/{job_id}")
+def delete_export(job_id: UUID, worker=Depends(available), access=Depends(get_access)):
+    conn = database.get_conn()
+    try:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            # Lock the job so worker admission, completion and download audit
+            # inserts cannot race removal of its dependent records.
+            cur.execute(
+                "SELECT status FROM data_exports_jobs WHERE id=%s AND username=%s FOR UPDATE",
+                (str(job_id), access["user"]),
+            )
+            row = cur.fetchone()
+            if not row:
+                raise HTTPException(404, "Export not found")
+            if row["status"] in ("queued", "running"):
+                raise HTTPException(409, "Cancel the export and wait for it to finish before deleting it")
+            cur.execute("DELETE FROM data_exports_downloads WHERE export_id=%s", (str(job_id),))
+            cur.execute("DELETE FROM data_exports_jobs WHERE id=%s", (str(job_id),))
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+    # Cleanup also retries orphaned directories if a filesystem removal fails.
+    shutil.rmtree(worker.root / str(job_id), ignore_errors=True)
+    return {"ok": True}
 
 
 @router.get("/exports/{job_id}")

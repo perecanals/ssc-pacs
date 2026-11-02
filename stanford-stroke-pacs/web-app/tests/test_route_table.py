@@ -31,6 +31,8 @@ EXPECTED_ROUTES = {
     ("GET", "/api/data-exports/exports"),
     ("POST", "/api/data-exports/exports"),
     ("GET", "/api/data-exports/exports/{job_id}"),
+    ("PATCH", "/api/data-exports/exports/{job_id}"),
+    ("DELETE", "/api/data-exports/exports/{job_id}"),
     ("POST", "/api/data-exports/exports/{job_id}/cancel"),
     ("GET", "/api/data-exports/exports/{job_id}/download"),
     ("POST", "/api/login"),

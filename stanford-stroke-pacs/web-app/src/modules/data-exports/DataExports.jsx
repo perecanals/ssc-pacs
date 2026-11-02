@@ -17,7 +17,7 @@ const blank = (table = "") => ({
   sort: [],
 });
 export default function DataExports() {
-  const { isAdmin, isStaff, loading } = useAuth();
+  const { currentUser, isAdmin, isStaff, loading } = useAuth();
   const canExport = isAdmin || isStaff;
   const allDatasets = isAdmin ? "All datasets" : "All permitted datasets";
   const [catalog, setCatalog] = useState([]);
@@ -920,6 +920,43 @@ export default function DataExports() {
         ) : (
           <ExportHistory
             jobs={jobs}
+            currentUser={currentUser}
+            onRename={(job) => {
+              const name = window.prompt("Rename export", job.name);
+              if (name === null) return;
+              run(async () => {
+                if (!name.trim()) throw new Error("Export name is required.");
+                const updated = await request(`/exports/${job.id}`, "PATCH", {
+                  name: name.trim(),
+                });
+                setDetail((previous) =>
+                  previous?.id === job.id
+                    ? { ...previous, name: updated.name }
+                    : previous,
+                );
+                await refresh();
+                setNotice("Export renamed.");
+              });
+            }}
+            onDelete={(job) => {
+              if (
+                !window.confirm(
+                  `Delete export "${job.name}"? This removes its history, download records and file.`,
+                )
+              )
+                return;
+              run(async () => {
+                await request(`/exports/${job.id}`, "DELETE");
+                setDetail((previous) =>
+                  previous?.id === job.id ? null : previous,
+                );
+                if (editingExport?.id === job.id) setEditingExport(null);
+                if (jobs.length === 1 && historyOffset > 0)
+                  setHistoryOffset(Math.max(0, historyOffset - 50));
+                await refresh();
+                setNotice("Export deleted.");
+              });
+            }}
             detail={detail}
             busy={busy}
             historyOffset={historyOffset}

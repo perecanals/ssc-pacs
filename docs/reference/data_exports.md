@@ -5,8 +5,10 @@ Navigator's login, theme and full-width workspace.
 
 Admins can query all datasets. Staff use their existing dataset grants and can
 manage only their own reports, export history and files. Admins can manage all
-reports and exports. Ordinary users cannot access this module. Every API request
-checks the current role; research data is read-only.
+reports and inspect, cancel or download all exports. Only the creator can rename
+or delete an export; admins have no override for these actions. Ordinary users
+cannot access this module. Every API request checks the current role; research
+data is read-only.
 
 ## Build an export
 
@@ -98,9 +100,18 @@ export history intact.
 **Export history → Edit export** restores the name, dataset, columns, ordering,
 conditions and SQL from a past run. Exporting the changes creates a new history
 entry with `configuration.source_export_id` pointing to the original. The
-original request and file remain unchanged until normal expiration. Reruns use
-current data and revalidate current permissions. A saved report changes only
-when you explicitly save it.
+original request and file remain unchanged until expiration or creator deletion.
+Reruns use current data and revalidate current permissions. A saved report changes
+only when you explicitly save it.
+
+**Rename** changes your export's display name and future download filenames,
+without rerunning the query or changing the retained file. Names use the same
+1–120 character validation as new exports.
+
+**Delete** asks for confirmation, then permanently removes your export's history
+entry, download records and retained file. Completed, failed, cancelled and
+expired exports can be deleted. Cancel queued/running exports and wait for them
+to finish first. Saved reports and other exports are unaffected.
 
 Each export records its name, configuration, SQL, bound parameters, format,
 serialization version, requester, timestamps, status, row count, file size and
