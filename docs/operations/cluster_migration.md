@@ -115,8 +115,8 @@ stores, both already covered above:
      sh -c "rm -rf /v/* && tar xzf /in/orthanc-vol.tgz -C /v"
    ```
 
-3. **The archive tree** — rsync `cold_archive_root` to the new host, preserving
-   layout. Use `-a` (it preserves mtime; the indexer keys on mtime/size, and
+3. **The archive tree** — rsync each archive volume root to the new host, preserving
+   layout (including its `.ssc-volume` sentinel; see [archive volumes](../cold_storage/archive_volumes.md)). Use `-a` (it preserves mtime; the indexer keys on mtime/size, and
    though the warm/evict cycle self-heals mtime drift, keeping it intact avoids
    a churn of "Modified" re-registrations on the first scans):
 
@@ -128,8 +128,8 @@ stores, both already covered above:
 **The only Orthanc config change** is the storage paths in `config.toml` —
 nothing in `docker-compose.yml`, `orthanc.json`, or inside the container changes:
 
-- `config.toml` `[storage]`: reset `mode`, `dicom_data_root`, and
-  `cold_archive_root` to the new host paths. The Orthanc
+- `config.toml` `[storage]`: reset `mode`, `dicom_data_root`, and each
+  `[storage.archive_volumes.<name>].root` to the new host paths. The Orthanc
   `/dicom-data` bind-mount **source** is derived from these by
   `scripts/orthanc/dc.sh` (exported as `DICOM_MOUNT_SOURCE`) — you no longer edit
   the compose `volumes:` by hand.
@@ -173,7 +173,9 @@ rewrite below, but scripted and safer — reads the *new* roots from `config.tom
 auto-detects the *old* roots from the data, swaps only the leading prefix
 (`new || substring(...)`, so the tail is preserved exactly rather than
 string-replaced), runs every column in one transaction, resets
-`series_cache_state` to cold, and re-audits before committing. Dry-run by default:
+`series_cache_state` to cold, and re-audits before committing. It handles a
+**single archive volume only** and refuses to run while more than one is
+configured. Dry-run by default:
 
 ```bash
 python scripts/migration/repoint_host_paths.py            # dry-run: prints the plan, rolls back

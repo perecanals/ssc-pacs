@@ -8,6 +8,7 @@ Run with: pytest tests/test_load_config.py
 """
 
 import pytest
+from archive_volumes import ArchiveVolume
 
 import execute_image_ingestion_protocol as executor
 from execute_image_ingestion_protocol import load_config
@@ -26,13 +27,23 @@ def _write_yaml(tmp_path, body, dataset="TEST"):
 @pytest.fixture
 def legacy_mode(monkeypatch):
     monkeypatch.setattr(executor, "STORAGE_MODE", "legacy")
-    monkeypatch.setattr(executor, "COLD_ARCHIVE_ROOT", None)
 
 
 @pytest.fixture
-def cold_mode(monkeypatch, tmp_path):
+def volumes(monkeypatch, tmp_path):
+    """Two scratch volumes; default disk1, dataset GUIDE -> disk2."""
+    import config
+
+    vols = {n: ArchiveVolume(n, tmp_path / n) for n in ("disk1", "disk2")}
+    monkeypatch.setattr(config, "ARCHIVE_VOLUMES", vols)
+    monkeypatch.setattr(config, "DEFAULT_ARCHIVE_VOLUME", "disk1")
+    monkeypatch.setattr(config, "DATASET_ARCHIVE_VOLUME", {"GUIDE": "disk2"})
+    return vols
+
+
+@pytest.fixture
+def cold_mode(monkeypatch, volumes):
     monkeypatch.setattr(executor, "STORAGE_MODE", "cold_path_cache")
-    monkeypatch.setattr(executor, "COLD_ARCHIVE_ROOT", str(tmp_path / "cold_root"))
 
 
 def test_defaults_merge(cold_mode, tmp_path):
@@ -46,8 +57,9 @@ def test_defaults_merge(cold_mode, tmp_path):
     assert cfg["pipeline_indexing"] is True
     assert cfg["cleanup_loose_after_indexing"] is True
     assert cfg["skip_dir_names"] == []
-    # cold_archive_root resolved from config.toml (module globals here).
-    assert cfg["cold_archive_root"] == str(tmp_path / "cold_root")
+    # Archive volume resolved from config.toml (module globals here).
+    assert cfg["archive_volume"] == "disk1"
+    assert cfg["cold_archive_root"] == str(tmp_path / "disk1")
     assert raw.startswith("src_dir:")
 
 
@@ -101,18 +113,28 @@ def test_overwrite_disables_pipeline_indexing(cold_mode, tmp_path, capsys):
     assert "pipeline_indexing disabled" in capsys.readouterr().out
 
 
-def test_cold_mode_without_archive_root_raises(monkeypatch, tmp_path):
-    monkeypatch.setattr(executor, "STORAGE_MODE", "cold_path_cache")
-    monkeypatch.setattr(executor, "COLD_ARCHIVE_ROOT", "")
-    with pytest.raises(RuntimeError, match="cold_archive_root"):
-        load_config(_write_yaml(tmp_path, "src_dir: /data/b\n"))
-
-
-def test_cold_mode_yaml_override_warns(cold_mode, tmp_path, capsys):
+def test_archive_volume_resolution_order(cold_mode, tmp_path):
+    # Dataset default from config.toml.
+    cfg, _ = load_config(_write_yaml(tmp_path, "src_dir: /data/b\n", dataset="GUIDE"))
+    assert cfg["archive_volume"] == "disk2"
+    assert cfg["cold_archive_root"] == str(tmp_path / "disk2")
+    assert "dataset_archive_volume" in cfg["_archive_volume_source"]
+    # The YAML wins over the dataset default.
     cfg, _ = load_config(_write_yaml(
-        tmp_path, "src_dir: /data/b\ncold_archive_root: /elsewhere\n"))
-    assert cfg["cold_archive_root"] == "/elsewhere"
-    assert "YAML overrides cold_archive_root" in capsys.readouterr().out
+        tmp_path, "src_dir: /data/b\narchive_volume: disk1\n", dataset="GUIDE"))
+    assert cfg["archive_volume"] == "disk1"
+    assert cfg["_archive_volume_source"] == "yaml archive_volume"
+
+
+def test_unknown_archive_volume_rejected(cold_mode, tmp_path):
+    with pytest.raises(ValueError, match="unknown archive volume 'disk9'"):
+        load_config(_write_yaml(tmp_path, "src_dir: /data/b\narchive_volume: disk9\n"))
+
+
+def test_yaml_cold_archive_root_is_retired(cold_mode, tmp_path):
+    with pytest.raises(ValueError, match="archive_volume"):
+        load_config(_write_yaml(
+            tmp_path, "src_dir: /data/b\ncold_archive_root: /elsewhere\n"))
 
 
 def test_legacy_mode_forces_cleanup_off(legacy_mode, tmp_path, capsys):
@@ -122,10 +144,11 @@ def test_legacy_mode_forces_cleanup_off(legacy_mode, tmp_path, capsys):
     assert "legacy" in capsys.readouterr().out
 
 
-def test_legacy_mode_archive_root_warns_but_keeps(legacy_mode, tmp_path, capsys):
+def test_legacy_mode_archive_volume_warns_and_is_ignored(legacy_mode, tmp_path, capsys):
     cfg, _ = load_config(_write_yaml(
-        tmp_path, "src_dir: /data/b\ncold_archive_root: /somewhere\n"))
-    assert cfg["cold_archive_root"] == "/somewhere"
+        tmp_path, "src_dir: /data/b\narchive_volume: disk2\n"))
+    assert cfg["archive_volume"] is None
+    assert cfg["cold_archive_root"] is None
     assert "mode is 'legacy'" in capsys.readouterr().out
 
 

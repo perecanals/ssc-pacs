@@ -160,7 +160,7 @@ Cold storage / hot cache (when enabled):
 
 ### `image_series.dicom_archive_path`
 
-Nullable `TEXT`. Populated by the offline archiver (`scripts/cold_storage/archive_all_series.py`) when series are packed to `*.tar.zst`. Used when `[storage].mode = "cold_path_cache"` in `config.toml`.
+Nullable `TEXT`. Populated by the offline archiver (`scripts/cold_storage/archive_all_series.py`) when series are packed to `*.tar.zst`. Used when `[storage].mode = "cold_path_cache"` in `config.toml`. The absolute path is the source of truth for which **archive volume** (disk) holds the series: the configured volume root containing it (`archive_volumes.volume_for_path`; there is no volume column). All series of a study share one volume — see [archive volumes](../cold_storage/archive_volumes.md).
 
 ### `series_cache_state`
 

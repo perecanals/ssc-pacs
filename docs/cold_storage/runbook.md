@@ -10,7 +10,8 @@ ingested see [`../reference/image_ingestion_protocol.md`](../reference/image_ing
 
 Two modes, set by `[storage].mode` in the stack-root `config.toml`: `legacy`
 (Orthanc indexes loose DICOMs under `dicom_data_root`) and `cold_path_cache`
-(current production — `*.tar.zst` archives under `cold_archive_root` are
+(current production — `*.tar.zst` archives on the configured archive volumes
+([`archive_volumes.md`](archive_volumes.md)) are
 canonical; requires the patched Orthanc image). Full comparison and the retired
 `cold_cache` history live in [`design.md`](design.md) §Storage modes and
 §Migration history.
@@ -47,8 +48,8 @@ curl -s -u "${ORTHANC_ADMIN_USER}:${ORTHANC_ADMIN_PASSWORD}" \
   http://localhost:8042/statistics | python3 -m json.tool
 ```
 
-There is no separate loose-DICOM backup once cleanup has run: the archives under
-`cold_archive_root` are canonical (a pre-migration loose-tree copy is not retained).
+There is no separate loose-DICOM backup once cleanup has run: the archives on
+the archive volumes are canonical (a pre-migration loose-tree copy is not retained).
 
 ---
 
@@ -170,9 +171,18 @@ Edit `config.toml` (use your host's real paths):
 [storage]
 mode = "cold_path_cache"
 dicom_data_root = "/path/to/imaging_data"      # warm cache (archives extract here)
-cold_archive_root = "/path/to/compressed"      # canonical *.tar.zst store
+default_archive_volume = "disk1"
 eviction_ttl_hours = 24                         # TTL before warm files are evicted (code default 24h); tune to taste
+
+[storage.archive_volumes.disk1]                 # canonical *.tar.zst store
+root = "/path/to/compressed"
+required = true
 ```
+
+Initialise the volume's sentinel first (`python scripts/admin/manage_archive_volumes.py
+init disk1 /path/to/compressed --execute`, or `adopt` for a non-empty tree) —
+without it the volume reads as offline. More disks, per-dataset defaults and
+offline behaviour: [archive volumes](archive_volumes.md).
 
 Restart the web app — on a Linux/systemd host use `systemctl`; on macOS use a
 launchd kickstart:

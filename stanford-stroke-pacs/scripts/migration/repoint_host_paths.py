@@ -50,10 +50,17 @@ sys.path.insert(0, str(REPO_ROOT / "web-app"))
 from db import DB_CONFIG, get_conn  # noqa: E402
 
 from config import (  # noqa: E402
+    ARCHIVE_VOLUMES,
     COLD_ARCHIVE_ROOT,
     DICOM_DATA_ROOT,
     STORAGE_MODE,
 )
+
+if len(ARCHIVE_VOLUMES) > 1:
+    # One old prefix -> one new root; per-volume repointing is not implemented
+    # yet (docs/cold_storage/archive_volumes.md).
+    sys.exit("Error: repoint_host_paths.py supports a single archive volume only; "
+             f"configured: {sorted(ARCHIVE_VOLUMES)}")
 
 GREEN, RED, YELLOW, CYAN, BOLD, NC = (
     "\033[0;32m", "\033[0;31m", "\033[1;33m", "\033[0;36m", "\033[1m", "\033[0m"

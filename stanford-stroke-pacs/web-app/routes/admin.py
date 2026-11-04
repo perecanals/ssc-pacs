@@ -14,6 +14,7 @@ from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from psycopg2 import sql
 from pydantic import BaseModel
 
+import archive_volumes
 import dataset_access
 from auth import require_admin
 from cache_manager import disk_usage_at
@@ -120,9 +121,31 @@ def healthz():
         body["disk_free_percent_dicom_data_root"] = None
         body["disk_error"] = str(e)[:200]
 
+    # Archive volumes: a required one offline is critical; any other offline
+    # volume only warns (the service stays up, that imaging is unavailable).
+    volumes: dict[str, dict] = {}
+    warnings: list[str] = []
+    required_offline = False
+    for vol in archive_volumes.configured_volumes().values():
+        st = archive_volumes.status(vol)
+        volumes[vol.name] = {
+            "online": st.online,
+            "required": vol.required,
+            "reason": st.reason,
+            "free_bytes": st.free_bytes,
+            "free_percent": round(st.free_bytes * 100.0 / st.total_bytes, 1)
+            if st.online and st.total_bytes else None,
+        }
+        if not st.online:
+            warnings.append(f"archive volume {vol.name} offline: {st.reason}")
+            required_offline = required_offline or vol.required
+    body["archive_volumes"] = volumes
+    if warnings:
+        body["warnings"] = warnings
+
     critical_ok = body["db_stanford_stroke"] == "ok"
     if STORAGE_MODE == "cold_path_cache":
-        critical_ok = critical_ok and body["orthanc_api"] == "ok"
+        critical_ok = critical_ok and body["orthanc_api"] == "ok" and not required_offline
 
     if not critical_ok:
         body["status"] = "degraded"

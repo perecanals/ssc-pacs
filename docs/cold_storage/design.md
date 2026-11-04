@@ -33,7 +33,7 @@ This is the core of `cold_path_cache`:
 | Phase  | What exists on disk | What OHIF sees |
 |--------|---------------------|----------------|
 | Hot    | Loose DICOMs at `dicom_dir_path` | Working viewer |
-| Cold   | Nothing (just the `*.tar.zst` archive under `cold_archive_root`) | Index entry present but reads fail |
+| Cold   | Nothing (just the `*.tar.zst` archive on its archive volume) | Index entry present but reads fail |
 | Warming | Files being extracted from archive back to `dicom_dir_path` | — |
 | Warm → Hot again | Loose DICOMs restored | Working viewer |
 
@@ -89,7 +89,8 @@ reads them directly. No cache manager involvement. Baseline pre-migration.
 
 ### `cold_path_cache` (current production mode)
 
-- Canonical store: `*.tar.zst` archives at `cold_archive_root`, one per series.
+- Canonical store: `*.tar.zst` archives on one or more named archive volumes
+  (one per series, all of a study's on one volume; see [archive volumes](archive_volumes.md)).
 - Hot cache: the legacy tree itself. When a study is warmed, each series'
   archive is extracted back to its original `dicom_dir_path`. When evicted,
   the extracted files are removed.
@@ -155,7 +156,7 @@ months, so every cache was built from readable files before archiving.
 ## Storage layout
 
 ```
-cold_archive_root/                    (canonical — never moves)
+<archive volume root>/                (canonical — never moves; same layout on every volume)
   {dataset_slug}/                     (owner enrollment's dataset; v2.2)
    {patient_id}/
     {study_uid}/
@@ -382,7 +383,7 @@ rename. Partial states never leak to OHIF.
 When the image ingestion protocol runs, it:
 
 1. Copies the new loose DICOMs to `dicom_dir_path`
-2. Compresses them to `cold_archive_root` (populates `dicom_archive_path`)
+2. Compresses them to the study's archive volume (populates `dicom_archive_path`)
 3. Registers the case into Orthanc (scoped scan, below), then by default
    deletes the loose files (`cleanup_loose_after_indexing: true`; same
    safety checks as `cleanup_loose_dicoms.py`)

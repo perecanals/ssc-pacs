@@ -378,6 +378,10 @@ See [`../reference/image_ingestion_protocol.md`](../reference/image_ingestion_pr
 python execute_image_ingestion_protocol.py [--config path/to/config.yaml]
 ```
 
+Optional YAML `archive_volume: <name>` sends the batch's new studies to that
+archive volume (else the dataset's / default volume). Check first, from the stack root:
+`python scripts/admin/manage_archive_volumes.py check-dataset <dataset>`.
+
 ---
 
 ## Labels (OE2)
@@ -554,7 +558,18 @@ curl -s -u admin:<password> http://localhost:8042/system | python3 -m json.tool
 
 ## Cold storage
 
-See [`../cold_storage/runbook.md`](../cold_storage/runbook.md) for evaluation, archiver, and mode switching.
+See [`../cold_storage/runbook.md`](../cold_storage/runbook.md) for evaluation, archiver, and mode switching,
+and [`../cold_storage/archive_volumes.md`](../cold_storage/archive_volumes.md) for multi-disk archive volumes.
+
+### Archive volumes
+
+```bash
+python scripts/admin/manage_archive_volumes.py status                    # per volume: online, free space, archived per dataset
+python scripts/admin/manage_archive_volumes.py check-dataset GUIDE       # which volume a batch for this dataset would use
+python scripts/admin/manage_archive_volumes.py init disk2 <root>                    # dry-run (no sudo)
+sudo "$(which python)" scripts/admin/manage_archive_volumes.py init disk2 <root> --execute   # root only: creates root + .ssc-volume sentinel
+sudo "$(which python)" scripts/admin/manage_archive_volumes.py adopt disk1 <root> --execute  # sentinel for an existing (non-empty) tree
+```
 
 ### Warm / evict / status (per series or per study)
 
@@ -575,7 +590,7 @@ curl -b cookies.txt -X POST http://localhost:8043/api/series/<series-uid>/evict
 ```bash
 # Compress series to *.tar.zst (dry-run default; --execute writes + records paths)
 python scripts/cold_storage/archive_all_series.py --dry-run
-python scripts/cold_storage/archive_all_series.py --workers 4 --execute
+python scripts/cold_storage/archive_all_series.py --workers 4 --execute   # each series to its study's volume; --volume NAME for new ones
 
 # Backfill per-series/study storage sizes (compressed/decompressed MB)
 python scripts/cold_storage/backfill_storage_sizes.py            # everything missing
@@ -590,7 +605,7 @@ python scripts/cold_storage/cleanup_loose_dicoms.py                  # dry-run
 python scripts/cold_storage/cleanup_loose_dicoms.py --execute
 
 # Verify (and optionally repair) archive integrity
-python scripts/cold_storage/verify_and_repair_archives.py
+python scripts/cold_storage/verify_and_repair_archives.py              # one volume per run (--volume NAME; default volume)
 
 # Cold-storage health probe (stuck warming, orphan dirs, disk free)
 python scripts/cold_storage/cold_storage_health.py
@@ -722,6 +737,8 @@ python scripts/backup/remote_backup.py restore tier1 --snapshot <id> --target /p
 # Spot-restore selected archives only (repeat --include)
 python scripts/backup/remote_backup.py restore imaging --snapshot <id> --target /path/to/new-dir \
   --include /cold/root/.../DICOM.tar.zst
+# Volumes other than disk1 name the volume (one imaging snapshot per volume)
+python scripts/backup/remote_backup.py restore imaging --volume disk2 --snapshot <id> --target /path/to/new-dir
 ```
 
 The rsync cold-archive mirror (legacy Tier 2) is implemented but **dormant** —

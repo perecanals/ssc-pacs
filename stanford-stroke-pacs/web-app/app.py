@@ -14,6 +14,7 @@ from fastapi.staticfiles import StaticFiles
 from slowapi.errors import RateLimitExceeded
 
 import auth as _auth
+from archive_volumes import ArchiveVolumeError, ArchiveVolumeOffline, offline_volumes
 from auth import create_jwt, decode_jwt
 from config import STORAGE_MODE, WARM_WORKERS, effective_config_summary
 from data_exports import api as data_exports_api
@@ -98,6 +99,13 @@ async def lifespan(application: FastAPI):
     # migration run, which wipes the JSON handler.  Re-install it.
     configure_logging()
     logger.info("startup: effective config", extra=effective_config_summary())
+    # An offline archive volume never stops the service — say it loudly instead.
+    for vol, st in offline_volumes():
+        logger.warning(
+            "startup: archive volume %s (%s) is OFFLINE%s — its imaging is unavailable "
+            "until it is mounted: %s", vol.name, vol.root,
+            " [required]" if vol.required else "", st.reason,
+        )
     proxy.init_client()
     # Bounded executor for backgrounded cold-storage warms. The route
     # handler for POST /api/studies/{uid}/warm submits the extraction here
@@ -161,6 +169,22 @@ async def _rate_limit_handler(request: Request, exc: RateLimitExceeded):
         content={"detail": "Too many attempts; please wait and retry."},
         headers={"Retry-After": str(int(retry_after))},
     )
+
+
+@app.exception_handler(ArchiveVolumeOffline)
+async def _archive_volume_offline_handler(request: Request, exc: ArchiveVolumeOffline):
+    return JSONResponse(status_code=503, content={"detail": {
+        "error": "archive_volume_offline", "volume": exc.volume.name, "reason": exc.reason,
+        "message": f"Archive disk {exc.volume.name} is offline; this imaging is "
+                   "unavailable until it is mounted again.",
+    }})
+
+
+@app.exception_handler(ArchiveVolumeError)
+async def _archive_volume_error_handler(request: Request, exc: ArchiveVolumeError):
+    return JSONResponse(status_code=409, content={"detail": {
+        "error": "archive_volume_inconsistent", "message": str(exc),
+    }})
 
 
 # ---------------------------------------------------------------------------

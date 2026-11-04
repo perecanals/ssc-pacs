@@ -54,7 +54,7 @@ tunnel.
             │                     │                                           │
             │                     ▼                                           │
             │  [storage].dicom_data_root/    ← loose DICOMs (hot)            │
-            │  [storage].cold_archive_root/  ← *.tar.zst (cold)              │
+            │  [storage.archive_volumes.*]   ← *.tar.zst (cold, 1+ disks)    │
             │       (paths from config.toml; see runtime_and_config.md)       │
             │                                                                 │
             └─────────────────────────────────────────────────────────────────┘
@@ -212,7 +212,7 @@ Both roots come from `config.toml` `[storage]` (see
                 ├── DICOM/               ← dicom_dir_path
                 └── NIFTI/image.nii.gz   ← legacy mode only
 
-{cold_archive_root}/                  (canonical in cold_path_cache mode)
+{archive_volume_root}/                (canonical in cold_path_cache mode; one per volume)
 └── {patient_id}/
     └── {studyinstanceuid}/
         └── {seriesdescription}/
@@ -221,9 +221,11 @@ Both roots come from `config.toml` `[storage]` (see
 ```
 
 The archive path deterministically mirrors the loose path — swap
-`dicom_data_root` for `cold_archive_root` and replace the leaf `DICOM/`
-with `DICOM.tar.zst`. That makes `resolve_series_archive()` work without
-a DB lookup when `dicom_archive_path` is NULL.
+`dicom_data_root` for the study's archive volume root and replace the leaf
+`DICOM/` with `DICOM.tar.zst`. That makes `resolve_series_archive()` work
+without a DB lookup when `dicom_archive_path` is NULL (it tries the twin on
+every configured volume). The volume a stored `dicom_archive_path` is on is
+the configured root containing it ([archive volumes](../cold_storage/archive_volumes.md)).
 
 Archive format: flat — DICOM files sit at the archive root, no `DICOM/`
 directory wrapper.
@@ -236,7 +238,7 @@ Controlled by `config.toml` `[storage].mode`. Two values:
 
 | | `legacy` | `cold_path_cache` (production) |
 |---|---|---|
-| Canonical store | loose DICOMs in `dicom_data_root` | `*.tar.zst` in `cold_archive_root` |
+| Canonical store | loose DICOMs in `dicom_data_root` | `*.tar.zst` on the archive volumes |
 | Hot cache | same as canonical | `dicom_data_root` (transient; empty when everything is cold) |
 | Orthanc index | populated by routine Folder Indexer scans | **permanent** — never eroded thanks to `RemoveMissingFiles: false` |
 | Warming | N/A | extract archive → `dicom_dir_path` |
@@ -354,7 +356,7 @@ enrichment is optional). One run per batch:
         │
         ▼
   (cold_path_cache only) compress each series →
-        cold_archive_root/.../DICOM.tar.zst
+        <archive volume root>/.../DICOM.tar.zst
         │
         ▼
   (legacy only) create NIFTI sibling

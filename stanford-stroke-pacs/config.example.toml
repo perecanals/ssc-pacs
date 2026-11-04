@@ -10,17 +10,21 @@
 [storage]
 # REQUIRED — "legacy" | "cold_path_cache".
 #   legacy:          Orthanc's Folder Indexer reads loose DICOMs from dicom_data_root.
-#   cold_path_cache: canonical series are *.tar.zst under cold_archive_root; warm
-#                    extracts back to dicom_data_root (needs the patched Orthanc image).
+#   cold_path_cache: canonical series are *.tar.zst on the archive volumes below;
+#                    warm extracts back to dicom_data_root (needs the patched Orthanc image).
 mode = "legacy"
 # REQUIRED — uncompressed DICOM tree Orthanc indexes. In cold_path_cache mode this
 # doubles as the warm cache: archives are extracted back here on warm (the path each
 # series records in image_series.dicom_dir_path lives under this root).
 dicom_data_root = "/path/to/imaging_data"
-# REQUIRED — root of the *.tar.zst cold archives (cold_path_cache mode; still
-# required in legacy mode, where it only names the future archive location).
-cold_archive_root = "/path/to/imaging_data_compressed"
-# Both roots file imaging as <root>/<dataset slug>/<patient_id>/<StudyUID>/…
+# REQUIRED — at least one archive volume (see [storage.archive_volumes.*] at the
+# end of this section). With more than one, name the volume new studies go to
+# by default; a dataset can override it in [storage.dataset_archive_volume] and
+# an ingestion YAML with archive_volume:. Existing studies never move.
+default_archive_volume = "disk1"
+# (The pre-v2.8 single `cold_archive_root = "..."` still works as one volume
+# "disk1", with a deprecation warning — replace it with the table below.)
+# Every root files imaging as <root>/<dataset slug>/<patient_id>/<StudyUID>/…
 # OPTIONAL — a generated symlink tree showing each enrollment the imaging it
 # shares with linked enrollments of the same person but does not own:
 # <linked_view_root>/<slug>/<patient_id>/<StudyUID> -> its archive dir. Must be
@@ -43,6 +47,28 @@ warming_disk_min_free_bytes = 1048576000  # 1000 MiB
 # each study slower. Keep LOW; the real speed lever is reducing competing disk
 # I/O, not this number.
 warm_workers = 6
+
+# Archive volumes: where the *.tar.zst trees live (cold_path_cache mode; still
+# required in legacy mode, where they only name the future archive location).
+# Each root must hold the sentinel written by
+#   python scripts/admin/manage_archive_volumes.py init|adopt <name> <root>
+# — a root without it reads as OFFLINE (unmounted disk): the app still starts,
+# says so in /healthz and the log, and refuses only that volume's operations.
+# Keys: root (absolute, REQUIRED); required (default false — true makes it a
+# systemd boot dependency and its outage /healthz-critical); backup_repository
+# (restic repository name under [remote_backup].remote_root, default "imaging").
+# docs/cold_storage/archive_volumes.md
+[storage.archive_volumes.disk1]
+root = "/path/to/imaging_data_compressed"
+required = true
+
+# [storage.archive_volumes.disk2]
+# root = "/path/to/second_disk/compressed"
+
+# OPTIONAL — per-dataset default volume for NEW studies (dataset name as in the
+# ingestion YAML `dataset:`).
+# [storage.dataset_archive_volume]
+# "GUIDE" = "disk2"
 
 [backup]
 # Single source of truth for the backup scripts (scripts/backup/*). Each script
@@ -91,7 +117,10 @@ restic_bin = "/usr/local/bin/restic"
 # Keep state/cache outside the source trees; mode 0700, owned by the job user.
 state_dir = "/path/to/ssc-pacs-remote-state"
 tier1_mount = "/path/to/local-backup-disk"
-imaging_mount = "/path/to/local-imaging-disk"
+imaging_mount = "/path/to/local-imaging-disk"   # mount of archive volume disk1
+# Other archive volumes: their mount point is found automatically; pin it here
+# to have the job refuse a root that is not on that mounted filesystem.
+# imaging_mounts = { disk2 = "/path/to/second-disk" }
 # Database names come from .env; freshness from [backup].max_age_hours.
 # Remote recovery points are independent of local file retention_days.
 keep_daily = 60

@@ -395,7 +395,9 @@ separate backup-timer copy in §9) — one command installs everything. The dorm
 
 **Boot ordering.** When the data or backup roots live on their own filesystem,
 the installer also derives their mountpoints from `config.toml` and renders
-`RequiresMountsFor=` into the units that touch them — plus a `docker.service`
+`RequiresMountsFor=` into the units that touch them (`dicom_data_root` plus only
+the archive volumes marked `required = true` — an optional dataset disk never
+blocks boot; see [archive volumes](../cold_storage/archive_volumes.md)) — plus a `docker.service`
 drop-in at `/etc/systemd/system/docker.service.d/10-ssc-data-mounts.conf`. This
 matters because a `nofail` (or LUKS-unlocked) volume mounts *after* Docker
 starts, and Docker resolves a bind mount only once: an `ssc-orthanc` that starts
@@ -739,7 +741,8 @@ How it slots into this runbook:
    schema already at head and does not re-migrate.
 3. **Orthanc index volume + archive tree** — `cluster_migration.md` §2: migrate
    the `<project>_ssc-orthanc-storage` Docker volume (indexer state + the only
-   copy of OHIF SR annotations) and rsync `cold_archive_root`.
+   copy of OHIF SR annotations) and rsync each archive volume root
+   ([archive volumes](../cold_storage/archive_volumes.md)).
 4. **Host-path backfill** — `cluster_migration.md` §3: rewrite the host-path
    columns across the schema to the new prefixes, and reset `series_cache_state` to cold.
 5. **Bring-up + web app + service units** — return here for §5 Steps 5–8

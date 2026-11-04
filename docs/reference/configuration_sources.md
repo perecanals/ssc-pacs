@@ -25,8 +25,9 @@ Nothing else (compose, service units, `orthanc.json`) should need hand-editing.
 `.env`, `deploy.env`, and `config.toml` are all gitignored (per-host); each has
 a committed `*.example` template. `config.toml` is **required** —
 `web-app/config.py` fails fast if it is missing, and refuses to start when an
-installation-specific key (`[storage]` `mode` / `dicom_data_root` /
-`cold_archive_root`) is absent. Benign tuning knobs fall back to built-in
+installation-specific key (`[storage]` `mode` / `dicom_data_root` / at least
+one archive volume — `[storage.archive_volumes.<name>]`, or the deprecated
+single `cold_archive_root`; see [archive volumes](../cold_storage/archive_volumes.md)) is absent. Benign tuning knobs fall back to built-in
 defaults with a logged warning.
 
 ---

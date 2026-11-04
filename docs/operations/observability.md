@@ -141,9 +141,16 @@ Unauthenticated liveness probe returning JSON:
   "db_orthanc": "ok",
   "orthanc_api": "ok",
   "disk_free_percent_dicom_data_root": 46.6,
-  "disk_free_bytes_dicom_data_root": 1833597009920
+  "disk_free_bytes_dicom_data_root": 1833597009920,
+  "archive_volumes": {
+    "disk1": {"online": true, "required": true, "reason": null,
+              "free_bytes": 1833597009920, "free_percent": 46.6}
+  }
 }
 ```
+
+When any archive volume is offline the body also carries a `warnings` list
+(`"archive volume disk2 offline: <reason>"`).
 
 ### HTTP codes
 
@@ -154,13 +161,17 @@ Unauthenticated liveness probe returning JSON:
 - `db_stanford_stroke` must be `ok` (web app cannot serve its own
   data without it).
 - When `STORAGE_MODE == "cold_path_cache"`, `orthanc_api` must also be
-  `ok` (OHIF can't render otherwise).
+  `ok` (OHIF can't render otherwise), and every archive volume marked
+  `required = true` must be online
+  ([archive volumes](../cold_storage/archive_volumes.md)).
 
 **Non-critical but reported:**
 - `db_orthanc` — connected via `PG_ORTHANC_USER`/`PG_ORTHANC_PASSWORD`.
   Reported as `"unconfigured"` if those env vars are absent.
 - `disk_free_*_dicom_data_root` — observability only; a `null` here
   does **not** degrade `/healthz`.
+- `archive_volumes.<name>` — per-volume online state, reason and free space.
+  An offline **non-required** volume only adds a `warnings` entry.
 
 ### Version field
 
@@ -199,12 +210,14 @@ Unauthenticated, same as `/healthz`.
 | `cold_storage_evict_total`                                   | counter   | `trigger` ∈ {`manual`, `ttl`}, `result` ∈ {`success`, `failure`} | Per-series evictions. `manual` = the study/series `POST …/evict` routes; `ttl` = the background eviction loop (`eviction_ttl_hours`), which is where almost all evictions happen. |
 | `cold_storage_warming_rows`                                  | gauge     | —                                      | `series_cache_state` rows currently in `status='warming'`, refreshed on scrape (no new label). |
 | `cold_storage_disk_free_bytes`                               | gauge     | —                                      | Free bytes on the filesystem holding `dicom_data_root`, refreshed on scrape. |
+| `archive_volume_online`                                      | gauge     | `volume`                               | 1 when the archive volume's `.ssc-volume` sentinel is present, else 0; refreshed on scrape. |
+| `archive_volume_free_bytes`                                  | gauge     | `volume`                               | Free bytes on an online archive volume's filesystem; refreshed on scrape. |
 
 `path_template` is the matched FastAPI route template (e.g.
 `/api/studies/{studyinstanceuid}/warm`) — **never the concrete path**,
 so UIDs don't explode cardinality.
 
-The `/metrics` handler refreshes the two gauges on every scrape
+The `/metrics` handler refreshes the gauges on every scrape
 (`metrics.refresh_cold_storage_gauges`). The evict counter is
 incremented in the route handlers (`manual`) and per series inside
 `cache_manager.run_eviction` (`ttl`); `cold_storage_warm_total` is

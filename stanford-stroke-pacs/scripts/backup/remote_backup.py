@@ -21,6 +21,15 @@ from dotenv import dotenv_values
 
 STACK = Path(__file__).resolve().parents[2]
 TIERS = ("tier1", "imaging")
+# Pure helpers only (no config.toml import): the volume parser and sentinel.
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "web-app"))
+from archive_volumes import (  # noqa: E402
+    LEGACY_VOLUME_NAME,
+    SENTINEL_NAME,
+    ArchiveVolume,
+    parse_archive_volumes,
+    read_sentinel,
+)
 
 # Run on either Linux or macOS. Fail before opening an SFTP repository if the
 # external disk is absent, a symlink redirects the path, or space is exhausted.
@@ -35,7 +44,7 @@ if root.resolve() != root or not root.is_dir() or mount not in root.parents:
     raise SystemExit('Remote root must be an existing directory below the mount, without symlinks')
 if root.stat().st_dev != mount.stat().st_dev:
     raise SystemExit('Remote root is on the wrong filesystem')
-for tier in ('tier1', 'imaging'):
+for tier in sys.argv[4:] or ('tier1', 'imaging'):
     if (root / tier).is_symlink():
         raise SystemExit('Repository directory must not be a symlink')
 # statvfs() wraps block counts at 32 bits on macOS, so a multi-terabyte
@@ -72,6 +81,14 @@ def source_directory(value: str, mount_value: str) -> Path:
     if mount not in path.parents or path.stat().st_dev != mount.stat().st_dev:
         raise ValueError("Source is not on the configured source filesystem")
     return path
+
+
+def mount_point_of(path: Path) -> Path:
+    """The mount point holding ``path`` (nearest ancestor that is a mount)."""
+    current = path
+    while not os.path.ismount(current) and current.parent != current:
+        current = current.parent
+    return current
 
 
 def latest_artifacts(root: Path, names: list[str], max_age: float) -> tuple[list[Path], float]:
@@ -120,9 +137,16 @@ class Backup:
         self.key = private_file(cfg["ssh_key_file"])
         self.password = private_file(cfg["password_file"])
         self.state_dir = absolute(cfg["state_dir"])
+        try:
+            volumes, *_ = parse_archive_volumes(config.get("storage", {}), None)
+        except RuntimeError as exc:
+            raise ValueError(str(exc)) from None
+        # Imaging tier: every archive volume, one restic snapshot each.
+        self.volumes: list[ArchiveVolume] = list(volumes.values())
         # Never place the password, restic cache or status inside the input tree.
-        for section, key in (("backup", "backup_root"), ("storage", "cold_archive_root")):
-            source = absolute(config[section][key]).resolve()
+        sources = [absolute(config["backup"]["backup_root"]).resolve(),
+                   *(v.root for v in self.volumes)]
+        for source in sources:
             for path in (self.key.resolve(), self.password.resolve(), self.state_dir.resolve()):
                 if path == source or source in path.parents:
                     raise ValueError("Credentials and state directory must be outside backup sources")
@@ -131,7 +155,7 @@ class Backup:
         if info.st_uid != os.getuid() or info.st_mode & 0o077:
             raise ValueError("State directory must be owned by the job user with mode 0700")
         self.state = self.state_dir / f"{tier}.json"
-        self.repository = f"sftp:{cfg['user']}@{cfg['host']}:{self.remote_root}/{tier}"
+        self.repository = self.repository_url(tier)
         self.ssh = [
             "ssh", "-i", str(self.key), "-p", str(int(cfg.get("port", 22))),
             "-o", "IdentitiesOnly=yes", "-o", "BatchMode=yes",
@@ -152,17 +176,52 @@ class Backup:
         if self.max_age <= 0 or self.keep_daily < 1 or self.reserve < 0:
             raise ValueError("Invalid freshness, retention or free-space setting")
 
+    def repository_url(self, name: str) -> str:
+        return f"sftp:{self.settings['user']}@{self.settings['host']}:{self.remote_root}/{name}"
+
+    # Per-volume layout of the imaging tier. disk1 keeps the pre-volume state
+    # file and tag set, so its snapshot history and retention group continue;
+    # every other volume gets its own state and a volume:<name> tag (restic
+    # retention groups by host+tags, so each volume ages out independently).
+    def volume_repository(self, vol: ArchiveVolume) -> str:
+        return self.repository_url(vol.backup_repository)
+
+    def volume_state(self, vol: ArchiveVolume) -> Path:
+        if vol.name == LEGACY_VOLUME_NAME:
+            return self.state_dir / "imaging.json"
+        return self.state_dir / f"imaging-{vol.name}.json"
+
+    @staticmethod
+    def volume_tags(vol: ArchiveVolume) -> list[str]:
+        return ["imaging"] if vol.name == LEGACY_VOLUME_NAME else ["imaging", f"volume:{vol.name}"]
+
+    def volume_mount(self, vol: ArchiveVolume) -> Path:
+        mounts = self.settings.get("imaging_mounts", {})
+        if vol.name in mounts:
+            return absolute(mounts[vol.name])
+        if vol.name == LEGACY_VOLUME_NAME and self.settings.get("imaging_mount"):
+            return absolute(self.settings["imaging_mount"])
+        return mount_point_of(vol.root)
+
+    def repositories(self) -> list[str]:
+        if self.tier == "tier1":
+            return [self.repository]
+        return sorted({self.volume_repository(v) for v in self.volumes})
+
     def remote_check(self, extra_bytes: int | None = None):
+        names = ["tier1", "imaging", *sorted({v.backup_repository for v in self.volumes})]
         command = shlex.join([
             self.settings.get("remote_python", "python3"), "-c", REMOTE_CHECK,
             str(self.remote_root), str(self.remote_mount),
             str(0 if extra_bytes is None else self.reserve + extra_bytes),
+            *dict.fromkeys(names),
         ])
         subprocess.run([*self.ssh, command], check=True, timeout=45)
 
-    def restic(self, *args: str, capture: bool = False):
+    def restic(self, *args: str, capture: bool = False, repository: str | None = None):
         env = {k: v for k, v in os.environ.items() if not k.startswith("RESTIC_")}
-        env.update(RESTIC_REPOSITORY=self.repository, RESTIC_PASSWORD_FILE=str(self.password))
+        env.update(RESTIC_REPOSITORY=repository or self.repository,
+                   RESTIC_PASSWORD_FILE=str(self.password))
         command = [
             self.settings.get("restic_bin", "restic"),
             "-o", "sftp.command=" + shlex.join([*self.ssh[:-1], "-s", self.ssh[-1], "sftp"]),
@@ -173,17 +232,51 @@ class Backup:
         return subprocess.run(command, env=env, check=True, text=True, capture_output=capture)
 
     def freshness(self):
-        state = json.loads(self.state.read_text())
-        if state["repository"] != self.repository or state["backup_id"] != self.settings["backup_id"]:
+        if self.tier == "tier1":
+            return self._freshness_one(self.state, self.repository, self.tier)
+        states = []
+        for vol in self.volumes:
+            path = self.volume_state(vol)
+            if not path.exists() and self._volume_root(vol, require_archives=False) is not None \
+                    and not self._has_archives(vol.root):
+                print(f"SKIP: imaging volume {vol.name} has no archives yet")
+                continue
+            states.append(self._freshness_one(path, self.volume_repository(vol), f"imaging/{vol.name}"))
+        return states
+
+    def _freshness_one(self, state_path: Path, repository: str, label: str):
+        state = json.loads(state_path.read_text())
+        if state["repository"] != repository or state["backup_id"] != self.settings["backup_id"]:
             raise ValueError("Success record belongs to a different destination or backup identity")
         for key in ("completed_at", "source_time"):
             if not 0 <= time.time() - state[key] <= self.max_age:
-                raise ValueError(f"Stale remote backup: {self.tier} ({key})")
-        snapshots = json.loads(self.restic("snapshots", "--json", state["snapshot_id"], capture=True).stdout)
+                raise ValueError(f"Stale remote backup: {label} ({key})")
+        snapshots = json.loads(self.restic("snapshots", "--json", state["snapshot_id"],
+                                           capture=True, repository=repository).stdout)
         if not any(s["id"] == state["snapshot_id"] for s in snapshots):
             raise ValueError("Last successful snapshot is missing remotely")
-        print(f"OK: {self.tier}, snapshot {state['snapshot_id'][:8]}")
+        print(f"OK: {label}, snapshot {state['snapshot_id'][:8]}")
         return state
+
+    @staticmethod
+    def _has_archives(root: Path) -> bool:
+        return next(root.rglob("*.tar.zst"), None) is not None
+
+    def _volume_root(self, vol: ArchiveVolume, require_archives: bool = True) -> Path | None:
+        """The volume's source dir, after the mount + sentinel checks.
+
+        Raises when the disk is not mounted or carries another volume's
+        sentinel; None when (with ``require_archives``) it holds no archives
+        yet — a freshly added volume is not an error.
+        """
+        root = source_directory(str(vol.root), str(self.volume_mount(vol)))
+        sentinel = read_sentinel(root)
+        if not isinstance(sentinel, dict) or sentinel.get("name") != vol.name:
+            raise ValueError(f"Archive volume {vol.name} is offline: {SENTINEL_NAME} missing or "
+                             "names another volume")
+        if require_archives and not self._has_archives(root):
+            return None
+        return root
 
     def backup(self, dry_run: bool = False):
         started = time.time()
@@ -193,32 +286,54 @@ class Backup:
                 root, self.database_names, self.max_age,
             )
             self.remote_check(sum(p.stat().st_size for p in paths))
-        else:
-            root = source_directory(self.config["storage"]["cold_archive_root"], self.settings["imaging_mount"])
-            if next(root.rglob("*.tar.zst"), None) is None:
-                raise ValueError("Cold archive tree contains no completed archives")
-            paths, source_time = [root], started
-            previous = json.loads(self.state.read_text()) if self.state.exists() else {}
-            initial_bytes = 0
-            if previous.get("repository") != self.repository:
-                # A new destination needs room for the whole canonical tree.
-                # Do not assume meaningful deduplication of already-compressed
-                # archives. Ignore unfinished files and non-followed symlinks.
-                for directory, _, files in os.walk(root):
-                    for name in files:
-                        path = Path(directory) / name
-                        if not path.is_symlink() and not name.endswith((".tmp", ".partial")):
-                            initial_bytes += path.stat().st_size
-            self.remote_check(initial_bytes)
-        args = [
-            "backup", "--json", "--host", self.settings["backup_id"], "--tag", self.tier,
-            "--exclude", "*.tmp", "--exclude", "*.partial", "--one-file-system",
-        ]
+            self._snapshot(paths, source_time, [self.tier], self.repository, self.state, dry_run)
+            return
+        # One snapshot per volume; an offline volume is reported and the others
+        # still run, but the job exits non-zero so monitoring sees it.
+        failures: list[tuple[str, Exception]] = []
+        for vol in self.volumes:
+            try:
+                self._backup_volume(vol, started, dry_run)
+            except (OSError, ValueError, StopIteration, subprocess.SubprocessError) as exc:
+                print(f"Imaging volume {vol.name} not backed up: {exc}", file=sys.stderr)
+                failures.append((vol.name, exc))
+        if len(failures) == 1 and len(self.volumes) == 1:
+            raise failures[0][1]
+        if failures:
+            raise ValueError("imaging backup incomplete for volume(s) "
+                             + ", ".join(name for name, _ in failures))
+
+    def _backup_volume(self, vol: ArchiveVolume, started: float, dry_run: bool):
+        root = self._volume_root(vol)
+        if root is None:
+            print(f"SKIP: imaging volume {vol.name} has no archives yet")
+            return
+        repository, state_path = self.volume_repository(vol), self.volume_state(vol)
+        previous = json.loads(state_path.read_text()) if state_path.exists() else {}
+        initial_bytes = 0
+        if previous.get("repository") != repository:
+            # A new destination needs room for the whole canonical tree.
+            # Do not assume meaningful deduplication of already-compressed
+            # archives. Ignore unfinished files and non-followed symlinks.
+            for directory, _, files in os.walk(root):
+                for name in files:
+                    path = Path(directory) / name
+                    if not path.is_symlink() and not name.endswith((".tmp", ".partial")):
+                        initial_bytes += path.stat().st_size
+        self.remote_check(initial_bytes)
+        self._snapshot([root], started, self.volume_tags(vol), repository, state_path, dry_run)
+
+    def _snapshot(self, paths, source_time, tags, repository, state_path, dry_run):
+        args = ["backup", "--json", "--host", self.settings["backup_id"]]
+        for tag in tags:
+            args += ["--tag", tag]
+        args += ["--exclude", "*.tmp", "--exclude", "*.partial", "--one-file-system"]
         if dry_run:
             args.append("--dry-run")
         # Nonzero (including restic's incomplete-backup exit 3) never advances
         # success state. Keep the previous recovery point visible to monitoring.
-        result = self.restic(*args, "--", *(str(p) for p in paths), capture=True)
+        result = self.restic(*args, "--", *(str(p) for p in paths), capture=True,
+                             repository=repository)
         summary = next(
             json.loads(line) for line in reversed(result.stdout.splitlines())
             if json.loads(line).get("message_type") == "summary"
@@ -227,15 +342,16 @@ class Backup:
         if dry_run:
             return
         state = {
-            "repository": self.repository, "backup_id": self.settings["backup_id"],
+            "repository": repository, "backup_id": self.settings["backup_id"],
             "snapshot_id": summary["snapshot_id"], "completed_at": time.time(), "source_time": source_time,
         }
-        tmp = self.state.with_suffix(".tmp")
+        tmp = state_path.with_suffix(".tmp")
         tmp.write_text(json.dumps(state) + "\n")
-        tmp.replace(self.state)
+        tmp.replace(state_path)
 
     def run(self, action: str, dry_run: bool = False, target: str | None = None,
-            snapshot: str | None = None, include: list[str] | None = None):
+            snapshot: str | None = None, include: list[str] | None = None,
+            volume: str | None = None):
         # Monitoring can inspect the previous committed record during a long
         # upload. Atomic state replacement prevents a partially written record.
         if action == "freshness":
@@ -251,17 +367,27 @@ class Backup:
                 return
             self.remote_check()
             if action == "init":
-                self.restic("init")
+                for repository in self.repositories():
+                    try:
+                        self.restic("cat", "config", capture=True, repository=repository)
+                        print(f"Already initialised: {repository}")
+                    except subprocess.CalledProcessError:
+                        self.restic("init", repository=repository)
             elif action == "check":
-                self.restic("check", "--read-data")
+                for repository in self.repositories():
+                    self.restic("check", "--read-data", repository=repository)
             elif action == "maintain":
                 self.freshness()
-                self.restic("check", "--read-data-subset", "1/12")
+                # --tag filters on the tier; --group-by host,tags keeps every
+                # volume's snapshots (tagged volume:<name>) in their own group.
                 args = [
                     "forget", "--host", self.settings["backup_id"], "--tag", self.tier,
                     "--group-by", "host,tags", "--keep-daily", str(self.keep_daily),
                 ]
-                self.restic(*args, *(["--dry-run"] if dry_run else ["--prune"]))
+                for repository in self.repositories():
+                    self.restic("check", "--read-data-subset", "1/12", repository=repository)
+                    self.restic(*args, *(["--dry-run"] if dry_run else ["--prune"]),
+                                repository=repository)
             elif action == "restore":
                 if not target or not snapshot or not re.fullmatch(r"[0-9a-f]{8,64}", snapshot):
                     raise ValueError("Restore requires --snapshot ID and --target NEW_ABSOLUTE_DIRECTORY")
@@ -271,7 +397,16 @@ class Backup:
                 # Optional spot restore: absolute source paths (or restic glob
                 # patterns on them) recreated beneath the target.
                 filters = [arg for path in include or [] for arg in ("--include", str(absolute(path)))]
-                self.restic("restore", snapshot, "--target", str(dest), "--verify", *filters)
+                repository = self.repository
+                if self.tier == "imaging":
+                    by_name = {v.name: v for v in self.volumes}
+                    chosen = by_name.get(volume or LEGACY_VOLUME_NAME) or (
+                        None if volume else self.volumes[0])
+                    if chosen is None:
+                        raise ValueError(f"Unknown archive volume {volume!r}; configured: {sorted(by_name)}")
+                    repository = self.volume_repository(chosen)
+                self.restic("restore", snapshot, "--target", str(dest), "--verify", *filters,
+                            repository=repository)
 
 
 def main():
@@ -284,6 +419,8 @@ def main():
     parser.add_argument("--snapshot")
     parser.add_argument("--include", action="append", metavar="SOURCE_PATH",
                         help="restore only these source paths (repeatable; restore only)")
+    parser.add_argument("--volume", help="imaging restore: archive volume whose repository "
+                                         "holds the snapshot (default disk1)")
     args = parser.parse_args()
     if args.include and args.action != "restore":
         parser.error("--include is only valid for restore")
@@ -294,7 +431,7 @@ def main():
         with args.config.open("rb") as stream:
             config = tomllib.load(stream)
         Backup(config, args.tier, args.config.parent / ".env").run(
-            args.action, args.dry_run, args.target, args.snapshot, args.include,
+            args.action, args.dry_run, args.target, args.snapshot, args.include, args.volume,
         )
     except (OSError, ValueError, KeyError, StopIteration, subprocess.SubprocessError) as exc:
         print(f"Remote backup failed: {exc}", file=sys.stderr)

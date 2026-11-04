@@ -11,6 +11,7 @@ import tarfile
 
 import pytest
 import zstandard as zstd
+from volume_helpers import make_volumes
 
 from image_ingestion_protocol import ImageIngestionProtocol
 
@@ -18,8 +19,10 @@ from image_ingestion_protocol import ImageIngestionProtocol
 def _bare_protocol(tmp_path, workers=2):
     proto = object.__new__(ImageIngestionProtocol)
     proto.base_dir = str(tmp_path / "dicom_root")
-    proto.cold_archive_root = str(tmp_path / "cold_root")
+    proto.archive_volumes = make_volumes(tmp_path, "cold_root")
+    proto.cold_archive_root = str(proto.archive_volumes["cold_root"].root)
     proto.compress_workers = workers
+    proto.postgres_engine = None
     return proto
 
 
@@ -123,7 +126,7 @@ def test_failed_build_leaves_no_tmp_or_archive(tmp_path, monkeypatch):
         proto._compress_series_dir(str(dicom_dir))
 
     cold_root = tmp_path / "cold_root"
-    leftovers = [p for p in cold_root.rglob("*") if p.is_file()]
+    leftovers = [p for p in cold_root.rglob("*") if p.is_file() and p.name != ".ssc-volume"]
     assert leftovers == []  # neither .tmp nor a published archive
 
 
@@ -175,6 +178,79 @@ def test_compress_cold_archives_records_failures_nonfatally(tmp_path, monkeypatc
     assert t.loc["s2", "dicom_archive_path"] is None
     assert len(written["failures"]) == 1
     assert written["failures"][0]["error"] == "missing dicom_dir_path"
+
+
+def _batch(proto, tmp_path, study_uid="st1"):
+    import pandas as pd
+
+    proto.case_dir = str(tmp_path / "src" / "11-001")
+    dicom_dir = _make_series_dir(tmp_path)
+    proto.case_series_table = pd.DataFrame([
+        {"seriesinstanceuid": "s1", "studyinstanceuid": study_uid,
+         "dicom_dir_path": str(dicom_dir)},
+    ])
+    return dicom_dir
+
+
+def test_existing_study_stays_on_its_volume(tmp_path):
+    """A re-sent study goes back to the volume its archives were on, not to the
+    batch's volume."""
+    proto = _bare_protocol(tmp_path)
+    vols = make_volumes(tmp_path, "disk1", "disk2")
+    proto.archive_volumes = vols
+    proto.cold_archive_root = str(vols["disk2"].root)  # batch volume
+    _batch(proto, tmp_path)
+    proto._pin_study_archive_root("st1", [str(vols["disk1"].root / "x" / "DICOM.tar.zst")])
+
+    proto.compress_cold_archives()
+
+    archive = proto.case_series_table.loc[0, "dicom_archive_path"]
+    assert archive.startswith(str(vols["disk1"].root) + os.sep)
+
+
+def test_new_study_goes_to_batch_volume(tmp_path):
+    proto = _bare_protocol(tmp_path)
+    vols = make_volumes(tmp_path, "disk1", "disk2")
+    proto.archive_volumes = vols
+    proto.cold_archive_root = str(vols["disk2"].root)
+    _batch(proto, tmp_path)
+
+    proto.compress_cold_archives()
+
+    archive = proto.case_series_table.loc[0, "dicom_archive_path"]
+    assert archive.startswith(str(vols["disk2"].root) + os.sep)
+
+
+def test_offline_volume_fails_series_without_writing(tmp_path, monkeypatch):
+    """No sentinel (unmounted disk): the series fails loudly and nothing is
+    written into the bare mount point."""
+    proto = _bare_protocol(tmp_path)
+    vols = make_volumes(tmp_path, "disk2", sentinel=False)
+    proto.archive_volumes = vols
+    proto.cold_archive_root = str(vols["disk2"].root)
+    _batch(proto, tmp_path)
+    written = {}
+    monkeypatch.setattr(ImageIngestionProtocol, "_write_compression_failure_log",
+                        lambda self, failures: written.setdefault("f", failures) and "/dev/null")
+
+    proto.compress_cold_archives()
+
+    assert proto.case_series_table.loc[0, "dicom_archive_path"] is None
+    assert "ArchiveVolumeOffline" in written["f"][0]["error"]
+    assert list(vols["disk2"].root.iterdir()) == []
+
+
+def test_pin_refuses_archives_spanning_volumes(tmp_path):
+    from archive_volumes import ArchiveVolumeError
+
+    proto = _bare_protocol(tmp_path)
+    vols = make_volumes(tmp_path, "disk1", "disk2")
+    proto.archive_volumes = vols
+    with pytest.raises(ArchiveVolumeError):
+        proto._pin_study_archive_root("st1", [
+            str(vols["disk1"].root / "a.tar.zst"), str(vols["disk2"].root / "b.tar.zst")])
+    with pytest.raises(ArchiveVolumeError):
+        proto._pin_study_archive_root("st1", [str(tmp_path / "elsewhere.tar.zst")])
 
 
 if __name__ == "__main__":

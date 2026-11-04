@@ -50,7 +50,7 @@ ssc-pacs/                     # git checkout root (Makefile, CI, root scripts)
 │   ├── web-app/              # FastAPI backend + React frontend (port 8043)
 │   ├── alembic/              # stanford-stroke DB migrations (alembic.ini alongside); web-app runs them at startup
 │   ├── scripts/              # utility scripts (see scripts/README.md); _lib.sh = shared helpers
-│   │   ├── admin/            # manage_users.py, manage_readonly_db_users.py, rotate_service_account.py, rotate_db_password.py, manage_datasets.py, link_patients.py, bulk_set_label_values.*, remove_label.*, teardown.sh
+│   │   ├── admin/            # manage_users.py, manage_readonly_db_users.py, rotate_service_account.py, rotate_db_password.py, manage_datasets.py, manage_archive_volumes.py, link_patients.py, bulk_set_label_values.*, remove_label.*, teardown.sh
 │   │   ├── backup/           # backup_pg_db.sh, backup_orthanc_storage.sh, check_backup_freshness.sh
 │   │   ├── cold_storage/     # archive, cleanup, health, scoped_index, reindex_missing_series, prune_stale_index_paths, verify_and_repair, build_linked_view
 │   │   ├── connectivity/     # tunnel/{linux,macos,windows}/
@@ -162,7 +162,7 @@ Two services and two databases. Full topology + request/ingest flows: `docs/refe
 
 **Storage modes** (`config.toml [storage].mode`):
 - `legacy` — the Folder Indexer reads loose DICOMs from `dicom_data_root`.
-- `cold_path_cache` (production) — canonical series are `*.tar.zst` archives under `cold_archive_root`. Warm extracts them back to the original `dicom_dir_path`; the patched index keeps pointing there even when files are absent, so OHIF works the moment files return. Evict deletes the extracted files; the index stays. **Requires the patched image + `"RemoveMissingFiles": false`.** See `docs/cold_storage/`.
+- `cold_path_cache` (production) — canonical series are `*.tar.zst` archives on named **archive volumes** (`[storage.archive_volumes.<name>]`, one disk each; legacy `cold_archive_root` = one volume `disk1`, deprecated). One study per volume; a stored `dicom_archive_path`'s volume = the configured root containing it (`archive_volumes.volume_for_path`). Offline volume (no `.ssc-volume` sentinel; `manage_archive_volumes.py init|adopt|status`) → service still starts, its warm/delete 503, backups skip it; `/healthz` 503 only if `required`. See `docs/cold_storage/archive_volumes.md`. Warm extracts them back to the original `dicom_dir_path`; the patched index keeps pointing there even when files are absent, so OHIF works the moment files return. Evict deletes the extracted files; the index stays. **Requires the patched image + `"RemoveMissingFiles": false`.** See `docs/cold_storage/`.
 
 **Layout** (v2.2, `web-app/storage_layout.py`): both roots file imaging as `<root>/<owner's dataset slug>/<patient_id>/<StudyUID>/<series desc>/<SeriesUID>/…`. The **stored** paths (`image_study.study_path`, `image_series.dicom_dir_path`/`dicom_archive_path`) are the source of truth, so never rebuild a path from `patient_id`. Linking/splitting re-owns studies without moving files ("misplaced", still working); `scripts/migration/move_to_dataset_layout.py` relocates them (stack stopped; it also rewrites the indexer's `Files.path`). The optional `[storage].linked_view_root` holds a generated symlink view of shared (member) studies. See `docs/operations/dataset_layout.md`.
 
@@ -183,7 +183,7 @@ cp execute_image_ingestion_protocol.example.yaml execute_image_ingestion_protoco
 conda activate ssc-pacs
 python execute_image_ingestion_protocol.py [--config path/to/config.yaml]
 ```
-YAML keys, ingestion steps, and per-mode behavior: `docs/reference/image_ingestion_protocol.md`. `src_dir` is required; storage roots come from `config.toml` (leave `cold_archive_root` unset in the YAML). The NIfTI-conversion and study-type-prediction steps are kept but dormant by design.
+YAML keys, ingestion steps, and per-mode behavior: `docs/reference/image_ingestion_protocol.md`. `src_dir` is required; storage roots come from `config.toml`; optional YAML `archive_volume: <name>` picks the volume for new studies (else `[storage.dataset_archive_volume]`, else `default_archive_volume`) — a YAML `cold_archive_root` is an error. The NIfTI-conversion and study-type-prediction steps are kept but dormant by design.
 
 ## Cold storage
 

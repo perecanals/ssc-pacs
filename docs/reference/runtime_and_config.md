@@ -154,6 +154,7 @@ auth model, runtime split, and provisioning flow are canonical in
 |------|---------|-------------|
 | `web-app/labelled_table_sync.py` | Helpers for maintaining per-level labelled mirror tables | Imported by `web-app/routes/labels.py` and `scripts/admin/remove_label.py` |
 | `scripts/admin/remove_label.py` | Remove a label definition + annotation rows from DB | |
+| `scripts/admin/manage_archive_volumes.py` | Archive volumes: `status`, `check-dataset`; `init`/`adopt` a disk (dry run; `--execute` needs root) — see [archive volumes](../cold_storage/archive_volumes.md) | Per-host volume roots in `config.toml` |
 | `scripts/admin/bulk_set_label_values.py` | Bulk-set annotation values from a CSV/Excel table; creates the label on demand | Requires `openpyxl` for `.xlsx` |
 | `image_ingestion_protocols/` | Imaging-data ingestion pipeline | Needed only when ingesting new data; clinical enrichment optional |
 
@@ -171,7 +172,7 @@ auth model, runtime split, and provisioning flow are canonical in
 
 | File | Purpose |
 |------|---------|
-| `scripts/cold_storage/archive_all_series.py` | Offline archiver: compress all series to `tar.zst` for cold storage |
+| `scripts/cold_storage/archive_all_series.py` | Offline archiver: compress all series to `tar.zst` for cold storage, each on its study's archive volume (`--volume` for studies with none yet) |
 | `scripts/data_integrity/dicom_path_sql_fs_audit.py` | Read-only audit comparing `image_series.dicom_dir_path` to actual filesystem |
 | `maintenance/scripts/orthanc_path_availability_test.py` (checkout-root `maintenance/`, gitignored) | Verify Orthanc can serve instances when their files are present/absent on disk |
 | `maintenance/scripts/orthanc_holdout_case.py` (checkout-root `maintenance/`, gitignored) | Temporarily hide/restore cases from the DICOM tree for manual OHIF testing |

@@ -14,6 +14,7 @@ from fastapi import HTTPException
 from fastapi.responses import FileResponse, StreamingResponse
 from zipstream import ZipStream
 
+from archive_volumes import ArchiveVolumeOffline
 from cache_manager import resolve_series_archive, untar_zst
 from common import ensure_series_access
 from db import get_conn
@@ -46,7 +47,11 @@ def series_record(uid, scope):
 
 
 def source_directory(row, temporary):
-    archive = resolve_series_archive(row.get("dicom_archive_path"), row.get("dicom_dir_path"))
+    offline = None
+    try:
+        archive = resolve_series_archive(row.get("dicom_archive_path"), row.get("dicom_dir_path"))
+    except ArchiveVolumeOffline as exc:
+        archive, offline = None, exc
     if archive and archive.is_file():
         source = temporary / "dicom"
         source.mkdir()
@@ -54,6 +59,9 @@ def source_directory(row, temporary):
         return source
     source = Path(row["dicom_dir_path"]) if row.get("dicom_dir_path") else None
     if source is None or not source.is_dir():
+        if offline is not None:
+            raise HTTPException(503, f"Archive disk {offline.volume.name} is offline; "
+                                     "this series is unavailable until it is mounted again")
         raise HTTPException(404, "DICOM files are unavailable for this series")
     return source
 

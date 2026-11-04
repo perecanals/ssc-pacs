@@ -23,7 +23,14 @@ import pytest
 
 import linked_view
 import storage_layout
+from archive_volumes import ArchiveVolume
 from tests.conftest import insert_patient
+
+
+def _vols(cold_root):
+    """(volumes, default) with ``cold_root`` as the single volume disk1."""
+    vol = ArchiveVolume("disk1", Path(cold_root))
+    return {"disk1": vol}, vol
 
 STACK = Path(__file__).resolve().parents[2]
 PREPARE_SQL = STACK.parent / "orthanc-indexer-patched" / "src" / "Sources" / "PrepareDatabase.sql"
@@ -280,7 +287,16 @@ class TestMove:
             mover.Move(STUDY_A, OWNER[STUDY_A], "/x/a", "/x/b", "/y/a", "/y/b")])
         monkeypatch.setattr(mover, "preflight", lambda *a: [])
         monkeypatch.setattr(mover, "_print_plan", lambda *a: None)
+        # Independent of the host's config.toml, which may list several volumes.
+        monkeypatch.setattr("config.ARCHIVE_VOLUMES", _vols("/y")[0])
         assert mover.main() == 1
+
+    def test_refuses_more_than_one_volume(self, monkeypatch):
+        monkeypatch.setattr("sys.argv", ["move_to_dataset_layout.py"])
+        monkeypatch.setattr("config.ARCHIVE_VOLUMES", {
+            "disk1": ArchiveVolume("disk1", Path("/a")), "disk2": ArchiveVolume("disk2", Path("/b"))})
+        with pytest.raises(SystemExit, match="single archive volume"):
+            mover.main()
 
 
 class TestIndexerPaths:
@@ -315,16 +331,16 @@ class TestLinkedView:
             cur.execute("UPDATE image_study SET subject_id = 'lvo__P-LAY' "
                         "WHERE studyinstanceuid = %s", (STUDY_B,))
             # Linking alone shares nothing (Alembic 0028)...
-            assert linked_view.desired_links(cur, data_root, cold_root) == {}
+            assert linked_view.desired_links(cur, data_root, *_vols(cold_root)) == {}
             # ...each enrollment re-sent the other's study (same UID): members.
             cur.execute("INSERT INTO study_member (studyinstanceuid, patient_key) "
                         "VALUES (%s, 'crisp2__P-LAY'), (%s, 'lvo__P-LAY')", (STUDY_A, STUDY_B))
             (view / "lvo" / "STALE").mkdir(parents=True)
             (view / "lvo" / "STALE" / "1.9").symlink_to(tmp_path / "gone")
-            dry = linked_view.rebuild(cur, view, data_root, cold_root, apply=False)
+            dry = linked_view.rebuild(cur, view, data_root, *_vols(cold_root), apply=False)
             assert not (view / "crisp2").exists()
-            result = linked_view.rebuild(cur, view, data_root, cold_root, apply=True)
-            again = linked_view.rebuild(cur, view, data_root, cold_root, apply=True)
+            result = linked_view.rebuild(cur, view, data_root, *_vols(cold_root), apply=True)
+            again = linked_view.rebuild(cur, view, data_root, *_vols(cold_root), apply=True)
         legacy_tree.rollback()
         assert dry["created"] == result["created"]
         assert sorted(result["created"]) == [f"crisp2/{PID}/{STUDY_A}", f"lvo/{PID}/{STUDY_B}"]
@@ -334,7 +350,8 @@ class TestLinkedView:
 
     def test_disabled_without_a_root(self, legacy_tree, roots):
         with legacy_tree.cursor() as cur:
-            assert linked_view.rebuild(cur, None, *roots, apply=True)["enabled"] is False
+            assert linked_view.rebuild(cur, None, roots[0], *_vols(roots[1]),
+                                       apply=True)["enabled"] is False
         legacy_tree.rollback()
 
     def test_root_must_be_outside_the_storage_roots(self):

@@ -15,7 +15,8 @@ capacity checks; Linux and macOS destinations are supported.
 The deployment's `stanford-stroke-pacs/config.toml` is the single source of
 truth for non-secret backup settings:
 
-- `[storage].cold_archive_root`: imaging source, shared with ingestion.
+- `[storage.archive_volumes.*]`: imaging sources (one per archive volume), shared
+  with ingestion; see [archive volumes](../cold_storage/archive_volumes.md).
 - `[backup].backup_root`: local backup source, shared by producers and remote uploads.
 - `[backup].max_age_hours`: one freshness threshold for local and remote copies.
 - `[backup].retention_days`: retention of local dated backup files.
@@ -52,15 +53,21 @@ database names there; do not point a smoke test at live inputs.
 | Repository | Input | Suggested source-host local schedule |
 |---|---|---|
 | `tier1` | Newest completed dump and SHA-256 sidecar for each DB, plus the newest Orthanc storage snapshot and sidecar | 03:15, with up to 5 minutes jitter |
-| `imaging` | `config.toml [storage].cold_archive_root`, excluding `*.tmp` and `*.partial` | 03:30, with up to 10 minutes jitter |
+| `imaging` | Each archive volume root (`config.toml [storage.archive_volumes.*]`), one snapshot per volume, excluding `*.tmp` and `*.partial` | 03:30, with up to 10 minutes jitter |
 | Freshness | Success records and actual remote snapshot existence for both repositories | Hourly |
 | Maintenance | Repository check (random 1/12 of data), then retention and prune | Sunday 06:00 Tier 1 / 08:00 imaging |
 
 **What is copied, and what is not.** Tier 1 uploads exactly six files: the
 newest completed dump and its `.sha256` sidecar for each of the two databases,
 plus the newest Orthanc storage snapshot and its sidecar. Imaging uploads the
-canonical cold archive tree under `[storage].cold_archive_root` only, which
-contains one `.tar.zst` per series. The warm cache under
+canonical cold archive trees — each archive volume root — only, which contain
+one `.tar.zst` per series. Each volume is its own restic snapshot in the
+repository `remote_root/<backup_repository>` (default `imaging`, shared by all
+volumes). `disk1` keeps the pre-volume tags and state file (`imaging.json`);
+every other volume is tagged `volume:<name>` with state `imaging-<name>.json`,
+so retention ages each volume out independently. A volume with no archives
+yet is skipped; an **offline** volume (sentinel missing) is skipped while the
+others still run, and the job exits non-zero. Details: [archive volumes](../cold_storage/archive_volumes.md). The warm cache under
 `[storage].dicom_data_root` (series extracted for viewing, which changes daily
 and is rebuilt from the archives) is a separate tree and is never read; nor is
 Orthanc's on-disk index, which the `orthanc_db` dump covers. Confirm what a
@@ -127,7 +134,9 @@ configured and invoked; installing units does not enable the new timers.
 6. Add `[remote_backup]` from `config.example.toml` to the deployment's
    `config.toml`, replace every placeholder, and set `enabled = true` only when
    ready for manual validation. This does not enable timers. Configure source
-   mount points explicitly (`tier1_mount`, `imaging_mount`); `/` is allowed for
+   mount points explicitly (`tier1_mount`, `imaging_mount` for `disk1`, and
+   `imaging_mounts.<name>` for other volumes — auto-detected from the root when
+   unset); `/` is allowed for
    a source genuinely on the root filesystem. Keep the password and state/cache
    directory outside the source trees. Existing state directories must be
    owned by the job user with mode 0700.
@@ -178,6 +187,9 @@ absolute destination directory (an existing destination is rejected):
 python scripts/backup/remote_backup.py restore tier1 \
   --snapshot SNAPSHOT_ID --target /path/to/new-restore-directory
 python scripts/backup/remote_backup.py restore imaging \
+  --snapshot SNAPSHOT_ID --target /path/to/new-imaging-restore-directory
+# a volume other than disk1: name it so the right repository is used
+python scripts/backup/remote_backup.py restore imaging --volume disk2 \
   --snapshot SNAPSHOT_ID --target /path/to/new-imaging-restore-directory
 ```
 

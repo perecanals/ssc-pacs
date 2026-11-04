@@ -6,12 +6,12 @@ enrollment that re-sent a study another enrollment of the same person owns is a
 *member* of it (``study_member``, Alembic 0028) and sees it only through the
 database. This tree gives the same view on disk:
 
-    <linked_view_root>/<slug>/<patient_id>/<StudyUID>  ->  <cold_archive_root>/<owner's study dir>
+    <linked_view_root>/<slug>/<patient_id>/<StudyUID>  ->  <archive volume root>/<owner's study dir>
 
 one link per membership. Linked enrollments' *other* studies (e.g. copies
 re-exported under new UIDs) are their own and are not linked. Targets are the
-archive tree — canonical in cold_path_cache mode (the loose tree is only a
-cache). The tree is a **convenience view, not a source of truth**: generated,
+archive tree, on whichever volume holds the study — canonical in
+cold_path_cache mode (the loose tree is only a cache). The tree is a **convenience view, not a source of truth**: generated,
 rebuildable at any time, and kept outside the storage roots (config.py checks)
 so Orthanc, the audits, deletion and backups never walk it.
 
@@ -25,11 +25,15 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+from archive_volumes import ArchiveVolume, ArchiveVolumeError, volume_of_archives
 from storage_layout import study_relpath
 
 # Every membership: an enrollment and a study it sees without owning it.
 _SHARED_SQL = """
-SELECT p.patient_key, p.dataset_slug, p.patient_id, st.studyinstanceuid, st.study_path
+SELECT p.patient_key, p.dataset_slug, p.patient_id, st.studyinstanceuid, st.study_path,
+       (SELECT array_agg(s.dicom_archive_path) FROM image_series s
+        WHERE s.studyinstanceuid = st.studyinstanceuid
+          AND coalesce(s.dicom_archive_path, '') <> '') AS archive_paths
 FROM (SELECT pt.*, d.slug AS dataset_slug FROM patient pt JOIN dataset d ON d.name = pt.dataset) p
 JOIN study_member m ON m.patient_key = p.patient_key
 JOIN image_study st ON st.studyinstanceuid = m.studyinstanceuid
@@ -38,24 +42,35 @@ ORDER BY p.patient_key, st.studyinstanceuid
 """
 
 
-def desired_links(cur, data_root: Path, cold_root: Path) -> dict[Path, Path]:
-    """{link path relative to the view root: absolute target}."""
+def desired_links(cur, data_root: Path, volumes: dict[str, ArchiveVolume],
+                  default: ArchiveVolume) -> dict[Path, Path]:
+    """{link path relative to the view root: absolute target}.
+
+    The target is the owner's study dir on the volume holding its archives
+    (``default`` for a study with none archived yet).
+    """
     cur.execute(_SHARED_SQL)
     out: dict[Path, Path] = {}
     for row in cur.fetchall():
-        _key, slug, pid, uid, study_path = (
+        _key, slug, pid, uid, study_path, archive_paths = (
             (row["patient_key"], row["dataset_slug"], row["patient_id"],
-             row["studyinstanceuid"], row["study_path"]) if isinstance(row, dict) else row
+             row["studyinstanceuid"], row["study_path"], row["archive_paths"])
+            if isinstance(row, dict) else row
         )
         try:
             rel = Path(study_path).relative_to(data_root)
         except ValueError:
             continue  # stored outside the loose root: nothing to point at
-        out[study_relpath(slug, pid, uid)] = Path(cold_root) / rel
+        try:
+            vol = volume_of_archives(archive_paths or [], volumes) or default
+        except ArchiveVolumeError:
+            continue  # inconsistent study: reported by the audits, not linked
+        out[study_relpath(slug, pid, uid)] = vol.root / rel
     return out
 
 
-def rebuild(cur, view_root: Path | None, data_root: Path, cold_root: Path,
+def rebuild(cur, view_root: Path | None, data_root: Path,
+            volumes: dict[str, ArchiveVolume], default: ArchiveVolume,
             *, apply: bool) -> dict:
     """Make ``view_root`` hold exactly the desired links. Idempotent.
 
@@ -68,7 +83,7 @@ def rebuild(cur, view_root: Path | None, data_root: Path, cold_root: Path,
     if view_root is None:
         return result
     view_root = Path(view_root)
-    want = desired_links(cur, data_root, cold_root)
+    want = desired_links(cur, data_root, volumes, default)
 
     existing: dict[Path, Path] = {}
     if view_root.is_dir():
@@ -127,14 +142,15 @@ def after_identity_change(conn) -> list[str]:
     Returns lines to print. A failure to rebuild is reported, never raised: the
     identity change is already committed and the view is rebuildable.
     """
-    from config import COLD_ARCHIVE_ROOT, DICOM_DATA_ROOT, LINKED_VIEW_ROOT
+    from archive_volumes import configured_volumes, default_volume
+    from config import DICOM_DATA_ROOT, LINKED_VIEW_ROOT
     from storage_layout import misplaced_studies
 
     lines = []
     with conn.cursor() as cur:
         try:
-            result = rebuild(cur, LINKED_VIEW_ROOT, DICOM_DATA_ROOT, COLD_ARCHIVE_ROOT,
-                             apply=True)
+            result = rebuild(cur, LINKED_VIEW_ROOT, DICOM_DATA_ROOT, configured_volumes(),
+                             default_volume(), apply=True)
             lines.append(summary(result))
         except OSError as exc:
             lines.append(f"linked view NOT rebuilt ({exc}); run "

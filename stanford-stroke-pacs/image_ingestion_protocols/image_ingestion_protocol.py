@@ -56,6 +56,12 @@ if str(_WEB_APP_DIR) not in sys.path:
     sys.path.insert(0, str(_WEB_APP_DIR))
 import warnings  # noqa: E402
 
+from archive_volumes import (  # noqa: E402
+    configured_volumes,
+    require_online,
+    volume_for_path,
+    volume_of_archives,
+)
 from storage_layout import slug_of, study_relpath  # noqa: E402
 from study_metadata import (  # noqa: E402
     lock_study_rows_sqlalchemy,
@@ -115,6 +121,9 @@ class ImageIngestionProtocol:
         # (Alembic 0026) — so the same id in two datasets stays two patients.
         self.dataset = dataset
         self.dataset_slug = None
+        # Root of the archive volume NEW studies of this batch go to. A study
+        # that already exists keeps its own volume (one study, one volume):
+        # see _study_archive_roots / _archive_root_for_study.
         self.cold_archive_root = cold_archive_root
         # Series archives are compressed concurrently (zstd releases the GIL);
         # 1 = serial. Shared-state writes stay in the calling thread.
@@ -138,6 +147,10 @@ class ImageIngestionProtocol:
 
         # Canonical destination for loose DICOMs.
         self.base_dir = str(DICOM_DATA_ROOT)
+
+    # Defaults for bare (object.__new__) test instances too.
+    archive_volumes = None  # None = config.toml's volumes (tests inject their own)
+    _study_archive_roots = None  # StudyInstanceUID -> archive root it is pinned to
 
     def execute_image_ingestion_protocol(self, overwrite_if_exists=False):
         if self.on_patient_mismatch == "reassign" and not overwrite_if_exists:
@@ -1075,11 +1088,12 @@ class ImageIngestionProtocol:
                     f"image_series has {db_n} slices, disk has {disk_n}. "
                     f"Wiping old files and re-ingesting."
                 )
-                # Path safety: only delete under base_dir / cold_archive_root.
+                # Path safety: only delete under base_dir / an archive volume.
                 if self._remove_dir_under(self.base_dir, old_dir):
                     print(f"  removed old DICOM dir {os.path.abspath(old_dir)}")
-                if self.cold_archive_root and self._remove_file_under(
-                    self.cold_archive_root, old_archive
+                archive_root = self._archive_volume_root(old_archive)
+                if self.cold_archive_root and archive_root and self._remove_file_under(
+                    archive_root, old_archive
                 ):
                     print(f"  removed stale archive {os.path.abspath(old_archive)}")
 
@@ -1189,13 +1203,20 @@ class ImageIngestionProtocol:
                 shutil.rmtree(path, ignore_errors=True)
 
         if self.cold_archive_root:
+            # Pin the study to its current volume before its archives (the only
+            # evidence of where it lives) are removed: the re-ingested copy
+            # goes back to the same volume.
+            self._pin_study_archive_root(study_instance_uid, archives_to_remove)
             for archive in sorted(set(archives_to_remove)):
-                if self._remove_file_under(self.cold_archive_root, archive):
+                root = self._archive_volume_root(archive)
+                if root is None:
+                    print(f"WARNING: refusing to remove archive outside every archive volume: {archive}")
+                    continue
+                if self._remove_file_under(root, archive):
                     print(f"Removing stale archive: {os.path.abspath(archive)}")
                     # Leave no empty skeleton behind (matters when the study
                     # moves to another patient's tree).
-                    self._remove_empty_parent_dirs(
-                        os.path.abspath(archive), root=self.cold_archive_root)
+                    self._remove_empty_parent_dirs(os.path.abspath(archive), root=root)
 
         if not study_rows.empty:
             # Prune from where the study was stored (its patient dir, and the
@@ -1300,6 +1321,59 @@ class ImageIngestionProtocol:
             os.remove(os.path.abspath(path))
             return True
         return False
+
+    def _archive_volume_root(self, path) -> str | None:
+        """Root of the archive volume holding ``path`` (None = outside all)."""
+        if not isinstance(path, str) or not path:
+            return None
+        vol = volume_for_path(path, self.archive_volumes)
+        return str(vol.root) if vol else None
+
+    def _pin_study_archive_root(self, study_uid, archive_paths) -> None:
+        """Remember the volume a study's existing archives are on.
+
+        Raises ArchiveVolumeError if they are outside every volume or span
+        volumes — the study must not be re-filed on a guess.
+        """
+        vol = volume_of_archives(
+            [a for a in archive_paths if isinstance(a, str)], self.archive_volumes)
+        if vol is not None:
+            if self._study_archive_roots is None:
+                self._study_archive_roots = {}
+            self._study_archive_roots.setdefault(str(study_uid), str(vol.root))
+
+    def _pin_existing_study_archive_roots(self, study_uids) -> None:
+        """Pin already-archived studies (append / resume) from the DB."""
+        pinned = self._study_archive_roots or {}
+        missing = sorted({str(u) for u in study_uids if u and str(u) not in pinned})
+        if not missing or getattr(self, "postgres_engine", None) is None:
+            return
+        with self.postgres_engine.connect() as conn:
+            rows = conn.execute(
+                text(
+                    "SELECT studyinstanceuid, dicom_archive_path FROM image_series "
+                    "WHERE studyinstanceuid = ANY(:uids) "
+                    "AND coalesce(dicom_archive_path, '') <> ''"
+                ),
+                {"uids": missing},
+            ).fetchall()
+        by_study: dict[str, list[str]] = {}
+        for uid, archive in rows:
+            by_study.setdefault(str(uid), []).append(archive)
+        for uid, archives in by_study.items():
+            self._pin_study_archive_root(uid, archives)
+
+    def _archive_root_for_study(self, study_uid) -> str:
+        return (self._study_archive_roots or {}).get(str(study_uid), self.cold_archive_root)
+
+    def _require_archive_root_online(self, root) -> None:
+        """Refuse to write onto an offline volume (unmounted disk)."""
+        volumes = self.archive_volumes if self.archive_volumes is not None else configured_volumes()
+        for vol in volumes.values():
+            if str(vol.root) == os.path.realpath(str(root)):
+                require_online(vol)
+                return
+        raise ValueError(f"archive root {root} is not a configured archive volume")
 
     def _remove_empty_parent_dirs(self, path, root=None):
         root = self.base_dir if root is None else root
@@ -2097,7 +2171,7 @@ class ImageIngestionProtocol:
             {"uids": study_uids},
         )
 
-    def _compress_series_dir(self, dicom_dir_path: str):
+    def _compress_series_dir(self, dicom_dir_path: str, archive_root: str | None = None):
         """Compress a series DICOM directory to a tar.zst archive.
 
         Returns the archive path (str). Idempotent: skips compression if a
@@ -2107,7 +2181,7 @@ class ImageIngestionProtocol:
         """
         dicom_dir = os.path.realpath(dicom_dir_path)
         base_dir = os.path.realpath(self.base_dir)
-        cold_root = os.path.realpath(self.cold_archive_root)
+        cold_root = os.path.realpath(archive_root or self.cold_archive_root)
 
         if not os.path.isdir(dicom_dir):
             raise FileNotFoundError(f"dicom_dir_path does not exist: {dicom_dir_path}")
@@ -2235,11 +2309,37 @@ class ImageIngestionProtocol:
             tasks.append((idx, row.get("seriesinstanceuid"),
                           row.get("studyinstanceuid"), dicom_dir_path))
 
+        # Existing studies stay on their volume; new ones go to the batch's.
+        # Every target volume must be online — an unmounted disk fails its
+        # series loudly instead of filling the empty mount point.
+        self._pin_existing_study_archive_roots(t[2] for t in tasks)
+        offline: dict[str, str] = {}
+        for root in {self._archive_root_for_study(t[2]) for t in tasks}:
+            try:
+                self._require_archive_root_online(root)
+            except Exception as exc:
+                offline[root] = f"{type(exc).__name__}: {exc}"
+        runnable = []
+        for task in tasks:
+            idx, series_uid, study_uid, dicom_dir_path = task
+            root = self._archive_root_for_study(study_uid)
+            if root in offline:
+                failures.append({
+                    "row_index": int(idx), "seriesinstanceuid": series_uid,
+                    "studyinstanceuid": study_uid, "dicom_dir_path": dicom_dir_path,
+                    "error": offline[root],
+                })
+                print(f"WARNING: not compressing {dicom_dir_path}: {offline[root]}")
+            else:
+                runnable.append(task)
+        tasks = runnable
+
         if tasks:
             n_workers = min(self.compress_workers, len(tasks))
             with ThreadPoolExecutor(max_workers=n_workers) as pool:
                 future_to_task = {
-                    pool.submit(self._compress_series_dir, dicom_dir_path):
+                    pool.submit(self._compress_series_dir, dicom_dir_path,
+                                self._archive_root_for_study(study_uid)):
                         (idx, series_uid, study_uid, dicom_dir_path)
                     for idx, series_uid, study_uid, dicom_dir_path in tasks
                 }
@@ -2285,6 +2385,7 @@ class ImageIngestionProtocol:
             "import_id": self.import_id,
             "import_label": self.import_label,
             "cold_archive_root": str(self.cold_archive_root) if self.cold_archive_root else None,
+            "pinned_study_archive_roots": dict(self._study_archive_roots or {}),
             "timestamp": datetime.now().isoformat(),
             "failures": failures,
         }

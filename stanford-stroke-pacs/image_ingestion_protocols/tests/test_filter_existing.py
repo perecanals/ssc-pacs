@@ -11,6 +11,7 @@ Run with: pytest tests/test_filter_existing.py
 
 import pandas as pd
 import pytest
+from volume_helpers import make_volumes
 
 from image_ingestion_protocol import ImageIngestionProtocol
 
@@ -20,7 +21,8 @@ STUDY = "1.2.3.100"
 def _protocol(tmp_path, db_study_rows, db_series_rows):
     proto = object.__new__(ImageIngestionProtocol)
     proto.base_dir = str(tmp_path / "dicom_root")
-    proto.cold_archive_root = str(tmp_path / "cold_root")
+    proto.archive_volumes = make_volumes(tmp_path, "cold_root", "disk2")
+    proto.cold_archive_root = str(proto.archive_volumes["cold_root"].root)
 
     def fake_load(study_uids, include_series=False):
         proto.image_study = pd.DataFrame(
@@ -97,6 +99,25 @@ def test_drift_series_reingested_with_old_files_wiped(tmp_path):
     assert proto.skipped_existing_series_uids == []
     assert list(proto.case_series_table["seriesinstanceuid"]) == ["s1"]  # re-ingested
     assert not old_dir.exists()
+    assert not old_archive.exists()
+
+
+def test_drift_wipe_removes_archive_on_another_volume(tmp_path):
+    """The stale archive is removed from the volume it is actually on, even when
+    that is not the batch's volume."""
+    old_archive = tmp_path / "disk2" / "11-001" / STUDY / "desc" / "s1" / "DICOM.tar.zst"
+    old_archive.parent.mkdir(parents=True)
+    old_archive.write_bytes(b"zzz")
+
+    proto = _protocol(
+        tmp_path,
+        db_study_rows=[(STUDY, "11-001", "/x")],
+        db_series_rows=[(STUDY, "s1", "/x/s1", str(old_archive), 3)],
+    )
+    proto.case_series_table, proto.case_study_table = _disk_tables([("s1", 5)])
+
+    proto.filter_existing_studies(overwrite_if_exists=False)
+
     assert not old_archive.exists()
 
 

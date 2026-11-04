@@ -407,8 +407,13 @@ def main() -> int:
     import linked_view
     from db import get_conn
 
-    from config import COLD_ARCHIVE_ROOT, DICOM_DATA_ROOT
+    from config import ARCHIVE_VOLUMES, COLD_ARCHIVE_ROOT, DICOM_DATA_ROOT
 
+    if len(ARCHIVE_VOLUMES) > 1:
+        # Moves rename within one archive root; multi-volume support is not
+        # implemented yet (docs/cold_storage/archive_volumes.md).
+        sys.exit("Error: move_to_dataset_layout.py supports a single archive volume only; "
+                 f"configured: {sorted(ARCHIVE_VOLUMES)}")
     data_root, cold_root = DICOM_DATA_ROOT, COLD_ARCHIVE_ROOT
     conn = get_conn()
     try:

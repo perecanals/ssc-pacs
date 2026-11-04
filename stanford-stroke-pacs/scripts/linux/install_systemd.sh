@@ -103,9 +103,12 @@ mounts_line() {
 if [[ -n "${DATA_MOUNTS:-}" ]]; then
   DATA_MOUNTS_LINE="RequiresMountsFor=$DATA_MOUNTS"
 else
+  # Only *required* archive volumes are boot dependencies; any other volume's
+  # disk may be absent — the app starts and reports it offline instead.
+  mapfile -t REQUIRED_VOLUME_ROOTS < <(archive_volume_roots --required | cut -f2)
   DATA_MOUNTS_LINE="$(mounts_line \
     "$(config_get storage dicom_data_root '')" \
-    "$(config_get storage cold_archive_root '')")"
+    "${REQUIRED_VOLUME_ROOTS[@]}")"
 fi
 if [[ -n "${BACKUP_MOUNTS:-}" ]]; then
   BACKUP_MOUNTS_LINE="RequiresMountsFor=$BACKUP_MOUNTS"

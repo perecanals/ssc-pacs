@@ -9,8 +9,10 @@ conda activate ssc-pacs
 # cd into the stack root
 ```
 
-Paths shown as `<dicom_data_root>` / `<cold_archive_root>` are the
-`[storage]` values from `config.toml`.
+Paths shown as `<dicom_data_root>` / `<archive_root>` are the
+`[storage]` values from `config.toml` (`<archive_root>` = the root of the
+series' [archive volume](../cold_storage/archive_volumes.md); the stored
+`image_series.dicom_archive_path` is the full path).
 
 ---
 
@@ -81,7 +83,7 @@ a backup host with no PostgreSQL or Orthanc available:
 
 ```bash
 python scripts/dicom/dicom_to_nifti.py \
-    --archive <cold_archive_root>/<patient-id>/1.2.../AX_T2_FLAIR/1.2.../DICOM.tar.zst \
+    --archive <archive_root>/<patient-id>/1.2.../AX_T2_FLAIR/1.2.../DICOM.tar.zst \
     --out /tmp/ax_t2_flair.nii.gz
 ```
 
@@ -115,13 +117,13 @@ or wait for the TTL-driven eviction loop.
 List the member files:
 
 ```bash
-zstd -dc <cold_archive_root>/.../DICOM.tar.zst | tar -tvf - | head
+zstd -dc <archive_root>/.../DICOM.tar.zst | tar -tvf - | head
 ```
 
 Pull the DICOM metadata from the first instance without touching disk:
 
 ```bash
-ARCHIVE=<cold_archive_root>/.../DICOM.tar.zst
+ARCHIVE=<archive_root>/.../DICOM.tar.zst
 FIRST_FILE=$(zstd -dc "$ARCHIVE" | tar -tf - | head -1)
 zstd -dc "$ARCHIVE" | tar -xOf - "$FIRST_FILE" | python3 -c "
 import sys, pydicom

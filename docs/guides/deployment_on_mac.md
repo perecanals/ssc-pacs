@@ -59,7 +59,9 @@ scripts/macos/colima_start.sh
 #     --mount <stack root>:r \
 #     --mount <data mount>:w
 # where <data mount> is derived from config.toml: the common parent of
-# [storage].dicom_data_root and cold_archive_root (override: COLIMA_DATA_MOUNT).
+# [storage].dicom_data_root and the legacy single-root cold_archive_root
+# (override: COLIMA_DATA_MOUNT). colima_start.sh predates archive volumes and
+# does not read [storage.archive_volumes.*] — set COLIMA_DATA_MOUNT then.
 ```
 
 The VM is sized at 4 vCPU / 8 GB. vCPUs matter when a study loads in OHIF, which

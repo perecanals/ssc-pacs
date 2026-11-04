@@ -6,6 +6,7 @@ import asyncio
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Request
 
+from archive_volumes import ArchiveVolumeOffline
 from auth import get_current_user, get_dataset_scope
 from cache_manager import (
     estimate_warm_disk_space,
@@ -35,6 +36,20 @@ from db import get_conn
 from metrics import cold_storage_evict_total, cold_storage_warm_total
 
 router = APIRouter()
+
+
+def _offline_503(exc: ArchiveVolumeOffline) -> HTTPException:
+    cold_storage_warm_total.labels(result="archive_volume_offline").inc()
+    return HTTPException(
+        status_code=503,
+        detail={
+            "error": "archive_volume_offline",
+            "volume": exc.volume.name,
+            "reason": exc.reason,
+            "message": f"Archive disk {exc.volume.name} is offline; this imaging is "
+                       "unavailable until it is mounted again.",
+        },
+    )
 
 
 def _filter_in_scope(uids: list[str], patient_keys: list[str], scope: list[str]):
@@ -133,7 +148,10 @@ async def api_warm_study(
     """
     check_study_access(studyinstanceuid, scope)
 
-    est = estimate_warm_disk_space(studyinstanceuid)
+    try:
+        est = estimate_warm_disk_space(studyinstanceuid)
+    except ArchiveVolumeOffline as exc:
+        raise _offline_503(exc) from None
     if est and est["available_bytes"] < est["required_bytes"]:
         cold_storage_warm_total.labels(result="insufficient_disk_space").inc()
         raise HTTPException(
@@ -195,7 +213,10 @@ async def api_warm_series(
     warm: same executor pool, same 507 disk precheck)."""
     check_series_access(seriesinstanceuid, scope)
 
-    est = estimate_warm_series_disk_space([seriesinstanceuid])
+    try:
+        est = estimate_warm_series_disk_space([seriesinstanceuid])
+    except ArchiveVolumeOffline as exc:
+        raise _offline_503(exc) from None
     if est and est["available_bytes"] < est["required_bytes"]:
         cold_storage_warm_total.labels(result="insufficient_disk_space").inc()
         raise HTTPException(

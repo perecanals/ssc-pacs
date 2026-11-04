@@ -23,6 +23,7 @@ import deletion  # noqa: E402
 from labelled_table_sync import sync_labelled_rows  # noqa: E402
 from study_metadata import refresh_study_modalities  # noqa: E402
 from tests.conftest import USER_NONE, insert_patient, login_as  # noqa: E402
+from tests.volume_helpers import archive_volumes_at
 
 STUDY_UID = "1.2.999.701"
 SERIES_UIDS = ["1.2.999.701.1", "1.2.999.701.2"]
@@ -30,8 +31,11 @@ PATIENT_ID = "P-DEL"
 
 
 @pytest.fixture()
-def del_study(seeded_db):
-    """A patient/study/2-series graph with annotations + cache rows to delete."""
+def del_study(seeded_db, tmp_path):
+    """A patient/study/2-series graph with annotations + cache rows to delete.
+
+    Its archives sit on a scratch archive volume (``tmp_path/cold``, disk1)."""
+    cold = (tmp_path / "cold").resolve()
     conn = psycopg2.connect(**seeded_db)
     try:
         with conn.cursor() as cur:
@@ -50,7 +54,7 @@ def del_study(seeded_db):
                     "VALUES (%s, %s, %s, 'CT', %s, %s, %s) ON CONFLICT DO NOTHING",
                     (PATIENT_ID, STUDY_UID, suid, i,
                      f"/imaging/{PATIENT_ID}/{STUDY_UID}/UNNAMED/{suid}/DICOM",
-                     f"/cold/{PATIENT_ID}/{STUDY_UID}/UNNAMED/{suid}/DICOM.tar.zst"),
+                     f"{cold}/{PATIENT_ID}/{STUDY_UID}/UNNAMED/{suid}/DICOM.tar.zst"),
                 )
                 cur.execute(
                     "INSERT INTO series_cache_state (seriesinstanceuid, status) "
@@ -75,7 +79,8 @@ def del_study(seeded_db):
     finally:
         conn.close()
 
-    yield {"study_uid": STUDY_UID, "series_uids": SERIES_UIDS, "patient_id": PATIENT_ID}
+    with archive_volumes_at(cold):
+        yield {"study_uid": STUDY_UID, "series_uids": SERIES_UIDS, "patient_id": PATIENT_ID}
 
     # Idempotent cleanup (rows may already be gone if the test deleted them).
     conn = psycopg2.connect(**seeded_db)
@@ -238,7 +243,7 @@ def test_remove_files_execute():
             "prune_parents": [],
         }
         with patch.object(deletion, "DICOM_DATA_ROOT", dicom_root), \
-             patch.object(deletion, "COLD_ARCHIVE_ROOT", cold_root):
+             archive_volumes_at(cold_root):
             res = deletion.remove_files(plan, execute=True)
         assert not study_loose.exists()
         assert not study_cold.exists()
@@ -247,6 +252,89 @@ def test_remove_files_execute():
         assert (dicom_root / PATIENT_ID).exists()
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_remove_files_across_volumes(tmp_path):
+    """Each archive dir is checked against the volume it is on; anything outside
+    every root, or a volume root itself, is refused."""
+    disk1, disk2, loose = tmp_path / "disk1", tmp_path / "disk2", tmp_path / "imaging"
+    on2 = disk2 / "guide" / PATIENT_ID / STUDY_UID
+    on2.mkdir(parents=True)
+    with patch.object(deletion, "DICOM_DATA_ROOT", loose), archive_volumes_at(disk1, disk2):
+        res = deletion.remove_dir_list([str(on2)], execute=True)
+        assert res["removed"] == [str(on2.resolve())] and not on2.exists()
+        for bad in (tmp_path / "elsewhere" / "P" / "1.2.3", disk2, disk2 / "guide" / PATIENT_ID):
+            with pytest.raises(ValueError):
+                deletion.remove_dir_list([str(bad)], execute=True)
+    assert disk2.exists()
+
+
+def test_study_plan_uses_the_studys_volume(del_study, seeded_db, tmp_path):
+    """The archive twin is taken on the volume holding the study's archives."""
+    disk1, disk2 = tmp_path / "disk1", tmp_path / "cold"  # del_study archives live in tmp/cold
+    conn = psycopg2.connect(**seeded_db)
+    try:
+        with archive_volumes_at(disk1, disk2), \
+             patch.object(deletion, "DICOM_DATA_ROOT", Path("/imaging")), \
+             patch.object(deletion, "orthanc_study_id", return_value=None):
+            _set_study_path(seeded_db, f"/imaging/{PATIENT_ID}/{STUDY_UID}")
+            plan = deletion.build_study_deletion_plan(conn, STUDY_UID)
+    finally:
+        conn.close()
+    assert plan["remove_dirs"] == [f"/imaging/{PATIENT_ID}/{STUDY_UID}",
+                                   str(disk2.resolve() / PATIENT_ID / STUDY_UID)]
+
+
+def test_study_plan_refuses_offline_volume(del_study, seeded_db, tmp_path):
+    """Deleting while the study's disk is unmounted would drop the rows and
+    strand the files: refused."""
+    from archive_volumes import ArchiveVolumeOffline
+
+    _unmount(tmp_path / "cold")
+    conn = psycopg2.connect(**seeded_db)
+    try:
+        with patch.object(deletion, "orthanc_study_id", return_value=None):
+            with pytest.raises(ArchiveVolumeOffline):
+                deletion.build_study_deletion_plan(conn, STUDY_UID)
+            with pytest.raises(ArchiveVolumeOffline):
+                deletion.build_series_deletion_plan(conn, SERIES_UIDS[0])
+    finally:
+        conn.close()
+
+
+def _unmount(root):
+    """Simulate an unmounted disk: the sentinel disappears."""
+    import archive_volumes
+
+    (root / ".ssc-volume").unlink()
+    archive_volumes.invalidate_status_cache()
+
+
+def test_delete_endpoint_offline_volume_is_503(logged_in_client, del_study, tmp_path):
+    _unmount(tmp_path / "cold")
+    resp = logged_in_client.delete(f"/api/admin/studies/{STUDY_UID}")
+    assert resp.status_code == 503
+    assert resp.json()["detail"]["error"] == "archive_volume_offline"
+
+
+def test_orphan_sweep_skips_offline_volumes(seeded_db, tmp_path):
+    loose, disk1, disk2 = tmp_path / "imaging", tmp_path / "disk1", tmp_path / "disk2"
+    orphan1 = disk1 / "lvo" / "P-X" / "1.2.999.801"
+    orphan2 = disk2 / "lvo" / "P-X" / "1.2.999.802"
+    for d in (loose, orphan1, orphan2):
+        d.mkdir(parents=True)
+    conn = psycopg2.connect(**seeded_db)
+    try:
+        with patch.object(deletion, "DICOM_DATA_ROOT", loose), \
+             archive_volumes_at(disk1, disk2) as vols:
+            (vols["disk2"].root / ".ssc-volume").unlink()
+            import archive_volumes
+            archive_volumes.invalidate_status_cache()
+            orphans = deletion.find_orphan_study_dirs(conn)
+    finally:
+        conn.close()
+    assert str(orphan1.resolve()) in orphans
+    assert all("disk2" not in o for o in orphans)
 
 
 # --------------------------------------------------------------------------- #
@@ -382,7 +470,7 @@ def test_study_plan_uses_the_stored_path(del_study, seeded_db, tmp_path):
     conn = psycopg2.connect(**seeded_db)
     try:
         with patch.object(deletion, "DICOM_DATA_ROOT", loose), \
-             patch.object(deletion, "COLD_ARCHIVE_ROOT", cold), \
+             archive_volumes_at(cold), \
              patch.object(deletion, "orthanc_study_id", return_value=None):
             plan = deletion.build_study_deletion_plan(conn, STUDY_UID)
             _set_study_path(seeded_db, "")
@@ -427,7 +515,7 @@ def test_orphan_scan_reads_dataset_and_legacy_dirs(del_study, seeded_db, tmp_pat
     conn = psycopg2.connect(**seeded_db)
     try:
         with patch.object(deletion, "DICOM_DATA_ROOT", loose), \
-             patch.object(deletion, "COLD_ARCHIVE_ROOT", cold):
+             archive_volumes_at(cold):
             orphans = deletion.find_orphan_study_dirs(conn)
     finally:
         conn.close()

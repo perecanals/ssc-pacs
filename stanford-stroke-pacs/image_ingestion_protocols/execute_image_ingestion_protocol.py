@@ -22,10 +22,17 @@ WEB_APP_DIR = ROOT_DIR / "web-app"
 if str(WEB_APP_DIR) not in sys.path:
     sys.path.insert(0, str(WEB_APP_DIR))
 
+from archive_volumes import (  # noqa: E402
+    ArchiveVolumeError,
+    get_volume,
+    require_online,
+    resolve_volume,
+    status,
+)
 from dataset_registry import resolve_or_offer_dataset  # noqa: E402
 from linked_view import after_identity_change  # noqa: E402
 
-from config import COLD_ARCHIVE_ROOT, DICOM_DATA_ROOT, STORAGE_MODE  # noqa: E402
+from config import DICOM_DATA_ROOT, STORAGE_MODE  # noqa: E402
 from labelled_table_sync import sync_labelled_rows  # noqa: E402
 from patient_identity import apply_links, load_links_json, refresh_subjects  # noqa: E402
 
@@ -154,13 +161,10 @@ def load_config(config_path):
     if not isinstance(config, dict):
         raise ValueError(f"Config file must contain a top-level mapping: {config_path}")
 
-    # Storage paths default from repo-root config.toml so the ingestion
-    # protocol can never drift from the running stack. The YAML can still
-    # override on a per-run basis but a warning is emitted.
-    config_toml_archive_root = (
-        str(COLD_ARCHIVE_ROOT) if STORAGE_MODE == "cold_path_cache" else None
-    )
-
+    # Storage roots come from repo-root config.toml so the ingestion protocol
+    # can never drift from the running stack. The YAML only *names* the archive
+    # volume new studies go to (archive_volume); see resolve_volume for the
+    # fallback order.
     defaults = {
         "env_path": DEFAULT_ENV_PATH,
         "database": "stanford-stroke",
@@ -169,7 +173,8 @@ def load_config(config_path):
         "delete_originals_after_verification": False,
         "import_label": None,
         "dataset": None,
-        "cold_archive_root": config_toml_archive_root,
+        "archive_volume": None,
+        "skip_archive_space_check": False,
         "cleanup_loose_after_indexing": True,
         "resume": True,
         "compress_workers": 4,
@@ -241,30 +246,36 @@ def load_config(config_path):
     merged_config["config_path"] = str(config_path)
     merged_config["_storage_mode"] = STORAGE_MODE
     merged_config["_dicom_data_root"] = str(DICOM_DATA_ROOT)
-    merged_config["_config_toml_cold_archive_root"] = config_toml_archive_root
+    if "cold_archive_root" in config:
+        # Retired: a raw path could point anywhere, outside every volume the
+        # stack knows about.
+        raise ValueError(
+            "cold_archive_root is no longer accepted in the ingestion YAML; name a "
+            "configured archive volume instead (archive_volume: disk2 — see "
+            f"config.toml [storage.archive_volumes]): {config_path}"
+        )
 
     # Validate consistency with config.toml.
-    yaml_archive_root = config.get("cold_archive_root")
+    merged_config["cold_archive_root"] = None
+    merged_config["_archive_volume_source"] = None
     if STORAGE_MODE == "cold_path_cache":
-        if not merged_config["cold_archive_root"]:
-            raise RuntimeError(
-                "config.toml has mode='cold_path_cache' but no cold_archive_root "
-                "could be resolved (neither config.toml nor YAML provides one). "
-                "Set [storage].cold_archive_root in config.toml."
-            )
-        if yaml_archive_root and yaml_archive_root != config_toml_archive_root:
-            print(
-                f"WARNING: YAML overrides cold_archive_root "
-                f"({yaml_archive_root!r}) — config.toml has "
-                f"{config_toml_archive_root!r}. Make sure this is intentional."
-            )
+        override = merged_config["archive_volume"]
+        if override is not None and not isinstance(override, str):
+            raise ValueError(f"archive_volume must be a volume name, got {override!r}: {config_path}")
+        try:
+            volume, source = resolve_volume(str(merged_config["dataset"]).strip(), override)
+        except ArchiveVolumeError as exc:
+            raise ValueError(f"{exc}: {config_path}") from None
+        merged_config["archive_volume"] = volume.name
+        merged_config["_archive_volume_source"] = source
+        merged_config["cold_archive_root"] = str(volume.root)
     elif STORAGE_MODE == "legacy":
-        if merged_config["cold_archive_root"]:
+        if merged_config["archive_volume"]:
             print(
-                f"WARNING: cold_archive_root is set ({merged_config['cold_archive_root']!r}) "
-                f"but config.toml mode is 'legacy'. The protocol will create archives "
-                f"that the running stack will not use."
+                f"WARNING: archive_volume is set ({merged_config['archive_volume']!r}) "
+                f"but config.toml mode is 'legacy' — no archives are created. Ignoring it."
             )
+            merged_config["archive_volume"] = None
         if merged_config["cleanup_loose_after_indexing"]:
             print(
                 "WARNING: cleanup_loose_after_indexing is set but config.toml mode "
@@ -274,6 +285,51 @@ def load_config(config_path):
             merged_config["cleanup_loose_after_indexing"] = False
 
     return merged_config, raw_yaml
+
+
+# Compressed DICOM is typically well under this fraction of the source.
+_ARCHIVE_SIZE_FACTOR = 0.6
+_ARCHIVE_HEADROOM_BYTES = 10 * 1024**3
+
+
+def _tree_bytes(root) -> int:
+    total = 0
+    for dirpath, _dirnames, filenames in os.walk(root):
+        for name in filenames:
+            try:
+                total += os.lstat(os.path.join(dirpath, name)).st_size
+            except OSError:
+                pass
+    return total
+
+
+def preflight_archive_volume(config, logger):
+    """Before any case: the batch's archive volume must be online and roomy.
+
+    Refuses loudly (RuntimeError) instead of failing every case's compression
+    halfway through the batch. Existing studies re-sent here keep their own
+    volume; those are checked per study at compression time.
+    """
+    if STORAGE_MODE != "cold_path_cache":
+        return
+    volume = get_volume(config["archive_volume"])
+    require_online(volume)
+    st = status(volume, max_age=0)
+    logger.info(
+        f"Archive volume: {volume.name} ({volume.root}) — from "
+        f"{config['_archive_volume_source']}; {st.free_bytes / 1024**3:,.0f} GiB free"
+    )
+    if config["skip_archive_space_check"]:
+        logger.info("Archive space check skipped (skip_archive_space_check: true)")
+        return
+    needed = int(_tree_bytes(config["src_dir"]) * _ARCHIVE_SIZE_FACTOR) + _ARCHIVE_HEADROOM_BYTES
+    if st.free_bytes < needed:
+        raise RuntimeError(
+            f"archive volume {volume.name} ({volume.root}) has {st.free_bytes / 1024**3:,.0f} GiB "
+            f"free but this batch may need ~{needed / 1024**3:,.0f} GiB "
+            f"({_ARCHIVE_SIZE_FACTOR:.0%} of src_dir + headroom). Pick another archive_volume, "
+            "free space, or set skip_archive_space_check: true if most of it is already ingested."
+        )
 
 
 def execute_image_ingestion_protocol(
@@ -836,6 +892,7 @@ if __name__ == "__main__":
     # Once, before any case: an unregistered dataset would otherwise fail (or,
     # mistyped, misfile) every case of the batch.
     ensure_dataset_registered(postgres_engine, config["dataset"].strip(), logger)
+    preflight_archive_volume(config, logger)
     if config["_patient_link_rows"]:
         apply_patient_links(postgres_engine, config["_patient_link_rows"],
                             Path(config["patient_links"]).name, logger)
@@ -862,7 +919,10 @@ if __name__ == "__main__":
     logger.info(f"Patient links: {config['patient_links']}")
     logger.info(f"Storage mode (config.toml): {config['_storage_mode']}")
     logger.info(f"DICOM data root (config.toml): {config['_dicom_data_root']}")
-    logger.info(f"Cold archive root (resolved): {config.get('cold_archive_root')}")
+    logger.info(
+        f"Archive volume for new studies: {config.get('archive_volume')} "
+        f"({config.get('cold_archive_root')}; from {config.get('_archive_volume_source')})"
+    )
     logger.info(f"Resume from prior run: {resume_enabled}")
 
     error_log_file_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'logs', f"error_log_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json")

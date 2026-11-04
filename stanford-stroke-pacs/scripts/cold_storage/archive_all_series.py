@@ -8,7 +8,12 @@ Dry-run by default (prints the pending series + sample archive paths);
 archives are skipped, so it doubles as the retry path for compression failures.
 
 Default layout matches the evaluation script:
-  archive = COLD_ROOT / relpath(dicom_dir, DICOM_ROOT).parent / f"{leaf}.tar.zst"
+  archive = <volume root> / relpath(dicom_dir, DICOM_ROOT).parent / f"{leaf}.tar.zst"
+
+Archive volumes: a series goes to the volume its study's archives are already
+on (one study, one volume); a study with none archived yet goes to --volume
+(default: config.toml default_archive_volume). Every target volume must be
+online (its .ssc-volume sentinel readable) before anything is written.
 """
 
 from __future__ import annotations
@@ -31,14 +36,22 @@ load_dotenv(REPO_ROOT / ".env")
 
 # Paths from repo-root config.toml (see web-app/config.py)
 sys.path.insert(0, str(REPO_ROOT / "web-app"))
+from archive_volumes import (  # noqa: E402
+    ArchiveVolumeError,
+    configured_volumes,
+    default_volume,
+    get_volume,
+    status,
+    volume_for_path,
+    volume_of_archives,
+)
 from common import subject_for_patient_arg  # noqa: E402
 from db import DB_CONFIG  # noqa: E402
 
 from cache_manager import archive_path_for_series_dir  # noqa: E402
-from config import COLD_ARCHIVE_ROOT, DICOM_DATA_ROOT  # noqa: E402
+from config import DICOM_DATA_ROOT  # noqa: E402
 
 DEFAULT_DICOM_ROOT = DICOM_DATA_ROOT
-DEFAULT_COLD = COLD_ARCHIVE_ROOT
 
 
 def iter_files(root: Path):
@@ -93,18 +106,37 @@ def compress_one_job(args: tuple[str, str, str, str, int]) -> dict[str, Any]:
     return out
 
 
-def fetch_rows(conn, subject_id: str | None) -> list[tuple[str, str]]:
+def fetch_rows(conn, subject_id: str | None, new_study_root: Path) -> list[tuple[str, str, Path]]:
+    """``(series_uid, dicom_dir, archive root)`` per series with a loose dir.
+
+    The root is the volume the study's archives already live on, else
+    ``new_study_root``. A study whose archives are outside every volume or span
+    volumes is skipped (reported) rather than re-filed on a guess.
+    """
     q = (
-        "SELECT seriesinstanceuid, dicom_dir_path FROM image_series "
-        "WHERE dicom_dir_path IS NOT NULL AND dicom_dir_path != ''"
+        "SELECT s.seriesinstanceuid, s.dicom_dir_path, s.studyinstanceuid, "
+        "       (SELECT array_agg(o.dicom_archive_path) FROM image_series o "
+        "        WHERE o.studyinstanceuid = s.studyinstanceuid "
+        "          AND coalesce(o.dicom_archive_path, '') <> '') "
+        "FROM image_series s "
+        "WHERE s.dicom_dir_path IS NOT NULL AND s.dicom_dir_path != ''"
     )
     params: list[Any] = []
     if subject_id:
-        q += " AND subject_id = %s"
+        q += " AND s.subject_id = %s"
         params.append(subject_id)
     with conn.cursor() as cur:
         cur.execute(q, params)
-        return [(r[0], r[1]) for r in cur.fetchall()]
+        raw = cur.fetchall()
+    out = []
+    for suid, dpath, study_uid, archives in raw:
+        try:
+            vol = volume_of_archives(archives or [])
+        except ArchiveVolumeError as exc:
+            print(f"  SKIP {suid} (study {study_uid}): {exc}", file=sys.stderr)
+            continue
+        out.append((suid, dpath, vol.root if vol else new_study_root))
+    return out
 
 
 def update_archive_path(conn, series_uid: str, archive_path: str) -> None:
@@ -123,7 +155,11 @@ def main() -> int:
         help="Uncompressed DICOM root (config.toml dicom_data_root). "
              "--legacy-root is a deprecated alias.",
     )
-    ap.add_argument("--cold-root", type=Path, default=DEFAULT_COLD)
+    target = ap.add_mutually_exclusive_group()
+    target.add_argument("--volume", help="Archive volume for studies with no archive yet "
+                                         "(default: config.toml default_archive_volume)")
+    target.add_argument("--cold-root", type=Path,
+                        help="Deprecated: a configured volume's root (use --volume)")
     ap.add_argument("--patient",
                     help="Only this patient's series: a patient_key, or a patient_id "
                          "that names one person")
@@ -140,20 +176,39 @@ def main() -> int:
         return 1
 
     data_root = args.dicom_root.resolve()
-    cold_root = args.cold_root.resolve()
-    cold_root.mkdir(parents=True, exist_ok=True)
+    try:
+        if args.cold_root:
+            vol = volume_for_path(args.cold_root.resolve() / "x")
+            if vol is None or vol.root != args.cold_root.resolve():
+                raise ArchiveVolumeError(f"--cold-root {args.cold_root} is not a configured archive "
+                                         f"volume root; configured: {sorted(configured_volumes())}")
+        else:
+            vol = get_volume(args.volume) if args.volume else default_volume()
+    except ArchiveVolumeError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+    print(f"New studies go to archive volume {vol.name} ({vol.root})")
 
     conn = psycopg2.connect(**DB_CONFIG)
     try:
         rows = fetch_rows(
-            conn, subject_for_patient_arg(args.patient) if args.patient else None
+            conn, subject_for_patient_arg(args.patient) if args.patient else None, vol.root
         )
     finally:
         conn.close()
 
+    # Never write onto an unmounted disk (its empty mount point).
+    by_root = {v.root: v for v in configured_volumes().values()}
+    offline = [(v, st) for v in {by_root[r] for _, _, r in rows if r in by_root}
+               if not (st := status(v, max_age=0)).online]
+    for v, st in offline:
+        print(f"Error: archive volume {v.name} ({v.root}) is offline: {st.reason}", file=sys.stderr)
+    if offline and args.execute:
+        return 1
+
     print(f"Series to process: {len(rows)}")
     if not args.execute:
-        for suid, dpath in rows[:20]:
+        for suid, dpath, cold_root in rows[:20]:
             try:
                 arch = archive_path_for_series_dir(Path(dpath), data_root, cold_root)
                 print(f"  {suid} -> {arch}")
@@ -187,7 +242,7 @@ def main() -> int:
     if args.workers <= 1:
         conn = psycopg2.connect(**DB_CONFIG)
         try:
-            for i, (suid, dpath) in enumerate(rows):
+            for i, (suid, dpath, cold_root) in enumerate(rows):
                 dicom_dir = Path(dpath)
                 try:
                     arch = archive_path_for_series_dir(dicom_dir, data_root, cold_root)
@@ -219,7 +274,7 @@ def main() -> int:
     else:
         jobs = [
             (suid, dpath, str(data_root), str(cold_root), args.zstd_level)
-            for suid, dpath in rows
+            for suid, dpath, cold_root in rows
         ]
         with ProcessPoolExecutor(max_workers=args.workers) as ex:
             futs = {ex.submit(compress_one_job, j): j[0] for j in jobs}

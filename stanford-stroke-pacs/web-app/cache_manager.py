@@ -34,8 +34,14 @@ import psycopg2
 import psycopg2.extras
 import zstandard as zstd
 
+from archive_volumes import (
+    ArchiveVolumeOffline,
+    configured_volumes,
+    default_volume,
+    status,
+    volume_for_path,
+)
 from config import (
-    COLD_ARCHIVE_ROOT,
     DICOM_DATA_ROOT,
     EVICTION_TTL_HOURS,
     STORAGE_MODE,
@@ -154,18 +160,35 @@ def archive_path_for_series_dir(dicom_dir: Path, data_root: Path, cold_root: Pat
 
 
 def resolve_series_archive(dicom_archive_path: str | None, dicom_dir_path: str | None) -> Path | None:
+    """The series' archive file: the stored path, else its twin on any volume.
+
+    Raises :class:`ArchiveVolumeOffline` when the stored archive is missing
+    because its volume is offline — the caller reports that instead of a
+    misleading "no archive". Otherwise returns a Path (possibly not a file;
+    callers check ``is_file()``) or None.
+    """
     if dicom_archive_path:
         p = Path(dicom_archive_path)
         if p.is_file():
             return p
+        vol = volume_for_path(p)
+        if vol is not None:
+            st = status(vol)
+            if not st.online:
+                raise ArchiveVolumeOffline(vol, st.reason)
     if not dicom_dir_path:
         return None
     dicom_dir = Path(dicom_dir_path)
     try:
-        return archive_path_for_series_dir(dicom_dir, DICOM_DATA_ROOT, COLD_ARCHIVE_ROOT)
+        candidates = [archive_path_for_series_dir(dicom_dir, DICOM_DATA_ROOT, v.root)
+                      for v in configured_volumes().values()]
     except ValueError:
         logger.warning("dicom_dir_path not under DICOM_DATA_ROOT: %s", dicom_dir_path)
         return None
+    for cand in candidates:
+        if cand.is_file():
+            return cand
+    return archive_path_for_series_dir(dicom_dir, DICOM_DATA_ROOT, default_volume().root)
 
 
 def untar_zst(archive: Path, dest: Path) -> None:
@@ -344,13 +367,17 @@ def _collapse_status(effs: list[str]) -> str:
 
 
 def _estimate_for_series_rows(series_rows: list[dict[str, Any]]) -> dict[str, Any] | None:
-    archives: list[tuple[str, Path]] = []
+    """Raises :class:`ArchiveVolumeOffline` if a series that would need
+    extracting lives on an offline volume (routes map it to a 503)."""
+    archives_to_extract: list[tuple[str, Path]] = []
     for r in series_rows:
+        dp = r.get("dicom_dir_path")
+        if dp and _is_series_dir_warm(dp):
+            continue
         arch = resolve_series_archive(r.get("dicom_archive_path"), r.get("dicom_dir_path"))
         if arch and arch.is_file():
-            archives.append((r["dicom_dir_path"], arch))
+            archives_to_extract.append((r["dicom_dir_path"], arch))
 
-    archives_to_extract = [(dp, ap) for dp, ap in archives if not _is_series_dir_warm(dp)]
     if not archives_to_extract:
         return None
 
@@ -738,7 +765,11 @@ def _warm_one_series(cur, conn, seriesinstanceuid: str, row: dict[str, Any] | No
     """
     touched_tmp_dirs: list[Path] = []
     dir_path = row.get("dicom_dir_path") if row else None
-    archive = resolve_series_archive(row.get("dicom_archive_path"), dir_path) if row else None
+    offline: ArchiveVolumeOffline | None = None
+    try:
+        archive = resolve_series_archive(row.get("dicom_archive_path"), dir_path) if row else None
+    except ArchiveVolumeOffline as exc:
+        archive, offline = None, exc
 
     cur.execute(
         "SELECT status, warming_started_at FROM series_cache_state WHERE seriesinstanceuid = %s",
@@ -783,6 +814,13 @@ def _warm_one_series(cur, conn, seriesinstanceuid: str, row: dict[str, Any] | No
             seriesinstanceuid, (row or {}).get("studyinstanceuid"), log_extra
         )
         return {"ok": True, "already_hot": True, "extract_seconds": 0.0}
+
+    if offline is not None:
+        _upsert_series_status(cur, seriesinstanceuid, "error",
+                              error_message=f"archive_volume_offline:{offline.volume.name}")
+        conn.commit()
+        logger.warning("warm_series: %s", offline, extra=log_extra)
+        return {"ok": False, "error": "archive_volume_offline", "volume": offline.volume.name}
 
     if not archive or not archive.is_file():
         _upsert_series_status(cur, seriesinstanceuid, "error", error_message="no_archive_for_series")

@@ -16,6 +16,8 @@ import logging
 import tomllib
 from pathlib import Path
 
+from archive_volumes import ArchiveVolume, parse_archive_volumes
+
 logger = logging.getLogger(__name__)
 
 _WEB_APP_DIR = Path(__file__).resolve().parent
@@ -25,8 +27,10 @@ _CONFIG_PATH = _REPO_ROOT / "config.toml"
 # Installation-specific keys: no built-in value could be correct on another
 # host, so a missing key is a hard startup error, never a silent fallback.
 _REQUIRED_KEYS = {
-    "storage": ("mode", "dicom_data_root", "cold_archive_root"),
+    "storage": ("mode", "dicom_data_root"),
 }
+# Plus at least one archive volume: [storage.archive_volumes.<name>] tables, or
+# the deprecated single [storage] cold_archive_root (= one volume, "disk1").
 
 _VALID_STORAGE_MODES = ("legacy", "cold_path_cache")
 
@@ -81,6 +85,9 @@ def _load_and_validate(path: Path) -> tuple[dict, dict, list[str]]:
         for key in keys:
             if not isinstance(sec, dict) or key not in sec:
                 missing.append(f"[{section}] {key}")
+    sec = raw.get("storage")
+    if not isinstance(sec, dict) or ("archive_volumes" not in sec and "cold_archive_root" not in sec):
+        missing.append("[storage.archive_volumes.<name>] (or the legacy [storage] cold_archive_root)")
     if missing:
         raise RuntimeError(
             f"config.toml ({path}) is missing required key(s): "
@@ -116,6 +123,12 @@ def _load_and_validate(path: Path) -> tuple[dict, dict, list[str]]:
             f"{_VALID_STORAGE_MODES}. Fix it before starting the app."
         )
     storage["mode"] = mode
+    # Parsed volumes ride along in the storage dict (validated here so a bad
+    # volume table aborts startup like any other required key).
+    (storage["_volumes"], storage["_default_volume"],
+     storage["_dataset_volumes"], storage["_legacy_volumes"]) = parse_archive_volumes(
+        storage, Path(str(storage["dicom_data_root"])).resolve(),
+    )
     return storage, web_app, fellback
 
 
@@ -131,13 +144,25 @@ if _fellback_keys:
 # Required keys — guaranteed present by _load_and_validate, no .get fallbacks.
 STORAGE_MODE = _storage["mode"]
 DICOM_DATA_ROOT = Path(str(_storage["dicom_data_root"])).resolve()
-COLD_ARCHIVE_ROOT = Path(str(_storage["cold_archive_root"])).resolve()
+ARCHIVE_VOLUMES: dict[str, ArchiveVolume] = _storage["_volumes"]
+DEFAULT_ARCHIVE_VOLUME: str = _storage["_default_volume"]
+DATASET_ARCHIVE_VOLUME: dict[str, str] = _storage["_dataset_volumes"]
+# The DEFAULT volume's root, for callers that genuinely mean "where new
+# archives go by default" (e.g. archive_all_series). Never use it to decide
+# whether a path is an archive — that is archive_volumes.volume_for_path.
+COLD_ARCHIVE_ROOT = ARCHIVE_VOLUMES[DEFAULT_ARCHIVE_VOLUME].root
+if _storage["_legacy_volumes"]:
+    logger.warning(
+        "config.toml [storage] cold_archive_root is deprecated: it is read as one "
+        "archive volume %r. Replace it with [storage.archive_volumes.%s] root = ... "
+        "(docs/cold_storage/archive_volumes.md).", DEFAULT_ARCHIVE_VOLUME, DEFAULT_ARCHIVE_VOLUME,
+    )
 
 
 def _linked_view_root(raw) -> Path | None:
     """Optional symlink view of linked imaging (web-app/linked_view.py).
 
-    Must sit outside both storage roots (and they outside it): anything that
+    Must sit outside every storage root (and they outside it): anything that
     walks a root — Orthanc, the audits, deletion's orphan sweep, backups —
     would otherwise meet every shared study twice.
     """
@@ -147,7 +172,7 @@ def _linked_view_root(raw) -> Path | None:
     if not path.is_absolute():
         raise RuntimeError(f"config.toml [storage] linked_view_root must be absolute (got {raw!r})")
     path = path.resolve()
-    for root in (DICOM_DATA_ROOT, COLD_ARCHIVE_ROOT):
+    for root in (DICOM_DATA_ROOT, *(v.root for v in ARCHIVE_VOLUMES.values())):
         if path == root or path.is_relative_to(root) or root.is_relative_to(path):
             raise RuntimeError(
                 f"config.toml [storage] linked_view_root ({path}) must be outside "
@@ -206,7 +231,9 @@ def effective_config_summary() -> dict:
         "port": WEB_APP_PORT,
         "storage_mode": STORAGE_MODE,
         "dicom_data_root": str(DICOM_DATA_ROOT),
-        "cold_archive_root": str(COLD_ARCHIVE_ROOT),
+        "archive_volumes": {n: str(v.root) for n, v in ARCHIVE_VOLUMES.items()},
+        "default_archive_volume": DEFAULT_ARCHIVE_VOLUME,
+        "dataset_archive_volume": DATASET_ARCHIVE_VOLUME,
         "linked_view_root": str(LINKED_VIEW_ROOT) if LINKED_VIEW_ROOT else None,
         "eviction_ttl_hours": EVICTION_TTL_HOURS,
         "warm_workers": WARM_WORKERS,

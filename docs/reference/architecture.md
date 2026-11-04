@@ -128,7 +128,8 @@ The two-database design keeps responsibilities clean:
 The DICOM Application Entity Title (AE Title) is configured as `SSC`.
 
 **Optional cold storage mode** (`mode = "cold_path_cache"` under `[storage]` in the stack-root `config.toml`):
-canonical series payloads live as `*.tar.zst` under `[storage].cold_archive_root`.
+canonical series payloads live as `*.tar.zst` on one of the named archive volumes
+(`[storage.archive_volumes.<name>]`; one study per volume — see [archive volumes](../cold_storage/archive_volumes.md)).
 On warm, the web app extracts an archive back to the **original** `dicom_dir_path` recorded in
 `image_series`; on evict it deletes those extracted files. This requires the custom
 `ssc-orthanc:patched-indexer` image with `"RemoveMissingFiles": false`, so Orthanc's index keeps

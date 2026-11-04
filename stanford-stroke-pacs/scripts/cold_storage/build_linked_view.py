@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Rebuild the linked view: symlinks to imaging an enrollment shares but does not own.
 
-    <linked_view_root>/<slug>/<patient_id>/<StudyUID> -> <cold_archive_root>/<owner's study dir>
+    <linked_view_root>/<slug>/<patient_id>/<StudyUID> -> <archive volume root>/<owner's study dir>
 
 A generated convenience view (web-app/linked_view.py), never a source of truth:
 idempotent, removes stale and dangling links, leaves non-link files alone.
@@ -31,15 +31,17 @@ def main() -> int:
     args = ap.parse_args()
 
     import linked_view
+    from archive_volumes import configured_volumes, default_volume
     from db import get_conn
 
-    from config import COLD_ARCHIVE_ROOT, DICOM_DATA_ROOT, LINKED_VIEW_ROOT
+    from config import DICOM_DATA_ROOT, LINKED_VIEW_ROOT
 
     conn = get_conn()
     try:
         with conn.cursor() as cur:
             result = linked_view.rebuild(cur, LINKED_VIEW_ROOT, DICOM_DATA_ROOT,
-                                         COLD_ARCHIVE_ROOT, apply=args.apply)
+                                         configured_volumes(), default_volume(),
+                                         apply=args.apply)
     finally:
         conn.close()
     print(("" if args.apply else "DRY RUN — ") + linked_view.summary(result))

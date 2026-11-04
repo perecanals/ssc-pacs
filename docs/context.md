@@ -38,5 +38,6 @@ One **Orthanc** container (`ssc-orthanc`), one native-host **Web App** service o
 | Restore runbook (DB recovery procedure) | [`operations/restore_runbook.md`](operations/restore_runbook.md) |
 | Cold storage design | [`cold_storage/design.md`](cold_storage/design.md) |
 | Cold storage operations | [`cold_storage/runbook.md`](cold_storage/runbook.md) |
+| Archive volumes (multi-disk cold archive, sentinel, offline behaviour, per-volume backups) | [`cold_storage/archive_volumes.md`](cold_storage/archive_volumes.md) |
 | DICOM processing recipes (NIFTI, archive inspection, cleanup) | [`recipes/dicom_processing.md`](recipes/dicom_processing.md) |
 | Dated changelog snapshot (frozen; superseded by root `CHANGELOG.md`) | [`history/current_state_changelog.md`](history/current_state_changelog.md) |

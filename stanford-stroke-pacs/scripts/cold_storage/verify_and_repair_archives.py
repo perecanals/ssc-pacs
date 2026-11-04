@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
-Verify every *.tar.zst under the cold archive root and optionally rebuild any
+Verify every *.tar.zst on one archive volume (--volume, default: config.toml
+default_archive_volume; run once per volume) and optionally rebuild any
 corrupt archives from the loose DICOM backup.
 
 Verify:
@@ -42,9 +43,8 @@ load_dotenv(REPO_ROOT / ".env")
 
 # Paths from repo-root config.toml (see web-app/config.py)
 sys.path.insert(0, str(REPO_ROOT / "web-app"))
-from config import COLD_ARCHIVE_ROOT  # noqa: E402
+from archive_volumes import ArchiveVolumeError, default_volume, get_volume, status  # noqa: E402
 
-DEFAULT_COLD_ROOT = COLD_ARCHIVE_ROOT
 CHUNK = 1 << 20  # 1 MiB
 
 
@@ -147,7 +147,9 @@ def rebuild_archive(src_dir: Path, out_path: Path, level: int) -> None:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--cold-root", type=Path, default=DEFAULT_COLD_ROOT)
+    target = ap.add_mutually_exclusive_group()
+    target.add_argument("--volume", help="Archive volume to scan (default: default_archive_volume)")
+    target.add_argument("--cold-root", type=Path, help="Scan this root instead of a configured volume")
     ap.add_argument(
         "--loose-root",
         type=Path,
@@ -186,7 +188,20 @@ def main() -> int:
     if args.repair and args.loose_root is None:
         ap.error("--repair requires --loose-root")
 
-    cold_root: Path = args.cold_root.resolve()
+    if args.cold_root:
+        cold_root: Path = args.cold_root.resolve()
+    else:
+        try:
+            vol = get_volume(args.volume) if args.volume else default_volume()
+        except ArchiveVolumeError as exc:
+            print(f"Error: {exc}", file=sys.stderr)
+            return 1
+        st = status(vol, max_age=0)
+        if not st.online:
+            # An unmounted disk would read as "no archives", not as a problem.
+            print(f"Archive volume {vol.name} ({vol.root}) is offline: {st.reason}", file=sys.stderr)
+            return 1
+        cold_root = vol.root
     loose_root: Path | None = args.loose_root.resolve() if args.loose_root else None
 
     if not cold_root.is_dir():

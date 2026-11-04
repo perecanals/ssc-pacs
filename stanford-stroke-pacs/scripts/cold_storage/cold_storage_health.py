@@ -47,6 +47,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 load_dotenv(REPO_ROOT / ".env")
 
 sys.path.insert(0, str(REPO_ROOT / "web-app"))
+from archive_volumes import configured_volumes, status  # noqa: E402
 from db import DB_CONFIG  # noqa: E402
 
 from config import (  # noqa: E402
@@ -197,8 +198,10 @@ def collect(min_free_bytes: int) -> dict[str, Any]:
         "orphan_warming_dirs": [],
         "disk": {},
         "cache_state_distribution": {},
+        "archive_volumes": [],
         "critical": False,
         "critical_reasons": [],
+        "warnings": [],
     }
 
     if STORAGE_MODE != "cold_path_cache":
@@ -219,6 +222,17 @@ def collect(min_free_bytes: int) -> dict[str, Any]:
     report["disk"]["min_free_bytes_threshold"] = int(min_free_bytes)
 
     reasons: list[str] = []
+    # Same policy as /healthz: a required volume offline is critical, any other
+    # offline volume a warning (its imaging is unavailable, the rest works).
+    for vol in configured_volumes().values():
+        st = status(vol, max_age=0)
+        report["archive_volumes"].append({
+            "name": vol.name, "root": str(vol.root), "required": vol.required,
+            "online": st.online, "reason": st.reason, "free": st.free_bytes, "total": st.total_bytes,
+        })
+        if not st.online:
+            (reasons if vol.required else report["warnings"]).append(
+                f"archive_volume_offline({vol.name}: {st.reason})")
     if report["stuck_warming"]:
         reasons.append(f"stuck_warming_rows={len(report['stuck_warming'])}")
     if report["orphan_warming_dirs"]:
@@ -248,6 +262,12 @@ def _human(report: dict[str, Any]) -> str:
         f"(threshold {threshold_gib:.2f} GiB)"
     )
 
+    for v in report["archive_volumes"]:
+        state = (f"online, {v['free'] / 1024**3:.0f} GiB free" if v["online"]
+                 else f"OFFLINE ({v['reason']})")
+        lines.append(f"  archive volume {v['name']:<9} : {v['root']}  "
+                     f"[{'required' if v['required'] else 'optional'}] {state}")
+
     dist = report["cache_state_distribution"]
     lines.append(
         "  series_cache_state       : total={total} hot_1h={hot_last_1h} "
@@ -271,6 +291,8 @@ def _human(report: dict[str, Any]) -> str:
     if len(orphans) > 10:
         lines.append(f"      … {len(orphans) - 10} more")
 
+    for w in report["warnings"]:
+        lines.append(f"WARNING: {w}")
     if report["critical"]:
         lines.append("CRITICAL: " + "; ".join(report["critical_reasons"]))
     else:

@@ -61,6 +61,32 @@ PY
     printf '%s' "${val:-$fallback}"
 }
 
+# Archive volumes from config.toml, one "name<TAB>root" line each ([storage.
+# archive_volumes.<name>] tables, or the legacy cold_archive_root = disk1).
+# `--required` lists only the required ones. Parsed by web-app/archive_volumes.py
+# (the same validator the app uses); prints nothing when config.toml is unreadable.
+archive_volume_roots() {
+    local required="${1:-}" py=""
+    py="$(resolve_python || true)"
+    [[ -r "$CONFIG_TOML" && -n "$py" ]] || return 0
+    "$py" - "$CONFIG_TOML" "$STACK_DIR/web-app" "$required" <<'PY'
+import sys, tomllib
+path, web_app, required = sys.argv[1], sys.argv[2], sys.argv[3] == "--required"
+sys.path.insert(0, web_app)
+from archive_volumes import parse_archive_volumes
+with open(path, "rb") as f:
+    storage = tomllib.load(f).get("storage", {})
+try:
+    volumes, *_ = parse_archive_volumes(storage, None)
+except RuntimeError as exc:
+    print(f"archive_volume_roots: {exc}", file=sys.stderr)
+    sys.exit(1)
+for vol in volumes.values():
+    if vol.required or not required:
+        print(f"{vol.name}\t{vol.root}")
+PY
+}
+
 deploy_env_get() {
     local key="$1" val=""
     if [[ -r "$DEPLOY_ENV" ]]; then

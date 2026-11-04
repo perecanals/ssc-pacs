@@ -73,9 +73,13 @@ def test_legacy_mirror_and_monitor_share_toml_config(tmp_path):
     (scripts / "cold_storage").mkdir()
     for relative in ("_lib.sh", "backup/check_backup_freshness.sh", "cold_storage/mirror_cold_archive.sh"):
         shutil.copyfile(STACK / "scripts" / relative, scripts / relative)
+    # _lib.sh parses the archive volumes with web-app/archive_volumes.py.
+    (tmp_path / "web-app").mkdir()
+    shutil.copyfile(STACK / "web-app" / "archive_volumes.py", tmp_path / "web-app" / "archive_volumes.py")
     source = tmp_path / "cold"
     destination = tmp_path / "mirror"
     source.mkdir()
+    (source / ".ssc-volume").write_text('{\n  "name": "disk1"\n}\n')  # legacy root = volume disk1
     destination.mkdir()
     backups = tmp_path / "backups"
     for db, filename in (("research", "latest.dump"), ("index", "latest.dump"), ("orthanc_storage", "latest.tar.gz")):
@@ -96,7 +100,15 @@ def test_legacy_mirror_and_monitor_share_toml_config(tmp_path):
         ["bash", str(scripts / "cold_storage/mirror_cold_archive.sh"), "--dry-run"],
         env=env, check=True, text=True, capture_output=True,
     )
-    assert str(destination) in result.stdout and "--bwlimit=123" in result.stdout
+    assert str(destination / "disk1") in result.stdout and "--bwlimit=123" in result.stdout
+    # An unmounted volume (no sentinel) is skipped, never rsync'd with --delete.
+    (source / ".ssc-volume").unlink()
+    skipped = subprocess.run(
+        ["bash", str(scripts / "cold_storage/mirror_cold_archive.sh"), "--dry-run"],
+        env=env, text=True, capture_output=True,
+    )
+    assert skipped.returncode == 1 and "--delete" not in skipped.stdout
+    assert "SKIP volume disk1" in skipped.stderr
     old = time.time() - 5 * 3600
     os.utime(destination, (old, old))
     result = subprocess.run(

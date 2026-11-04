@@ -56,6 +56,8 @@ cold_storage_evict_total = Counter(
 
 cold_storage_warming_rows = Gauge(
     "cold_storage_warming_rows",
+    "archive_volume_online",
+    "archive_volume_free_bytes",
     "Number of series_cache_state rows currently in status='warming'.",
     registry=REGISTRY,
 )
@@ -70,6 +72,20 @@ cold_storage_disk_free_bytes = Gauge(
 # ---------------------------------------------------------------------------
 # Reconciliation metrics
 # ---------------------------------------------------------------------------
+
+archive_volume_online = Gauge(
+    "archive_volume_online",
+    "1 when the archive volume's sentinel is readable (mounted), else 0.",
+    labelnames=("volume",),
+    registry=REGISTRY,
+)
+
+archive_volume_free_bytes = Gauge(
+    "archive_volume_free_bytes",
+    "Free bytes on the filesystem holding each online archive volume.",
+    labelnames=("volume",),
+    registry=REGISTRY,
+)
 
 reconciliation_mismatches_total = Gauge(
     "reconciliation_mismatches_total",
@@ -137,6 +153,16 @@ def refresh_cold_storage_gauges() -> None:
 
     try:
         cold_storage_disk_free_bytes.set(disk_free_bytes(DICOM_DATA_ROOT))
+    except Exception:
+        pass
+
+    try:
+        from archive_volumes import configured_volumes, status
+        for vol in configured_volumes().values():
+            st = status(vol)
+            archive_volume_online.labels(volume=vol.name).set(1 if st.online else 0)
+            if st.free_bytes is not None:
+                archive_volume_free_bytes.labels(volume=vol.name).set(st.free_bytes)
     except Exception:
         pass
 

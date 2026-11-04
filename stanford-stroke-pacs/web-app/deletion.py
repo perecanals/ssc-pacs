@@ -45,8 +45,15 @@ from typing import Any
 import psycopg2.extras
 import requests
 
+from archive_volumes import (
+    configured_volumes,
+    require_online,
+    status,
+    volume_for_path,
+    volume_of_archives,
+)
 from common import table_exists
-from config import COLD_ARCHIVE_ROOT, DICOM_DATA_ROOT
+from config import DICOM_DATA_ROOT
 from labelled_table_sync import sync_labelled_rows
 from orthanc_client import (
     ORTHANC_PASS,
@@ -159,7 +166,17 @@ def build_study_deletion_plan(conn, studyinstanceuid: str) -> dict[str, Any] | N
         loose_study_dir = expected_study_dir(
             DICOM_DATA_ROOT, study["patient_key"], patient_id, studyinstanceuid
         )
-    archive_study_dir = archive_dir_for(loose_study_dir, DICOM_DATA_ROOT, COLD_ARCHIVE_ROOT)
+    # The archive twin lives on the study's volume (the one its archived series
+    # are on). A study with no archived series may still have a leftover twin
+    # on any online volume. Refuse while the study's volume is offline: the DB
+    # rows would go and the files stay behind, unreachable.
+    vol = volume_of_archives(s["dicom_archive_path"] for s in series)
+    if vol is not None:
+        require_online(vol)
+        volumes = [vol]
+    else:
+        volumes = [v for v in configured_volumes().values() if status(v).online]
+    archive_study_dirs = [str(archive_dir_for(loose_study_dir, DICOM_DATA_ROOT, v.root)) for v in volumes]
 
     return {
         "level": "study",
@@ -172,7 +189,7 @@ def build_study_deletion_plan(conn, studyinstanceuid: str) -> dict[str, Any] | N
         "n_annotations": n_annotations,
         "orthanc": {"kind": "study", "id": orthanc_study_id(studyinstanceuid)},
         # Whole study subtree in each root — removed wholesale (no ancestor prune).
-        "remove_dirs": [str(loose_study_dir), str(archive_study_dir)],
+        "remove_dirs": [str(loose_study_dir), *archive_study_dirs],
         "prune_parents": [],
         # Loose subtree under the *indexed* root — its indexer-plugin.db Files rows
         # must be purged after the files are gone (the archive root is not indexed).
@@ -213,6 +230,9 @@ def build_series_deletion_plan(conn, seriesinstanceuid: str) -> dict[str, Any] |
         indexer_dirs.append(str(series_dir))  # loose tree is the indexed one
         prune_parents.append((str(series_dir.parent), str(series_dir.parents[2])))
     if row["dicom_archive_path"]:
+        vol = volume_for_path(row["dicom_archive_path"])
+        if vol is not None:
+            require_online(vol)
         archive_dir = Path(row["dicom_archive_path"]).parent
         remove_dirs.append(str(archive_dir))
         prune_parents.append((str(archive_dir.parent), str(archive_dir.parents[2])))
@@ -358,8 +378,8 @@ def _delete_series_side_rows(cur, series_uids: list[str]) -> None:
 def remove_files(plan: dict[str, Any], *, execute: bool) -> dict[str, Any]:
     """Remove the study/series directories from both storage roots.
 
-    Every target is validated to sit safely under ``DICOM_DATA_ROOT`` /
-    ``COLD_ARCHIVE_ROOT`` (and to be a study directory or deeper) before
+    Every target is validated to sit safely under ``DICOM_DATA_ROOT`` or an
+    archive volume root (and to be a study directory or deeper) before
     removal — that guard, not OS privilege, is what prevents a stray delete.
     """
     result = remove_dir_list(plan["remove_dirs"], execute=execute)
@@ -500,13 +520,14 @@ def _post_force_scan(session, folders, *, timeout_s, poll_s):
 def _root_for(path: Path) -> Path:
     """Which storage root a path belongs to (for the safety check)."""
     resolved = path.resolve()
-    if resolved.is_relative_to(COLD_ARCHIVE_ROOT.resolve()):
-        return COLD_ARCHIVE_ROOT
+    vol = volume_for_path(resolved)
+    if vol is not None:
+        return vol.root
     if resolved.is_relative_to(DICOM_DATA_ROOT.resolve()):
         return DICOM_DATA_ROOT
     raise ValueError(
-        f"refusing to remove {resolved}: outside both storage roots "
-        f"({DICOM_DATA_ROOT}, {COLD_ARCHIVE_ROOT})"
+        f"refusing to remove {resolved}: outside every storage root "
+        f"({DICOM_DATA_ROOT}, archive volumes {sorted(configured_volumes())})"
     )
 
 
@@ -528,8 +549,15 @@ def find_orphan_study_dirs(conn) -> list[str]:
         # look like orphan studies).
         slugs = registered_slugs(cur)
 
+    roots = [DICOM_DATA_ROOT]
+    for vol in configured_volumes().values():
+        st = status(vol)
+        if st.online:
+            roots.append(vol.root)
+        else:
+            logger.warning("orphan sweep: skipping offline archive volume %s: %s", vol.name, st.reason)
     orphans: list[str] = []
-    for root in (DICOM_DATA_ROOT, COLD_ARCHIVE_ROOT):
+    for root in roots:
         for _slug, _pid, patient_dir in patient_dirs(root, slugs):
             for study_dir in patient_dir.iterdir():
                 if study_dir.is_dir() and study_dir.name not in known:

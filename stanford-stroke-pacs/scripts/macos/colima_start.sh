@@ -11,7 +11,7 @@
 #                                              bind-mounts for the container
 #   data mount                  : read-write — common parent of config.toml's
 #                                              [storage].dicom_data_root and
-#                                              cold_archive_root (override with
+#                                              the required archive volumes (override with
 #                                              COLIMA_DATA_MOUNT); the container
 #                                              bind is still :ro
 #
@@ -35,12 +35,13 @@ REPO_MOUNT="$STACK_DIR"
 # parent read-write; hard-fail if config.toml is unreadable (an empty value
 # here would otherwise become a wrong mount at boot).
 DICOM_ROOT="$(config_get storage dicom_data_root "")"
-COLD_ROOT="$(config_get storage cold_archive_root "")"
-if [[ -z "$DICOM_ROOT" || -z "$COLD_ROOT" ]]; then
+COLD_ROOTS=()  # no mapfile: macOS ships bash 3.2
+while IFS= read -r root; do COLD_ROOTS+=("$root"); done < <(archive_volume_roots --required | cut -f2)
+if [[ -z "$DICOM_ROOT" || ${#COLD_ROOTS[@]} -eq 0 ]]; then
     echo "ERROR: could not read [storage] roots from $CONFIG_TOML" >&2
     exit 1
 fi
-DATA_MOUNT="${COLIMA_DATA_MOUNT:-$(python3 -c 'import os,sys;print(os.path.commonpath(sys.argv[1:]))' "$DICOM_ROOT" "$COLD_ROOT")}"
+DATA_MOUNT="${COLIMA_DATA_MOUNT:-$(python3 -c 'import os,sys;print(os.path.commonpath(sys.argv[1:]))' "$DICOM_ROOT" "${COLD_ROOTS[@]}")}"
 
 # OHIF/DICOMweb fires many parallel frame requests when a study loads, which
 # wants vCPUs, so 4 keeps the viewer responsive. vCPUs are a *cap*, not a hard
@@ -62,12 +63,12 @@ fi
 # Wait for the external volume holding the storage roots (cold archives /
 # DICOM tree). External volumes can mount a little after boot/login.
 for i in $(seq 1 60); do
-    [[ -d "$DICOM_ROOT" && -d "$COLD_ROOT" ]] && break
+    [[ -d "$DICOM_ROOT" && -d "${COLD_ROOTS[0]}" ]] && break
     echo "waiting for $DATA_MOUNT to mount ($i/60)…"
     sleep 5
 done
-if [[ ! -d "$DICOM_ROOT" || ! -d "$COLD_ROOT" ]]; then
-    echo "ERROR: $DATA_MOUNT not mounted (missing $DICOM_ROOT or $COLD_ROOT); aborting colima start" >&2
+if [[ ! -d "$DICOM_ROOT" || ! -d "${COLD_ROOTS[0]}" ]]; then
+    echo "ERROR: $DATA_MOUNT not mounted (missing $DICOM_ROOT or ${COLD_ROOTS[0]}); aborting colima start" >&2
     exit 1
 fi
 

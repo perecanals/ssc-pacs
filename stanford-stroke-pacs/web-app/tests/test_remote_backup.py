@@ -11,6 +11,8 @@ from unittest.mock import Mock
 
 import pytest
 
+from archive_volumes import write_sentinel
+
 SPEC = importlib.util.spec_from_file_location(
     "remote_backup", Path(__file__).resolve().parents[2] / "scripts/backup/remote_backup.py",
 )
@@ -47,7 +49,12 @@ def configured(tmp_path, monkeypatch):
         (directory / f"latest.{suffix}").symlink_to(artifact.name)
     (sources / "cold").mkdir()
     (sources / "cold" / "sample.tar.zst").write_bytes(b"synthetic archive")
+    write_sentinel(sources / "cold", "disk1")
     return config
+
+
+def _sentinel_bytes(root):
+    return (Path(root) / remote.SENTINEL_NAME).stat().st_size
 
 
 def test_disabled_prevents_state_and_network(configured):
@@ -202,7 +209,81 @@ def test_initial_imaging_upload_budgets_source_size(configured, monkeypatch):
         [], 0, '{"message_type":"summary"}\n',
     )))
     job.backup(dry_run=True)
-    check.assert_called_once_with(len(b"synthetic archive"))
+    check.assert_called_once_with(len(b"synthetic archive") + _sentinel_bytes(root))
+
+
+def _two_volumes(configured, tmp_path):
+    """Replace the legacy root with disk1 (existing) + disk2 (new)."""
+    disk1 = Path(configured["storage"].pop("cold_archive_root"))
+    disk2 = tmp_path / "sources" / "disk2"
+    disk2.mkdir()
+    write_sentinel(disk2, "disk2")
+    (disk2 / "g.tar.zst").write_bytes(b"guide archive")
+    configured["storage"].update({
+        "default_archive_volume": "disk1",
+        "archive_volumes": {"disk1": {"root": str(disk1)}, "disk2": {"root": str(disk2)}},
+    })
+    configured["remote_backup"]["imaging_mounts"] = {"disk2": "/"}
+    return disk1, disk2
+
+
+def _summary(snapshot="c" * 64):
+    return subprocess.CompletedProcess(
+        [], 0, json.dumps({"message_type": "summary", "snapshot_id": snapshot}) + "\n")
+
+
+def test_imaging_backs_up_each_volume_as_its_own_snapshot(configured, monkeypatch, tmp_path):
+    disk1, disk2 = _two_volumes(configured, tmp_path)
+    job = remote.Backup(configured, "imaging")
+    monkeypatch.setattr(job, "remote_check", Mock())
+    run = Mock(return_value=_summary())
+    monkeypatch.setattr(job, "restic", run)
+    job.backup()
+    calls = [c.args for c in run.call_args_list]
+    assert [c[-1] for c in calls] == [str(disk1), str(disk2)]
+    # disk1 keeps the pre-volume tag set (history continues); disk2 is tagged.
+    assert "volume:disk1" not in calls[0] and "volume:disk2" in calls[1]
+    # Both into the shared default repository, each with its own state file.
+    assert {c.kwargs["repository"] for c in run.call_args_list} == {job.repository_url("imaging")}
+    assert (job.state_dir / "imaging.json").exists()
+    assert (job.state_dir / "imaging-disk2.json").exists()
+
+
+def test_offline_volume_fails_job_but_others_still_back_up(configured, monkeypatch, tmp_path):
+    disk1, disk2 = _two_volumes(configured, tmp_path)
+    (disk2 / remote.SENTINEL_NAME).unlink()  # disk2 unmounted
+    job = remote.Backup(configured, "imaging")
+    monkeypatch.setattr(job, "remote_check", Mock())
+    run = Mock(return_value=_summary())
+    monkeypatch.setattr(job, "restic", run)
+    with pytest.raises(ValueError, match="incomplete for volume.*disk2"):
+        job.backup()
+    assert [c.args[-1] for c in run.call_args_list] == [str(disk1)]
+    assert (job.state_dir / "imaging.json").exists()
+
+
+def test_new_empty_volume_is_skipped_not_failed(configured, monkeypatch, tmp_path):
+    disk1, disk2 = _two_volumes(configured, tmp_path)
+    (disk2 / "g.tar.zst").unlink()
+    job = remote.Backup(configured, "imaging")
+    monkeypatch.setattr(job, "remote_check", Mock())
+    run = Mock(return_value=_summary())
+    monkeypatch.setattr(job, "restic", run)
+    job.backup()
+    assert [c.args[-1] for c in run.call_args_list] == [str(disk1)]
+
+
+def test_separate_backup_repository_per_volume(configured, monkeypatch, tmp_path):
+    _two_volumes(configured, tmp_path)
+    configured["storage"]["archive_volumes"]["disk2"]["backup_repository"] = "imaging-disk2"
+    job = remote.Backup(configured, "imaging")
+    assert job.repositories() == sorted([job.repository_url("imaging"),
+                                         job.repository_url("imaging-disk2")])
+    monkeypatch.setattr(job, "remote_check", Mock())
+    run = Mock()
+    monkeypatch.setattr(job, "restic", run)
+    job.run("restore", target=str(tmp_path / "restored"), snapshot="d" * 64, volume="disk2")
+    assert run.call_args.kwargs["repository"] == job.repository_url("imaging-disk2")
 
 
 def test_remote_guard_rejects_unmounted_directory(tmp_path):

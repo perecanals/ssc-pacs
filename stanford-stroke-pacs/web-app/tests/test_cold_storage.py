@@ -9,10 +9,13 @@ import tempfile
 from pathlib import Path
 from unittest.mock import patch
 
+import psycopg2
 import pytest
 import zstandard as zstd
 
+from archive_volumes import ArchiveVolumeOffline
 from tests.conftest import insert_patient
+from tests.volume_helpers import archive_volumes_at
 
 
 @pytest.fixture()
@@ -201,7 +204,7 @@ def test_warm_evict_cycle(cold_env, seeded_db):
     with (
         patch.object(cm, "STORAGE_MODE", "cold_path_cache"),
         patch.object(cm, "DICOM_DATA_ROOT", cold_env["dicom_root"]),
-        patch.object(cm, "COLD_ARCHIVE_ROOT", cold_env["cold_root"]),
+        archive_volumes_at(cold_env["cold_root"]),
     ):
         # 1. Status should be cold.
         status = cm.get_cache_status(study_uid)
@@ -244,11 +247,64 @@ def test_warm_no_archives_returns_error(cold_env, seeded_db):
     with (
         patch.object(cm, "STORAGE_MODE", "cold_path_cache"),
         patch.object(cm, "DICOM_DATA_ROOT", cold_env["dicom_root"]),
-        patch.object(cm, "COLD_ARCHIVE_ROOT", cold_env["cold_root"]),
+        archive_volumes_at(cold_env["cold_root"]),
     ):
         result = cm.warm_study(study_uid)
         assert result["ok"] is False
         assert "no_archives" in result.get("error", "")
+
+
+def test_warm_from_offline_volume_reports_it(cold_env, seeded_db):
+    """Disk unmounted (archive gone, no sentinel): the series records
+    archive_volume_offline:<volume>, not a misleading no-archive error."""
+    import cache_manager as cm
+
+    cold_env["archive_path"].unlink()
+    with (
+        patch.object(cm, "STORAGE_MODE", "cold_path_cache"),
+        patch.object(cm, "DICOM_DATA_ROOT", cold_env["dicom_root"]),
+        archive_volumes_at(cold_env["cold_root"], sentinel=False),
+    ):
+        result = cm.warm_study(cold_env["study_uid"])
+        assert result["ok"] is False
+        with pytest.raises(ArchiveVolumeOffline):
+            cm.estimate_warm_disk_space(cold_env["study_uid"])
+    conn = psycopg2.connect(**seeded_db)
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT status, error_message FROM series_cache_state "
+                        "WHERE seriesinstanceuid = %s", (cold_env["series_uid"],))
+            assert cur.fetchone() == ("error", "archive_volume_offline:disk1")
+    finally:
+        conn.close()
+
+
+def test_warm_endpoint_offline_volume_is_503(cold_env, logged_in_client):
+    import cache_manager as cm
+
+    cold_env["archive_path"].unlink()
+    with (
+        patch.object(cm, "STORAGE_MODE", "cold_path_cache"),
+        patch.object(cm, "DICOM_DATA_ROOT", cold_env["dicom_root"]),
+        archive_volumes_at(cold_env["cold_root"], sentinel=False),
+    ):
+        resp = logged_in_client.post(f"/api/studies/{cold_env['study_uid']}/warm")
+    assert resp.status_code == 503
+    assert resp.json()["detail"]["error"] == "archive_volume_offline"
+    assert resp.json()["detail"]["volume"] == "disk1"
+
+
+def test_warm_from_second_volume(cold_env, tmp_path):
+    """An archive stored on disk2 warms like any other (stored path wins)."""
+    import cache_manager as cm
+
+    with (
+        patch.object(cm, "STORAGE_MODE", "cold_path_cache"),
+        patch.object(cm, "DICOM_DATA_ROOT", cold_env["dicom_root"]),
+        archive_volumes_at(tmp_path / "disk1", cold_env["cold_root"]),
+    ):
+        assert cm.warm_study(cold_env["study_uid"])["ok"] is True
+        assert any(cold_env["dicom_dir"].iterdir())
 
 
 def test_warm_endpoint_returns_202_and_eventually_hot(cold_env, logged_in_client):
@@ -266,7 +322,7 @@ def test_warm_endpoint_returns_202_and_eventually_hot(cold_env, logged_in_client
     with (
         patch.object(cm, "STORAGE_MODE", "cold_path_cache"),
         patch.object(cm, "DICOM_DATA_ROOT", cold_env["dicom_root"]),
-        patch.object(cm, "COLD_ARCHIVE_ROOT", cold_env["cold_root"]),
+        archive_volumes_at(cold_env["cold_root"]),
     ):
         t0 = time.perf_counter()
         resp = logged_in_client.post(f"/api/studies/{study_uid}/warm")
@@ -315,7 +371,7 @@ def test_warm_evict_series_cycle(cold_env, seeded_db):
     with (
         patch.object(cm, "STORAGE_MODE", "cold_path_cache"),
         patch.object(cm, "DICOM_DATA_ROOT", cold_env["dicom_root"]),
-        patch.object(cm, "COLD_ARCHIVE_ROOT", cold_env["cold_root"]),
+        archive_volumes_at(cold_env["cold_root"]),
     ):
         assert cm.get_series_cache_status(series_uid)["status"] == "cold"
 
@@ -354,7 +410,7 @@ def test_single_series_warm_leaves_siblings_cold_and_study_not_ready(cold_env_mu
     with (
         patch.object(cm, "STORAGE_MODE", "cold_path_cache"),
         patch.object(cm, "DICOM_DATA_ROOT", cold_env_multi["dicom_root"]),
-        patch.object(cm, "COLD_ARCHIVE_ROOT", cold_env_multi["cold_root"]),
+        archive_volumes_at(cold_env_multi["cold_root"]),
     ):
         # Warm only series 1.
         cm.warm_series([s1["uid"]])
@@ -385,7 +441,7 @@ def test_patient_aggregate_counts_studies(cold_env_multi, seeded_db):
     with (
         patch.object(cm, "STORAGE_MODE", "cold_path_cache"),
         patch.object(cm, "DICOM_DATA_ROOT", cold_env_multi["dicom_root"]),
-        patch.object(cm, "COLD_ARCHIVE_ROOT", cold_env_multi["cold_root"]),
+        archive_volumes_at(cold_env_multi["cold_root"]),
     ):
         summary = cm.get_patient_cache_status(f"lvo__{patient_id}")
         assert summary["total"] == 1  # one study
@@ -415,7 +471,7 @@ def test_series_warm_endpoint_returns_202_and_eventually_hot(cold_env, logged_in
     with (
         patch.object(cm, "STORAGE_MODE", "cold_path_cache"),
         patch.object(cm, "DICOM_DATA_ROOT", cold_env["dicom_root"]),
-        patch.object(cm, "COLD_ARCHIVE_ROOT", cold_env["cold_root"]),
+        archive_volumes_at(cold_env["cold_root"]),
     ):
         resp = logged_in_client.post(f"/api/series/{series_uid}/warm")
         assert resp.status_code == 202, resp.text
@@ -515,7 +571,7 @@ def test_ohif_link_hot_series_returns_ready_url(cold_env, logged_in_client):
     with (
         patch.object(cm, "STORAGE_MODE", "cold_path_cache"),
         patch.object(cm, "DICOM_DATA_ROOT", cold_env["dicom_root"]),
-        patch.object(cm, "COLD_ARCHIVE_ROOT", cold_env["cold_root"]),
+        archive_volumes_at(cold_env["cold_root"]),
         patch.object(studies_mod, "STORAGE_MODE", "cold_path_cache"),
         patch.object(studies_mod, "orthanc_lookup", lambda _uid: [{"Type": "Study"}]),
     ):
@@ -544,7 +600,7 @@ def test_run_eviction_counts_ttl_evictions(cold_env, seeded_db):
     with (
         patch.object(cm, "STORAGE_MODE", "cold_path_cache"),
         patch.object(cm, "DICOM_DATA_ROOT", cold_env["dicom_root"]),
-        patch.object(cm, "COLD_ARCHIVE_ROOT", cold_env["cold_root"]),
+        archive_volumes_at(cold_env["cold_root"]),
         patch.object(cm, "EVICTION_TTL_HOURS", 1.0),
     ):
         assert cm.warm_study(study_uid)["ok"] is True

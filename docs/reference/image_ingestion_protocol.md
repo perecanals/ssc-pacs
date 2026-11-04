@@ -20,7 +20,7 @@ Takes a directory of per-patient source DICOMs, and for each case:
 2. Groups series into studies
 3. Validates studies against the dataset's clinical table (when one is registered)
 4. Copies DICOMs to the canonical layout under `dicom_data_root`
-5. Optionally compresses each series to a `*.tar.zst` archive under `cold_archive_root`
+5. Optionally compresses each series to a `*.tar.zst` archive on an [archive volume](../cold_storage/archive_volumes.md)
 6. Converts selected series to NIfTI alongside the DICOM tree
 7. Upserts `image_study`, `image_series`, and `patient` rows (one transaction)
 8. Optionally deletes the source directory after verifying the copy
@@ -130,7 +130,8 @@ before ingesting, when both datasets carry the same imaging.
 | `import_label` | Free-text tag written to `import_label` column in both tables — useful for filtering a batch later |
 | `dataset` | **Required.** The dataset (its display name, e.g. `CRISP2/LVO`) this batch is ingested into. The driver raises `ValueError` at config load when it is missing, then checks it once before any case: an **unregistered** name — a new dataset, or a typo, which would file every patient of the batch as a new, unlinked person — is offered for creation only when the run was started from a terminal (`Create it now as a new dataset (slug '<slug>', permanent)? [y/N]`, listing similar existing names); a background run stops with the `scripts/admin/manage_datasets.py add` command instead. Each PatientID becomes an enrollment in it (`patient.dataset`); it is also what users' dataset grants filter on. |
 | `patient_links` | **Optional.** Path (absolute, or relative to the YAML) to a JSON link file `{"dataset": "<this batch's dataset>", "link_dataset": "<reference dataset>", "links": {"<PatientID here>": "<patient_id there>", ...}}`. Read and validated at config load (the file's `dataset` must equal `dataset`). Applied once per run, right after the dataset check and **before any case**, in one transaction: each listed patient is enrolled in (or linked to) the reference patient's subject, so studies the two datasets share are accepted instead of refused. Any invalid row (unregistered dataset, reference patient not ingested, id listed twice) stops the run with nothing linked. Re-running (resume) is a no-op for links already in place. Keys must be the **DICOM `PatientID`** the files carry, or the link and the ingested enrollment are two different patients. The same file works with `scripts/admin/link_patients.py link <file>` (dry-run validation). |
-| `cold_archive_root` | **Optional override.** Defaults to `[storage].cold_archive_root` from `config.toml` when `mode = "cold_path_cache"`, or `null` in legacy mode. The script warns if you override and the override differs from `config.toml`. |
+| `archive_volume` | **Optional.** Name of a configured archive volume (`config.toml [storage.archive_volumes.<name>]`) that this batch's **new** studies are archived to. Resolution order: this key → `[storage.dataset_archive_volume]` for the batch's dataset → `[storage] default_archive_volume`; the run log prints the volume and which rule chose it. Existing studies (re-sent, overwritten, reassigned, retried) stay on the volume they are already on. Ignored with a warning in legacy mode. Check before a run: `scripts/admin/manage_archive_volumes.py check-dataset <dataset>`. See [archive volumes](../cold_storage/archive_volumes.md). |
+| `skip_archive_space_check` | Default `false`. When `true`, skip the pre-flight free-space estimate on the archive volume (the online check still runs) — for a batch that is mostly already ingested. |
 | `cleanup_loose_after_indexing` | `cold_path_cache` only (ignored with a warning in legacy mode). Default `true`: after each case's Orthanc indexing verifies, delete its series' loose `DICOM/` dirs (same safety checks as `cleanup_loose_dicoms.py`; NIFTI siblings preserved). Set `false` to keep loose files until a manual cleanup pass. See "Cleanup of loose DICOMs after ingestion". |
 | `resume` | Default `true`. Skip cases that prior logs for this `src_dir` prove were successfully completed; failed/interrupted cases re-run (see "Resume"). CLI `--no-resume` overrides. |
 | `compress_workers` | Concurrent per-series archive compressions within a case (thread pool; zstd releases the GIL). Default `4`; `1` = serial. |
@@ -145,17 +146,27 @@ the batch, so you can later find everything that came in together.
 Storage paths and storage mode are read from `config.toml` by both
 `ImageIngestionProtocol` and the `execute_image_ingestion_protocol.py`
 driver (via `web-app/config.py`). This eliminates the previously hardcoded
-storage path and the YAML's separate `cold_archive_root`. You no longer need
-to keep multiple files in sync; the only path you typically edit is
-`[storage]` in `config.toml`.
+storage path. You no longer need to keep multiple files in sync; the only
+paths you edit live in `[storage]` in `config.toml` (`dicom_data_root` and the
+[archive volumes](../cold_storage/archive_volumes.md)). The YAML only *names*
+a volume (`archive_volume`), never a path.
 
 The driver validates the resolved configuration at startup:
-- If `mode = "cold_path_cache"` but no `cold_archive_root` can be resolved,
-  it raises immediately.
-- If the YAML supplies a `cold_archive_root` that disagrees with `config.toml`,
-  it logs a warning so the override is auditable.
-- If `mode = "legacy"` but a `cold_archive_root` is set anyway, it logs a
-  warning (the archives will be created but the running stack won't use them).
+- A YAML `cold_archive_root` key is an **error** (it used to be a warned
+  override): a raw path could point outside every configured volume. Use
+  `archive_volume: <name>` instead.
+- If `mode = "cold_path_cache"`, the batch's volume is resolved (YAML
+  `archive_volume` → `[storage.dataset_archive_volume]` → `default_archive_volume`);
+  an unknown volume name raises immediately.
+- If `mode = "legacy"` but `archive_volume` is set anyway, it logs a warning
+  and ignores it (no archives are created).
+
+**Pre-flight (before any case, `cold_path_cache` only):** the batch's volume
+must be online (its `.ssc-volume` sentinel present), and its free space must
+cover an estimate of ~60% of `src_dir`'s size plus 10 GiB headroom; otherwise
+the run refuses before touching anything. `skip_archive_space_check: true`
+skips only the space estimate. An existing study pinned to an offline volume
+fails its series at compression time (logged, retriable).
 
 ---
 
@@ -182,10 +193,11 @@ In `cold_path_cache` mode this sibling is not produced by the protocol —
 generate NIFTIs on demand via `scripts/dicom/dicom_to_nifti.py`.
 
 In cold_path_cache mode the archive mirrors the same relative path under the
-archive root, with `DICOM/` replaced by `DICOM.tar.zst`:
+root of the study's [archive volume](../cold_storage/archive_volumes.md), with
+`DICOM/` replaced by `DICOM.tar.zst`:
 
 ```
-{cold_archive_root}/
+{archive_volume_root}/
   {patient_id}/
     {studyinstanceuid}/
       {seriesdescription_normalized}/
@@ -213,7 +225,7 @@ the tar.
 | 5 | `validate_studies_against_clinical_data` | Flags each study with `clinical_match_found` (does `patient_id` have a row in the dataset's clinical table?) and warns per unmatched patient (`patient <id> has no row in <table>`). Nothing is dropped. Only the batch dataset's own table is consulted — another dataset's clinical rows describe other people. |
 | 6 | `assign_import_id` / `assign_import_label` | Tags all rows with the batch import_id/label |
 | 7 | `add_paths_and_copy_dicom_files` | **Copies DICOMs** from source → `{dicom_data_root}/{slug}/{patient_id}/{studyUID}/{seriesDesc}/{seriesUID}/DICOM/`, where `slug` is the dataset slug of the study's **owner** (step 2b — not necessarily the batch dataset) and a new series of an already stored study joins that study's stored `study_path` (see [`../operations/dataset_layout.md`](../operations/dataset_layout.md)). Copies the series' aggregated file list (which may span several source folders); on a destination basename collision it **renames** the file (`…__dupN`) so nothing is overwritten. Optionally anonymizes (see `anonymize_files`; the headers were already anonymised in step 1 so DB and files agree). Sets `dicom_dir_path` and records the source→dest pairs for verification. |
-| 8 | `compress_cold_archives` | **Only if `cold_archive_root` is set.** For each series, creates `{cold_archive_root}/.../DICOM.tar.zst`. Sets `dicom_archive_path` on each row. **Per-series strict, batch soft**: each archive is built to a `.tmp` sibling, member-count verified, and atomically renamed — so a published archive is always valid. A failure on one series does NOT abort the case; the loop continues and failures are collected. After the loop, a WARNING is printed summarizing `N/M` failed, and a JSON report is written to `image_ingestion_protocols/logs/compression_failures_<timestamp>.json` (includes seriesinstanceuid, studyinstanceuid, dicom_dir_path, error). Failed rows keep `dicom_archive_path = NULL` — retriable via `scripts/cold_storage/archive_all_series.py --patient <id>`. Idempotent: existing archives are re-verified rather than rebuilt; corrupted ones are detected and rebuilt. |
+| 8 | `compress_cold_archives` | **Only in `cold_path_cache` mode** (an archive volume resolved). For each series, creates `{archive_volume_root}/.../DICOM.tar.zst` on its study's volume (the batch's volume for a new study; the volume it is already on for an existing one). Sets `dicom_archive_path` on each row. **Per-series strict, batch soft**: each archive is built to a `.tmp` sibling, member-count verified, and atomically renamed — so a published archive is always valid. A failure on one series does NOT abort the case; the loop continues and failures are collected. After the loop, a WARNING is printed summarizing `N/M` failed, and a JSON report is written to `image_ingestion_protocols/logs/compression_failures_<timestamp>.json` (includes seriesinstanceuid, studyinstanceuid, dicom_dir_path, error, plus `pinned_study_archive_roots` — the volume root each study was pinned to). Failed rows keep `dicom_archive_path = NULL` — retriable via `scripts/cold_storage/archive_all_series.py --patient <id>`. Idempotent: existing archives are re-verified rather than rebuilt; corrupted ones are detected and rebuilt. |
 | 9 | `create_nifti_files` | In `legacy` mode: runs DICOM→NIFTI conversion for select series and writes `{seriesUID}/NIFTI/image.nii.gz`. In `cold_path_cache` mode (production): **skipped by design** — NIFTIs would orphan once their sibling loose DICOMs are cleaned up. The conversion code is kept-dormant-by-design (available for a future legacy-style run); generate NIFTIs on demand via `scripts/dicom/dicom_to_nifti.py` (see [`../recipes/dicom_processing.md`](../recipes/dicom_processing.md)). |
 | 10 | `format_column_names` | Normalizes DataFrame column names, including adding `dicom_archive_path` to the set of columns to upsert |
 | 11 | `_require_import_id_columns` / `_require_import_label_columns` / `_require_number_of_slices_column` / `_require_dicom_archive_path_column` | Auto-DDL: `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` for any columns the protocol writes that don't yet exist. Safe to run against a fresh DB. |
@@ -503,7 +515,7 @@ Unit tests: `image_ingestion_protocols/tests/test_series_classification.py` and
 ### Legacy mode
 
 Driven by `config.toml` `[storage].mode = "legacy"`; leave the YAML's
-`cold_archive_root` unset.
+`archive_volume` unset (it is ignored with a warning).
 
 ```
 source DICOMs
@@ -521,13 +533,14 @@ the scan root (or the per-case `POST /indexer/scan` path used in
 ### cold_path_cache mode
 
 Driven by `config.toml` `[storage].mode = "cold_path_cache"`; the archive root
-comes from `[storage].cold_archive_root` — leave the YAML's `cold_archive_root`
-unset (override only for one-off experiments).
+is the resolved [archive volume](../cold_storage/archive_volumes.md)'s root —
+set `archive_volume` in the YAML only to send new studies somewhere other than
+the dataset/default volume.
 
 ```
 source DICOMs
   → copy to {dicom_data_root}/... (loose files)
-  → compress to {cold_archive_root}/.../DICOM.tar.zst
+  → compress to {archive_volume_root}/.../DICOM.tar.zst
   → (NIFTI generation skipped — produce on demand via scripts/dicom/dicom_to_nifti.py)
   → upsert image_study / image_series (dicom_archive_path populated)
 ```
@@ -671,13 +684,15 @@ periodically (weekly or so) to catch archive corruption the fast path would miss
 
 ## Configuration coupling with the rest of the stack
 
-The ingestion protocol reads `[storage].dicom_data_root`, `[storage].cold_archive_root`,
+The ingestion protocol reads `[storage].dicom_data_root`, the archive volumes
+(`[storage.archive_volumes.*]`, `default_archive_volume`, `[storage.dataset_archive_volume]`),
 and `[storage].mode` from `config.toml` via `web-app/config.py`. There are
 no hardcoded paths to keep in sync.
 
 **Checklist before running ingestion in `cold_path_cache` mode:**
 1. `config.toml` has `mode = "cold_path_cache"` with the right
-   `dicom_data_root` and `cold_archive_root`
+   `dicom_data_root` and archive volumes; the target volume is online
+   (`scripts/admin/manage_archive_volumes.py check-dataset <dataset>`)
 2. The custom `ssc-orthanc:patched-indexer` image is deployed and running
 3. `orthanc.json` has `"RemoveMissingFiles": false`
 
@@ -723,7 +738,7 @@ ls /path/to/new_cases_root/
 #    (first run: copy execute_image_ingestion_protocol.example.yaml)
 #    - src_dir: /path/to/new_cases_root   (required)
 #    - import_label: "2026-04-research-batch"
-#    (leave cold_archive_root unset — config.toml [storage].cold_archive_root supplies it)
+#    - archive_volume: disk2   (optional; default = dataset/default volume from config.toml)
 
 # 3. Run
 cd stanford-stroke-pacs/image_ingestion_protocols

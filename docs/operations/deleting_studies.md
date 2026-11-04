@@ -18,7 +18,8 @@ independent places** it lives (none of which cascade):
    precedes the indexer purge.
 3. **On disk** — the loose `dicom_dir_path` tree and the cold `dicom_archive_path`
    archives, under `<root>/<slug>/<patient>/<studyUID>/…` in both `dicom_data_root`
-   and `cold_archive_root` ([dataset layout](dataset_layout.md)). A delete removes
+   and the study's archive volume ([dataset layout](dataset_layout.md),
+   [archive volumes](../cold_storage/archive_volumes.md)). A delete removes
    the study's **stored** paths (`image_study.study_path`, the series' paths),
    never a path rebuilt from the patient id.
 
@@ -119,8 +120,11 @@ patient as clean.
   ok), and file removal (missing ⇒ ok) all tolerate partial prior runs. If a run
   fails midway, re-run it.
 - **Path safety**: file removal refuses any target not under `dicom_data_root` /
-  `cold_archive_root`, or shallower than a study directory — it can never
+  a configured archive volume root (`archive_volumes.volume_for_path`), or shallower than a study directory — it can never
   delete a storage root, a dataset directory or a whole patient directory. The
   orphan sweep reads dataset directories as such (registered slugs), never as
-  patients.
+  patients, and skips an offline archive volume.
+- **Offline archive volume**: deleting a study whose archives are on an offline
+  volume is refused (HTTP 503 `archive_volume_offline`) — the rows would go and
+  the files stay behind. Remount the disk, then retry.
 - **Storage mode**: the CLI requires `cold_path_cache` (the production layout).

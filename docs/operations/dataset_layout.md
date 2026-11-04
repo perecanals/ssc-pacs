@@ -8,8 +8,11 @@ linked view. Identity model: [`linking_patients.md`](linking_patients.md).
 
 ```
 <dicom_data_root>/<slug>/<patient_id>/<StudyUID>/<series desc>/<SeriesUID>/DICOM/
-<cold_archive_root>/<slug>/<patient_id>/<StudyUID>/<series desc>/<SeriesUID>/DICOM.tar.zst
+<archive volume root>/<slug>/<patient_id>/<StudyUID>/<series desc>/<SeriesUID>/DICOM.tar.zst
 ```
+
+Every archive volume uses the same layout; a study's archives all live on one
+volume ([archive volumes](../cold_storage/archive_volumes.md)).
 
 - `slug` is the dataset slug of the enrollment that **owns** the study (the
   prefix of `image_study.patient_key`). It is not always the batch being
@@ -45,7 +48,8 @@ One idempotent tool covers three jobs:
 - relocating misplaced studies later;
 - rolling back.
 
-It moves every misplaced study, and nothing once none are left.
+It moves every misplaced study, and nothing once none are left. It handles a
+single archive volume only and refuses to run while more than one is configured.
 
 For each study, three steps run in order. Each is written to a journal at
 `<checkout>/maintenance/layout-move/<timestamp>/` before the next one starts:
@@ -160,7 +164,7 @@ only through the database. For browsing the files, the linked view gives each
 enrollment a symlink per membership:
 
 ```
-<linked_view_root>/<slug>/<patient_id>/<StudyUID>  ->  <cold_archive_root>/<owner's study dir>
+<linked_view_root>/<slug>/<patient_id>/<StudyUID>  ->  <owner's archive volume root>/<owner's study dir>
 ```
 
 - It is enabled by `config.toml [storage] linked_view_root`, an absolute path

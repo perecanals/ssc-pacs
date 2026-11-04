@@ -279,18 +279,27 @@ In production, once the cold mirror is enabled (see
 
 ```bash
 # Stop hot warming first to avoid races
-# (warming reads from cold_archive_root; if you're restoring INTO
-# cold_archive_root from the mirror, no warm should be in flight)
+# (warming reads from the archive volumes; if you're restoring INTO
+# one from the mirror, no warm should be in flight)
 
-# CAR = config.toml [storage].cold_archive_root
-CAR=$(python3 -c "import tomllib;print(tomllib.load(open('config.toml','rb'))['storage']['cold_archive_root'])")
+# The mirror holds one tree per archive volume: $COLD_MIRROR_DEST/<volume>/.
+# ROOT = config.toml [storage.archive_volumes.<VOL>].root
+VOL=disk1
+ROOT=$(python3 -c "import sys,tomllib;print(tomllib.load(open('config.toml','rb'))['storage']['archive_volumes'][sys.argv[1]]['root'])" "$VOL")
 
-# Restore everything
-rsync -a --info=stats2 "$COLD_MIRROR_DEST"/ "$CAR"/
+# Restore the whole volume (repeat per volume)
+rsync -a --info=stats2 "$COLD_MIRROR_DEST/$VOL"/ "$ROOT"/
 
 # Or restore a single series
-rsync -a "$COLD_MIRROR_DEST/<series-uid-prefix>/" "$CAR/<series-uid-prefix>/"
+rsync -a "$COLD_MIRROR_DEST/$VOL/<series-relative-path>/" "$ROOT/<series-relative-path>/"
+
+# The volume must read as online again (its .ssc-volume sentinel restored)
+python scripts/admin/manage_archive_volumes.py status
 ```
+
+From the restic imaging tier instead, restore per volume with
+`remote_backup.py restore imaging --volume <VOL> …` ([remote backups](remote_backups.md),
+[archive volumes](../cold_storage/archive_volumes.md)).
 
 Then verify by warming a recently-restored series:
 

@@ -33,7 +33,7 @@ and how to recover. Restore steps live in
 |---|---|---|---|
 | `stanford-stroke` PostgreSQL DB | host PostgreSQL (≥ 16) | **Yes — Tier 1, daily** | Authored content (annotations, users, label defs, preferences) cannot be reconstructed |
 | `orthanc_db` PostgreSQL DB | host PostgreSQL (≥ 16) | **Yes — Tier 1, daily** | Orthanc's index — rebuildable from disk but slow; cheap to back up |
-| Cold DICOM archives (`cold_archive_root`) | local disk | **Not yet** — mirror script implemented (Tier 2, dormant) | Re-ingest from source is currently acceptable; a mirror needs a destination |
+| Cold DICOM archives (archive volumes, `[storage.archive_volumes.*]`) | local disk | **Not yet** — mirror script implemented (Tier 2, dormant) | Re-ingest from source is currently acceptable; a mirror needs a destination |
 | Uncompressed/warm DICOM tree (`dicom_data_root`) | local disk | No | Reconstructible from cold archives on demand |
 | Orthanc storage volume (`…_ssc-orthanc-storage` at `/var/lib/orthanc/db`) | docker volume | **Yes — Tier 1, daily** | Holds OHIF-authored DICOM SR/SEG annotations (**no other copy**) + the Folder Indexer `indexer-plugin.db` (rebuild = full cold-archive decompression + reindex) |
 | Orthanc container filesystem (rootfs) | docker | No | Stateless; rebuilt from `docker compose up` + the `ssc-orthanc:patched-indexer` image |
@@ -248,7 +248,7 @@ currently recoverable via re-ingestion.
 
 | Path | Role |
 |---|---|
-| `scripts/cold_storage/mirror_cold_archive.sh` | `rsync -a --delete` from `SOURCE_DIR` to `COLD_MIRROR_DEST` (no-op if `COLD_MIRROR_DEST` unset) |
+| `scripts/cold_storage/mirror_cold_archive.sh` | `rsync -a --delete` from each online archive volume to `COLD_MIRROR_DEST/<volume>/` (`SOURCE_DIR` = one-off single tree into the dest root; no-op if `COLD_MIRROR_DEST` unset) |
 | `deploy/systemd/cold-archive-mirror.service.in` | runs the script, which reads `[backup].cold_mirror_dest` from `config.toml` |
 | `deploy/systemd/cold-archive-mirror.timer.in` | nightly, **not enabled by default** |
 
@@ -262,7 +262,9 @@ currently recoverable via re-ingestion.
    encryption at rest (borg/restic both support this). See
    `docs/reference/image_ingestion_protocol.md`.
 3. Set the legacy mirror destination in the existing `config.toml` `[backup]`
-   section (the source already comes from `[storage].cold_archive_root`):
+   section (the sources already come from the archive volumes, `[storage.archive_volumes.*]`;
+   each online volume is mirrored to `<cold_mirror_dest>/<volume>/`, and a volume
+   without its sentinel is skipped — see [archive volumes](../cold_storage/archive_volumes.md)):
 
    ```toml
    cold_mirror_dest = "/path/to/mirror"
