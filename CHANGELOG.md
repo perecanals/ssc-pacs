@@ -1,5 +1,10 @@
 # Changelog
 
+## v2.8 — 2026-11-04
+
+Cold archives can live on several disks: named archive volumes (`[storage.archive_volumes.<name>]`, per-dataset default in `[storage.dataset_archive_volume]`, ingestion YAML `archive_volume:`); a study stays on one volume, and an unmounted volume is reported offline (startup log, `/healthz`, 503s) instead of breaking the service. Remote imaging backups take one snapshot per volume.
+No schema migration. Before restarting: `sudo "$(which python)" scripts/admin/manage_archive_volumes.py adopt disk1 <cold_archive_root> --execute` (adding or adopting a disk requires root), then replace `cold_archive_root` in config.toml with a `disk1` volume table (the old key still works, with a warning). A YAML `cold_archive_root` is now an error. See docs/cold_storage/archive_volumes.md.
+
 ## v2.7 — 2026-11-02
 
 Export creators can rename exports and delete finished exports from history, including their download records and retained files. Creator ownership is enforced for staff and admins.
