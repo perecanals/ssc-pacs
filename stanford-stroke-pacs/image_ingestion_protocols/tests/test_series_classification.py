@@ -33,391 +33,153 @@ def _tags(modality="CT", descr="", kernel=None, image_type=None, study=None, **e
     return tags
 
 
-# --- The colleague's central judgement: bone windows are not NCCT -------------
+# Series-family identity includes diagnostic reconstructions, regardless of plane.
+# These are development-cohort descriptions; no held-out examples enter tests.
 
 
-@pytest.mark.parametrize("descr,kernel", [
-    ("0.625MM ROUTINE HEAD BONE WO", "BONEPLUS"),
-    ("ROUTINE HEAD BONE", "BONEPLUS"),
-    ("DE_Head  3.0  H60s  F_0.5", ["H60s"]),  # bone kernel inside a DE study
-])
-def test_bone_windows_never_become_ncct(descr, kernel):
-    # His central judgement: bone kernels are matched BEFORE NCCT kernels. Bone is
-    # an exclusion in his scheme, not a type, so it yields None with a rule.
-    stype, rule = classify_series(_tags(descr=descr, kernel=kernel), 1)
-    assert stype is None
-    assert rule == "kernel-bone"
-
-
-def test_bone_is_matched_before_ncct():
-    # "ROUTINE HEAD" hits the NCCT description lexicon; the bone kernel must win.
-    stype, _ = classify_series(_tags(descr="ROUTINE HEAD BONE", kernel="BONEPLUS"), 1)
-    assert stype != "NCCT"
-
-
-# --- Geometry (dynamic families) ---------------------------------------------
-
-
-@pytest.mark.parametrize("modality,count,expected", [
-    ("CT", 30, "CTP"),
-    ("MR", 30, "PWI"),
-    ("MR", 6, "DWI"),
-    ("CT", 1, None),
-])
-def test_geometry_stage(modality, count, expected):
-    stype, _ = classify_series(_tags(modality=modality, descr="AX"), count)
-    assert stype == expected
-
-
-def test_mr_can_never_be_ctp():
-    # 67 MR series in the corpus carry a CTP label from a pre-modality-guard bug.
-    stype, _ = classify_series(_tags(modality="MR", descr="PERFUSION"), 40)
-    assert stype != "CTP"
-
-
-# --- Derived / localizer (new stage; DicomDetector has no equivalent) ---------
-
-
-@pytest.mark.parametrize("descr,image_type", [
-    ("RAPID Perfusion Parameter Maps Colored", ["DERIVED", "SECONDARY", "OTHER"]),
-    ("3D Lab:  Ax batch 20 x 5 MIP", ["DERIVED", "SECONDARY", "AQNETSC"]),
-    ("RAPID CT-P Summary", ["DERIVED", "SECONDARY", "OTHER"]),
-])
-def test_derived_products_are_flagged(descr, image_type):
-    stype, rule = classify_series(_tags(descr=descr, image_type=image_type), 1)
-    assert stype is None
-    assert rule in {"description-derived", "imagetype-derived-secondary"}
-
-
-@pytest.mark.parametrize("descr,image_type", [
-    ("SN Topo   1.0  Tr20", ["ORIGINAL", "PRIMARY", "LOCALIZER"]),
-    ("SCOUT", ["ORIGINAL", "PRIMARY", "LOCALIZER"]),
-    ("3Plane Loc SSFSE", None),
-])
-def test_localizers_are_flagged(descr, image_type):
-    stype, rule = classify_series(_tags(descr=descr, image_type=image_type), 1)
-    assert stype is None
-    assert rule == "imagetype-localizer"
-
-
-def test_trace_dwi_survives_the_derived_filter():
-    # Scanners stamp trace/isotropic DWI as DERIVED\SECONDARY because it IS
-    # computed from the raw directions — but it is the image a rater reads. The
-    # carried b-value outranks ImageType. 12 genuine DWI/ADC series in the live
-    # corpus were being lost as DERIVED before this rule.
-    stype, _ = classify_series(
-        _tags(modality="MR", descr="AXIAL DWI 4MM", DiffusionBValue=1000.0,
-              image_type=["DERIVED", "SECONDARY", "OTHER"]),
-        4,
+@pytest.mark.parametrize(
+    "modality,description,extra,count,expected",
+    [
+        (
+            "CT",
+            "DE_Head 3.0 MPR Ax F_0.5",
+            {"ImageType": ["DERIVED", "PRIMARY", "LOCALIZER"]},
+            1,
+            "NCCT",
+        ),
+        ("CT", "DE_Head WO 0.75 Hr32 F_0.5", {}, 1, "NCCT"),
+        ("CT", "NCCT SRC Head 3.0", {}, 1, "NCCT"),
+        (
+            "CT",
+            "2MM AXIAL HEAD WO CON",
+            {"ImageType": ["DERIVED", "SECONDARY", "REFORMATTED"]},
+            1,
+            "NCCT",
+        ),
+        (
+            "CT",
+            "CTA 2.0 MPR Cor",
+            {"ImageOrientationPatient": [1, 0, 0, 0, 0, -1]},
+            1,
+            "CTA",
+        ),
+        ("CT", "Head/Neck Angio 5.0mm", {}, 1, "CTA"),
+        (
+            "CT",
+            "VOLUME Head 0.5 CE",
+            {
+                "ConvolutionKernel": "FC68",
+                "SliceThickness": 0.5,
+                "StudyDescription": "CT HEAD NECK ANGIOGRAPHY",
+            },
+            1,
+            "CTA",
+        ),
+        ("CT", "CTA, iDose (1)", {"ConvolutionKernel": "UC"}, 1, "CTA"),
+        (
+            "CT",
+            "Cow/Carotid Soft Tissue",
+            {"ConvolutionKernel": "H31f", "ContrastBolusAgent": "APPLIED"},
+            1,
+            "CTA",
+        ),
+        (
+            "CT",
+            "Head W/ 3x3",
+            {"SliceThickness": 3, "StudyDescription": "CTA HEAD NECK"},
+            1,
+            "CECT",
+        ),
+        ("CT", "PERFUSION Head 8.0 CE", {}, 30, "CTP"),
+        ("CT", "Top Slab Head 8.0 CE", {}, 1, "CTP"),
+        ("MR", "AX PWI", {}, 30, "PWI"),
+        ("MR", "Ax EPI-GRE +C", {}, 60, "PWI"),
+        ("MR", "Ax DWI (SEND TO RAPID-3)", {}, 4, "DWI"),
+        ("MR", "DIFFUSION_ADC", {"DiffusionBValue": 1000}, 4, "ADC"),
+        (
+            "MR",
+            "AXIAL DWI",
+            {"ImageType": ["DERIVED", "PRIMARY", "DIFFUSION", "ADC"]},
+            1,
+            "ADC",
+        ),
+        ("MR", "Ax GRE", {}, 1, "GRE"),
+        ("MR", "AXEPIfastmix-T2 FLAIR", {}, 4, "FLAIR"),
+        ("MR", "3DEPI SWI-AX Neuromix", {}, 6, "SWI"),
+        ("MR", "Brain Ax 3D MRA_TOF", {}, 1, "MRA_TOF"),
+        ("MR", "MRA CAROTID+C", {}, 1, "MRA_CE"),
+        (
+            "MR",
+            "PJN:3DTOF COW MRA fast",
+            {"ImageType": ["DERIVED", "PRIMARY", "PROJECTION IMAGE"]},
+            1,
+            "MRA_TOF",
+        ),
+        ("MR", "AX 3D ASL (color)", {}, 1, "ASL_SOURCE"),
+        ("MR", "(CBF) AX 3D ASL (color)", {}, 1, "ASL_CBF"),
+        ("MR", "(Transit delay) eASL: TT map", {}, 1, "ASL_DELAY"),
+        ("MR", "(per del, mean PW, REF) eASL: TT map", {}, 1, "ASL_OTHER"),
+        ("CT", "RAPID CT-P Summary", {}, 30, "RAPID_SUMMARY"),
+        ("MR", "RAPID DWI-PWI Summary", {"DiffusionBValue": 1000}, 6, "RAPID_SUMMARY"),
+        ("CT", "PACS nomination form", {}, 1, "DOCUMENT"),
+        ("XA", "LICA", {"ImageType": ["DERIVED", "SECONDARY"]}, 1, "DSA"),
+        ("CT", "ROUTINE HEAD BONE", {"ConvolutionKernel": "BONEPLUS"}, 1, "CT_BONE"),
+        ("CT", "Iodine Map MPR tra 3mm", {}, 1, "CT_MATERIAL"),
+    ],
+)
+def test_development_families(modality, description, extra, count, expected):
+    result, rule = classify_series(
+        _tags(modality=modality, descr=description, **extra), count, 100
     )
-    assert stype == "DWI"
+    assert result == expected, rule
 
 
-def test_send_to_rapid_is_an_acquisition_not_a_rapid_product():
-    # "Ax DWI (SEND TO RAPID-3)" is a real DWI being *sent to* RAPID, not a RAPID
-    # output. A substring match on "rapid" discarded 438 human-confirmed DWI
-    # series as DERIVED. ORIGINAL/PRIMARY is the scanner asserting provenance and
-    # must outrank the description lexicon.
-    stype, rule = classify_series(
-        _tags(modality="MR", descr="Ax DWI (SEND TO RAPID-3) (freq r/l)",
-              image_type=["ORIGINAL", "PRIMARY", "OTHER"]),
-        2,
+@pytest.mark.parametrize(
+    "modality,description",
+    [
+        ("CT", "SCOUT"),
+        ("CT", "SN Topo 1.0 Tr20"),
+        ("MR", "3Plane Loc SSFSE"),
+        ("CT", "3D Lab: Ax batch 20 x 5 MIP"),
+        ("CT", "test bolus"),
+        ("CT", "Dose Report"),
+        ("MR", "unknown"),
+        ("OT", "unknown"),
+        ("CT", "unknown"),
+    ],
+)
+def test_unknown_or_excluded_series_abstain(modality, description):
+    assert (
+        classify_series(_tags(modality=modality, descr=description), 1, 100)[0] is None
     )
-    assert stype == "DWI", rule
 
 
-def test_original_primary_outranks_every_derived_keyword():
-    # Same invariant, stated generally: no description keyword may override an
-    # ORIGINAL/PRIMARY acquisition.
-    for descr in ("Ax DWI send to RAPID", "CTA with MIP reformat request", "3D Lab protocol CTA"):
-        _, rule = classify_series(
-            _tags(descr=descr, kernel="STANDARD",
-                  image_type=["ORIGINAL", "PRIMARY", "AXIAL"]),
-            1, 200,
-        )
-        assert rule != "description-derived", descr
-
-
-def test_rapid_summary_is_still_derived_even_with_a_bvalue():
-    # The b-value exemption must not rescue post-processing output: a
-    # "RAPID Summary" can carry a DiffusionBValue too. Description-derived is
-    # therefore checked BEFORE the ImageType rule.
-    stype, rule = classify_series(
-        _tags(modality="MR", descr="RAPID Summary", DiffusionBValue=1000.0,
-              image_type=["DERIVED", "SECONDARY", "OTHER"]),
-        4,
+def test_series_noncontrast_outranks_reused_injection_metadata():
+    tags = _tags(
+        descr="HEAD WO", ContrastBolusAgent="APPLIED", study="CT HEAD W AND WO CONTRAST"
     )
-    assert stype is None
-    assert rule == "description-derived"
+    assert classify_series(tags, 1, 50)[0] == "NCCT"
 
 
-def test_rapid_dwi_summary_is_not_a_dwi():
-    # 3,806 series were labelled DWI by the old geometry-only classifier that are
-    # actually RAPID post-processing summaries.
-    stype, _ = classify_series(
-        _tags(modality="MR", descr="RAPID DWI-PWI Summary",
-              image_type=["DERIVED", "SECONDARY", "OTHER"]),
-        6,
+def test_mixed_phase_study_is_not_evidence_of_noncontrast():
+    from series_detection import contrast_state
+
+    assert contrast_state("ct head w and wo iv contrast") is None
+    assert contrast_state("ct head wo iv contrast") is False
+    assert contrast_state("ct head w iv contrast") is True
+
+
+def test_family_does_not_use_patient_identifiers_or_annotations():
+    tags = _tags(descr="CTA", PatientID="training-case", label_series_type="NCCT")
+    expected = classify_series(tags, 1, 300)
+    tags.update(
+        PatientID="unseen-case", label_series_type="DWI", InstitutionName="elsewhere"
     )
-    assert stype is None
+    assert classify_series(tags, 1, 300) == expected
 
 
-def test_derived_primary_mpr_stays_classifiable():
-    # DERIVED/PRIMARY is a reformat of a real acquisition — it must NOT be swept
-    # into DERIVED along with the screen-saves, or we lose every MPR.
-    stype, _ = classify_series(
-        _tags(descr="VOLUME Head 3.000 CE", kernel="FC68",
-              image_type=["DERIVED", "PRIMARY", "MPR"]),
-        1,
-    )
-    assert stype != "DERIVED"
-
-
-# --- Imaging plane: CT reformats are not acquisitions --------------------------
-
-AXIAL = [1, 0, 0, 0, 1, 0]
-CORONAL = [1, 0, 0, 0, 0, -1]
-SAGITTAL = [0, 1, 0, 0, 0, -1]
-
-
-@pytest.mark.parametrize("descr,kernel,iop", [
-    ("CTA  2.0  MPR  Cor", "Bv40", CORONAL),
-    ("CTA  2.0  MPR  Sag", "Bv40", SAGITTAL),
-    ("SAG HEAD", "STANDARD", SAGITTAL),
-    ("COR HEAD", "STANDARD", CORONAL),
-    ("Head W/O  2.0  MPR  cor", "STANDARD", CORONAL),
-])
-def test_coronal_and_sagittal_ct_are_reformats(descr, kernel, iop):
-    # A CT is always acquired axially; a cor/sag CT series is a reconstruction.
-    stype, rule = classify_series(
-        _tags(descr=descr, kernel=kernel, image_type=["DERIVED", "PRIMARY", "AXIAL"],
-              ImageOrientationPatient=iop),
-        1,
-    )
-    assert stype is None
-    assert rule == "ct-reformat-non-axial"
-
-
-def test_plane_comes_from_cosines_not_from_imagetype_or_description():
-    # `CTA 2.0 MPR Cor` carries ImageType ...AXIAL... — the metadata lies. Only
-    # ImageOrientationPatient tells the truth.
-    stype, _ = classify_series(
-        _tags(descr="CTA  2.0  MPR  Cor", kernel="Bv40",
-              image_type=["DERIVED", "PRIMARY", "AXIAL", "CT_SOM5 MPR"],
-              ImageOrientationPatient=CORONAL),
-        1,
-    )
-    assert stype is None
-
-
-def test_axial_ct_acquisition_is_unaffected():
-    stype, _ = classify_series(
-        _tags(descr="ROUTINE HEAD STD", kernel="STANDARD",
-              image_type=["ORIGINAL", "PRIMARY", "AXIAL"],
-              ImageOrientationPatient=AXIAL),
-        1,
-    )
-    assert stype == "NCCT"
-
-
-def test_axial_mpr_is_kept_as_an_acquisition():
-    # Only cor/sag are reformats for our purposes; a thin-slice axial MPR is
-    # still the series a rater reads.
-    stype, _ = classify_series(
-        _tags(descr="Head W/O  2.0  MPR  ax", kernel="STANDARD",
-              image_type=["DERIVED", "PRIMARY", "MPR"],
-              ImageOrientationPatient=AXIAL),
-        1,
-    )
-    assert stype == "NCCT"
-
-
-def test_sagittal_mr_is_NOT_a_reformat():
-    # The plane rule is CT-only: sagittal T1 / coronal DWI are real MR acquisitions.
-    stype, _ = classify_series(
-        _tags(modality="MR", descr="cor DWI 4MM", DiffusionBValue=1000.0,
-              image_type=["ORIGINAL", "PRIMARY", "OTHER"],
-              ImageOrientationPatient=CORONAL),
-        4,
-    )
-    assert stype == "DWI"
-
-
-def test_oblique_reformat_caught_by_the_anchored_description_backstop():
-    # A double-oblique "CTA 2.0 MPR Cor" has cosines tilted between planes, so
-    # the dominant-axis test reads it as axial. The anchored name catches it.
-    stype, rule = classify_series(
-        _tags(descr="CTA  2.0  MPR  Cor", kernel="Bv40",
-              image_type=["DERIVED", "PRIMARY", "AXIAL"],
-              ImageOrientationPatient=[0.993, 0.098, -0.055, -0.109, 0.729, -0.676]),
-        1,
-    )
-    assert stype is None
-    assert rule == "ct-reformat-description"
-
-
-def test_reformat_backstop_does_not_match_cor_inside_recon():
-    # The bug this whole lexicon design exists to avoid: bare 'cor' matches
-    # inside 'RECON'. 'ANGIO 1.25MM RECON' is a real CTA acquisition.
-    stype, _ = classify_series(
-        _tags(descr="ANGIO 1.25MM RECON", kernel="STANDARD",
-              image_type=["ORIGINAL", "PRIMARY", "AXIAL"],
-              ImageOrientationPatient=AXIAL),
-        1,
-    )
-    assert stype == "CTA"
-
-
-def test_missing_orientation_does_not_force_derived():
-    stype, _ = classify_series(
-        _tags(descr="ROUTINE HEAD STD", kernel="STANDARD",
-              image_type=["ORIGINAL", "PRIMARY", "AXIAL"]),
-        1,
-    )
-    assert stype == "NCCT"
-
-
-# --- Contrast: the "Optimum Contrast" trap ------------------------------------
-
-
-def test_optimum_contrast_is_a_blend_preset_not_iv_contrast():
-    # Siemens names a dual-energy blend "Optimum Contrast#0 (Auto)". A naive
-    # 'contrast' substring match reads this noncontrast series as enhanced.
-    stype, rule = classify_series(
-        _tags(descr="DE_Head  1.5  Q34s  3 Optimum Contrast#0 (Auto)",
-              kernel=["Q34s", "3"], study="CT HEAD WO IV CONTRAST"),
-        1,
-    )
-    assert stype is None
-    assert rule == "de-optimum-blend-pending-review"
-
-
-def test_study_description_resolves_unmarked_contrast_state():
-    # 4,315 "unmarked" DE_Head series sit inside `CT HEAD WO IV CONTRAST` studies;
-    # the parent study supplies the contrast state the series omits.
-    _, rule = classify_series(
-        _tags(descr="DE_Head  0.75  Hr32  3  F_0.5", kernel=["Hr32s", "3"],
-              study="CT HEAD WO IV CONTRAST"),
-        1,
-    )
-    assert rule == "de-blend-noncontrast-pending-review"
-
-
-def test_w_and_wo_study_cannot_disambiguate_a_series():
-    # A "W AND WO" study holds both phases — it must not resolve either way.
-    _, rule = classify_series(
-        _tags(descr="DE_Head  0.75  Hr32  3  F_0.5", kernel=["Hr32s", "3"],
-              study="CT HEAD W AND WO IV CONTRAST BRAIN PERFUSION"),
-        1,
-    )
-    assert rule == "de-blend-unknown-contrast-pending-review"
-
-
-# --- Dual-energy: held unresolved pending clinical review ---------------------
-
-
-@pytest.mark.parametrize("descr,expected_rule", [
-    ("DE_Head  1.5  Qr32  3  A_80kV", "de-energy-bin-pending-review"),
-    ("DE_Head  1.5  Qr32  3  B_Sn150kV", "de-energy-bin-pending-review"),
-    ("DE_Head WC  0.75  Hr32  3  F_0.5", "de-blend-contrast-pending-review"),
-])
-def test_dual_energy_is_parked_with_a_granular_rule(descr, expected_rule):
-    # Held unresolved deliberately (matching his exclusion of DE kernels) until
-    # the family is clinically reviewed. The granular rule names are what let the
-    # dry-run report price each policy before we commit to one.
-    stype, rule = classify_series(_tags(descr=descr, kernel=["Qr32s", "3"]), 1)
-    assert stype is None
-    assert rule == expected_rule
-
-
-# --- MR diffusion (new stage) -------------------------------------------------
-
-
-def test_adc_maps_are_caught_despite_single_frame_per_position():
-    # ADC/eADC carry a b-value but one frame per slice location, so the 2-14
-    # frame DWI rule structurally misses them.
-    stype, _ = classify_series(
-        _tags(modality="MR", descr="ADC (10^-6 mm2/s)", DiffusionBValue=1000.0), 1
-    )
-    assert stype == "ADC"
-
-
-def test_asl_is_excluded():
-    stype, _ = classify_series(_tags(modality="MR", descr="AX 3D ASL (color)"), 1)
-    assert stype is None
-
-
-# --- MR angiography -----------------------------------------------------------
-
-
-@pytest.mark.parametrize("descr", [
-    "3DTOF COW MRA fast",
-    "MRA COW",
-    "Brain Ax 3D MRA_TOF",
-    "AXIAL 3D TOF HEAD",
-    "Ax 2D TOF FSPGR neck",     # 2D neck TOF counts too
-    "AXIAL 2D TOF NECK",
-])
-def test_non_contrast_mra_is_tof(descr):
-    stype, _ = classify_series(
-        _tags(modality="MR", descr=descr, image_type=["ORIGINAL", "PRIMARY", "OTHER"]), 1
-    )
-    assert stype == "MRA_TOF"
-
-
-@pytest.mark.parametrize("descr", [
-    "MRA CAROTID+C",            # ContrastBolusAgent is EMPTY on these...
-    "MRA CAROTID+C 1/2 dose",
-    "Gad Neck Cor 3D MRA",      # ...and on these. Only the description says gado.
-])
-def test_gadolinium_mra_is_ce(descr):
-    stype, rule = classify_series(
-        _tags(modality="MR", descr=descr, image_type=["ORIGINAL", "PRIMARY", "OTHER"]), 1
-    )
-    assert stype == "MRA_CE", rule
-
-
-def test_mra_detected_from_sequence_variant_when_description_is_silent():
-    stype, _ = classify_series(
-        _tags(modality="MR", descr="AXIAL HEAD", image_type=["ORIGINAL", "PRIMARY", "M"],
-              SequenceVariant=["TOF", "MTC", "SP", "OSP"]),
-        1,
-    )
-    assert stype == "MRA_TOF"
-
-
-@pytest.mark.parametrize("descr,image_type", [
-    # PJN: = projection, COL: = collapse. Both are MIPs of the MRA, and both are
-    # DERIVED/PRIMARY (not DERIVED/SECONDARY), so only the explicit ImageType
-    # token catches them. "pjn" used to sit in the LOCALIZER lexicon and typed
-    # 1,221 of these as localizers.
-    ("PJN:3DTOF COW MRA fast", ["DERIVED", "PRIMARY", "PROJECTION IMAGE", "VASCULAR"]),
-    ("COL:MRA COW", ["DERIVED", "PRIMARY", "PROJECTION IMAGE", "COLLAPSE"]),
-])
-def test_mra_projections_are_derived_not_localizer_and_not_mra(descr, image_type):
-    stype, rule = classify_series(_tags(modality="MR", descr=descr, image_type=image_type), 1)
-    assert stype is None
-    assert rule == "imagetype-projection"
-
-
-def test_swi_is_not_mistaken_for_mra():
-    # SWI is 3D GRE like TOF, but it is not angiography.
-    stype, _ = classify_series(
-        _tags(modality="MR", descr="3DEPI SWI-AX Neuromix",
-              image_type=["ORIGINAL", "PRIMARY", "OTHER"]),
-        1,
-    )
-    assert stype != "MRA_TOF"
-
-
-# --- Catheter angiography -----------------------------------------------------
-
-
-def test_xa_is_an_exclusion_not_a_type():
-    # He has a DSA_description list but never wires it to an output column.
-    stype, rule = classify_series(_tags(modality="XA", descr="RM Std Neuro"), None)
-    assert stype is None
-    assert rule == "modality-xa"
+def test_short_named_cta_is_not_rejected_by_a_vendor_specific_slice_threshold():
+    assert classify_series(_tags(descr="CTA HEAD NECK"), 1, 40)[0] == "CTA"
 
 
 # --- Study level --------------------------------------------------------------
@@ -715,3 +477,97 @@ def test_study_without_acquisition_time_is_unplaced():
     assert result["a"]["episode"] is None
     assert result["a"]["timepoint"] is None
     assert result["a"]["timepoint_rule"] == "no-acquisition-time"
+
+
+def _context_row(uid, description, time="120000", study="study", **tags):
+    return dict(
+        seriesinstanceuid=uid,
+        studyinstanceuid=study,
+        tags=_tags(descr=description, AcquisitionTime=time, SliceThickness=1, **tags),
+        same_position_count=1,
+        n_instances_scanned=120,
+    )
+
+
+def test_repeated_matching_volumes_are_ctp_even_with_separate_series_uids():
+    from series_classification import classify_series_batch
+
+    rows = [_context_row(str(i), "Head 1.0 CE", time=f"1200{i:02d}") for i in range(20)]
+    result = classify_series_batch(rows)
+    assert all(
+        value == ("CTP", "ct-temporal-volumes-across-series")
+        for value in result.values()
+    )
+
+
+@pytest.mark.parametrize("change", ["study", "time", "same_clock", "missing_clock"])
+def test_unrelated_or_reconstructed_volumes_do_not_become_perfusion(change):
+    from series_classification import classify_series_batch
+
+    rows = [_context_row(str(i), "Head 1.0 CE", time=f"1200{i:02d}") for i in range(20)]
+    for i, row in enumerate(rows):
+        if change == "study":
+            row["studyinstanceuid"] = f"study-{i}"
+        elif change == "time":
+            row["tags"]["AcquisitionTime"] = f"12{i:02d}00"
+        elif change == "same_clock":
+            row["tags"]["AcquisitionTime"] = "120000"
+        else:
+            row["tags"].pop("AcquisitionTime")
+    assert all(value[0] != "CTP" for value in classify_series_batch(rows).values())
+
+
+def test_named_sibling_resolves_an_ambiguous_reconstruction():
+    from series_classification import classify_series_batch
+
+    rows = [
+        _context_row("named", "CTA HEAD NECK"),
+        _context_row("generic", "Head 1.0", ContrastBolusAgent=""),
+    ]
+    assert classify_series_batch(rows)["generic"] == (
+        "CTA",
+        "ct-named-sibling-same-acquisition",
+    )
+
+
+@pytest.mark.parametrize(
+    "study,time", [("other-study", "120000"), ("study", "120001"), ("study", "")]
+)
+def test_sibling_inference_requires_same_study_and_exact_clock(study, time):
+    from series_classification import classify_series_batch
+
+    rows = [
+        _context_row("named", "CTA HEAD NECK"),
+        _context_row("generic", "Head 1.0", study=study, time=time),
+    ]
+    assert classify_series_batch(rows)["generic"][0] == "NCCT"
+
+
+def test_conflicting_names_and_explicit_noncontrast_are_not_overwritten():
+    from series_classification import classify_series_batch
+
+    rows = [
+        _context_row("cta", "CTA HEAD NECK"),
+        _context_row("ncct", "NCCT HEAD"),
+        _context_row("generic", "Head 1.0"),
+    ]
+    result = classify_series_batch(rows)
+    assert result["cta"][0] == "CTA"
+    assert result["ncct"][0] == "NCCT"
+    assert result["generic"][0] == "NCCT"
+
+
+def test_asl_nondiagnostic_marker_can_include_for():
+    assert (
+        classify_series(
+            _tags(modality="MR", descr="NOT FOR DIAGNOSTIC USE: CBF"), 1, 50
+        )[0]
+        == "ASL_OTHER"
+    )
+
+
+def test_sibling_clock_does_not_override_an_explicit_contrast_phase():
+    from series_classification import classify_series_batch
+    rows = [_context_row("native", "NCCT HEAD"), _context_row("enhanced", "Head W/ 3x3")]
+    rows[1]["tags"]["SliceThickness"] = 3
+    assert classify_series_batch(rows)["enhanced"][0] == "CECT"

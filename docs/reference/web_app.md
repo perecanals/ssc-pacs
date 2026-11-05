@@ -274,15 +274,16 @@ them — but never writes them.
 The point of the "Auto" prefix and the muted, outlined, non-clickable pill is
 that annotation labels named `series_type` and `timepoint` also exist and sit in
 adjacent columns. The two are **independent axes**: a reclassify run must not
-overwrite a rater's judgement, and a rater's judgement must not feed back into
-the rules ([`data_stores.md`](data_stores.md)).
+overwrite a rater's judgement. Manual labels can guide offline rule development,
+but runtime detection never reads them ([`data_stores.md`](data_stores.md)).
 
 - **Auto Series Type** also shows the per-patient preference rank as a
   superscript: `NCCT` with a bold `1` is *the* NCCT to open for that patient.
   Type the label into the column filter (`NCCT_1`) to isolate every patient's
   preferred NCCT in one query.
-- Most series are **excluded** rather than typed (bone, topogram, RAPID output,
-  …), which the classifier records as a rule. Those cells show a faint `—`;
+- Uncertain and excluded series (for example scouts) retain a rule explaining
+  why no family was assigned. Bone, RAPID output and other recognized families
+  have their own automatic types. Those cells show a faint `—`;
   hover it for the exclusion that fired. An empty cell means not-yet-classified.
 - **Auto Timepoint** (`BL` / `THROMBECTOMY` / `FU`) is anchored on the
   femoral-sheath puncture. Where no puncture time was recorded the classifier

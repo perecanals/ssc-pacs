@@ -416,9 +416,9 @@ entirely at the patient level since patients have no direct OHIF action.
 `Auto Series Type` (`image_series.series_type`) and `Auto Timepoint`
 (`image_study.timepoint`) surface what the ingestion classifier decided. They are
 a **separate axis** from the human annotation labels that happen to share those
-names (`series_type`, `timepoint`, both default-visible) — neither is derived
-from the other in either direction, so the two sit side by side and must not be
-confused. See `docs/reference/data_stores.md`.
+names (`series_type`, `timepoint`, both default-visible). Runtime detection never
+reads manual annotations, and automatic reclassification never overwrites them;
+manual labels can guide offline evaluation and rule development. See `docs/reference/data_stores.md`.
 
 - **Rendered by `AutoPill`** (`BuiltinCell.jsx`): an *outlined, muted,
   non-interactive* pill, deliberately unlike the filled, clickable `SelectPill`
@@ -431,9 +431,9 @@ confused. See `docs/reference/data_stores.md`.
   The header filter matches `series_label`, so `NCCT` finds every NCCT and
   `NCCT_1` isolates each patient's preferred one; sorting keys on `series_label`
   too (type first, then rank).
-- **Exclusions are not gaps**: most series have a NULL `series_type` because the
-  classifier *excluded* them (bone, topogram, RAPID output, …), and
-  `series_type_rule` records which exclusion fired. Those cells render a faint
+- **Exclusions and uncertainty are not gaps**: a NULL `series_type` can mean
+  an excluded scout or insufficient evidence, and `series_type_rule` explains
+  the decision. Recognized bone, RAPID and other families have their own types. Those cells render a faint
   `—` whose tooltip names the rule, rather than an empty cell that would read as
   "the classifier had nothing to say". A row with neither a type nor a rule (not
   yet classified) is genuinely blank.

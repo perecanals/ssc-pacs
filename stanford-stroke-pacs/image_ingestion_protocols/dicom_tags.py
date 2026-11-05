@@ -31,7 +31,7 @@ from utils import _frame_positions, _position_key
 
 # Bump when the extracted shape changes in a way that makes old rows
 # non-comparable; written to series_dicom_tags.extractor_version.
-EXTRACTOR_VERSION = "tags-v1"
+EXTRACTOR_VERSION = "tags-v2"
 
 # Sequences are recursed to this depth. Everything observed in the corpus is a
 # small code sequence (ProcedureCodeSequence, AnatomicRegionSequence,
@@ -66,7 +66,9 @@ def _coerce(value: Any, depth: int) -> Any:
     if isinstance(value, pydicom.sequence.Sequence):
         if depth >= MAX_SEQUENCE_DEPTH:
             return None
-        return [_dataset_to_dict(item, depth + 1) for item in value[:MAX_SEQUENCE_ITEMS]]
+        return [
+            _dataset_to_dict(item, depth + 1) for item in value[:MAX_SEQUENCE_ITEMS]
+        ]
     if isinstance(value, (MultiValue, list, tuple)):
         return [_coerce(v, depth) for v in value]
     # DSfloat / IS / DSdecimal and friends are numeric subclasses in disguise.
@@ -132,10 +134,9 @@ def _kernel_str(value: Any) -> str | None:
 class SeriesTagAccumulator:
     """Fold a series' instances into one tag row, one instance at a time.
 
-    Memory is O(1) in the instance count: only the first dataset (the
-    representative instance) is retained, everything else collapses into
-    counters and sets as it goes. A 2,000-instance CTP series costs the same
-    as a 20-slice NCCT.
+    Retain one representative from the most common diagnostic image group,
+    rather than the first file (which can be an embedded scout). Only counters
+    are retained for other groups; datasets and pixels are never accumulated.
 
     That matters because the backfill fans out across worker processes: holding
     every dataset of a large series resident, times N workers, is enough to OOM
@@ -150,6 +151,9 @@ class SeriesTagAccumulator:
     def __init__(self, source_instance: str | None = None) -> None:
         self.source_instance = source_instance
         self._tags: dict | None = None
+        self._group_counts: dict = {}
+        self._representative_score = (-1, 0)
+        self._representative_group = None
         self._position_counts: dict = {}
         self._positions: set = set()
         self._kernels: set[str] = set()
@@ -158,13 +162,8 @@ class SeriesTagAccumulator:
         self._saw_position = False
         self._geometry_undecodable = False
 
-    def add(self, dcm) -> None:
+    def add(self, dcm, source_instance: str | None = None) -> None:
         self._n_instances += 1
-
-        if self._tags is None:
-            self._tags = _dataset_to_dict(dcm)
-            if self.source_instance is None:
-                self.source_instance = getattr(dcm, "filename", None)
 
         kernel = _kernel_str(getattr(dcm, "ConvolutionKernel", None))
         if kernel:
@@ -178,6 +177,38 @@ class SeriesTagAccumulator:
                 self._image_types.add("/".join(str(v) for v in image_type))
             except TypeError:
                 pass
+
+        # Group by coarse plane, not exact cosines: normal floating-point
+        # variation must not turn every slice into a separate group.
+        tokens = [image_type] if isinstance(image_type, str) else list(image_type or [])
+        tokens = tuple(str(t).upper() for t in tokens)
+        iop = getattr(dcm, "ImageOrientationPatient", None)
+        plane = None
+        if iop is not None and len(iop) == 6:
+            try:
+                a, b, c, d, e, f = (float(v) for v in iop)
+                normal = (b * f - c * e, c * d - a * f, a * e - b * d)
+                plane = max(range(3), key=lambda i: abs(normal[i]))
+            except (TypeError, ValueError):
+                pass
+        group = (tokens, kernel, plane)
+        count = self._group_counts.get(group, 0) + 1
+        self._group_counts[group] = count
+        diagnostic = not any(
+            t in tokens for t in ("LOCALIZER", "PROJECTION IMAGE", "MIP")
+        )
+        score = (int(diagnostic), count)
+        if score > self._representative_score:
+            self._representative_score = score
+            if group != self._representative_group:
+                first = self._tags is None
+                self._tags = _dataset_to_dict(dcm)
+                self._representative_group = group
+                self.source_instance = (
+                    source_instance
+                    or getattr(dcm, "filename", None)
+                    or (self.source_instance if first else None)
+                )
 
         self._add_positions(dcm)
 

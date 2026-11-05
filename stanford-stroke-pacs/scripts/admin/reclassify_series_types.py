@@ -50,7 +50,7 @@ from series_classification import (  # noqa: E402
     ASSIGN_RANKS_SQL,
     CLEAR_RANKS_SQL,
     RULES_VERSION,
-    classify_series,
+    classify_series_batch,
     classify_study,
 )
 from subject_timepoints import (  # noqa: E402
@@ -203,11 +203,10 @@ def main() -> int:
         )
 
     results, study_types = [], defaultdict(list)
+    predictions = classify_series_batch(series_rows)
     for row in series_rows:
         tags = row["tags"] or {}
-        proposed, rule = classify_series(
-            tags, row["same_position_count"], row["n_instances_scanned"]
-        )
+        proposed, rule = predictions[row["seriesinstanceuid"]]
         results.append({
             "suid": row["seriesinstanceuid"],
             "current": row["series_type"],

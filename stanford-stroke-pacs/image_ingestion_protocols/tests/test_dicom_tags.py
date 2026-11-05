@@ -185,7 +185,7 @@ def test_undecodable_multiframe_geometry_degrades_to_none():
     assert extract_series_tags(headers)["same_position_count"] is None
 
 
-def test_accumulator_holds_only_the_first_dataset():
+def test_accumulator_retains_one_representative_per_series():
     # The memory guarantee, asserted rather than assumed: a 500-instance series
     # retains exactly one representative dataset.
     acc = SeriesTagAccumulator()
@@ -196,6 +196,34 @@ def test_accumulator_holds_only_the_first_dataset():
     assert result["n_instances_scanned"] == 500
     assert result["tags"]["SeriesDescription"] == "instance-0"  # the first, not the last
     assert acc._tags is result["tags"]
+
+
+@pytest.mark.parametrize("scout_first", [True, False])
+def test_embedded_scout_does_not_represent_a_diagnostic_stack(scout_first):
+    scout = _header(image_type=["DERIVED", "PRIMARY", "LOCALIZER"], descr="SCOUT")
+    scout.ImageOrientationPatient = [1, 0, 0, 0, 0, -1]
+    axial = []
+    for i in range(53):
+        ds = _header(z=float(i), image_type=["DERIVED", "PRIMARY", "AXIAL"], descr="DE_Head WO")
+        ds.ImageOrientationPatient = [1, 0, 0, 0, 1, 0]
+        axial.append(ds)
+    headers = [scout, *axial] if scout_first else [*axial, scout]
+    result = extract_series_tags(headers)
+    assert result["tags"]["SeriesDescription"] == "DE_Head WO"
+    assert result["tags"]["ImageOrientationPatient"] == [1, 0, 0, 0, 1, 0]
+    assert result["n_instances_scanned"] == 54
+
+
+def test_majority_plane_wins_even_without_a_localizer_token():
+    acc = SeriesTagAccumulator()
+    for i in range(4):
+        ds = _header(z=float(i), image_type=["DERIVED", "SECONDARY", "REFORMATTED"])
+        ds.ImageOrientationPatient = [0, 1, 0, 0, 0, -1] if i == 0 else [1, 0, 0, 0, 1, 0]
+        acc.add(ds, source_instance=f"archive::{i}.dcm")
+    result = acc.result()
+    assert result["tags"]["ImageOrientationPatient"] == [1, 0, 0, 0, 1, 0]
+    assert result["source_instance"] == "archive::2.dcm"
+    assert len(acc._group_counts) == 2
 
 
 def test_malformed_element_and_nul_bytes_do_not_fail_the_series():

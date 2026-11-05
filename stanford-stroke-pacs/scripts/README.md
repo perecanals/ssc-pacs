@@ -104,6 +104,11 @@ python scripts/admin/bulk_set_label_values.py --file x.csv --level series \
 # table, not the archives — safe to re-run whenever the lexicons change.
 python scripts/admin/reclassify_series_types.py [--label sir_batch1] [--execute]
 
+# Read-only evaluation: clear manual series_type families, separate unlabeled counts.
+# Freeze development before inspecting the final-test results.
+python scripts/data_integrity/evaluate_series_types.py --cohort development --output ../maintenance/series-development --freeze
+python scripts/data_integrity/evaluate_series_types.py --cohort test --frozen ../maintenance/series-development/freeze.json --output ../maintenance/series-final-test
+
 # Recompute acquisition datetimes, episodes, and study timepoints from the tag
 # table (dry-run by default). Episode-aware; anchors each episode on its clinical
 # puncture or, failing that, its own thrombectomy study.

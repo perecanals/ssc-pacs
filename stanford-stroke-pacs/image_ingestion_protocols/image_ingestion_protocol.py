@@ -22,7 +22,7 @@ from series_classification import (
     ASSIGN_RANKS_SQL,
     CLEAR_RANKS_SQL,
     RULES_VERSION,
-    classify_series,
+    classify_series_batch,
     classify_study,
     construct_acquisition_datetime,
 )
@@ -712,13 +712,6 @@ class ImageIngestionProtocol:
             # tags is what lets a reclassify run off series_dicom_tags instead of
             # re-reading 130k cold archives.
             tag_row = extract_series_tags(headers, source_instance=paths[0])
-            same_position_count = tag_row["same_position_count"]
-
-            # Same classifier the reclassify CLI uses — one source of truth.
-            series_type, series_type_rule = classify_series(
-                tag_row["tags"], same_position_count, tag_row["n_instances_scanned"]
-            )
-
             series_tag_rows.append({"seriesinstanceuid": series_instance_uid, **tag_row})
 
             acquisition_datetime, acquisition_datetime_source = self._parse_datetime(dcm)
@@ -759,8 +752,8 @@ class ImageIngestionProtocol:
                             "seriesdescription_": name_sanity_check(
                                 series_description or "UNNAMED_SERIES"
                             ),
-                            "series_type": series_type,
-                            "series_type_rule": series_type_rule,
+                            "series_type": None,  # assigned with study context below
+                            "series_type_rule": None,
                             "series_type_version": RULES_VERSION,
                             "modality": modality,
                         }
@@ -776,6 +769,14 @@ class ImageIngestionProtocol:
 
         self.case_series_tags_table = pd.DataFrame(series_tag_rows)
         self.case_series_table = pd.concat(data_series_list, ignore_index=True)
+        studies = self.case_series_table.set_index("seriesinstanceuid")["studyinstanceuid"].to_dict()
+        predictions = classify_series_batch([
+            {**row, "studyinstanceuid": studies[row["seriesinstanceuid"]]}
+            for row in series_tag_rows
+        ])
+        uids = self.case_series_table["seriesinstanceuid"]
+        self.case_series_table["series_type"] = [predictions[uid][0] for uid in uids]
+        self.case_series_table["series_type_rule"] = [predictions[uid][1] for uid in uids]
         self.case_series_table = self.case_series_table.sort_values(
             by=["patient_id", "acquisitiondatetime", "studyinstanceuid", "seriesinstanceuid"],
             na_position="last",

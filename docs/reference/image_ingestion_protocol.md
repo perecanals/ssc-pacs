@@ -283,103 +283,122 @@ local Postgres. Run them via `make test-ingestion` from the checkout root.
 
 ### How `series_type` and `study_type` are detected
 
-`series_classification.py` is the single source of truth, applied both at ingest
-(`create_series_table`) and by `scripts/admin/reclassify_series_types.py`. Every
-call returns `(type, rule)`; the rule is persisted to `series_type_rule` alongside
-`series_type_version`, so a classification can always be explained and recomputed.
+`series_detection.py` contains the readable series-family rules (`rules-v5`).
+`series_classification.py` exposes the shared API used by ingestion and
+`scripts/admin/reclassify_series_types.py`; it also owns study classification,
+preference ranks and timepoints. Every series decision records a type (or NULL),
+a `series_type_rule`, and a `series_type_version`.
 
-**Emitted types — and only these** (`EMITTED_TYPES`):
+The detector uses eight DICOM fields: `Modality`, `SeriesDescription`,
+`StudyDescription`, `ImageType`, `ConvolutionKernel`, `ContrastBolusAgent`,
+`SliceThickness`, and `AcquisitionTime`, plus the existing `same_position_count` and
+`n_instances_scanned` aggregates. It does not use patient identity, dataset,
+manual labels, site, model, protocol name, or a learned description lookup.
 
-| | |
+| Family | Automatic values |
 |---|---|
-| **His five** | `NCCT`, `CTA`, `CTP`, `PWI`, `DWI` — one per output column of the reference implementation (`likely_ncct` … `likely_dwi`) |
-| **Sanctioned additions** | `ADC`, `MRA_TOF`, `MRA_CE` |
+| CT | `NCCT`, `CTA`, `CTP`, `CECT` (postcontrast head), `CT_BONE`, `CT_MATERIAL` |
+| MR | `DWI`, `ADC`, `PWI`, `MRA_TOF`, `MRA_CE`, `FLAIR`, `GRE`, `SWI` |
+| ASL | `ASL_SOURCE`, `ASL_CBF`, `ASL_DELAY`, `ASL_OTHER` |
+| Derived/administrative | `RAPID_SUMMARY`, `DOCUMENT` |
+| Catheter angiography | `DSA` |
 
-Everything else in his taxonomy — bone kernels, dual-energy, topograms, test
-bolus, RAPID output, projections, CT reformats, DSA — is an **exclusion, not a
-type**. He sets those to `False` on all five columns; we return `NULL`. The
-exclusion logic is retained in full (it is heavily tuned and does real work, e.g.
-bone-before-NCCT keeps bone windows out of the NCCT cohort), but it mints no
-labels.
+Named sequences and processing outputs are resolved first. Repeated-position
+geometry identifies dynamic CT perfusion (at least 14 frames/position) and MR
+perfusion (at least 15); unnamed MR with 2–14 repetitions can resolve to DWI.
+Static CT uses the series description first, then contrast, thickness, parent
+study and a small set of vascular/bone kernel prefixes. Explicit noncontrast
+series descriptions override injection metadata reused across study phases.
+A mixed `W AND WO` study does not establish either phase. A sufficiently large, thin contrast stack can be a CTA candidate; study context
+is applied before accepting its final family.
 
-> **A NULL is usually a decision, not a failure.** `series_type_rule` records
-> which exclusion fired (`kernel-bone`, `imagetype-projection`,
-> `ct-reformat-non-axial`, `modality-xa`, `description-derived`…). Read the rule
-> before concluding a series is unclassified — ~84% of the corpus is NULL, and
-> almost all of it is deliberately excluded.
+**Study context is part of detection.** The shared `classify_series_batch` entry
+point applies the per-series rules, then handles two physical relationships:
 
-His criteria, reproduced:
+- At least 14 matching CT volumes acquired at distinct times within three minutes
+  identify perfusion split across series UIDs. Description, kernel, slice
+  thickness and instance count must match within one study.
+- Clearly named NCCT/CTA reconstructions can resolve otherwise ambiguous siblings
+  in the same study with the exact same acquisition time. Missing clocks,
+  conflicting names, explicitly typed reconstructions and unrelated studies do
+  not propagate. Study UIDs establish grouping; their contents are not features.
 
-| Rule | Value |
-|---|---|
-| CTA minimum instances | **80** (`cta_identifier` `min_files`) |
-| NCCT minimum instances | **10** (`ncct_identifier` `min_files`) |
-| CTP floor | **14** frames/position |
-| DWI range | **2–14** frames/position |
-| Bone kernels matched **before** NCCT kernels | keeps bone windows out of NCCT |
+Ingestion and the reclassification CLI both use this batch entry point. A narrow
+CLI filter or partial incoming case supplies less context and can produce
+different family decisions until the complete study is available; prefer a
+full-scope reclassification pass. No pixel heuristics or fitted model are
+required.
 
-PWI uses 15, not 14: his DWI (2–14) and perfusion (≥14) ranges *overlap*, which is
-fine for five independent columns but not for one mutually-exclusive
-`series_type`. The tie breaks to DWI.
+**Identity includes diagnostic reconstructions.** Axial, coronal and sagittal
+reformats and angiographic projections can retain the parent scan family.
+`NCCT` also includes explicitly named virtual noncontrast reconstructions;
+iodine/material maps are separate. Family identity does not assert image
+quality or suitability for an analysis. Motion, duplicate, salvage, “don't use”
+and pre/post-treatment judgements are not automatically reproduced.
 
-**Rank and display label.** His output was never flat — each column holds
-`NCCT_1`, `NCCT_2`, `CTA_1`… a preference ranking *within a patient*, so rank 1 is
-*the* NCCT to use. Reproduced as `series_type_rank` plus the combined
-`series_label` (`NCCT_1`), **which is the column to display**. Ordering: CTA
-thinnest-slice first, NCCT thickest first, the rest chronological; tie-broken by
-`ImageType` (original > secondary > derived) then time.
+**Do not trust the first file as the whole series.** A diagnostic stack may
+contain one differently oriented scout. The `tags-v2` extractor retains a
+representative from the most common diagnostic image group, using only group
+counters and one retained tag dictionary. It does not accumulate pixel data or
+all instance headers. Older cached `tags-v1` rows remain readable; the detector
+does not reject a whole stack solely because its representative ImageType says
+LOCALIZER or DERIVED. Explicit scout descriptions still remain excluded.
+New ingestion uses `tags-v2`; upgrading code does not re-extract existing rows.
 
-**Stages**, in order: non-acquisition filter (`ImageType` localizer / projection /
-derived) → geometry (`same_position_count` → CTP/PWI/DWI) → CT static (plane,
-kernel lexicons, description) → MR static (`DiffusionBValue` → ADC/DWI;
-description or `SequenceVariant` → MRA) → modality.
-
-Three invariants hold it together, each learned by breaking it:
-
-1. **`ORIGINAL/PRIMARY` outranks every description keyword** — the scanner
-   asserting "I acquired this". Without it, 438 human-confirmed DWI named
-   `Ax DWI (SEND TO RAPID-3)` were discarded as derived; they are *sent to* RAPID,
-   not produced by it.
-2. **A carried `DiffusionBValue` outranks `ImageType`** — trace DWI and ADC maps
-   are computed from the raw directions, so scanners legitimately mark them
-   `DERIVED\SECONDARY`.
-3. **Prefer the vendor's explicit tag over a description substring.** The plane of
-   a CT comes from `ImageOrientationPatient`, not the name: `CTA 2.0 MPR Cor` is a
-   coronal reformat whose `ImageType` reads `AXIAL`. Bare `cor`/`sag` substrings
-   match inside `RECON` — the bug in his `EXCLUSION_description`.
+**Rank and display label.** `series_type_rank` ranks within the owning enrollment,
+and `series_label` combines family and rank, e.g. `NCCT_1`. CTA prefers thinner
+slices, NCCT thicker slices; other families use acquisition order. A family or
+rank is not a quality certification or a per-episode recommendation.
 
 `study_type` is derived from `StudyDescription` alone (`CT_HEAD`, `MR_BRAIN`,
-`CT_STROKE_PROTOCOL`, `CTA`, `THROMBECTOMY`) — no clinical join, and deliberately
-not a function of the study's series types.
-
-> **Machine-owned.** `series_type` / `study_type` / `timepoint` are a different
-> axis from the human annotation labels sharing those names (`label_series_type_*`
-> etc.). Neither may be derived from the other.
+`CT_STROKE_PROTOCOL`, `CTA`, `THROMBECTOMY`); the series-rule revision does not
+change the study/timepoint algorithms.
 
 ### Validating against human annotations
 
-~5,500 independent human `series_type` annotations serve as ground truth:
+Manual `annotations.label='series_type'` values (exported as
+`label_series_type`) are evaluation references, never runtime detector inputs.
+The evaluation normalizes explicit family aliases and numbered alternatives
+(e.g. NCCT2 → NCCT, MRP → PWI, TOF/MRA → MRA). Pre/Post normalize to DSA identity
+only. Quality/workflow suffixes, uncertain candidates and spelling guesses are
+listed separately, with counts, rather than silently included as trusted truth.
+The mapping lives in `scripts/data_integrity/evaluate_series_types.py`.
 
-| Human label | n | Machine agrees |
-|---|---|---|
-| PWI | 71 | 100% |
-| MRA (`TOF` + `MRA`) | 372 | 99.5% |
-| CTP | 243 | 99.2% |
-| DWI | 884 | 96.0% |
-| ADC | 100 | 89.0% |
-| CTA | 950 | 79.9% |
-| NCCT | 1,370 | 77.4% |
-
-Re-run this whenever a lexicon changes — a rule that shrinks the residue but drops
-agreement is a regression, and the residue alone will not tell you.
-
-**Recomputing.** Classification reads `series_dicom_tags`, not the archives, so a
-full-corpus pass is a table scan (~30s):
+Development uses PRECISE and CRISP2/LVO enrollments whose IDs start `2-`, joining
+imaging through `study_visibility`. Final testing uses everything else, excluding
+any study **or subject** shared with development. Freeze the implementation
+before final testing, and do not retune against that final result. Example from
+the stack root (output directories must be new):
 
 ```bash
-python scripts/admin/reclassify_series_types.py             # dry-run + report
-python scripts/admin/reclassify_series_types.py --execute   # apply
+python scripts/data_integrity/evaluate_series_types.py --cohort development --output ../maintenance/series-development --freeze
+python scripts/data_integrity/evaluate_series_types.py --cohort test --frozen ../maintenance/series-development/freeze.json --output ../maintenance/series-final-test
 ```
+
+Both commands use read-only database sessions. They save local metadata snapshots,
+per-family/per-dataset metrics, excluded-label counts and disagreement CSVs.
+The final test checks the frozen code hash. `--snapshot <json>` repeats an offline
+evaluation; use a snapshot from the stated cohort. Outputs contain project
+identifiers and belong in `maintenance/`, not in git. Consult the generated
+metrics instead of copying live label counts or percentages into this document.
+
+Recall and precision are reported **within confidently labeled series**.
+An unlabeled prediction is an unknown, not a false positive. Unlabeled prediction
+counts are reported separately; population precision requires an independently
+reviewed sample. Missing metadata, contradictory annotations and rare families
+remain visible in the reports.
+
+**Recomputing automatic values.** Evaluation and code upgrades do not rewrite
+existing predictions. Review a dry-run before executing the existing CLI:
+
+```bash
+python scripts/admin/reclassify_series_types.py
+python scripts/admin/reclassify_series_types.py --execute
+```
+
+The execute command also recomputes ranks and timepoints as before. It never
+writes manual annotations. Human labels may guide offline rule development;
+no automatic value is copied from a manual label at runtime.
 
 ### How `timepoint` is detected
 
@@ -481,8 +500,8 @@ after the scan — which mis-dates the study and fabricates spurious episodes.
 
 > **Machine-owned, and independent of annotations.** `series_type` / `study_type`
 > are a different axis from the human annotation labels that share those names
-> (`label_series_type_*` / `label_study_type_*`). Neither may be derived from the
-> other, in either direction.
+> (`label_series_type_*` / `label_study_type_*`). Offline evaluation may guide rule development; runtime detection never reads
+> annotations and reclassification never overwrites them.
 
 **Recomputing.** Classification reads `series_dicom_tags`, not the archives, so a
 full-corpus re-derivation is a table scan:

@@ -1,5 +1,10 @@
 # Changelog
 
+## v2.9 — 2026-11-05
+
+Automatic series typing uses readable rules and study/acquisition context for NCCT, CTA, perfusion, MR and derived-output families. Tag extraction selects a diagnostic representative instead of an embedded scout; manual annotations remain independent.
+No schema migration. Use `scripts/admin/reclassify_series_types.py --execute` to update existing automatic values and ranks; the read-only evaluation tool records development/test cohorts and disagreement reports. See docs/reference/image_ingestion_protocol.md.
+
 ## v2.8 — 2026-11-04
 
 Cold archives can live on several disks: named archive volumes (`[storage.archive_volumes.<name>]`, per-dataset default in `[storage.dataset_archive_volume]`, ingestion YAML `archive_volume:`); a study stays on one volume, and an unmounted volume is reported offline (startup log, `/healthz`, 503s) instead of breaking the service. Remote imaging backups take one snapshot per volume.

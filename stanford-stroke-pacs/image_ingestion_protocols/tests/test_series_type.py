@@ -189,12 +189,10 @@ def test_create_series_table_assigns_geometric_types(tmp_path):
     assert t.loc[ctp_uid, "series_type"] == "CTP"
     assert t.loc[dwi_uid, "series_type"] == "DWI"
 
-    # Only 5 instances — below his CTA minimum of 80, so it is excluded, and the
-    # rule says exactly why.
-    assert t.loc[static_uid, "series_type"] is None
-    assert t.loc[static_uid, "series_type_rule"] == "description-cta-below-min-instances"
-
-    assert t.loc[ctp_uid, "series_type_rule"] == "geometry-same-position-count"
+    # Family identity includes a named CTA even when it is a short reconstruction.
+    assert t.loc[static_uid, "series_type"] == "CTA"
+    assert t.loc[static_uid, "series_type_rule"] == "ct-angiography-description"
+    assert t.loc[ctp_uid, "series_type_rule"] == "ct-dynamic-geometry"
     assert t.loc[ctp_uid, "series_type_version"] == RULES_VERSION
 
     # The tag rows are captured in the same pass, keyed by series UID.
@@ -215,3 +213,26 @@ def test_series_geometry_uses_true_z_extent(tmp_path):
 
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "-v"]))
+
+
+def test_ingestion_uses_cross_series_perfusion_context(tmp_path):
+    case = tmp_path / "dynamic-case"
+    for phase in range(14):
+        uid = f"1.2.3.4.{phase}"
+        for z in range(10):
+            ds = _header(
+                modality="CT",
+                series_desc="Head 1.0 CE",
+                z=float(z),
+                instance=z + 1,
+                series_uid=uid,
+            )
+            ds.AcquisitionTime = f"1200{phase:02d}"
+            ds.SliceThickness = 1
+            _write(str(case / str(phase) / f"{z}.dcm"), ds)
+    ingestion = ImageIngestionProtocol(case_dir=str(case), postgres_engine=None)
+    ingestion.create_series_table()
+    assert set(ingestion.case_series_table["series_type"]) == {"CTP"}
+    assert set(ingestion.case_series_table["series_type_rule"]) == {
+        "ct-temporal-volumes-across-series"
+    }
