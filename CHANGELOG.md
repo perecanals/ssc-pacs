@@ -1,5 +1,10 @@
 # Changelog
 
+## v2.11 — 2026-11-05
+
+Added a read-only PACS-wide duplicate-series audit with metadata evidence, JSON/CSV reports, study/dataset filters and optional comparison across linked subjects' studies.
+Optional full pixel verification streams canonical archives without warming or extracting them. No schema migration or service restart; see docs/operations/duplicate_series.md.
+
 ## v2.10 — 2026-11-05
 
 `RAPID_SUMMARY` now identifies consolidated summaries only; maps, AIF/VOF outputs and summary-slice/threshold stacks remain unclassified. Recognized bone reconstructions, including J70h kernels, are classified as CT_BONE before NCCT selection and cannot take NCCT_1.
