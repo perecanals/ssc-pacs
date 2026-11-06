@@ -96,10 +96,17 @@ def classify_series(
         and _matches(desc, r"^\d+(?:\s+ce)?(?:\s+summary)?$")
     ):
         return ("DOCUMENT", "small-document-series")
-    if _matches(
-        desc, r"rapid.*(?:summary|threshold|map|color|r?cb[ fv]|mtt|tmax|tsmip)|aif/vof"
-    ) and not _matches(desc, r"send|sent|to rapid"):
-        return ("RAPID_SUMMARY", "description-rapid-output")
+    if _matches(desc, r"\brapid\b|aif[/ ]vof") and not _matches(
+        desc, r"\b(?:send|sent)\b|\bto rapid\b"
+    ):
+        # Only the consolidated report is a summary. Slice-by-slice threshold
+        # products can themselves contain 'Summary' in their descriptions.
+        if _matches(desc, r"\brapid\b.*\bsummary\b") and not _matches(
+            desc, r"\bslices?\b|\bthresholds?\b"
+        ):
+            return ("RAPID_SUMMARY", "description-rapid-output")
+        # Stop here: perfusion maps are not native perfusion acquisitions or ASL.
+        return (None, "rapid-derived-output")
     if _matches(desc, r"\bscout\b|\btopo\w*|\blocaliz|\bsurview\b|3\s*plane\s*loc"):
         return (None, "localizer")
     if mod == "XA":
@@ -155,8 +162,6 @@ def classify_series(
         return (None, "ct-processing-output")
     if same_position_count is not None and same_position_count >= 14:
         return ("CTP", "ct-dynamic-geometry")
-    if _matches(desc, r"\bvnc\b|\bvue\b"):
-        return ("NCCT", "ct-virtual-noncontrast")
     if _matches(desc, r"iodine|\bwater\b|monoenergetic"):
         return ("CT_MATERIAL", "ct-material-map")
     if _matches(desc, r"perfusion|\bctp\b|\bvpct\b|\bslab\b"):
@@ -176,13 +181,19 @@ def classify_series(
         return (None, "ct-spine-description")
     if _matches(desc, r"chest|abdomen|pelvis|\bcap\b"):
         return (None, "ct-body-description")
+    # Sharp head reconstructions are bone, even when the protocol says NCCT.
+    # _text handles DICOM multi-valued kernels such as ['J70h', '2'].
+    bone_kernel = _matches(kernel, r"^(?:bone|h[678]0|hr[678]|j[78]0)")
+    if bone_kernel:
+        return ("CT_BONE", "ct-bone-kernel")
+    if _matches(desc, r"\bvnc\b|\bvue\b"):
+        return ("NCCT", "ct-virtual-noncontrast")
     if _matches(desc, r"\bncct\b|\bnon[ -]?con|\broutine head\b|\bhead std\b"):
         return ("NCCT", "ct-noncontrast-description")
     if explicit_contrast is False:
         return ("NCCT", "ct-noncontrast-description")
     vascular_kernel = _matches(kernel, r"^(?:bv|br5|hr5|i26|fc0[2358]|fc43|body_sharp)")
-    bone_kernel = _matches(kernel, r"^(?:bone|h[67]0|hr[67])")
-    kernel_type = "CTA" if vascular_kernel else ("CT_BONE" if bone_kernel else None)
+    kernel_type = "CTA" if vascular_kernel else None
     try:
         thickness = float(tags.get("SliceThickness") or 99)
     except (ValueError, TypeError):
@@ -206,8 +217,6 @@ def classify_series(
         return ("CECT", "ct-postcontrast-head")
     if _matches(desc, r"de[ _-]?head") and contrast is not True:
         return ("NCCT", "ct-dual-energy-head")
-    if kernel_type == "CT_BONE":
-        return ("CT_BONE", "ct-bone-kernel")
     if kernel_type == "CTA":
         return ("CTA", "ct-vascular-kernel")
     if _matches(
@@ -275,8 +284,11 @@ def classify_series_batch(rows: list[dict]) -> dict[str, tuple[str | None, str]]
             "localizer",
             "ct-processing-output",
             "description-rapid-output",
+            "rapid-derived-output",
             "ct-material-map",
             "ct-test-bolus",
+            "ct-bone-kernel",
+            "ct-bone-description",
         }:
             continue
         key = (

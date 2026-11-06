@@ -13,7 +13,7 @@ from typing import Any
 
 from series_detection import EMITTED_TYPES, classify_series, classify_series_batch  # noqa: F401
 
-RULES_VERSION = "rules-v5"
+RULES_VERSION = "rules-v6"
 
 
 def _norm(value: Any) -> str:

@@ -1,5 +1,10 @@
 # Changelog
 
+## v2.10 — 2026-11-05
+
+`RAPID_SUMMARY` now identifies consolidated summaries only; maps, AIF/VOF outputs and summary-slice/threshold stacks remain unclassified. Recognized bone reconstructions, including J70h kernels, are classified as CT_BONE before NCCT selection and cannot take NCCT_1.
+No schema migration. Reapply automatic values and ranks with `scripts/admin/reclassify_series_types.py --execute`; manual annotations remain independent. See docs/reference/image_ingestion_protocol.md.
+
 ## v2.9 — 2026-11-05
 
 Automatic series typing uses readable rules and study/acquisition context for NCCT, CTA, perfusion, MR and derived-output families. Tag extraction selects a diagnostic representative instead of an embedded scout; manual annotations remain independent.

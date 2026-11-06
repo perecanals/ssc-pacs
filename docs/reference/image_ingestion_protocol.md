@@ -283,7 +283,7 @@ local Postgres. Run them via `make test-ingestion` from the checkout root.
 
 ### How `series_type` and `study_type` are detected
 
-`series_detection.py` contains the readable series-family rules (`rules-v5`).
+`series_detection.py` contains the readable series-family rules (`rules-v6`).
 `series_classification.py` exposes the shared API used by ingestion and
 `scripts/admin/reclassify_series_types.py`; it also owns study classification,
 preference ranks and timepoints. Every series decision records a type (or NULL),
@@ -309,8 +309,17 @@ perfusion (at least 15); unnamed MR with 2–14 repetitions can resolve to DWI.
 Static CT uses the series description first, then contrast, thickness, parent
 study and a small set of vascular/bone kernel prefixes. Explicit noncontrast
 series descriptions override injection metadata reused across study phases.
+Recognized bone kernels (including multi-valued `J70h` kernels) produce
+`CT_BONE` even with an NCCT/head description, so they cannot occupy `NCCT_1`.
+Explicit angiography and dynamic perfusion identification retain precedence.
 A mixed `W AND WO` study does not establish either phase. A sufficiently large, thin contrast stack can be a CTA candidate; study context
 is applied before accepting its final family.
+
+`RAPID_SUMMARY` identifies consolidated RAPID summaries only. Parameter maps,
+colored maps, AIF/VOF products and summary-slice/threshold stacks remain
+unclassified (`rapid-derived-output`); they do not fall through to native scan
+families. Descriptions marking an acquisition as being sent to RAPID retain
+their native scan-family detection.
 
 **Study context is part of detection.** The shared `classify_series_batch` entry
 point applies the per-series rules, then handles two physical relationships:

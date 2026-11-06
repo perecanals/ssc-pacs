@@ -134,6 +134,64 @@ def test_development_families(modality, description, extra, count, expected):
     assert result == expected, rule
 
 
+@pytest.mark.parametrize("modality", ["CT", "MR", "OT"])
+@pytest.mark.parametrize(
+    "description,expected",
+    [
+        ("RAPID CT-P Summary", "RAPID_SUMMARY"),
+        ("RAPID DWI-PWI Summary", "RAPID_SUMMARY"),
+        ("RAPID Summary Outputs", "RAPID_SUMMARY"),
+        ("RAPID Summary", "RAPID_SUMMARY"),
+        ("RAPID Columned PWI Summary", "RAPID_SUMMARY"),
+        ("RAPID Angiography Summary Assessment for series 4", "RAPID_SUMMARY"),
+        ("Reprocessed by isvadmin: RAPID CT-P Summary", "RAPID_SUMMARY"),
+        ("RAPID_CT_P_Summary", "RAPID_SUMMARY"),
+        ("RAPID Summary slices CBF/Tmax Mismatch", None),
+        ("RAPID_Summary_slices_CBF_Thresholds", None),
+        ("RAPID Summary slices ADC Threshold", None),
+        ("RAPID Perfusion Parameter Maps Colored", None),
+        ("RAPID CBF", None),
+        ("RAPID rCBV color", None),
+        ("RAPID Tmax", None),
+        ("RAPID MTT", None),
+        ("RAPID AIF/VOF Location", None),
+        ("RAPID tsMIP AIF/VOF Location", None),
+        ("RAPID_tsMIP_AIF_VOF_Location", None),
+        ("RAPID DWI and PWI Mismatch Lesion Sizes (colored)", None),
+    ],
+)
+def test_rapid_summary_excludes_individual_processing_products(
+    modality, description, expected
+):
+    # Hostile native-scan hints must never reclassify a processing product.
+    tags = _tags(
+        modality=modality,
+        descr=description,
+        StudyDescription="CTA HEAD",
+        ConvolutionKernel="Bv40",
+        ImageType=["DERIVED", "ADC"],
+    )
+    result, rule = classify_series(tags, 30, 100)
+    assert result == expected
+    assert rule == (
+        "description-rapid-output" if expected else "rapid-derived-output"
+    )
+
+
+@pytest.mark.parametrize("description", ["HEAD WO CONTRAST", "NCCT", "DE Head", "VNC"])
+@pytest.mark.parametrize("kernel", ["J70h", ["J70h", "2"], "H60s", "Hr60f", "BONEPLUS", ["J80s", "1"]])
+def test_bone_kernel_cannot_compete_for_ncct_rank(description, kernel):
+    assert classify_series(_tags(descr=description, kernel=kernel), 1, 100) == (
+        "CT_BONE", "ct-bone-kernel"
+    )
+
+
+def test_bone_kernel_keeps_explicit_angiography_and_dynamic_perfusion():
+    assert classify_series(_tags(descr="CTA HEAD", kernel="J70h"), 1, 100)[0] == "CTA"
+    assert classify_series(_tags(descr="HEAD", kernel="J70h"), 30, 100)[0] == "CTP"
+    assert classify_series(_tags(descr="HEAD WO CONTRAST", kernel="J30f"), 1, 100)[0] == "NCCT"
+
+
 @pytest.mark.parametrize(
     "modality,description",
     [
@@ -498,6 +556,35 @@ def test_repeated_matching_volumes_are_ctp_even_with_separate_series_uids():
         value == ("CTP", "ct-temporal-volumes-across-series")
         for value in result.values()
     )
+
+
+@pytest.mark.parametrize(
+    "description", ["RAPID Summary slices Tmax Thresholds", "RAPID CBF"]
+)
+def test_rapid_processing_products_stay_unclassified_in_study_context(description):
+    from series_classification import classify_series_batch
+
+    rows = [
+        _context_row(str(i), description, time=f"1200{i:02d}")
+        for i in range(20)
+    ]
+    rows.append(_context_row("native", "CTA HEAD NECK"))
+    result = classify_series_batch(rows)
+    assert result.pop("native")[0] == "CTA"
+    assert set(result.values()) == {(None, "rapid-derived-output")}
+
+
+def test_bone_kernel_stays_separate_from_ncct_and_temporal_context():
+    from series_classification import classify_series_batch
+
+    rows = [
+        _context_row(str(i), "NCCT", time=f"1200{i:02d}", ConvolutionKernel=["J70h", "2"])
+        for i in range(20)
+    ]
+    rows.append(_context_row("soft", "NCCT", ConvolutionKernel="J30f"))
+    result = classify_series_batch(rows)
+    assert result.pop("soft")[0] == "NCCT"
+    assert set(result.values()) == {("CT_BONE", "ct-bone-kernel")}
 
 
 @pytest.mark.parametrize("change", ["study", "time", "same_clock", "missing_clock"])
