@@ -54,6 +54,7 @@ TAG_FIELDS = (
     "ContrastBolusAgent",
     "SliceThickness",
     "AcquisitionTime",
+    "_series_plane",
 )
 
 
@@ -72,6 +73,7 @@ def code_digest() -> str:
     for path in (
         Path(__file__),
         STACK_ROOT / "image_ingestion_protocols/series_detection.py",
+        STACK_ROOT / "image_ingestion_protocols/series_geometry.py",
         STACK_ROOT / "image_ingestion_protocols/series_classification.py",
         STACK_ROOT / "image_ingestion_protocols/dicom_tags.py",
         STACK_ROOT / "image_ingestion_protocols/image_ingestion_protocol.py",

@@ -119,6 +119,25 @@ def test_cross_instance_aggregates():
     assert row["extractor_version"] == EXTRACTOR_VERSION
 
 
+def test_series_plane_uses_the_stack_instead_of_one_embedded_scout():
+    headers = [_header(z=float(i), image_type=["DERIVED", "PRIMARY", "MPR"]) for i in range(51)]
+    headers[0].ImageOrientationPatient = [1, 0, 0, 0, 0, -1]
+    for header in headers[1:]:
+        header.ImageOrientationPatient = [1, 0, 0, 0, 1, 0]
+    tags = extract_series_tags(headers)["tags"]
+    assert tags["_series_plane"] == "AXIAL"
+
+
+def test_series_plane_is_unknown_for_mixed_or_missing_geometry():
+    headers = [_header(z=float(i)) for i in range(10)]
+    for header in headers[:5]:
+        header.ImageOrientationPatient = [1, 0, 0, 0, 1, 0]
+    for header in headers[5:]:
+        header.ImageOrientationPatient = [1, 0, 0, 0, 0, -1]
+    assert "_series_plane" not in extract_series_tags(headers)["tags"]
+    assert "_series_plane" not in extract_series_tags([_header()])["tags"]
+
+
 def test_distinct_kernels_joins_multivalue_and_dedupes():
     # ConvolutionKernel is a plain str on some scanners and a MultiValue on
     # others; both must normalize to one comparable token.

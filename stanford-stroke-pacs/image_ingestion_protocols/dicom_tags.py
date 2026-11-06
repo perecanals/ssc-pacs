@@ -27,11 +27,12 @@ import pydicom
 from pydicom.multival import MultiValue
 from pydicom.valuerep import PersonName
 
+from series_geometry import dominant_plane, image_plane
 from utils import _frame_positions, _position_key
 
 # Bump when the extracted shape changes in a way that makes old rows
 # non-comparable; written to series_dicom_tags.extractor_version.
-EXTRACTOR_VERSION = "tags-v2"
+EXTRACTOR_VERSION = "tags-v3"
 
 # Sequences are recursed to this depth. Everything observed in the corpus is a
 # small code sequence (ProcedureCodeSequence, AnatomicRegionSequence,
@@ -159,11 +160,15 @@ class SeriesTagAccumulator:
         self._kernels: set[str] = set()
         self._image_types: set[str] = set()
         self._n_instances = 0
+        self._plane_counts: dict[str, int] = {}
         self._saw_position = False
         self._geometry_undecodable = False
 
     def add(self, dcm, source_instance: str | None = None) -> None:
         self._n_instances += 1
+        verified_plane = image_plane(getattr(dcm, "ImageOrientationPatient", None))
+        if verified_plane:
+            self._plane_counts[verified_plane] = self._plane_counts.get(verified_plane, 0) + 1
 
         kernel = _kernel_str(getattr(dcm, "ConvolutionKernel", None))
         if kernel:
@@ -246,8 +251,14 @@ class SeriesTagAccumulator:
         else:
             same_position_count = max(self._position_counts.values())
 
+        tags = self._tags if self._tags is not None else {}
+        plane = dominant_plane(self._plane_counts, self._n_instances)
+        if plane:
+            tags["_series_plane"] = plane
+        else:
+            tags.pop("_series_plane", None)
         return {
-            "tags": self._tags or {},
+            "tags": tags,
             "same_position_count": same_position_count,
             "n_positions": len(self._positions) or None,
             "n_instances_scanned": self._n_instances,

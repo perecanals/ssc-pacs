@@ -1,5 +1,10 @@
 # Changelog
 
+## v2.13 — 2026-11-06
+
+Automatic typing recognizes Hr59 bone reconstructions, excludes coronal/sagittal CT and MRI views, and uses axial MPR only when the same study has no regular eligible series of that family. Whole-series plane consensus prevents embedded scouts from deciding eligibility.
+New ingestion uses tags-v3; existing tags require plane enrichment before geometry-based exclusions or unnamed MPR fallbacks. No schema migration or service restart. Recompute automatic types and ranks with `scripts/admin/reclassify_series_types.py --execute`; manual annotations remain independent. See docs/reference/image_ingestion_protocol.md.
+
 ## v2.12 — 2026-11-06
 
 Duplicate pixel verification supports resumable checkpoints and bounded workers, records DICOM PatientIDs and rejects changed inputs. A read-only review proposes label-preserving survivors and specific removals awaiting approval; cross-patient matches and label conflicts are protected.

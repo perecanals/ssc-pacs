@@ -2,8 +2,9 @@
 
 Description and modality lead. Repeated-position geometry identifies dynamic
 acquisitions. Contrast, thickness and a small kernel vocabulary resolve static
-CTs. ImageType only supplies specific MR sequence tokens; a scout's ImageType
-must never reject a whole diagnostic stack. Unknown inputs remain unclassified.
+CTs. ImageType supplies sequence/reconstruction tokens; whole-series plane
+consensus protects diagnostic stacks containing a scout. Unknown inputs remain
+unclassified, and axial MPR is eligible only as a study/family fallback.
 """
 
 from __future__ import annotations
@@ -53,6 +54,42 @@ def _matches(value, pattern):
     return bool(re.search(pattern, value, re.I))
 
 
+def nonaxial_view(tags):
+    """Recognize named coronal/sagittal views or verified whole-series geometry.
+
+    Older stored tags may describe an embedded scout. Its plane must not reject
+    a diagnostic series. Only the consensus aggregate is used for geometry.
+    """
+    desc = _text(tags.get("SeriesDescription")).replace("_", " ")
+    image_type = " ".join(_image_type(tags)).lower()
+    if _matches(desc + " " + image_type, r"\b(?:cor(?:onal)?|sag(?:ittal)?)\b"):
+        return "nonaxial-description"
+    if tags.get("_series_plane") in {"CORONAL", "SAGITTAL"} and not _projection(tags):
+        return "nonaxial-orientation"
+    return None
+
+
+def _projection(tags):
+    return _matches(
+        _text(tags.get("SeriesDescription")) + " " + " ".join(_image_type(tags)),
+        r"\bmip\b|\bpjn\b|projection",
+    )
+
+
+def _mpr(tags):
+    desc = _text(tags.get("SeriesDescription")).replace("_", " ")
+    # A source stack intended FOR MPR is still an ordinary acquisition.
+    desc = re.sub(r"\bfor\s+(?:mpr|3d)\b", "", desc)
+    return _matches(desc + " " + " ".join(_image_type(tags)), r"\bmpr\b|\breformat\w*")
+
+
+def _axial(tags):
+    return tags.get("_series_plane") == "AXIAL" or _matches(
+        _text(tags.get("SeriesDescription")).replace("_", " "),
+        r"\b(?:ax(?:ial)?|trueax|tra(?:nsversal)?)\b",
+    )
+
+
 def contrast_state(description):
     # Series-level statements outrank study headers and reused injection tags.
     if _matches(description, r"\bw\s*(?:and(?:/or)?|/|&)\s*w/?o\b"):
@@ -70,7 +107,7 @@ def contrast_state(description):
     return None
 
 
-def classify_series(
+def _classify_series_candidate(
     tags: dict, same_position_count: int | None = None, n_instances: int | None = None
 ) -> tuple[str | None, str]:
     """Return a per-series candidate; batch classification resolves study context."""
@@ -183,7 +220,7 @@ def classify_series(
         return (None, "ct-body-description")
     # Sharp head reconstructions are bone, even when the protocol says NCCT.
     # _text handles DICOM multi-valued kernels such as ['J70h', '2'].
-    bone_kernel = _matches(kernel, r"^(?:bone|h[678]0|hr[678]|j[78]0)")
+    bone_kernel = _matches(kernel, r"^(?:bone|h[678]0|hr59|hr[678]|j[78]0)")
     if bone_kernel:
         return ("CT_BONE", "ct-bone-kernel")
     if _matches(desc, r"\bvnc\b|\bvue\b"):
@@ -192,7 +229,8 @@ def classify_series(
         return ("NCCT", "ct-noncontrast-description")
     if explicit_contrast is False:
         return ("NCCT", "ct-noncontrast-description")
-    vascular_kernel = _matches(kernel, r"^(?:bv|br5|hr5|i26|fc0[2358]|fc43|body_sharp)")
+    # Hr59 is a sharp head reconstruction, not evidence of angiography.
+    vascular_kernel = _matches(kernel, r"^(?:bv|br5|hr5[46]|i26|fc0[2358]|fc43|body_sharp)")
     kernel_type = "CTA" if vascular_kernel else None
     try:
         thickness = float(tags.get("SliceThickness") or 99)
@@ -231,6 +269,25 @@ def classify_series(
     return (None, "unresolved-ct")
 
 
+def _eligible_view(tags, result):
+    family, _ = result
+    if family not in {None, "DOCUMENT", "RAPID_SUMMARY"} and _text(
+        tags.get("Modality")
+    ) in {"ct", "mr"}:
+        if view_rule := nonaxial_view(tags):
+            return (None, view_rule)
+    return result
+
+
+def classify_series(
+    tags: dict, same_position_count: int | None = None, n_instances: int | None = None
+) -> tuple[str | None, str]:
+    """Return an eligible per-series candidate; batch detection adds study context."""
+    return _eligible_view(
+        tags or {}, _classify_series_candidate(tags, same_position_count, n_instances)
+    )
+
+
 def _acquisition_seconds(value) -> float | None:
     value = str(value or "").strip()
     if not re.fullmatch(r"\d{6}(?:\.\d+)?", value):
@@ -254,7 +311,7 @@ def classify_series_batch(rows: list[dict]) -> dict[str, tuple[str | None, str]]
     exact acquisition time. Conflicting or missing clocks do not propagate.
     """
     results = {
-        row["seriesinstanceuid"]: classify_series(
+        row["seriesinstanceuid"]: _classify_series_candidate(
             row.get("tags"),
             row.get("same_position_count"),
             row.get("n_instances_scanned"),
@@ -328,4 +385,37 @@ def classify_series_batch(rows: list[dict]) -> dict[str, tuple[str | None, str]]
                 continue
             if results[uid][1] in weak_rules and results[uid][0] != family:
                 results[uid] = (family, "ct-named-sibling-same-acquisition")
+    # An excluded reconstruction can still describe its acquisition correctly.
+    # Resolve study context before filtering views, so excluding a coronal CTA
+    # does not erase the angiography evidence for its eligible axial siblings.
+    results = {
+        row["seriesinstanceuid"]: _eligible_view(
+            row.get("tags") or {}, results[row["seriesinstanceuid"]]
+        )
+        for row in rows
+    }
+    regular = {
+        (row["studyinstanceuid"], results[row["seriesinstanceuid"]][0])
+        for row in rows
+        if row.get("studyinstanceuid")
+        and results[row["seriesinstanceuid"]][0] not in {None, "DOCUMENT", "RAPID_SUMMARY"}
+        and not _mpr(row.get("tags") or {})
+        and not _projection(row.get("tags") or {})
+    }
+    for row in rows:
+        uid = row["seriesinstanceuid"]
+        tags = row.get("tags") or {}
+        family, _ = results[uid]
+        if (
+            _text(tags.get("Modality")) not in {"ct", "mr"}
+            or family in {None, "DOCUMENT", "RAPID_SUMMARY"}
+            or not _mpr(tags)
+        ):
+            continue
+        if (row.get("studyinstanceuid"), family) in regular:
+            results[uid] = (None, "axial-mpr-superseded")
+        elif _axial(tags):
+            results[uid] = (family, "axial-mpr-fallback")
+        else:
+            results[uid] = (None, "mpr-plane-unverified")
     return results

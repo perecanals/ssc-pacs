@@ -283,7 +283,7 @@ local Postgres. Run them via `make test-ingestion` from the checkout root.
 
 ### How `series_type` and `study_type` are detected
 
-`series_detection.py` contains the readable series-family rules (`rules-v6`).
+`series_detection.py` contains the readable series-family rules (`rules-v7`).
 `series_classification.py` exposes the shared API used by ingestion and
 `scripts/admin/reclassify_series_types.py`; it also owns study classification,
 preference ranks and timepoints. Every series decision records a type (or NULL),
@@ -294,6 +294,9 @@ The detector uses eight DICOM fields: `Modality`, `SeriesDescription`,
 `SliceThickness`, and `AcquisitionTime`, plus the existing `same_position_count` and
 `n_instances_scanned` aggregates. It does not use patient identity, dataset,
 manual labels, site, model, protocol name, or a learned description lookup.
+One additional aggregate, `_series_plane`, is computed from `ImageOrientationPatient`
+across all instances. It requires a near-axial/coronal/sagittal normal on at least
+80% of instances; a single embedded scout cannot establish the series plane.
 
 | Family | Automatic values |
 |---|---|
@@ -311,6 +314,7 @@ study and a small set of vascular/bone kernel prefixes. Explicit noncontrast
 series descriptions override injection metadata reused across study phases.
 Recognized bone kernels (including multi-valued `J70h` kernels) produce
 `CT_BONE` even with an NCCT/head description, so they cannot occupy `NCCT_1`.
+`Hr59` is a sharp head kernel, not part of a generic vascular `Hr5*` family.
 Explicit angiography and dynamic perfusion identification retain precedence.
 A mixed `W AND WO` study does not establish either phase. A sufficiently large, thin contrast stack can be a CTA candidate; study context
 is applied before accepting its final family.
@@ -338,21 +342,37 @@ different family decisions until the complete study is available; prefer a
 full-scope reclassification pass. No pixel heuristics or fitted model are
 required.
 
-**Identity includes diagnostic reconstructions.** Axial, coronal and sagittal
-reformats and angiographic projections can retain the parent scan family.
+**Views and MPR fallback.** Coronal and sagittal CT and MR views remain NULL.
+Descriptions provide explicit plane names; otherwise only the verified whole-series
+`_series_plane` is used. A historical first-instance orientation is insufficient.
+Axial MPR/reformatted stacks retain a family only if no regular eligible axial
+series of that family exists in the same study (`axial-mpr-fallback`). Otherwise
+they remain NULL (`axial-mpr-superseded`). A generic MPR without verified axial
+geometry or an explicit axial description remains NULL (`mpr-plane-unverified`).
+Source stacks described as being *for* MPR are ordinary acquisitions. Projection
+images cannot displace an axial MPR fallback. Resolve study/acquisition context
+before filtering views, so an excluded coronal reconstruction can still identify
+its eligible axial siblings. Manual annotation values are never changed by these
+eligibility rules; labelled reconstructions intentionally excluded by this policy
+must be reported separately from unintended regressions in evaluations.
+
+Angiographic projections can retain the parent scan family.
 `NCCT` also includes explicitly named virtual noncontrast reconstructions;
 iodine/material maps are separate. Family identity does not assert image
 quality or suitability for an analysis. Motion, duplicate, salvage, “don't use”
 and pre/post-treatment judgements are not automatically reproduced.
 
 **Do not trust the first file as the whole series.** A diagnostic stack may
-contain one differently oriented scout. The `tags-v2` extractor retains a
+contain one differently oriented scout. The `tags-v3` extractor retains a
 representative from the most common diagnostic image group, using only group
 counters and one retained tag dictionary. It does not accumulate pixel data or
 all instance headers. Older cached `tags-v1` rows remain readable; the detector
 does not reject a whole stack solely because its representative ImageType says
 LOCALIZER or DERIVED. Explicit scout descriptions still remain excluded.
-New ingestion uses `tags-v2`; upgrading code does not re-extract existing rows.
+New ingestion uses `tags-v3`; upgrading code does not re-extract existing rows.
+Existing rows may be enriched with `_series_plane` after a read-only archive
+header pass using `series_geometry.image_plane` and `dominant_plane`, without
+replacing their historical DICOM tags or claiming a full extractor upgrade.
 
 **Rank and display label.** `series_type_rank` ranks within the owning enrollment,
 and `series_label` combines family and rank, e.g. `NCCT_1`. CTA prefers thinner

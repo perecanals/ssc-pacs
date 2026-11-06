@@ -61,7 +61,7 @@ def _tags(modality="CT", descr="", kernel=None, image_type=None, study=None, **e
             "CTA 2.0 MPR Cor",
             {"ImageOrientationPatient": [1, 0, 0, 0, 0, -1]},
             1,
-            "CTA",
+            None,
         ),
         ("CT", "Head/Neck Angio 5.0mm", {}, 1, "CTA"),
         (
@@ -190,6 +190,67 @@ def test_bone_kernel_keeps_explicit_angiography_and_dynamic_perfusion():
     assert classify_series(_tags(descr="CTA HEAD", kernel="J70h"), 1, 100)[0] == "CTA"
     assert classify_series(_tags(descr="HEAD", kernel="J70h"), 30, 100)[0] == "CTP"
     assert classify_series(_tags(descr="HEAD WO CONTRAST", kernel="J30f"), 1, 100)[0] == "NCCT"
+
+
+@pytest.mark.parametrize("kernel", ["Hr59h", ["Hr59h", "3"], ["Hr59d", "3"]])
+def test_sharp_hr59_head_kernel_is_bone_without_a_bone_description(kernel):
+    assert classify_series(
+        _tags(descr="Head 1.0 Hr59", kernel=kernel, SliceThickness=1), 1, 173
+    ) == ("CT_BONE", "ct-bone-kernel")
+
+
+@pytest.mark.parametrize("kernel", ["Hr54d", ["Hr54d", "4"], ["Hr56f", "3"]])
+def test_hr54_and_hr56_vascular_kernels_keep_their_existing_detection(kernel):
+    assert classify_series(_tags(descr="Head", kernel=kernel), 1, 100)[0] == "CTA"
+
+
+@pytest.mark.parametrize("modality,description", [
+    ("CT", "Head 3.0 MPR cor"),
+    ("CT", "CTA 2.0 MPR Sag"),
+    ("CT", "NCCT Coronal"),
+    ("MR", "SAG CUBE FLAIR"),
+    ("MR", "Brain Cor DWI_b1000"),
+])
+def test_coronal_and_sagittal_views_are_not_assigned_a_scan_family(modality, description):
+    tags = _tags(modality=modality, descr=description, kernel="Bv40")
+    assert classify_series(tags, 30, 200) == (None, "nonaxial-description")
+
+
+@pytest.mark.parametrize("orientation", [
+    [1, 0, 0, 0, 0, -1],
+    [0, 1, 0, 0, 0, -1],
+    [0.99662988964931, 0.014434729643, 0.08074962314302,
+     0.08193387106301, -0.127616267994, -0.9884335733452],
+])
+@pytest.mark.parametrize("modality,description", [("CT", "Head"), ("MR", "DWI")])
+def test_diagnostic_geometry_identifies_unnamed_nonaxial_views(modality, description, orientation):
+    from series_geometry import image_plane
+
+    tags = _tags(modality=modality, descr=description, _series_plane=image_plane(orientation))
+    assert classify_series(tags, 1, 100) == (None, "nonaxial-orientation")
+
+
+@pytest.mark.parametrize("orientation", [None, [], [0]*6, [1]*6, [float("nan")]*6])
+def test_invalid_orientation_does_not_reject_a_scan(orientation):
+    tags = _tags(descr="Head", ImageOrientationPatient=orientation)
+    assert classify_series(tags, 1, 100)[0] == "NCCT"
+
+
+@pytest.mark.parametrize("description,image_type", [
+    ("Head", ["DERIVED", "PRIMARY", "LOCALIZER", "CT_SOM5 MPR"]),
+    ("Axial Head", ["DERIVED", "PRIMARY", "CT_SOM5 MPR"]),
+    ("TRUEAX HEAD STD", ["DERIVED", "SECONDARY", "REFORMATTED"]),
+])
+def test_scout_geometry_cannot_reject_an_axial_diagnostic_stack(description, image_type):
+    tags = _tags(descr=description, image_type=image_type,
+                 ImageOrientationPatient=[1, 0, 0, 0, 0, -1])
+    assert classify_series(tags, 1, 100)[0] == "NCCT"
+
+
+def test_mra_projection_geometry_does_not_identify_a_nonaxial_slice_stack():
+    tags = _tags(modality="MR", descr="COW MIPS", image_type=["DERIVED", "PJN", "MIP"],
+                 _series_plane="CORONAL")
+    assert classify_series(tags, 1, 100)[0] == "MRA_TOF"
 
 
 @pytest.mark.parametrize(
@@ -585,6 +646,83 @@ def test_bone_kernel_stays_separate_from_ncct_and_temporal_context():
     result = classify_series_batch(rows)
     assert result.pop("soft")[0] == "NCCT"
     assert set(result.values()) == {("CT_BONE", "ct-bone-kernel")}
+
+
+def test_nonaxial_views_stay_unclassified_in_temporal_and_sibling_context():
+    from series_classification import classify_series_batch
+
+    rows = [_context_row(str(i), "NCCT MPR cor", time=f"1200{i:02d}") for i in range(20)]
+    rows.append(_context_row("axial", "NCCT"))
+    result = classify_series_batch(rows)
+    assert result.pop("axial")[0] == "NCCT"
+    assert set(result.values()) == {(None, "nonaxial-description")}
+
+
+def test_excluded_reconstruction_preserves_acquisition_evidence_for_axial_siblings():
+    from series_classification import classify_series_batch
+
+    result = classify_series_batch([
+        _context_row("coronal", "CTA MPR cor"),
+        _context_row("axial", "Head 1.0", ConvolutionKernel="H31f"),
+    ])
+    assert result["coronal"] == (None, "nonaxial-description")
+    assert result["axial"] == ("CTA", "ct-named-sibling-same-acquisition")
+
+
+@pytest.mark.parametrize("modality,description", [("CT", "NCCT MPR ax"), ("MR", "AX CUBE FLAIR")])
+def test_axial_mpr_is_suppressed_only_by_its_own_study_and_family(modality, description):
+    from series_classification import classify_series_batch
+
+    family = "NCCT" if modality == "CT" else "FLAIR"
+    mpr = _context_row("mpr", description, Modality=modality,
+                       ImageType=["DERIVED", "SECONDARY", "REFORMATTED"], _series_plane="AXIAL")
+    native = _context_row("native", family, Modality=modality, _series_plane="AXIAL")
+    assert classify_series_batch([mpr])["mpr"] == (family, "axial-mpr-fallback")
+    assert classify_series_batch([mpr, native])["mpr"] == (None, "axial-mpr-superseded")
+    native["studyinstanceuid"] = "other"
+    assert classify_series_batch([mpr, native])["mpr"][0] == family
+    native["studyinstanceuid"] = "study"
+    native["tags"]["SeriesDescription"] = "CTA" if modality == "CT" else "DWI"
+    assert classify_series_batch([mpr, native])["mpr"][0] == family
+
+
+def test_nonaxial_source_and_projection_cannot_displace_an_axial_mpr():
+    from series_classification import classify_series_batch
+
+    rows = [
+        _context_row("mpr", "NCCT MPR ax", _series_plane="AXIAL"),
+        _context_row("coronal", "NCCT", _series_plane="CORONAL"),
+        _context_row("projection", "NCCT MIP", ImageType=["DERIVED", "MIP"]),
+    ]
+    assert classify_series_batch(rows)["mpr"] == ("NCCT", "axial-mpr-fallback")
+
+
+def test_unverified_generic_mpr_is_not_accepted_as_an_axial_fallback():
+    from series_classification import classify_series_batch
+
+    row = _context_row("mpr", "Head", ImageType=["DERIVED", "MPR"])
+    assert classify_series_batch([row])["mpr"] == (None, "mpr-plane-unverified")
+    row["tags"]["_series_plane"] = "AXIAL"
+    assert classify_series_batch([row])["mpr"] == ("NCCT", "axial-mpr-fallback")
+
+
+def test_source_for_mpr_is_a_regular_acquisition():
+    from series_classification import classify_series_batch
+
+    rows = [
+        _context_row("native", "NCCT 0.625MM FOR MPR", ImageType=["ORIGINAL", "AXIAL"]),
+        _context_row("mpr", "NCCT MPR ax", _series_plane="AXIAL"),
+    ]
+    result = classify_series_batch(rows)
+    assert result["native"][0] == "NCCT"
+    assert result["mpr"] == (None, "axial-mpr-superseded")
+
+
+def test_mpr_eligibility_filter_applies_to_ct_and_mr_only():
+    from series_classification import classify_series_batch
+
+    row = _context_row("xa", "DSA REFORMATTED", Modality="XA", ImageType=["DERIVED", "MPR"])
+    assert classify_series_batch([row])["xa"][0] == "DSA"
 
 
 @pytest.mark.parametrize("change", ["study", "time", "same_clock", "missing_clock"])
