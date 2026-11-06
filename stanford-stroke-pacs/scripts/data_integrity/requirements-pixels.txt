@@ -1,0 +1,4 @@
+# Optional JPEG/JPEG lossless decoders for duplicate_series_audit.py --verify-pixels.
+# Install on top of the stack requirements (which already pin numpy).
+pylibjpeg==2.1.0
+pylibjpeg-libjpeg==2.5.0

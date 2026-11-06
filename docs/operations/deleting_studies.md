@@ -39,6 +39,12 @@ deletion. Whole-study deletion removes the study and its mirror as before.
 > moves to another study/series. Decide up front whether any labels need copying
 > elsewhere first.
 
+For verified duplicates, the read-only [duplicate review](duplicate_series.md#approval-only-removal-review)
+proposes a survivor, complementary label/notes merges and specific removals.
+It protects matches associated with different PatientIDs and blocks label
+conflicts. The proposal applies nothing: separately approve the listed actions,
+revalidate the evidence and preserve approved labels before using deletion.
+
 > **Fixing a wrong PatientID?** Don't delete: re-ingest the corrected files with
 > `overwrite_if_exists: true` + `on_patient_mismatch: reassign`, which keeps the study/series
 > annotations. See [Correcting a wrong PatientID](../reference/image_ingestion_protocol.md#correcting-a-wrong-patientid-on-re-ingestion).

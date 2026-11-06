@@ -24,7 +24,7 @@ by default and applies only with `--execute`; interactive prompts have a
 | `backup/` | PostgreSQL dump, Orthanc volume snapshot, freshness monitoring, opt-in encrypted remote backups | `backup_pg_db.sh`, `backup_orthanc_storage.sh` (+ in-container `orthanc_storage_snapshot.py`), `check_backup_freshness.sh`, `remote_backup.py` ([remote setup](../../docs/operations/remote_backups.md)) |
 | `cold_storage/` | Archive, cleanup, health, cache state, index repair | `archive_all_series.py`, `cleanup_loose_dicoms.py`, `scoped_index.py`, `reindex_missing_series.py`, `prune_stale_index_paths.py`, `rebuild_cache_state.py`, `cold_storage_health.py`, `backfill_storage_sizes.py`, `list_unarchived_series.py`, `verify_and_repair_archives.py`, `mirror_cold_archive.sh`, `build_linked_view.py` |
 | `connectivity/` | Sanitized SSH tunnel templates for end users (per OS) | `tunnel/{linux,macos,windows}/tunnel.*` |
-| `data_integrity/` | Cross-store audits + repairs (see matrix below) | `reconcile.py`, `duplicate_series_audit.py`, `dicom_path_sql_fs_audit.py`, `disk_vs_db_series_audit.py`, `detect_mixed_dirs.py`, `repair_dicomweb_metadata_cache.py` |
+| `data_integrity/` | Cross-store audits + repairs (see matrix below) | `reconcile.py`, `duplicate_series_audit.py`, `duplicate_series_review.py`, `dicom_path_sql_fs_audit.py`, `disk_vs_db_series_audit.py`, `detect_mixed_dirs.py`, `repair_dicomweb_metadata_cache.py` |
 | `dicom/` | DICOM conversion utilities | `dicom_to_nifti.py` |
 | `linux/` | Linux deploy path (systemd units, Postgres cluster) + whole-stack control | `install_systemd.sh`, `provision_postgres.sh`, `stop_stack.sh`, `start_stack.sh` |
 | `macos/` | macOS host tooling (Colima, launchd, disks) + whole-stack control | `colima_start.sh`, `colima_watchdog.sh`, `install_launchd.sh`, `stop_stack.sh`, `start_stack.sh` |
@@ -49,6 +49,7 @@ hours-long tree scan into the cron/JSON-report path):
 |---|---|---|---|
 | `data_integrity/reconcile.py` | DB ↔ Orthanc (+ DB-recorded paths exist, + annotations vs spine tables) | cheap; cron-able, feeds admin endpoint/metrics | Does everything in `image_series` exist in Orthanc's index (and vice versa), and does every annotation still have its entity? |
 | `data_integrity/duplicate_series_audit.py` | Stored series metadata → candidate groups; optional full image comparison | metadata-only by default; `--verify-pixels` reads candidate archives | Are different series UIDs potentially duplicate exports? See [criteria and review](../../docs/operations/duplicate_series.md). |
+| `data_integrity/duplicate_series_review.py` | Verified pixel matches + live identities/annotations → approval-only proposals | reads DB and source file stats; writes local review reports only | Which copy should survive, which manual labels/notes need merging, and which matches are protected or conflicted? No execute option. |
 | `data_integrity/dicom_path_sql_fs_audit.py` | SQL → FS (sampled) | cheap | Do the paths recorded in SQL exist / look right on disk? |
 | `data_integrity/disk_vs_db_series_audit.py` | FS → DB (full walk, first file per dir) | expensive (hours) | Is there imaging on disk that `image_series` doesn't know about, or with drifted slice counts? |
 | `data_integrity/detect_mixed_dirs.py` | FS deep (every file header) | very expensive, targeted | Does one physical DICOM dir hold more than one true series? |
@@ -129,6 +130,8 @@ python scripts/data_integrity/reconcile.py --json
 # Potentially duplicated series (reports only; optional full image verification)
 python scripts/data_integrity/duplicate_series_audit.py
 python scripts/data_integrity/duplicate_series_audit.py --study <UID> --verify-pixels
+python scripts/data_integrity/duplicate_series_audit.py --verify-pixels --workers 2 --output ../maintenance/duplicate-series/verified
+python scripts/data_integrity/duplicate_series_review.py --report ../maintenance/duplicate-series/verified/report.json --output ../maintenance/duplicate-series/verified/review
 
 # Repoint host paths after a port (dry-run by default; --apply to commit)
 python scripts/migration/repoint_host_paths.py

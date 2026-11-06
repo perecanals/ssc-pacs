@@ -28,7 +28,7 @@ One **Orthanc** container (`ssc-orthanc`), one native-host **Web App** service o
 | Secret rotation (JWT, Orthanc admin, DB) | [`operations/secret_rotation.md`](operations/secret_rotation.md) |
 | Observability (logs, /healthz, /metrics, Grafana) | [`operations/observability.md`](operations/observability.md) |
 | Two-DB reconciliation (image_series vs Orthanc) | [`operations/reconciliation.md`](operations/reconciliation.md) |
-| Potentially duplicated series (PACS-wide metadata screen + optional image verification) | [`operations/duplicate_series.md`](operations/duplicate_series.md) |
+| Potentially duplicated series (resumable pixel verification, protected patients and label-preserving approval review) | [`operations/duplicate_series.md`](operations/duplicate_series.md) |
 | Deleting studies/series (CLI + admin UI, 3 layers) | [`operations/deleting_studies.md`](operations/deleting_studies.md) |
 | Dataset layout on disk (`<root>/<slug>/<patient_id>/<StudyUID>`), moving / relocating studies, the linked view | [`operations/dataset_layout.md`](operations/dataset_layout.md) |
 | Per-user dataset access (grants, /admin page, enforcement) | [`reference/architecture.md` §5.4](reference/architecture.md) + [`operations/commands.md`](operations/commands.md) |

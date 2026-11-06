@@ -18,10 +18,12 @@ import sys
 import tarfile
 import time
 from collections import Counter, defaultdict
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from datetime import UTC, datetime
 from pathlib import Path
 
 STACK_ROOT = Path(__file__).resolve().parents[2]
+VERIFICATION_VERSION = 2
 
 # Reconstruction/sequence differences must not disappear behind a shared name.
 # No patient names, private tags, UIDs, or representative slice position in the
@@ -135,7 +137,7 @@ def fetch_rows(study: str | None, dataset: str | None, scope: str = "study") -> 
     where = " AND ".join(conditions) or "TRUE"
     query = f"""
         WITH base AS (
-            SELECT s.seriesinstanceuid, s.studyinstanceuid, s.patient_key, s.subject_id,
+            SELECT s.seriesinstanceuid, s.studyinstanceuid, s.patient_id, s.patient_key, s.subject_id,
                    s.seriesdescription, s.modality, s.number_of_slices, s.imageshape,
                    count(*) OVER (PARTITION BY {identity},
                        lower(trim(regexp_replace(s.seriesdescription, '\\s+', ' ', 'g'))),
@@ -191,17 +193,20 @@ def fingerprint_series(row: dict) -> dict:
     import zstandard
 
     counts = Counter()
+    patient_ids = set()
 
     def read_instance(fileobj):
         ds = pydicom.dcmread(fileobj)
         if (str(getattr(ds, "SeriesInstanceUID", "")) != row["seriesinstanceuid"]
                 or str(getattr(ds, "StudyInstanceUID", "")) != row["studyinstanceuid"]):
             raise ValueError("file's study/series UID differs from the database row")
+        patient_ids.add(str(getattr(ds, "PatientID", "")))
         counts[instance_digest(ds)] += 1
 
     archive = row.get("dicom_archive_path")
     source = archive or row.get("dicom_dir_path")
     try:
+        before = source_signature(row)
         if archive:
             with Path(archive).open("rb") as raw, zstandard.ZstdDecompressor().stream_reader(raw) as stream:
                 with tarfile.open(fileobj=stream, mode="r|") as tar:
@@ -223,10 +228,78 @@ def fingerprint_series(row: dict) -> dict:
         expected = row.get("n_instances_scanned") or row.get("number_of_slices")
         if not actual or actual != expected:
             raise ValueError(f"instance count {actual} differs from expected {expected}")
+        if source_signature(row) != before:
+            raise ValueError("source changed during verification")
         return {"status": "ok", "sha256": hashlib.sha256(canonical(sorted(counts.items())).encode()).hexdigest(),
-                "instances": actual, "source": source}
+                "instances": actual, "source": source, "dicom_patient_ids": sorted(patient_ids),
+                "source_signature": before, "version": VERIFICATION_VERSION}
     except Exception as exc:
         return {"status": "unavailable", "error": f"{type(exc).__name__}: {exc}", "source": source}
+
+
+def source_signature(row: dict) -> str:
+    """Detect changed inputs before reusing a verification checkpoint."""
+    archive = row.get("dicom_archive_path")
+    source = archive or row.get("dicom_dir_path")
+    if not source:
+        raise ValueError("no stored archive or loose DICOM path")
+    path = Path(source)
+    paths = [path] if archive else sorted(p for p in path.rglob("*") if p.is_file() and not p.name.startswith("."))
+    files = []
+    for item in paths:
+        stat = item.stat()
+        files.append((str(item), stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns))
+    return hashlib.sha256(canonical([
+        VERIFICATION_VERSION, row["seriesinstanceuid"], row["studyinstanceuid"], row.get("patient_id"),
+        row.get("n_instances_scanned"), row.get("number_of_slices"), str(path), files,
+    ]).encode()).hexdigest()
+
+
+def write_json(path: Path, value: dict) -> None:
+    temporary = path.with_suffix(path.suffix + ".tmp")
+    temporary.write_text(json.dumps(value, indent=2, default=str) + "\n")
+    temporary.replace(path)
+
+
+def verify_candidates(groups: list[dict], output: Path, *, workers: int = 1,
+                      resume: bool = False, limit: int | None = None) -> None:
+    """Checkpoint each completed group; reuse only complete, unchanged inputs."""
+    checkpoints = output / "verification"
+    checkpoints.mkdir(parents=True, exist_ok=True)
+    pending = []
+    for index, group in enumerate(groups):
+        if limit is not None and index >= limit:
+            group["verification"] = {"status": "not_checked_limit"}
+            continue
+        path = checkpoints / f"{group['group_id']}.json"
+        if resume and path.is_file():
+            try:
+                cached = json.loads(path.read_text())
+                results = cached["series"]
+                if set(results) == {r["seriesinstanceuid"] for r in group["series"]} and all(
+                    results[r["seriesinstanceuid"]].get("version") == VERIFICATION_VERSION
+                    and results[r["seriesinstanceuid"]].get("source_signature") == source_signature(r)
+                    for r in group["series"]
+                ):
+                    group["verification"] = cached
+                    continue
+            except (OSError, ValueError, KeyError, TypeError):
+                pass
+        pending.append(group)
+
+    def record(group, result, completed):
+        group["verification"] = result
+        write_json(checkpoints / f"{group['group_id']}.json", result)
+        print(f"Verified {completed}/{len(pending)} pending groups: {result['status']}", file=sys.stderr, flush=True)
+
+    if workers == 1:
+        for completed, group in enumerate(pending, 1):
+            record(group, verify_group(group), completed)
+    else:
+        with ProcessPoolExecutor(max_workers=workers) as pool:
+            futures = {pool.submit(verify_group, group): group for group in pending}
+            for completed, future in enumerate(as_completed(futures), 1):
+                record(futures[future], future.result(), completed)
 
 
 def verify_group(group: dict) -> dict:
@@ -258,33 +331,34 @@ def main() -> int:
                         help="Compare within studies (default) or across studies of linked people")
     parser.add_argument("--verify-pixels", action="store_true", help="Read/decode every candidate instance; potentially slow")
     parser.add_argument("--max-verify-groups", type=int, help="Verify only the first N groups; explicitly mark the remainder")
+    parser.add_argument("--workers", type=int, default=1, help="Concurrent verification processes (default: 1)")
+    parser.add_argument("--resume", action="store_true", help="Reuse unchanged successful verification checkpoints in --output")
     parser.add_argument("--output", type=Path, help="Report directory (default: maintenance/duplicate-series/<UTC timestamp>)")
     args = parser.parse_args()
     if args.max_verify_groups is not None and (not args.verify_pixels or args.max_verify_groups < 1):
         parser.error("--max-verify-groups requires --verify-pixels and a positive number")
+    if args.workers < 1 or (args.workers != 1 and not args.verify_pixels):
+        parser.error("--workers must be positive and requires --verify-pixels")
+    if args.resume and (not args.verify_pixels or args.output is None):
+        parser.error("--resume requires --verify-pixels and --output")
+    output = args.output or (STACK_ROOT.parent / "maintenance" / "duplicate-series"
+                             / datetime.now(UTC).strftime("%Y%m%dT%H%M%S%fZ"))
+    output.mkdir(parents=True, exist_ok=True)
     started = time.monotonic()
     print("Reading series metadata (read-only)...", file=sys.stderr, flush=True)
     rows = fetch_rows(args.study, args.dataset, args.scope)
     groups, summary = find_candidates(rows, args.scope)
     del rows
     if args.verify_pixels:
-        for index, group in enumerate(groups):
-            if args.max_verify_groups is not None and index >= args.max_verify_groups:
-                group["verification"] = {"status": "not_checked_limit"}
-                continue
-            print(f"Verifying group {index + 1}/{len(groups)}: {group['seriesdescription']}", file=sys.stderr, flush=True)
-            group["verification"] = verify_group(group)
+        verify_candidates(groups, output, workers=args.workers, resume=args.resume, limit=args.max_verify_groups)
     summary["matches"] = dict(Counter(g["match"] for g in groups))
     summary["verification"] = dict(Counter(g["verification"]["status"] for g in groups))
-    report = {"schema_version": 1, "timestamp": datetime.now(UTC).isoformat(),
+    report = {"schema_version": 2, "verification_version": VERIFICATION_VERSION, "timestamp": datetime.now(UTC).isoformat(),
               "duration_seconds": round(time.monotonic() - started, 2),
               "scope": args.scope, "study": args.study, "dataset": args.dataset,
               "summary": summary, "groups": groups}
-    output = args.output or (STACK_ROOT.parent / "maintenance" / "duplicate-series"
-                             / datetime.now(UTC).strftime("%Y%m%dT%H%M%S%fZ"))
-    output.mkdir(parents=True, exist_ok=True)
     path = output / "report.json"
-    path.write_text(json.dumps(report, indent=2, default=str) + "\n")
+    write_json(path, report)
     # One row per candidate series, so reviewers can sort/filter without JSON tooling.
     with (output / "series.csv").open("w", newline="") as fileobj:
         writer = csv.writer(fileobj)

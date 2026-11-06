@@ -249,3 +249,43 @@ def test_cli_marks_groups_beyond_verification_limit(tmp_path, monkeypatch):
 
     report = json.loads((tmp_path / "report.json").read_text())
     assert report["summary"]["verification"] == {"confirmed_pixel_match": 1, "not_checked_limit": 1}
+
+
+def test_checkpoint_resume_reuses_only_successful_unchanged_sources(tmp_path, monkeypatch):
+    a = write_series(tmp_path, "1.2.1", archive=True)
+    b = write_series(tmp_path, "1.2.2", archive=True)
+    group = audit.find_candidates([a, b])[0][0]
+    output = tmp_path / "output"
+    audit.verify_candidates([group], output)
+    original = audit.verify_group
+    calls = []
+
+    def tracked(group):
+        calls.append(group["group_id"])
+        return original(group)
+
+    monkeypatch.setattr(audit, "verify_group", tracked)
+    audit.verify_candidates([group], output, resume=True)
+    assert calls == []
+    path = Path(a["dicom_archive_path"])
+    path.touch()
+    audit.verify_candidates([group], output, resume=True)
+    assert calls == [group["group_id"]]
+    path.unlink()
+    audit.verify_candidates([group], output, resume=True)
+    assert group["verification"]["status"] == "incomplete"
+    calls.clear()
+    audit.verify_candidates([group], output, resume=True)
+    assert calls == [group["group_id"]]
+
+
+def test_verification_records_dicom_patient_id_and_rejects_changed_source(tmp_path, monkeypatch):
+    a = write_series(tmp_path, "1.2.1")
+    path = next(Path(a["dicom_dir_path"]).iterdir())
+    ds = pydicom.dcmread(path)
+    ds.PatientID = "person-a"
+    ds.save_as(path, enforce_file_format=True)
+    assert audit.fingerprint_series(a)["dicom_patient_ids"] == ["", "person-a"]
+    signatures = iter(["before", "after"])
+    monkeypatch.setattr(audit, "source_signature", lambda row: next(signatures))
+    assert "source changed" in audit.fingerprint_series(a)["error"]

@@ -1,5 +1,10 @@
 # Changelog
 
+## v2.12 — 2026-11-06
+
+Duplicate pixel verification supports resumable checkpoints and bounded workers, records DICOM PatientIDs and rejects changed inputs. A read-only review proposes label-preserving survivors and specific removals awaiting approval; cross-patient matches and label conflicts are protected.
+Complementary label/notes merges are proposed only, never applied; cross-study matches require separate review. No schema migration or service restart. See docs/operations/duplicate_series.md.
+
 ## v2.11 — 2026-11-05
 
 Added a read-only PACS-wide duplicate-series audit with metadata evidence, JSON/CSV reports, study/dataset filters and optional comparison across linked subjects' studies.
