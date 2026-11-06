@@ -113,7 +113,7 @@ def _tags(modality="CT", descr="", kernel=None, image_type=None, study=None, **e
             "PJN:3DTOF COW MRA fast",
             {"ImageType": ["DERIVED", "PRIMARY", "PROJECTION IMAGE"]},
             1,
-            "MRA_TOF",
+            None,
         ),
         ("MR", "AX 3D ASL (color)", {}, 1, "ASL_SOURCE"),
         ("MR", "(CBF) AX 3D ASL (color)", {}, 1, "ASL_CBF"),
@@ -247,10 +247,43 @@ def test_scout_geometry_cannot_reject_an_axial_diagnostic_stack(description, ima
     assert classify_series(tags, 1, 100)[0] == "NCCT"
 
 
-def test_mra_projection_geometry_does_not_identify_a_nonaxial_slice_stack():
+def test_mra_projection_is_excluded_even_with_verified_geometry():
     tags = _tags(modality="MR", descr="COW MIPS", image_type=["DERIVED", "PJN", "MIP"],
                  _series_plane="CORONAL")
-    assert classify_series(tags, 1, 100)[0] == "MRA_TOF"
+    assert classify_series(tags, 1, 100) == (None, "projection-output")
+
+
+@pytest.mark.parametrize("modality", ["CT", "MR"])
+@pytest.mark.parametrize("description,image_type", [
+    ("AXIAL MIP", ["DERIVED", "PRIMARY", "AXIAL", "CT_SOM5 MIP"]),
+    ("AXIAL_MIP", []),
+    ("COW MIPS", ["DERIVED", "PJN"]),
+    ("PJN:3DTOF COW MRA fast", ["DERIVED", "PROJECTION IMAGE"]),
+    ("HEAD", ["DERIVED", "MIP"]),
+])
+def test_projection_outputs_cannot_inherit_a_scan_family(modality, description, image_type):
+    tags = _tags(modality=modality, descr=description, image_type=image_type,
+                 study="CTA HEAD", kernel="Bv40", _series_plane="AXIAL")
+    assert classify_series(tags, 30, 601) == (None, "projection-output")
+
+
+def test_cta_source_volume_is_retained_when_its_mip_is_excluded():
+    from series_classification import classify_series_batch
+
+    rows = [
+        _context_row("source", "VIA ONLY 0.75 Br34", ConvolutionKernel="Br34f",
+                     ContrastBolusAgent="Omnipaque", StudyDescription="CTA HEAD"),
+        _context_row("mip", "AXIAL MIP", ImageType=["DERIVED", "PRIMARY", "CT_SOM5 MIP"],
+                     StudyDescription="CTA HEAD"),
+    ]
+    result = classify_series_batch(rows)
+    assert result["source"][0] == "CTA"
+    assert result["mip"] == (None, "projection-output")
+
+
+def test_source_intended_for_mip_remains_an_ordinary_acquisition():
+    tags = _tags(descr="CTA FOR MIP", image_type=["ORIGINAL", "PRIMARY", "AXIAL"])
+    assert classify_series(tags, 1, 601)[0] == "CTA"
 
 
 @pytest.mark.parametrize(

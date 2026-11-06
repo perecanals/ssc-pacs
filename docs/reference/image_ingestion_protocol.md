@@ -283,7 +283,7 @@ local Postgres. Run them via `make test-ingestion` from the checkout root.
 
 ### How `series_type` and `study_type` are detected
 
-`series_detection.py` contains the readable series-family rules (`rules-v7`).
+`series_detection.py` contains the readable series-family rules (`rules-v8`).
 `series_classification.py` exposes the shared API used by ingestion and
 `scripts/admin/reclassify_series_types.py`; it also owns study classification,
 preference ranks and timepoints. Every series decision records a type (or NULL),
@@ -342,7 +342,11 @@ different family decisions until the complete study is available; prefer a
 full-scope reclassification pass. No pixel heuristics or fitted model are
 required.
 
-**Views and MPR fallback.** Coronal and sagittal CT and MR views remain NULL.
+**Views and MPR fallback.** MIP/projection outputs and coronal/sagittal CT and MR
+views remain NULL. Descriptions and ImageType tokens (`MIP`, `PJN`,
+`PROJECTION IMAGE`) identify projections (`projection-output`), including axial
+MIPs; they are never accepted as an axial MPR fallback. Source acquisitions
+described as being *for* MIP retain their scan-family detection.
 Descriptions provide explicit plane names; otherwise only the verified whole-series
 `_series_plane` is used. A historical first-instance orientation is insufficient.
 Axial MPR/reformatted stacks retain a family only if no regular eligible axial
@@ -356,20 +360,25 @@ its eligible axial siblings. Manual annotation values are never changed by these
 eligibility rules; labelled reconstructions intentionally excluded by this policy
 must be reported separately from unintended regressions in evaluations.
 
-Angiographic projections can retain the parent scan family.
+Projection exclusion is applied after study/acquisition context is resolved.
 `NCCT` also includes explicitly named virtual noncontrast reconstructions;
 iodine/material maps are separate. Family identity does not assert image
 quality or suitability for an analysis. Motion, duplicate, salvage, “don't use”
 and pre/post-treatment judgements are not automatically reproduced.
 
 **Do not trust the first file as the whole series.** A diagnostic stack may
-contain one differently oriented scout. The `tags-v3` extractor retains a
+contain one differently oriented scout. The `tags-v4` extractor retains a
 representative from the most common diagnostic image group, using only group
 counters and one retained tag dictionary. It does not accumulate pixel data or
 all instance headers. Older cached `tags-v1` rows remain readable; the detector
 does not reject a whole stack solely because its representative ImageType says
 LOCALIZER or DERIVED. Explicit scout descriptions still remain excluded.
-New ingestion uses `tags-v3`; upgrading code does not re-extract existing rows.
+New ingestion uses `tags-v4`; upgrading code does not re-extract existing rows.
+Projection stacks represent themselves: one original source image cannot hide
+a majority of MIP/projection images. For historical rows whose ImageType came
+from an embedded projection, verify every header before correcting ImageType
+to the dominant non-projection stack; do not exclude the native volume from a
+first-image flag alone.
 Existing rows may be enriched with `_series_plane` after a read-only archive
 header pass using `series_geometry.image_plane` and `dominant_plane`, without
 replacing their historical DICOM tags or claiming a full extractor upgrade.

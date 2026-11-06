@@ -1,5 +1,10 @@
 # Changelog
 
+## v2.14 — 2026-11-06
+
+Automatic CT/MRI typing excludes MIP and other projection outputs, including axial MIPs, while retaining source acquisitions intended for MIP processing. The axial MPR fallback policy remains in place.
+New ingestion uses tags-v4 so a minority source image cannot mask a projection stack. No schema migration or service restart. Recompute automatic types and ranks with `scripts/admin/reclassify_series_types.py --execute`; manual annotations remain independent. See docs/reference/image_ingestion_protocol.md.
+
 ## v2.13 — 2026-11-06
 
 Automatic typing recognizes Hr59 bone reconstructions, excludes coronal/sagittal CT and MRI views, and uses axial MPR only when the same study has no regular eligible series of that family. Whole-series plane consensus prevents embedded scouts from deciding eligibility.

@@ -32,7 +32,7 @@ from utils import _frame_positions, _position_key
 
 # Bump when the extracted shape changes in a way that makes old rows
 # non-comparable; written to series_dicom_tags.extractor_version.
-EXTRACTOR_VERSION = "tags-v3"
+EXTRACTOR_VERSION = "tags-v4"
 
 # Sequences are recursed to this depth. Everything observed in the corpus is a
 # small code sequence (ProcedureCodeSequence, AnatomicRegionSequence,
@@ -199,9 +199,9 @@ class SeriesTagAccumulator:
         group = (tokens, kernel, plane)
         count = self._group_counts.get(group, 0) + 1
         self._group_counts[group] = count
-        diagnostic = not any(
-            t in tokens for t in ("LOCALIZER", "PROJECTION IMAGE", "MIP")
-        )
+        # A projection stack must represent itself even if it contains one
+        # original source image. Eligibility is decided by the classifier.
+        diagnostic = "LOCALIZER" not in tokens
         score = (int(diagnostic), count)
         if score > self._representative_score:
             self._representative_score = score

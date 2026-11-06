@@ -70,9 +70,11 @@ def nonaxial_view(tags):
 
 
 def _projection(tags):
+    desc = _text(tags.get("SeriesDescription")).replace("_", " ")
+    desc = re.sub(r"\bfor\s+mips?\b", "", desc)
     return _matches(
-        _text(tags.get("SeriesDescription")) + " " + " ".join(_image_type(tags)),
-        r"\bmip\b|\bpjn\b|projection",
+        desc + " " + " ".join(_image_type(tags)),
+        r"\bmips?\b|\bpjn\b|projection",
     )
 
 
@@ -274,6 +276,8 @@ def _eligible_view(tags, result):
     if family not in {None, "DOCUMENT", "RAPID_SUMMARY"} and _text(
         tags.get("Modality")
     ) in {"ct", "mr"}:
+        if _projection(tags):
+            return (None, "projection-output")
         if view_rule := nonaxial_view(tags):
             return (None, view_rule)
     return result

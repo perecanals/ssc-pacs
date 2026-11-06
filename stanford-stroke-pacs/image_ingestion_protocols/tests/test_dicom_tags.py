@@ -138,6 +138,16 @@ def test_series_plane_is_unknown_for_mixed_or_missing_geometry():
     assert "_series_plane" not in extract_series_tags([_header()])["tags"]
 
 
+@pytest.mark.parametrize("sources,projections,expected", [
+    (1, 20, ["DERIVED", "SECONDARY", "MIP"]),
+    (124, 20, ["ORIGINAL", "PRIMARY", "OTHER"]),
+])
+def test_majority_stack_wins_when_sources_and_projections_share_a_series(sources, projections, expected):
+    source = [_header(z=float(i), image_type=["ORIGINAL", "PRIMARY", "OTHER"]) for i in range(sources)]
+    projected = [_header(z=float(i), image_type=["DERIVED", "SECONDARY", "MIP"]) for i in range(projections)]
+    assert extract_series_tags([*projected, *source])["tags"]["ImageType"] == expected
+
+
 def test_distinct_kernels_joins_multivalue_and_dedupes():
     # ConvolutionKernel is a plain str on some scanners and a MultiValue on
     # others; both must normalize to one comparable token.
