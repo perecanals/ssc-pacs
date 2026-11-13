@@ -841,6 +841,7 @@ def ohif_link(
     Access and series-membership checks run first, on one connection — before
     any series_cache_state mutation or the Orthanc lookup.
     """
+    report_series_uid = None
     conn = get_conn()
     try:
         with conn.cursor() as cur:
@@ -859,6 +860,9 @@ def ohif_link(
                         detail="Series not found in study",
                     )
                 if selected_series[0] == "orthanc":
+                    # Keep the report selected, but warm its study's source images.
+                    # Filtering QIDO to the SR alone would hide its references.
+                    report_series_uid = seriesinstanceuid
                     seriesinstanceuid = None
 
         with conn.cursor() as cur:
@@ -875,14 +879,15 @@ def ohif_link(
             )
             st = cs.get("status") or "cold"
             if st in ("warming", "queued"):
-                return {"status": st, "url": None}
+                return {"status": st, "url": None, "warm_level": "series" if seriesinstanceuid else "study"}
             if st == "cold":
                 detail = (
                     "Series not warmed yet; POST /api/series/{uid}/warm first"
                     if seriesinstanceuid
                     else "Study not warmed yet; POST /api/studies/{uid}/warm first"
                 )
-                return {"status": "cold", "url": None, "detail": detail}
+                return {"status": "cold", "url": None, "detail": detail,
+                        "warm_level": "series" if seriesinstanceuid else "study"}
             if st == "error":
                 raise HTTPException(
                     status_code=503,
@@ -930,6 +935,7 @@ def ohif_link(
                     "status": "cold",
                     "url": None,
                     "detail": "Cache state was stale; files missing on disk",
+                    "warm_level": "series" if seriesinstanceuid else "study",
                 }
             if seriesinstanceuid:
                 touch_access_series(seriesinstanceuid)
@@ -946,6 +952,8 @@ def ohif_link(
             query = {"StudyInstanceUIDs": studyinstanceuid}
             if seriesinstanceuid:
                 query["SeriesInstanceUIDs"] = seriesinstanceuid
+            if report_series_uid:
+                query["initialSeriesInstanceUID"] = report_series_uid
             url = f"/ohif/viewer?{urlencode(query)}"
             if STORAGE_MODE == "cold_path_cache":
                 return {"status": "ready", "url": url}

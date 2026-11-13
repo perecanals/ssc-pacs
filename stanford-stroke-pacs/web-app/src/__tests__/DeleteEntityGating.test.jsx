@@ -148,7 +148,7 @@ it("Orthanc reports retain admin deletion but hide filesystem downloads", async 
   await waitFor(() =>
     expect(resolveOhifViewerUrl).toHaveBeenCalledWith(
       SERIES_ROW.studyinstanceuid,
-      null,
+      SERIES_ROW.seriesinstanceuid,
     ),
   );
 });

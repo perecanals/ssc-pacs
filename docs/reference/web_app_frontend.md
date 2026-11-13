@@ -510,7 +510,20 @@ live table.
 ## OHIF structured reports
 
 Saved DICOM SR reports appear as series in the flat table and expanded study rows.
-Returning to the app refreshes the table. OHIF/Pane opens the parent study so
-referenced images remain available. Orthanc-owned reports have no decompression,
+Returning to the app refreshes the table. Selecting a report (row, Pane or OHIF)
+opens the study with `initialSeriesInstanceUID` set to the report's UID, rather
+than filtering the loaded series to the report. OHIF's native SR viewport loads
+the source image series at the first measurement's referenced image and renders
+the saved geometry. Source imaging is warmed at study level; the SR itself is
+already available in Orthanc. This applies in the embedded and detached viewers.
+
+For a report with several measurements, the first measurement is the starting
+position; there is no single slice representing every measurement. Circles and
+other image-referenced graphics use OHIF's native rendering. Text-only, unsupported
+or 3D measurements do not necessarily have a single source slice; this feature
+does not synthesize one or add new OHIF measurement-type support. Reviewing an SR
+does not automatically load it for editing or save a new version.
+
+Orthanc-owned reports have no decompression,
 filesystem path, ZIP or NIfTI actions. Admins can delete them through the normal
 confirmation dialog; this deletes the Orthanc series as well.

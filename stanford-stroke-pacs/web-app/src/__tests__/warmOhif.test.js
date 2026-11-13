@@ -176,3 +176,45 @@ describe("getBatchCacheStatus chunking", () => {
     expect(data).toEqual({ studies: {}, patients: {}, series: {} });
   });
 });
+
+it.each(["cold", "queued", "warming"])(
+  "opens the selected SR after warming its source study (%s)",
+  async (status) => {
+    const calls = [];
+    let links = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url, options = {}) => {
+        calls.push({ url, method: options.method || "GET" });
+        if (url.startsWith(`/api/ohif-link/${STUDY}`)) {
+          return jsonResponse(
+            ++links === 1
+              ? { status, url: null, warm_level: "study" }
+              : { url: `/ohif/viewer?initialSeriesInstanceUID=${SERIES}` },
+          );
+        }
+        if (url === `/api/studies/${STUDY}/warm`)
+          return jsonResponse({ ok: true });
+        if (url === `/api/studies/${STUDY}/cache-status`)
+          return jsonResponse({ status: "hot" });
+        if (url === "/api/storage-mode")
+          return jsonResponse({ storage_mode: "legacy" });
+        throw new Error(`Unexpected request: ${url}`);
+      }),
+    );
+    const { resolveOhifViewerUrl } = await freshModule();
+    expect(await resolveOhifViewerUrl(STUDY, SERIES)).toContain(
+      `initialSeriesInstanceUID=${SERIES}`,
+    );
+    expect(calls.filter((c) => c.url.startsWith("/api/series/"))).toEqual([]);
+    expect(calls.filter((c) => c.method === "POST")).toHaveLength(
+      status === "cold" ? 1 : 0,
+    );
+    expect(
+      calls
+        .filter((c) => c.url.includes("ohif-link"))
+        .every((c) => c.url.includes(`seriesinstanceuid=${SERIES}`)),
+    ).toBe(true);
+    vi.unstubAllGlobals();
+  },
+);

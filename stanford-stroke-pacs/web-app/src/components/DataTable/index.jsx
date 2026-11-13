@@ -542,10 +542,7 @@ function DataTableInner({
         ? `series:${row.seriesinstanceuid}`
         : `study:${row.studyinstanceuid}`,
       studyinstanceuid: row.studyinstanceuid,
-      seriesinstanceuid:
-        isSeries && row.storage_source !== "orthanc"
-          ? row.seriesinstanceuid || null
-          : null,
+      seriesinstanceuid: isSeries ? row.seriesinstanceuid || null : null,
       sourceLevel: srcLvl,
       patientId: row.patient_id || null,
       description: isSeries
@@ -599,12 +596,7 @@ function DataTableInner({
           )}
           <button
             onClick={() =>
-              handleOhifLink(
-                uid,
-                isSeries && row.storage_source !== "orthanc"
-                  ? row.seriesinstanceuid
-                  : null,
-              )
+              handleOhifLink(uid, isSeries ? row.seriesinstanceuid : null)
             }
             className="link-btn"
           >

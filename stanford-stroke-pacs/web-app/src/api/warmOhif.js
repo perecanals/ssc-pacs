@@ -212,7 +212,8 @@ async function queueWarmSiblings(studyinstanceuid) {
  * warms and waits on just that series, so sifting through individual series is
  * fast — the rest of the study is queued in the background (queueWarmSiblings)
  * so the OHIF side panel fills in without error popups. A study open (no
- * series UID) warms the whole study — unchanged.
+ * series UID) warms the whole study — unchanged. SR links retain the selected
+ * report UID but the backend requests study warming for its referenced images.
  */
 export async function resolveOhifViewerUrl(
   studyinstanceuid,
@@ -231,19 +232,22 @@ export async function resolveOhifViewerUrl(
     return data.url;
   }
 
+  const warmSeriesUid = data.warm_level === "study" ? null : seriesinstanceuid;
+
   // Needs warming — trigger it (or join an in-progress warm) then retry. The
-  // ohif-link status reflects the series when a series UID was passed, so we warm
-  // at that same granularity.
+  // The backend selects the warm granularity: reports warm the source study,
+  // ordinary image previews warm their selected series. Keep the original
+  // report UID in the retry URL so OHIF opens its native SR viewport.
   if (
     data.status === "cold" ||
     data.status === "warming" ||
     data.status === "queued"
   ) {
     if (data.status === "cold") {
-      if (seriesinstanceuid) await warmSeriesSync(seriesinstanceuid);
+      if (warmSeriesUid) await warmSeriesSync(warmSeriesUid);
       else await warmStudy(studyinstanceuid);
-    } else if (seriesinstanceuid) {
-      await pollCacheUntilHot(seriesinstanceuid, 600_000, "series");
+    } else if (warmSeriesUid) {
+      await pollCacheUntilHot(warmSeriesUid, 600_000, "series");
     } else {
       await pollCacheUntilHot(studyinstanceuid);
     }

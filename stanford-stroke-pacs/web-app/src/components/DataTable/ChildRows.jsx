@@ -164,9 +164,7 @@ function GrandChildTable({
                             onClick={() =>
                               onResolveOhifLink(
                                 gc.studyinstanceuid,
-                                gc.storage_source === "orthanc"
-                                  ? null
-                                  : gc.seriesinstanceuid,
+                                gc.seriesinstanceuid,
                               )
                             }
                             className="dt__gc-link-btn"
@@ -416,8 +414,7 @@ export default function ChildRows({
                         onClick={() =>
                           onResolveOhifLink(
                             child.studyinstanceuid,
-                            childConfig.idCol === "seriesinstanceuid" &&
-                              child.storage_source !== "orthanc"
+                            childConfig.idCol === "seriesinstanceuid"
                               ? child.seriesinstanceuid
                               : null,
                           )

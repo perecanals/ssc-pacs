@@ -117,3 +117,47 @@ def test_xml_stow_only_returns_successful_instances():
       </Item></DicomAttribute>
     </NativeDicomModel>"""
     assert catalog.successful_sops(body) == ["1.2.3"]
+
+
+@pytest.mark.parametrize("status", ["hot", "cold", "queued", "warming"])
+def test_report_link_selects_sr_and_warms_source_study(
+    db_conn, logged_in_client, monkeypatch, tmp_path, status,
+):
+    from urllib.parse import parse_qs, urlsplit
+
+    import routes.studies as studies
+    from tests.conftest import insert_patient
+
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "image.dcm").touch()
+    with db_conn.cursor() as cur:
+        insert_patient(cur, "SR-VIEW", "crisp2")
+        cur.execute("INSERT INTO image_study (patient_id, studyinstanceuid) VALUES ('SR-VIEW', '9.29.2')")
+        cur.execute("""INSERT INTO image_series
+            (patient_id, studyinstanceuid, seriesinstanceuid, modality, storage_source, dicom_dir_path)
+            VALUES ('SR-VIEW','9.29.2','9.29.2.1','CT','filesystem',%s),
+                   ('SR-VIEW','9.29.2','9.29.2.2','SR','orthanc',NULL)""", (str(source),))
+    db_conn.commit()
+    monkeypatch.setattr(studies, "STORAGE_MODE", "cold_path_cache")
+    cache = MagicMock(return_value={"status": status})
+    monkeypatch.setattr(studies, "get_cache_status", cache)
+    monkeypatch.setattr(studies, "get_series_cache_status", MagicMock(side_effect=AssertionError("SR must use study warmth")))
+    monkeypatch.setattr(studies, "touch_access", lambda uid: None)
+    monkeypatch.setattr(studies, "orthanc_lookup", lambda uid: [{"Type": "Study"}])
+    response = logged_in_client.get("/api/ohif-link/9.29.2?seriesinstanceuid=9.29.2.2")
+    assert response.status_code == 200
+    cache.assert_called_once_with("9.29.2")
+    body = response.json()
+    if status == "hot":
+        query = parse_qs(urlsplit(body["url"]).query)
+        assert query == {"StudyInstanceUIDs": ["9.29.2"], "initialSeriesInstanceUID": ["9.29.2.2"]}
+    else:
+        assert body["url"] is None
+        assert body["status"] == status
+        assert body["warm_level"] == "study"
+    with db_conn.cursor() as cur:
+        cur.execute("DELETE FROM image_series WHERE studyinstanceuid='9.29.2'")
+        cur.execute("DELETE FROM image_study WHERE studyinstanceuid='9.29.2'")
+        cur.execute("DELETE FROM patient WHERE patient_id='SR-VIEW'")
+    db_conn.commit()
