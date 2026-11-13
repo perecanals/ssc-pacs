@@ -677,7 +677,26 @@ python scripts/admin/delete_study.py --purge-orphan-files --execute
 ```
 
 Admins can also delete from the Studies/Series tables via the **trash-icon**
-button — same complete removal, behind a confirmation modal.
+button — same complete removal, behind a confirmation modal. For OHIF reports
+stored in Orthanc, this removes the report from Orthanc and its application
+metadata; there are no cold archives or Folder Indexer paths to remove.
+
+### Catalogue existing OHIF reports
+
+New SR reports are catalogued after successful OHIF saves. Backfill older reports
+or recover a logged cataloguing failure after applying migration
+`0029_series_storage_source` (commands from the stack root):
+
+```bash
+python scripts/admin/sync_ohif_reports.py             # preview
+python scripts/admin/sync_ohif_reports.py --execute   # apply
+# Add --study <StudyInstanceUID> to limit either command to one study.
+```
+
+Repeated runs are safe; unknown application studies and existing filesystem
+series are skipped. The report DICOMs remain in Orthanc storage and need the
+Orthanc-storage backup, not just a metadata database dump. See the
+[report runbook](deleting_studies.md#orthanc-owned-ohif-reports).
 
 ---
 

@@ -1,5 +1,10 @@
 # Changelog
 
+## v2.16 — 2026-11-13
+
+Selecting an OHIF structured report opens its source series at the first measurement’s referenced image with the saved geometry visible; source imaging is warmed before opening. Multi-measurement reports start at the first measurement, subject to OHIF’s native measurement support.
+Includes v2.15 report browsing, admin-only deletion from both the app and Orthanc, and the existing-report backfill command (Alembic migration `0029_series_storage_source`). Rebuild the frontend and restart the web app after updating.
+
 ## v2.15 — 2026-11-13
 
 OHIF structured reports appear in series tables and can be deleted by admins from both the app and Orthanc. Existing reports can be catalogued with `scripts/admin/sync_ohif_reports.py --execute`.

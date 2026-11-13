@@ -112,6 +112,13 @@ Key behaviors:
 
 - patient rows can expand into studies
 - study rows can expand into series
+- OHIF structured reports appear as SR series. Selecting one opens its source
+  series at the first measurement's referenced image with the saved geometry
+  visible; source images are decompressed first when needed. Reports with several
+  measurements start at the first, and rendering follows OHIF's supported
+  measurement types. Admins can delete a report from the table, which also removes
+  it from Orthanc. See [report viewing](web_app_frontend.md#ohif-structured-reports)
+  and [report deletion/backfill](../operations/deleting_studies.md#orthanc-owned-ohif-reports).
 - nested rows support inherited annotations
 - columns can include both source metadata and annotation-driven fields
 - inline editors allow direct annotation changes in the table — unless the
