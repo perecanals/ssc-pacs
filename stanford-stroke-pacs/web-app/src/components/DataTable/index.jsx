@@ -394,6 +394,16 @@ function DataTableInner({
     onLabelsMutated?.();
   };
 
+  const refreshOnFocus = useRef(handleMutated);
+  useEffect(() => {
+    refreshOnFocus.current = handleMutated;
+  });
+  useEffect(() => {
+    const refresh = () => refreshOnFocus.current();
+    window.addEventListener("focus", refresh);
+    return () => window.removeEventListener("focus", refresh);
+  }, []);
+
   const handleSort = (key) => {
     if (sortBy === key) {
       setSortDir((prev) => (prev === "asc" ? "desc" : "asc"));
@@ -532,7 +542,10 @@ function DataTableInner({
         ? `series:${row.seriesinstanceuid}`
         : `study:${row.studyinstanceuid}`,
       studyinstanceuid: row.studyinstanceuid,
-      seriesinstanceuid: isSeries ? row.seriesinstanceuid || null : null,
+      seriesinstanceuid:
+        isSeries && row.storage_source !== "orthanc"
+          ? row.seriesinstanceuid || null
+          : null,
       sourceLevel: srcLvl,
       patientId: row.patient_id || null,
       description: isSeries
@@ -586,13 +599,19 @@ function DataTableInner({
           )}
           <button
             onClick={() =>
-              handleOhifLink(uid, isSeries ? row.seriesinstanceuid : null)
+              handleOhifLink(
+                uid,
+                isSeries && row.storage_source !== "orthanc"
+                  ? row.seriesinstanceuid
+                  : null,
+              )
             }
             className="link-btn"
           >
             OHIF
           </button>
           {canWarm &&
+            row.storage_source !== "orthanc" &&
             (isSeries ? (
               row.seriesinstanceuid && (
                 <WarmButton
@@ -607,6 +626,7 @@ function DataTableInner({
               />
             ))}
           {rowLevel === "series" &&
+            row.storage_source !== "orthanc" &&
             row.seriesinstanceuid &&
             (isAdmin || isStaff) && (
               <ImagingDownloadButtons
@@ -615,9 +635,10 @@ function DataTableInner({
                 onDownload={handleDicomDownload}
               />
             )}
-          {rowLevel === "series" && row.seriesinstanceuid && isAdmin && (
-            <CopyPathButtons seriesUid={row.seriesinstanceuid} />
-          )}
+          {rowLevel === "series" &&
+            row.storage_source !== "orthanc" &&
+            row.seriesinstanceuid &&
+            isAdmin && <CopyPathButtons seriesUid={row.seriesinstanceuid} />}
           {isAdmin && (
             <button
               onClick={() =>
@@ -1067,6 +1088,7 @@ function DataTableInner({
           label={deleteTarget.label}
           onClose={() => setDeleteTarget(null)}
           onDeleted={() => {
+            onPreviewClose?.();
             setDeleteTarget(null);
             handleMutated();
           }}

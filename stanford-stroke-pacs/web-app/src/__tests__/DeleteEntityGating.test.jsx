@@ -69,6 +69,7 @@ async function renderSeriesLevel() {
 describe("Delete button gating + confirmation modal", () => {
   beforeEach(() => {
     isAdminFlag = false;
+    SERIES_ROW.storage_source = "filesystem";
     // Default: any apiFetch resolves ok (debounced pref-save hook calls .catch).
     apiFetch.mockReset();
     apiFetch.mockResolvedValue({ ok: true, json: () => Promise.resolve({}) });
@@ -133,4 +134,21 @@ describe("Delete button gating + confirmation modal", () => {
       expect(called).toBe(true);
     });
   });
+});
+
+it("Orthanc reports retain admin deletion but hide filesystem downloads", async () => {
+  isAdminFlag = true;
+  SERIES_ROW.storage_source = "orthanc";
+  await renderSeriesLevel();
+  expect(screen.getByTitle("Delete this series")).toBeInTheDocument();
+  expect(screen.queryByText("NIfTI")).not.toBeInTheDocument();
+  expect(screen.queryByTitle("Download DICOM as zip")).not.toBeInTheDocument();
+  fireEvent.click(screen.getByText("OHIF"));
+  const { resolveOhifViewerUrl } = await import("../api/warmOhif");
+  await waitFor(() =>
+    expect(resolveOhifViewerUrl).toHaveBeenCalledWith(
+      SERIES_ROW.studyinstanceuid,
+      null,
+    ),
+  );
 });

@@ -824,6 +824,16 @@ async def _proxy_forward(request: Request, upload=None, upload_size=None) -> Res
         content=body,
     )
     upstream = await client.send(upstream_req, stream=True)
+    if request.method == "POST" and _STOW_PATH_RE.fullmatch(request.url.path):
+        from report_catalog import catalog_stow_response
+        body = await upstream.aread()
+        await upstream.aclose()
+        if 200 <= upstream.status_code < 300:
+            await run_in_threadpool(catalog_stow_response, body)
+        headers = _filtered_response_headers(upstream)
+        headers.pop("content-encoding", None)
+        headers.pop("content-length", None)
+        return Response(content=body, status_code=upstream.status_code, headers=headers)
     headers = _filtered_response_headers(upstream)
     if upstream.status_code == 200 and is_immutable_ohif_asset(request.url.path):
         headers["cache-control"] = _IMMUTABLE_CACHE_CONTROL

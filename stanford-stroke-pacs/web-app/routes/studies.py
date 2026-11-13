@@ -624,7 +624,7 @@ def study_series(
             cur.execute(
                 "SELECT s.seriesinstanceuid, s.studyinstanceuid, s.patient_key, s.subject_id, "
                 "s.import_id, s.import_label, "
-                "s.modality, s.seriesdescription, s.acquisitiondatetime, s.number_of_slices, "
+                "s.storage_source, s.modality, s.seriesdescription, s.acquisitiondatetime, s.number_of_slices, "
                 "s.slicethickness, s.scanaxialcoverage_mm, "
                 f"{SERIES_AUTO_COLS}, {STUDY_AUTO_COLS}, "
                 "s.patient_id "
@@ -793,7 +793,7 @@ def list_series(
                         s.import_id,
                         s.import_label,
                         st.study_type,
-                        s.modality,
+                        s.storage_source, s.modality,
                         s.seriesdescription,
                         s.acquisitiondatetime,
                         s.number_of_slices,
@@ -847,18 +847,24 @@ def ohif_link(
             ensure_study_access(cur, studyinstanceuid, scope)
             if seriesinstanceuid:
                 cur.execute(
-                    "SELECT 1 FROM image_series "
+                    "SELECT storage_source FROM image_series "
                     "WHERE studyinstanceuid = %s AND seriesinstanceuid = %s "
                     "LIMIT 1",
                     (studyinstanceuid, seriesinstanceuid),
                 )
-                if cur.fetchone() is None:
+                selected_series = cur.fetchone()
+                if selected_series is None:
                     raise HTTPException(
                         status_code=404,
                         detail="Series not found in study",
                     )
+                if selected_series[0] == "orthanc":
+                    seriesinstanceuid = None
 
-        if STORAGE_MODE == "cold_path_cache":
+        with conn.cursor() as cur:
+            cur.execute("SELECT EXISTS (SELECT 1 FROM image_series WHERE studyinstanceuid = %s AND storage_source = 'filesystem')", (studyinstanceuid,))
+            has_filesystem = cur.fetchone()[0]
+        if STORAGE_MODE == "cold_path_cache" and has_filesystem:
             # Per-series preview keys off the series' own warm state (so sifting
             # through independent series is fast); a study open (no series UID)
             # keeps the whole-study aggregate behaviour.

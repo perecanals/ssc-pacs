@@ -134,3 +134,24 @@ patient as clean.
   volume is refused (HTTP 503 `archive_volume_offline`) — the rows would go and
   the files stay behind. Remount the disk, then retry.
 - **Storage mode**: the CLI requires `cold_path_cache` (the production layout).
+
+## Orthanc-owned OHIF reports
+
+Migration `0029_series_storage_source` distinguishes `orthanc` reports from
+`filesystem` imaging. SR metadata is catalogued after successful STOW storage;
+DICOM content stays in Orthanc. Deleting a report uses the same admin endpoints,
+removes Orthanc first, and skips filesystem and Folder Indexer operations.
+The parent study and sibling imaging remain.
+
+Backfill existing reports or recover a logged cataloguing failure from the stack root:
+
+```bash
+python scripts/admin/sync_ohif_reports.py              # dry run
+python scripts/admin/sync_ohif_reports.py --execute    # apply
+# Optional: --study <StudyInstanceUID>
+```
+
+Unknown application studies and existing filesystem series are skipped. Re-running
+is safe. This command does not import SEG or create patients/studies. Successful
+Orthanc uploads remain successful if metadata cataloguing fails; check application
+logs and rerun the sync. Orthanc storage backups must cover these report objects.

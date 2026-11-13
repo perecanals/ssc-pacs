@@ -1,5 +1,10 @@
 # Changelog
 
+## v2.15 — 2026-11-13
+
+OHIF structured reports appear in series tables and can be deleted by admins from both the app and Orthanc. Existing reports can be catalogued with `scripts/admin/sync_ohif_reports.py --execute`.
+Includes Alembic migration `0029_series_storage_source`; reports remain in Orthanc storage and do not use the cold cache.
+
 ## v2.14 — 2026-11-06
 
 Automatic CT/MRI typing excludes MIP and other projection outputs, including axial MIPs, while retaining source acquisitions intended for MIP processing. The axial MPR fallback policy remains in place.

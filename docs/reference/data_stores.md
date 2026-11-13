@@ -398,3 +398,11 @@ Connection settings are read from `.env`:
 
 - Operator procedures for cold storage: [`../cold_storage/runbook.md`](../cold_storage/runbook.md)
 - Design rationale: [`../cold_storage/design.md`](../cold_storage/design.md)
+
+### Orthanc report storage
+
+`image_series.storage_source` (`filesystem` by default, or `orthanc`) identifies
+the owner of DICOM storage (migration `0029_series_storage_source`). Orthanc-owned
+SR rows retain study enrollment identity, have no filesystem paths, and participate
+in ordinary series queries, annotations and modality rollups. They are always
+available without cache extraction. Their DICOM files remain in Orthanc storage.

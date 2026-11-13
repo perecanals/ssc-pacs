@@ -32,6 +32,8 @@ def series_record(uid, scope):
     try:
         with conn.cursor() as cur:
             ensure_series_access(cur, uid, scope)
+            from report_catalog import require_filesystem_series
+            require_filesystem_series(uid)
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             cur.execute(
                 "SELECT patient_id, acquisitiondatetime, seriesdescription, dicom_dir_path, dicom_archive_path "

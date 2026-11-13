@@ -506,3 +506,11 @@ frontend never reads them directly, so annotation edits stay immediate in the
 live table.
 
 **Table DDL, indexes, and cold-storage columns** are documented in [`data_stores.md`](data_stores.md); migrations are managed via Alembic (`alembic/`).
+
+## OHIF structured reports
+
+Saved DICOM SR reports appear as series in the flat table and expanded study rows.
+Returning to the app refreshes the table. OHIF/Pane opens the parent study so
+referenced images remain available. Orthanc-owned reports have no decompression,
+filesystem path, ZIP or NIfTI actions. Admins can delete them through the normal
+confirmation dialog; this deletes the Orthanc series as well.

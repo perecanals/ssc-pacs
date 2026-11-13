@@ -164,7 +164,9 @@ function GrandChildTable({
                             onClick={() =>
                               onResolveOhifLink(
                                 gc.studyinstanceuid,
-                                gc.seriesinstanceuid,
+                                gc.storage_source === "orthanc"
+                                  ? null
+                                  : gc.seriesinstanceuid,
                               )
                             }
                             className="dt__gc-link-btn"
@@ -172,27 +174,33 @@ function GrandChildTable({
                             OHIF
                           </button>
                         )}
-                        {gc.seriesinstanceuid && canWarm && (
-                          <WarmButton
-                            status={seriesStatus[gc.seriesinstanceuid]}
-                            onWarm={() => onWarmSeries(gc.seriesinstanceuid)}
-                            baseClass="dt__gc-link-btn"
-                          />
-                        )}
-                        {gc.seriesinstanceuid && (canExport || isAdmin) && (
-                          <ImagingDownloadButtons
-                            uid={gc.seriesinstanceuid}
-                            busy={downloadingSeries === gc.seriesinstanceuid}
-                            onDownload={onDicomDownload}
-                            className="dt__gc-link-btn"
-                          />
-                        )}
-                        {gc.seriesinstanceuid && isAdmin && (
-                          <CopyPathButtons
-                            seriesUid={gc.seriesinstanceuid}
-                            baseClass="dt__gc-link-btn"
-                          />
-                        )}
+                        {gc.storage_source !== "orthanc" &&
+                          gc.seriesinstanceuid &&
+                          canWarm && (
+                            <WarmButton
+                              status={seriesStatus[gc.seriesinstanceuid]}
+                              onWarm={() => onWarmSeries(gc.seriesinstanceuid)}
+                              baseClass="dt__gc-link-btn"
+                            />
+                          )}
+                        {gc.storage_source !== "orthanc" &&
+                          gc.seriesinstanceuid &&
+                          (canExport || isAdmin) && (
+                            <ImagingDownloadButtons
+                              uid={gc.seriesinstanceuid}
+                              busy={downloadingSeries === gc.seriesinstanceuid}
+                              onDownload={onDicomDownload}
+                              className="dt__gc-link-btn"
+                            />
+                          )}
+                        {gc.storage_source !== "orthanc" &&
+                          gc.seriesinstanceuid &&
+                          isAdmin && (
+                            <CopyPathButtons
+                              seriesUid={gc.seriesinstanceuid}
+                              baseClass="dt__gc-link-btn"
+                            />
+                          )}
                         {gc.seriesinstanceuid && isAdmin && onRequestDelete && (
                           <button
                             onClick={() =>
@@ -408,7 +416,8 @@ export default function ChildRows({
                         onClick={() =>
                           onResolveOhifLink(
                             child.studyinstanceuid,
-                            childConfig.idCol === "seriesinstanceuid"
+                            childConfig.idCol === "seriesinstanceuid" &&
+                              child.storage_source !== "orthanc"
                               ? child.seriesinstanceuid
                               : null,
                           )
@@ -427,6 +436,7 @@ export default function ChildRows({
                         />
                       )}
                     {childConfig.idCol === "seriesinstanceuid" &&
+                      child.storage_source !== "orthanc" &&
                       child.seriesinstanceuid &&
                       canWarm && (
                         <WarmButton
@@ -435,6 +445,7 @@ export default function ChildRows({
                         />
                       )}
                     {childConfig.idCol === "seriesinstanceuid" &&
+                      child.storage_source !== "orthanc" &&
                       child.seriesinstanceuid &&
                       (canExport || isAdmin) && (
                         <ImagingDownloadButtons
@@ -444,6 +455,7 @@ export default function ChildRows({
                         />
                       )}
                     {childConfig.idCol === "seriesinstanceuid" &&
+                      child.storage_source !== "orthanc" &&
                       child.seriesinstanceuid &&
                       isAdmin && (
                         <CopyPathButtons

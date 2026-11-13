@@ -308,7 +308,7 @@ def _series_for_studies(study_uids: list[str]) -> list[str]:
     try:
         with conn.cursor() as cur:
             cur.execute(
-                "SELECT seriesinstanceuid FROM image_series WHERE studyinstanceuid = ANY(%s)",
+                "SELECT seriesinstanceuid FROM image_series WHERE storage_source = 'filesystem' AND studyinstanceuid = ANY(%s)",
                 (list(study_uids),),
             )
             return [r[0] for r in cur.fetchall()]
@@ -421,7 +421,7 @@ def estimate_warm_series_disk_space(series_uids: list[str]) -> dict[str, Any] | 
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             cur.execute(
                 "SELECT dicom_dir_path, dicom_archive_path "
-                "FROM image_series WHERE seriesinstanceuid = ANY(%s)",
+                "FROM image_series WHERE storage_source = 'filesystem' AND seriesinstanceuid = ANY(%s)",
                 (list(series_uids),),
             )
             series_rows = cur.fetchall()
@@ -440,6 +440,10 @@ def get_series_cache_status(seriesinstanceuid: str) -> dict[str, Any]:
     conn = get_conn()
     try:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute("SELECT storage_source FROM image_series WHERE seriesinstanceuid = %s", (seriesinstanceuid,))
+            source = cur.fetchone()
+            if source and source["storage_source"] == "orthanc":
+                return {**_COLD_STATUS_ROW, "status": "hot"}
             cur.execute(
                 "SELECT status, error_message, warmed_at, last_accessed_at, "
                 "       warming_started_at, cache_path "
@@ -473,6 +477,9 @@ def get_batch_series_status(series_uids: list[str]) -> dict[str, str]:
             )
             for uid, status in cur.fetchall():
                 out[uid] = status
+            cur.execute("SELECT seriesinstanceuid FROM image_series WHERE storage_source = 'orthanc' AND seriesinstanceuid = ANY(%s)", (list(series_uids),))
+            for (uid,) in cur.fetchall():
+                out[uid] = "hot"
         return out
     finally:
         conn.close()
@@ -485,7 +492,7 @@ def get_cache_status(studyinstanceuid: str) -> dict[str, Any]:
     try:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             cur.execute(
-                f"SELECT {effective_status_sql()} AS eff, "
+                f"SELECT CASE WHEN s.storage_source = 'orthanc' THEN 'hot' ELSE {effective_status_sql()} END AS eff, "
                 "       cs.warmed_at, cs.last_accessed_at, cs.warming_started_at, cs.error_message "
                 "FROM image_series s "
                 "LEFT JOIN series_cache_state cs ON cs.seriesinstanceuid = s.seriesinstanceuid "
@@ -537,7 +544,7 @@ def get_batch_cache_status(uids: list[str]) -> dict[str, str]:
     try:
         with conn.cursor() as cur:
             cur.execute(
-                f"SELECT s.studyinstanceuid, {effective_status_sql()} AS eff "
+                f"SELECT s.studyinstanceuid, CASE WHEN s.storage_source = 'orthanc' THEN 'hot' ELSE {effective_status_sql()} END AS eff "
                 "FROM image_series s "
                 "LEFT JOIN series_cache_state cs ON cs.seriesinstanceuid = s.seriesinstanceuid "
                 "WHERE s.studyinstanceuid = ANY(%s)",
@@ -571,7 +578,7 @@ def _patient_status_counts(patient_keys: list[str]) -> dict[str, dict[str, int]]
     try:
         with conn.cursor() as cur:
             cur.execute(
-                f"SELECT p.patient_key, st.studyinstanceuid, {effective_status_sql()} AS eff "
+                f"SELECT p.patient_key, st.studyinstanceuid, CASE WHEN s.storage_source = 'orthanc' THEN 'hot' ELSE {effective_status_sql()} END AS eff "
                 "FROM study_visibility p "
                 "JOIN image_study st ON st.studyinstanceuid = p.studyinstanceuid "
                 "LEFT JOIN image_series s ON s.studyinstanceuid = st.studyinstanceuid "
@@ -916,7 +923,7 @@ def warm_series(series_uids: list[str]) -> dict[str, Any]:
         cur.execute(
             "SELECT seriesinstanceuid, studyinstanceuid, dicom_dir_path, "
             "dicom_archive_path "
-            "FROM image_series WHERE seriesinstanceuid = ANY(%s)",
+            "FROM image_series WHERE storage_source = 'filesystem' AND seriesinstanceuid = ANY(%s)",
             (list(series_uids),),
         )
         meta = {r["seriesinstanceuid"]: dict(r) for r in cur.fetchall()}
@@ -1021,7 +1028,7 @@ def evict_series(series_uids: list[str]) -> dict[str, Any]:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             cur.execute(
                 "SELECT seriesinstanceuid, dicom_dir_path FROM image_series "
-                "WHERE seriesinstanceuid = ANY(%s)",
+                "WHERE storage_source = 'filesystem' AND seriesinstanceuid = ANY(%s)",
                 (list(series_uids),),
             )
             rows = cur.fetchall()

@@ -207,7 +207,7 @@ def build_series_deletion_plan(conn, seriesinstanceuid: str) -> dict[str, Any] |
     with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
         cur.execute(
             "SELECT seriesinstanceuid, studyinstanceuid, patient_id, "
-            "       dicom_dir_path, dicom_archive_path "
+            "       dicom_dir_path, dicom_archive_path, storage_source "
             "FROM image_series WHERE seriesinstanceuid = %s",
             (seriesinstanceuid,),
         )
@@ -217,6 +217,19 @@ def build_series_deletion_plan(conn, seriesinstanceuid: str) -> dict[str, Any] |
         n_annotations = _count_annotations(cur, None, [seriesinstanceuid])
 
     patient_id = row["patient_id"]
+    report_id = None
+    if row["storage_source"] == "orthanc":
+        from report_catalog import orthanc_json
+        matches = orthanc_json("POST", "/tools/lookup", data=seriesinstanceuid)
+        for match in matches:
+            if match.get("Type") != "Series":
+                continue
+            resource = orthanc_json("GET", "/series/" + match["ID"])
+            parent = orthanc_json("GET", "/studies/" + resource["ParentStudy"])
+            if (resource["MainDicomTags"]["SeriesInstanceUID"] != seriesinstanceuid
+                    or parent["MainDicomTags"]["StudyInstanceUID"] != row["studyinstanceuid"]):
+                raise ValueError("Orthanc report identity mismatch")
+            report_id = match["ID"]
     remove_dirs: list[str] = []
     indexer_dirs: list[str] = []
     prune_parents: list[tuple[str, str]] = []
@@ -224,12 +237,12 @@ def build_series_deletion_plan(conn, seriesinstanceuid: str) -> dict[str, Any] |
     # Loose + archive series subtree = the <seriesUID> dir (parent of DICOM /
     # DICOM.tar.zst). Prune now-empty ancestors up to (not incl.) the patient dir,
     # <patient>/<study>/<desc>/<series>: the series dir's third ancestor.
-    if row["dicom_dir_path"]:
+    if row["storage_source"] == "filesystem" and row["dicom_dir_path"]:
         series_dir = Path(row["dicom_dir_path"]).parent
         remove_dirs.append(str(series_dir))
         indexer_dirs.append(str(series_dir))  # loose tree is the indexed one
         prune_parents.append((str(series_dir.parent), str(series_dir.parents[2])))
-    if row["dicom_archive_path"]:
+    if row["storage_source"] == "filesystem" and row["dicom_archive_path"]:
         vol = volume_for_path(row["dicom_archive_path"])
         if vol is not None:
             require_online(vol)
@@ -245,7 +258,7 @@ def build_series_deletion_plan(conn, seriesinstanceuid: str) -> dict[str, Any] |
         "series_uids": [seriesinstanceuid],
         "n_series": 1,
         "n_annotations": n_annotations,
-        "orthanc": {"kind": "series", "id": orthanc_series_id(seriesinstanceuid)},
+        "orthanc": {"kind": "series", "id": report_id if row["storage_source"] == "orthanc" else orthanc_series_id(seriesinstanceuid)},
         "remove_dirs": remove_dirs,
         "prune_parents": prune_parents,
         "indexer_dirs": indexer_dirs,
@@ -296,6 +309,9 @@ def delete_index_and_db(conn, plan: dict[str, Any], *, execute: bool) -> dict[st
         result["image_study"] = 1 if plan["level"] == "study" else 0
         return result
 
+    with conn.cursor() as cur:
+        lock_study_rows(cur, [plan["studyinstanceuid"]])
+
     # 1) Orthanc first — idempotent, online, cleans both orthanc DBs + caches.
     oid = plan["orthanc"]["id"]
     if oid:
@@ -305,6 +321,9 @@ def delete_index_and_db(conn, plan: dict[str, Any], *, execute: bool) -> dict[st
             result["orthanc_deleted"] = delete_orthanc_series(oid)
     else:
         result["orthanc_deleted"] = True  # nothing indexed to remove
+
+    if not result["orthanc_deleted"]:
+        raise RuntimeError("Orthanc deletion failed; application metadata retained")
 
     # 2) DB rows in one transaction.
     series_uids = plan["series_uids"]

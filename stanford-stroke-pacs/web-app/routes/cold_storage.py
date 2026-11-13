@@ -212,6 +212,8 @@ async def api_warm_series(
     """Queue a single series for warming (per-series analogue of the study
     warm: same executor pool, same 507 disk precheck)."""
     check_series_access(seriesinstanceuid, scope)
+    from report_catalog import require_filesystem_series
+    require_filesystem_series(seriesinstanceuid)
 
     try:
         est = estimate_warm_series_disk_space([seriesinstanceuid])
@@ -245,6 +247,8 @@ def api_evict_series(
     scope: list[str] | None = Depends(get_dataset_scope),
 ):
     check_series_access(seriesinstanceuid, scope)
+    from report_catalog import require_filesystem_series
+    require_filesystem_series(seriesinstanceuid)
     try:
         evict_series([seriesinstanceuid])
     except Exception as e:
