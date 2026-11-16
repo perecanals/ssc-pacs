@@ -1,5 +1,10 @@
 # Changelog
 
+## v2.18 — 2026-11-16
+
+Ingestion now compares archive filenames and full byte contents before reuse, preventing a matching file count from hiding stale files. A failed rebuild retains the previous archive until a verified replacement is ready.
+Includes the v2.17 OHIF loading-screen fix. No schema migration; archive verification changes apply on the next ingestion run.
+
 ## v2.17 — 2026-11-16
 
 Fix OHIF remaining on its loading screen when a study contains a long nested DICOM comment. The patched Orthanc image now includes a targeted DICOMweb 1.22 serialization fix; original DICOMs, pixels and full metadata remain intact.

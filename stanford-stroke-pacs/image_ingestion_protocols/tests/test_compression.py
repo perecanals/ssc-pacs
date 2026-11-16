@@ -6,6 +6,7 @@ series dirs into a scratch cold_archive_root.
 Run with: pytest tests/test_compression.py
 """
 
+import io
 import os
 import tarfile
 
@@ -87,6 +88,51 @@ def test_corrupt_existing_archive_is_rebuilt(tmp_path):
     ImageIngestionProtocol._verify_archive(archive, 3)
 
 
+def test_existing_archive_with_same_count_and_old_filenames_is_rebuilt(tmp_path):
+    proto = _bare_protocol(tmp_path)
+    dicom_dir = _make_series_dir(tmp_path)
+    archive = proto._compress_series_dir(str(dicom_dir))
+    (dicom_dir / "IM-0000.dcm").rename(dicom_dir / "renamed.dcm")
+
+    assert proto._compress_series_dir(str(dicom_dir)) == archive
+    assert dict(_archive_members(archive)) == {
+        p.name: p.read_bytes() for p in dicom_dir.iterdir()
+    }
+
+
+def test_existing_archive_with_same_names_and_sizes_but_old_bytes_is_rebuilt(tmp_path):
+    proto = _bare_protocol(tmp_path)
+    dicom_dir = _make_series_dir(tmp_path)
+    # A change beyond the first comparison chunk must also invalidate reuse.
+    payload = b"DICM" + b"\0" * (1024 * 1024 + 64)
+    (dicom_dir / "IM-0000.dcm").write_bytes(payload)
+    archive = proto._compress_series_dir(str(dicom_dir))
+    (dicom_dir / "IM-0000.dcm").write_bytes(payload[:-1] + b"x")
+
+    assert proto._compress_series_dir(str(dicom_dir)) == archive
+    assert dict(_archive_members(archive)) == {
+        p.name: p.read_bytes() for p in dicom_dir.iterdir()
+    }
+
+
+def test_failed_rebuild_preserves_previous_archive(tmp_path, monkeypatch):
+    proto = _bare_protocol(tmp_path)
+    dicom_dir = _make_series_dir(tmp_path)
+    archive = proto._compress_series_dir(str(dicom_dir))
+    with open(archive, "rb") as f:
+        previous = f.read()
+
+    def failing_verify(*args, **kwargs):
+        raise ValueError("forced verification failure")
+
+    monkeypatch.setattr(ImageIngestionProtocol, "_verify_archive", staticmethod(failing_verify))
+    with pytest.raises(ValueError, match="forced verification failure"):
+        proto._compress_series_dir(str(dicom_dir))
+    with open(archive, "rb") as f:
+        assert f.read() == previous
+    assert not os.path.exists(archive + ".tmp")
+
+
 def test_empty_source_dir_raises(tmp_path):
     proto = _bare_protocol(tmp_path)
     dicom_dir = _make_series_dir(tmp_path, n_files=0)
@@ -117,7 +163,7 @@ def test_failed_build_leaves_no_tmp_or_archive(tmp_path, monkeypatch):
     proto = _bare_protocol(tmp_path)
     dicom_dir = _make_series_dir(tmp_path)
 
-    def failing_verify(archive_path, expected_count):
+    def failing_verify(archive_path, expected_count, **kwargs):
         raise ValueError("forced verification failure")
 
     monkeypatch.setattr(ImageIngestionProtocol, "_verify_archive",
@@ -137,6 +183,18 @@ def test_verify_archive_count_mismatch_raises(tmp_path):
 
     with pytest.raises(ValueError, match="expected 4"):
         ImageIngestionProtocol._verify_archive(archive, 4)
+
+
+def test_verify_archive_rejects_duplicate_member_names(tmp_path):
+    archive = tmp_path / "duplicate.tar.zst"
+    with archive.open("wb") as out, zstd.ZstdCompressor().stream_writer(out) as z_out:
+        with tarfile.open(fileobj=z_out, mode="w|") as tf:
+            for content in [b"first image", b"second image"]:
+                member = tarfile.TarInfo("same.dcm")
+                member.size = len(content)
+                tf.addfile(member, io.BytesIO(content))
+    with pytest.raises(ValueError, match="duplicate archive member"):
+        ImageIngestionProtocol._verify_archive(str(archive), 2)
 
 
 def test_verify_archive_missing_or_empty_raises(tmp_path):

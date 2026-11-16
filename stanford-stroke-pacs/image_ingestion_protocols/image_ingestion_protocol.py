@@ -2198,24 +2198,24 @@ class ImageIngestionProtocol:
         series_name = os.path.basename(rel)
         archive = os.path.join(cold_root, rel_parent, f"{series_name}.tar.zst")
 
-        # Source file count for verification.
+        # Verify names and bytes as well as counts: a stale archive can have
+        # the same count but restore filenames that Orthanc no longer indexes.
         src_files = sorted(p for p in Path(dicom_dir).rglob("*") if p.is_file())
+        source_files = {str(p.relative_to(dicom_dir)): p for p in src_files}
         expected_count = len(src_files)
         if expected_count == 0:
             raise ValueError(f"dicom_dir_path is empty: {dicom_dir_path}")
 
-        # Idempotent path: if an archive already exists, verify it matches the
-        # source count. If it doesn't, treat it as corrupt and rebuild.
+        # Keep the previous archive until a verified replacement is ready.
         if os.path.isfile(archive) and os.path.getsize(archive) > 0:
             try:
-                self._verify_archive(archive, expected_count)
+                self._verify_archive(archive, expected_count, source_files=source_files)
                 return archive
             except Exception as exc:
                 print(
                     f"Existing archive {archive} failed verification "
                     f"({exc}); rebuilding."
                 )
-                os.remove(archive)
 
         os.makedirs(os.path.dirname(archive), exist_ok=True)
 
@@ -2231,7 +2231,7 @@ class ImageIngestionProtocol:
                             tf.add(str(f), arcname=str(f.relative_to(dicom_dir)))
 
             # Verify before publishing the final filename.
-            self._verify_archive(tmp_archive, expected_count)
+            self._verify_archive(tmp_archive, expected_count, source_files=source_files)
             os.replace(tmp_archive, archive)
         except Exception:
             # Don't leave a partial .tmp file behind.
@@ -2245,9 +2245,13 @@ class ImageIngestionProtocol:
         return archive
 
     @staticmethod
-    def _verify_archive(archive_path: str, expected_count: int) -> None:
+    def _verify_archive(
+        archive_path: str, expected_count: int, *, source_files: dict[str, Path] | None = None,
+    ) -> None:
         """Open the tar.zst archive and confirm it contains exactly
-        `expected_count` regular files. Raises on any mismatch."""
+        `expected_count` unique regular files. When sources are supplied,
+        compare their names and complete contents too. Raises on mismatch.
+        """
         if not os.path.isfile(archive_path):
             raise FileNotFoundError(f"archive missing: {archive_path}")
         if os.path.getsize(archive_path) == 0:
@@ -2255,16 +2259,37 @@ class ImageIngestionProtocol:
 
         dctx = zstd.ZstdDecompressor()
         actual = 0
+        seen = set()
         with open(archive_path, "rb") as f_in:
             with dctx.stream_reader(f_in) as z_in:
                 with tarfile.open(fileobj=z_in, mode="r|") as tf:
                     for member in tf:
                         if member.isfile():
+                            if member.name in seen:
+                                raise ValueError(f"duplicate archive member: {member.name}")
+                            seen.add(member.name)
                             actual += 1
+                            if source_files is not None:
+                                source = source_files.get(member.name)
+                                if source is None:
+                                    raise ValueError(f"archive filename differs from source: {member.name}")
+                                with source.open("rb") as original, tf.extractfile(member) as archived:
+                                    while True:
+                                        expected = original.read(1024 * 1024)
+                                        content = archived.read(1024 * 1024)
+                                        if content != expected:
+                                            raise ValueError(f"archive content differs from source: {member.name}")
+                                        if not content:
+                                            break
+                # tar can finish before the compressed stream's trailer.
+                while z_in.read(1024 * 1024):
+                    pass
         if actual != expected_count:
             raise ValueError(
                 f"archive {archive_path} has {actual} files; expected {expected_count}"
             )
+        if source_files is not None and seen != source_files.keys():
+            raise ValueError(f"archive {archive_path} filenames differ from source")
 
     def compress_cold_archives(self):
         """Compress each series DICOM directory to a cold tar.zst archive.
@@ -2273,7 +2298,7 @@ class ImageIngestionProtocol:
         is set. Per-series failures are non-fatal: the loop continues, the
         failed row keeps `dicom_archive_path = None`, and a JSON failure
         report is written to `image_ingestion_protocols/logs/`. Each
-        successful archive is verified (file count match) before being
+        successful archive is verified (filenames and byte contents) before being
         published, courtesy of `_compress_series_dir`.
 
         Loose DICOM files are NOT deleted here — cleanup happens after
