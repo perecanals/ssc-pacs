@@ -3,7 +3,8 @@
 A small fork of the [Orthanc Folder Indexer plugin](https://orthanc.uclouvain.be/book/plugins/indexer.html)
 with two SSC changes: the **`RemoveMissingFiles`** flag and an **on-demand scoped scan
 endpoint** (`POST/GET /indexer/scan`). See **[PATCHES.md](PATCHES.md)** for the full,
-canonical description of both (rationale, API, config, rebuild/deploy).
+canonical description (rationale, API, config, rebuild/deploy), including the
+DICOMweb nested-text serialization fix shipped in the same image.
 
 ## Why this exists
 
@@ -24,17 +25,18 @@ Upstream source: `hg clone https://orthanc.uclouvain.be/hg/orthanc-indexer/`
 
 ## Build
 
-The Dockerfile uses a two-stage build: Ubuntu 25.10 (matching
-`orthancteam/orthanc:latest`) to compile the `.so`, then layers it onto the
-official Orthanc image.
+The Dockerfile compiles the Folder Indexer and patched DICOMweb 1.22 in Ubuntu
+25.10 build stages, then layers both plugins onto the digest-pinned Orthanc image.
+The DICOMweb source archive is checksum-verified and its upstream unit tests run
+during the build.
 
 ```bash
 cd orthanc-indexer-patched
 docker build -t ssc-orthanc:patched-indexer .
 ```
 
-Build takes ~1–2 minutes on a modern machine. The output image is tagged
-`ssc-orthanc:patched-indexer` and is ~750 MB.
+The output image is tagged `ssc-orthanc:patched-indexer`. Check its current size
+with `docker image inspect ssc-orthanc:patched-indexer --format '{{.Size}}'`.
 
 **ABI note:** the builder base must match the runtime image's OS, because
 the plugin dynamically links against `libjsoncpp`, `libboost_*`, etc. If you

@@ -68,6 +68,23 @@ RUN cmake /src \
     && ls -l libOrthancIndexer.so \
     && strip libOrthancIndexer.so
 
+# Preserve the deployed DICOMweb version, with a narrow QIDO sequence fix.
+FROM builder AS dicomweb-builder
+ADD https://orthanc.uclouvain.be/downloads/sources/orthanc-dicomweb/OrthancDicomWeb-1.22.tar.gz /tmp/dicomweb.tar.gz
+RUN echo "6c0fccf0b7d4abc983b1c2664a8fc267772cc1617c411d17c96f60fed54dafb7  /tmp/dicomweb.tar.gz" | sha256sum -c - \
+    && tar -xzf /tmp/dicomweb.tar.gz -C /tmp
+COPY dicomweb/too-long-sequence.patch /tmp/too-long-sequence.patch
+RUN cd /tmp/OrthancDicomWeb-1.22 && patch -p1 < /tmp/too-long-sequence.patch
+WORKDIR /dicomweb-build
+RUN cmake /tmp/OrthancDicomWeb-1.22 \
+      -DCMAKE_BUILD_TYPE=Release \
+      -DALLOW_DOWNLOADS=ON \
+      -DSTATIC_BUILD=OFF \
+      -DUSE_SYSTEM_ORTHANC_SDK=OFF \
+    && make -j8 OrthancDicomWeb UnitTests \
+    && ./UnitTests \
+    && strip libOrthancDicomWeb.so
+
 # ---------------------------------------------------------------------------
 # Stage 2: overlay the patched plugin onto the official Orthanc image
 # ---------------------------------------------------------------------------
@@ -80,3 +97,6 @@ FROM orthancteam/orthanc@sha256:a055ccd31f7cd1e45ce98912e1c6e8e83b6a8f262f5b8fe6
 
 COPY --from=builder /build/libOrthancIndexer.so \
      /usr/share/orthanc/plugins/libOrthancIndexer.so
+
+COPY --from=dicomweb-builder /dicomweb-build/libOrthancDicomWeb.so \
+     /usr/share/orthanc/plugins-available/libOrthancDicomWeb.so

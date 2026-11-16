@@ -1,5 +1,10 @@
 # Changelog
 
+## v2.17 — 2026-11-16
+
+Fix OHIF remaining on its loading screen when a study contains a long nested DICOM comment. The patched Orthanc image now includes a targeted DICOMweb 1.22 serialization fix; original DICOMs, pixels and full metadata remain intact.
+Rebuild the Orthanc image and recreate its container. No database migration.
+
 ## v2.16 — 2026-11-13
 
 Selecting an OHIF structured report opens its source series at the first measurement’s referenced image with the saved geometry visible; source imaging is warmed before opening. Multi-measurement reports start at the first measurement, subject to OHIF’s native measurement support.

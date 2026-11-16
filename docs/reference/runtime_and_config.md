@@ -21,7 +21,13 @@ the Makefile home).
 
 The Orthanc image is built locally from [`../../orthanc-indexer-patched/`](../../orthanc-indexer-patched/) —
 a fork of the upstream Folder Indexer plugin with a `RemoveMissingFiles` config
-flag required by `cold_path_cache`. See [`../cold_storage/design.md`](../cold_storage/design.md)
+flag required by `cold_path_cache`. The image also builds DICOMweb 1.22 with a
+small QIDO serialization patch: nested text stored as `TooLong` in the Orthanc
+index is returned as an empty value, avoiding HTTP 400 and an OHIF loading screen.
+Original DICOM files and full WADO metadata retain the complete text. No reindex
+or database migration is needed for this fix. The patch and disposable synthetic
+regression check are documented in
+[`../../orthanc-indexer-patched/PATCHES.md`](../../orthanc-indexer-patched/PATCHES.md). See [`../cold_storage/design.md`](../cold_storage/design.md)
 for the why, and [`../cold_storage/runbook.md`](../cold_storage/runbook.md#build-the-patched-orthanc-image)
 for the build/deploy commands.
 

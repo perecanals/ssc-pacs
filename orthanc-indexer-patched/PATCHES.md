@@ -101,3 +101,38 @@ removed were `DICOM.warming/…` twins of valid `DICOM/…` rows.
 `.warming` (`IsWarmingDirectory`), in both the continuous monitor and on-demand scans.
 Nothing legitimate lives there: it is always a partial copy that becomes `DICOM/` a
 moment later and is then picked up by the next scan.
+
+
+## DICOMweb patch — long nested text in QIDO series lists
+
+The image also patches upstream **DICOMweb 1.22**, independently of the Folder
+Indexer. Orthanc stores overlength indexed sequence text as `Type: TooLong` with
+a null value. DICOMweb's `ToShortDicomAsJson` previously left that leaf as `{}`.
+When converting it to a DICOM response, Orthanc rejected the object for a text VR
+(for example RequestedProcedureComments, `0040,1400`). One such series made the
+whole study's QIDO series list return HTTP 400, leaving OHIF on its loading screen.
+
+`dicomweb/too-long-sequence.patch` treats `TooLong` like `Null` in this conversion.
+QIDO returns an empty value for text unavailable in the index. Full WADO metadata
+and original files retain the complete text. This handles nested sequences at any
+depth, requires no index rewrite, and does not modify pixel data or archives.
+
+The Dockerfile downloads the pinned 1.22 source archive, verifies its SHA-256,
+applies the patch, and runs upstream unit tests. Run the regression check from
+the checkout root in the `ssc-pacs` Python environment:
+
+```bash
+python orthanc-indexer-patched/tests/check_dicomweb_sequences.py --image ssc-orthanc:patched-indexer
+```
+
+The check starts and removes a disposable Orthanc container, binds its random HTTP
+port to loopback only, and uploads synthetic DICOMs. It checks short, empty and long
+comments, nested sequence fields, QIDO, full metadata, original bytes and frames.
+It never connects to production databases or storage. `--expect-bug` demonstrates
+the failure against an unpatched image.
+
+For deployment, retain the current image under a rollback tag, build the replacement,
+then run `scripts/orthanc/dc.sh up -d --force-recreate orthanc` from the stack root.
+Check `/system` and the affected study's `/dicom-web/studies/{StudyUID}/series`,
+then reopen OHIF. Rollback is retagging the retained image as
+`ssc-orthanc:patched-indexer` and recreating Orthanc again. No schema migration.

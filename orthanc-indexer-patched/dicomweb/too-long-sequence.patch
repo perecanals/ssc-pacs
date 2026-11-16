@@ -1,0 +1,13 @@
+--- a/Plugin/DicomWebFormatter.cpp
++++ b/Plugin/DicomWebFormatter.cpp
+@@ -241,7 +241,9 @@
+             target[*member] = Json::arrayValue;
+             ToShortDicomAsJson(target[*member], jsonSourceMember["Value"]);
+           }
+-          else if (jsonSourceMember["Type"] == "Null")
++          // SSC: unavailable indexed text must remain an empty value, not an object.
++          else if (jsonSourceMember["Type"] == "Null" ||
++                   jsonSourceMember["Type"] == "TooLong")
+           {
+             target[*member] = Json::nullValue;
+           }
