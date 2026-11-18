@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import re
 import time
 from urllib.parse import parse_qsl, urlencode
@@ -30,6 +31,8 @@ router = APIRouter()
 
 # WADO-RS/QIDO-RS path form: /dicom-web/studies/{StudyInstanceUID}[/...]
 _STUDY_PATH_RE = re.compile(r"^/dicom-web/studies/([^/]+)")
+logger = logging.getLogger(__name__)
+
 _STOW_PATH_RE = re.compile(r"^/dicom-web/studies(?:/([^/]+))?/?$")
 
 # Webpack emits OHIF's assets with a 20-hex [contenthash] as a whole
@@ -553,12 +556,13 @@ async def dicomweb_dataset_guard(
     block the event loop.
     """
     scope = await run_in_threadpool(dataset_access.get_user_scope_cached, user)
-    if scope is None:
-        return
+    request.state.sr_upload_user = user
     stow = _STOW_PATH_RE.fullmatch(request.url.path)
     if request.method == "POST" and stow:
         request.state.annotation_scope = scope
         request.state.annotation_path_uid = stow.group(1)
+        return
+    if scope is None:
         return
     m = _STUDY_PATH_RE.match(request.url.path)
     uid = m.group(1) if m else (
@@ -791,7 +795,24 @@ async def _proxy(request: Request) -> Response:
         async with validated_upload(
             request, request.state.annotation_scope, request.state.annotation_path_uid,
         ) as (upload, size):
-            return await _proxy_forward(request, upload, size)
+            from report_catalog import catalog_stow_response, successful_sops
+            from sr_provenance import begin_upload, confirm_upload
+            instances = request.state.annotation_instances
+            user = request.state.sr_upload_user
+            lock_conn = await run_in_threadpool(begin_upload, instances, user)
+            try:
+                response = await _proxy_forward(request, upload, size)
+                if 200 <= response.status_code < 300:
+                    try:
+                        await run_in_threadpool(confirm_upload, instances, user,
+                                                set(successful_sops(response.body)))
+                    except Exception:
+                        logger.exception("SR attribution unconfirmed; staff deletion remains blocked")
+            finally:
+                await run_in_threadpool(lock_conn.close)
+            if 200 <= response.status_code < 300:
+                await run_in_threadpool(catalog_stow_response, response.body)
+            return response
     return await _proxy_forward(request)
 
 
@@ -825,11 +846,8 @@ async def _proxy_forward(request: Request, upload=None, upload_size=None) -> Res
     )
     upstream = await client.send(upstream_req, stream=True)
     if request.method == "POST" and _STOW_PATH_RE.fullmatch(request.url.path):
-        from report_catalog import catalog_stow_response
         body = await upstream.aread()
         await upstream.aclose()
-        if 200 <= upstream.status_code < 300:
-            await run_in_threadpool(catalog_stow_response, body)
         headers = _filtered_response_headers(upstream)
         headers.pop("content-encoding", None)
         headers.pop("content-length", None)

@@ -45,7 +45,7 @@ def _uid(value):
     return value
 
 
-def _study_uids(part):
+def _study_uids(part, instances=None):
     """Read metadata and references without loading SEG pixel data."""
     try:
         part.seek(0)
@@ -82,6 +82,9 @@ def _study_uids(part):
             raise HTTPException(415, "Only SR and SEG annotations may be uploaded")
         # Evidence/reference sequences can carry additional studies. Do not
         # authorize these using the top-level StudyInstanceUID alone.
+        if instances is not None:
+            instances.append({"study": study, "series": str(ds.SeriesInstanceUID),
+                              "sop": sop, "sr": sop_class != "1.2.840.10008.5.1.4.1.1.66.4"})
         studies = set()
 
         def collect_studies(dataset):
@@ -111,6 +114,7 @@ def _validate(raw, boundary, scope, requested_uids):
     value = bytearray()
     headers = {}
     studies = set()
+    instances = []
 
     def on_part_begin():
         nonlocal part, count, header_bytes, headers
@@ -143,7 +147,7 @@ def _validate(raw, boundary, scope, requested_uids):
 
     def on_part_end():
         nonlocal part
-        study, referenced_studies = _study_uids(part)
+        study, referenced_studies = _study_uids(part, instances)
         if any(uid != study for uid in requested_uids):
             raise _bad_request()
         studies.update(referenced_studies)
@@ -182,12 +186,13 @@ def _validate(raw, boundary, scope, requested_uids):
         if not dataset_access.scope_allows(scope, dataset_access.get_study_datasets_cached(study)):
             raise HTTPException(403, "Dataset access denied")
     raw.seek(0)
+    return instances
 
 
 @asynccontextmanager
 async def validated_upload(request: Request, scope, path_uid):
     """Yield a rewindable original request body only after full authorization."""
-    if not scope:
+    if scope is not None and not scope:
         raise HTTPException(403, "Dataset access denied")
     content_type, params = parse_options_header(request.headers.get("content-type", ""))
     boundary = params.get(b"boundary", b"")
@@ -209,7 +214,8 @@ async def validated_upload(request: Request, scope, path_uid):
             if size > OHIF_ANNOTATION_MAX_UPLOAD_BYTES:
                 raise HTTPException(413, "Annotation upload too large")
             await run_in_threadpool(raw.write, chunk)
-        await run_in_threadpool(_validate, raw, boundary, scope, requested_uids)
+        request.state.annotation_instances = await run_in_threadpool(
+            _validate, raw, boundary, scope, requested_uids)
         yield raw, size
     finally:
         await run_in_threadpool(raw.close)

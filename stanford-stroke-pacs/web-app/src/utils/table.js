@@ -147,6 +147,24 @@ const LEVEL_CONFIG = {
         label: "Series Description",
         filterable: true,
       },
+      {
+        key: "sr_saved_by",
+        label: "Saved by",
+        filterable: false,
+        defaultVisible: false,
+      },
+      {
+        key: "sr_saved_at",
+        label: "SR saved at",
+        filterable: false,
+        defaultVisible: false,
+      },
+      {
+        key: "sr_ownership",
+        label: "SR ownership",
+        filterable: false,
+        defaultVisible: false,
+      },
       { key: "number_of_slices", label: "Slices", filterable: false },
       {
         key: "slicethickness",
@@ -301,7 +319,8 @@ export function buildBuiltinColumnCatalog(activeLevel) {
 // Display formatting for built-in column values: dates humanized, numeric
 // series columns rounded to 2dp, everything else passed through.
 export function formatBuiltinValue(sourceKey, raw) {
-  if (sourceKey === "acquisitiondatetime") return formatDatetime(raw);
+  if (sourceKey === "acquisitiondatetime" || sourceKey === "sr_saved_at")
+    return formatDatetime(raw);
   if (sourceKey === "slicethickness" || sourceKey === "scanaxialcoverage_mm")
     return formatNumber(raw);
   return raw;

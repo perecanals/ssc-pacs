@@ -61,7 +61,9 @@ CONTENT_TYPE = 'multipart/related; type="application/dicom"; boundary="ohif-boun
 
 
 @pytest.fixture(autouse=True)
-def fresh_caches():
+def fresh_caches(monkeypatch):
+    import sr_provenance
+    monkeypatch.setattr(sr_provenance, "orthanc_json", lambda *a, **kw: [])
     dataset_access.clear_caches()
     yield
     dataset_access.clear_caches()
@@ -169,11 +171,11 @@ def test_unsupported_upload_denied(client, upstream, body, content_type):
     assert not upstream
 
 
-def test_admin_upload_keeps_existing_behavior(client, upstream):
+def test_admin_upload_requires_valid_dicom(client, upstream):
     login_as(client, TEST_USER)
     body = b"admin body passes directly to Orthanc"
-    assert post(client, body).status_code == 200
-    assert upstream[0][1] == body
+    assert post(client, body).status_code == 400
+    assert not upstream
 
 
 def test_staff_has_same_annotation_access(client, upstream):

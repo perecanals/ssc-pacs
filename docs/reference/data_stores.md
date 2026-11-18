@@ -406,3 +406,20 @@ the owner of DICOM storage (migration `0029_series_storage_source`). Orthanc-own
 SR rows retain study enrollment identity, have no filesystem paths, and participate
 in ordinary series queries, annotations and modality rollups. They are always
 available without cache extraction. Their DICOM files remain in Orthanc storage.
+
+
+### SR save provenance
+
+Alembic `0030_sr_provenance` adds `sr_provenance`, keyed by SOP Instance UID,
+with study/series UIDs, authenticated `saved_by`, the account's creation timestamp,
+first save time and a `confirmed` flag. Pending rows are durable before forwarding
+an OHIF upload; only SOPs in the successful STOW response become confirmed.
+Rows remain after deletion as an attribution trail. No DICOM content is stored.
+
+`image_series` and `image_series_labelled` carry nullable `sr_saved_by` and
+`sr_saved_at` summaries. Catalogue sync populates them only for complete,
+unambiguous ownership; historical reports remain NULL. API series rows also
+include `sr_ownership` (`confirmed`, `mixed`, `unknown`) and `can_delete`, verified
+against current Orthanc instances. These summaries are not authorization inputs:
+staff deletion rechecks every actual instance, account lifetime and dataset access.
+See [SR ownership](../operations/deleting_studies.md#sr-ownership-and-staff-deletion).

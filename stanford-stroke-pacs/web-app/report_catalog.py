@@ -85,6 +85,8 @@ def catalog_reports(study_uid=None, *, execute=False):
                     (uid, study, *owner, tags.get("SeriesDescription") or "Structured report", len(report["Instances"]), date))
                 refresh_study_modalities(cur, [study])
             if execute:
+                from sr_provenance import refresh_series_summary
+                refresh_series_summary(conn, uid)
                 sync_labelled_rows(conn, "series", [uid])
                 sync_labelled_rows(conn, "study", [study])
         if execute:

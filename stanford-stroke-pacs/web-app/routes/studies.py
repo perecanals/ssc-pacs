@@ -9,7 +9,7 @@ from urllib.parse import urlencode
 import psycopg2.extras
 from fastapi import APIRouter, Depends, HTTPException, Query
 
-from auth import get_dataset_scope, require_admin, require_staff
+from auth import get_current_user, get_dataset_scope, require_admin, require_staff
 from cache_manager import (
     get_cache_status,
     get_series_cache_status,
@@ -593,6 +593,7 @@ def study_series(
     ),
     label_filters: str | None = Query(None),
     scope: list[str] | None = Depends(get_dataset_scope),
+    user: str = Depends(get_current_user),
 ):
     """Series for a given study (expandable sub-rows).
 
@@ -624,7 +625,7 @@ def study_series(
             cur.execute(
                 "SELECT s.seriesinstanceuid, s.studyinstanceuid, s.patient_key, s.subject_id, "
                 "s.import_id, s.import_label, "
-                "s.storage_source, s.modality, s.seriesdescription, s.acquisitiondatetime, s.number_of_slices, "
+                "s.sr_saved_by, s.sr_saved_at, s.storage_source, s.modality, s.seriesdescription, s.acquisitiondatetime, s.number_of_slices, "
                 "s.slicethickness, s.scanaxialcoverage_mm, "
                 f"{SERIES_AUTO_COLS}, {STUDY_AUTO_COLS}, "
                 "s.patient_id "
@@ -637,6 +638,8 @@ def study_series(
                 dt = r.get("acquisitiondatetime")
                 r["acquisitiondatetime"] = dt.isoformat() if dt else None
 
+            from sr_provenance import attach_sr_permissions
+            attach_sr_permissions(cur, rows, user)
             attach_enrollment_display(cur, rows, scope)
             attach_annotations(cur, rows, "series", "seriesinstanceuid")
             attach_inherited_annotations(cur, rows, "series", scope=scope)
@@ -694,6 +697,7 @@ def list_series(
     page: int = Query(1, ge=1),
     per_page: int = Query(50, ge=1, le=500),
     scope: list[str] | None = Depends(get_dataset_scope),
+    user: str = Depends(get_current_user),
 ):
     """Paginated series list, optionally filtered."""
     conn = get_conn()
@@ -793,7 +797,7 @@ def list_series(
                         s.import_id,
                         s.import_label,
                         st.study_type,
-                        s.storage_source, s.modality,
+                        s.sr_saved_by, s.sr_saved_at, s.storage_source, s.modality,
                         s.seriesdescription,
                         s.acquisitiondatetime,
                         s.number_of_slices,
@@ -816,6 +820,8 @@ def list_series(
                 dt = r.get("acquisitiondatetime")
                 r["acquisitiondatetime"] = dt.isoformat() if dt else None
 
+            from sr_provenance import attach_sr_permissions
+            attach_sr_permissions(cur, rows, user)
             attach_enrollment_display(cur, rows, scope)
             attach_annotations(cur, rows, "series", "seriesinstanceuid")
             attach_inherited_annotations(cur, rows, "series", scope=scope)

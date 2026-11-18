@@ -424,7 +424,9 @@ role, while `require_admin` remains unchanged. Staff can download series as
 DICOM ZIP or NIfTI and use [Data Exports](data_exports.md), within their existing
 dataset grants. They cannot manage users, delete imaging data, use the admin copy-path
 endpoint, or log directly into Orthanc. `manage_users.py set-staff` grants/revokes
-this capability independently of dataset grants and passwords. API role checks
+this capability independently of dataset grants and passwords. Staff may also
+delete their own fully attributed Orthanc SR series within their dataset grants
+(Alembic `0030_sr_provenance`; [ownership rules](../operations/deleting_studies.md#sr-ownership-and-staff-deletion)). API role checks
 read the database rather than trusting a role embedded in the login token.
 
 ### 5.4 Dataset-level authorization (per-user cohort access)
@@ -488,9 +490,13 @@ of (a linked enrollment that re-sent the same StudyInstanceUID) — the
     study identifiers agree with the object's study. It validates the entire batch
     before forwarding the original bytes to Orthanc. Unknown/out-of-scope studies
     return 403; invalid content 400; unsupported media, SOP classes or transfer
-    syntaxes 415; exceeded upload limits 413. Admins retain the existing bypass.
+    syntaxes 415; exceeded upload limits 413. Admins bypass dataset scope, but
+    their uploads also undergo DICOM validation and attribution. Successful SR
+    instances are attributed to the authenticated saver; overwrites and appends
+    by non-admins require confirmed ownership of the existing report series.
     These objects live in Orthanc storage, independently of the Web App's SQL
-    annotation labels; no `image_series` or cache-state rows are created.
+    annotation labels. SR series metadata is catalogued in `image_series` with
+    `storage_source='orthanc'`; no cache-state rows or filesystem copies are created.
   - The proxy also strips `Modality` (0008,0060) from `includefield` on
     study-level QIDO searches (`routes/proxy.py:sanitize_study_search_query`):
     it is a series-level tag, so Orthanc answers it by opening one stored

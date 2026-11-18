@@ -1,5 +1,10 @@
 # Changelog
 
+## v2.19 — 2026-11-17
+
+OHIF SR saves record the authenticated saver. Staff can delete fully owned SR series within their dataset grants; mixed, existing unknown and unconfirmed reports remain admin-only.
+Includes Alembic migration `0030_sr_provenance`. Rebuild the frontend and restart the web app; admin OHIF uploads now also require valid SR/SEG DICOM.
+
 ## v2.18 — 2026-11-16
 
 Ingestion now compares archive filenames and full byte contents before reuse, preventing a matching file count from hiding stale files. A failed rebuild retains the previous archive until a verified replacement is ready.

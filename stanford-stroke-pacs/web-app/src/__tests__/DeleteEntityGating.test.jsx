@@ -70,6 +70,7 @@ describe("Delete button gating + confirmation modal", () => {
   beforeEach(() => {
     isAdminFlag = false;
     SERIES_ROW.storage_source = "filesystem";
+    SERIES_ROW.can_delete = false;
     // Default: any apiFetch resolves ok (debounced pref-save hook calls .catch).
     apiFetch.mockReset();
     apiFetch.mockResolvedValue({ ok: true, json: () => Promise.resolve({}) });
@@ -151,4 +152,21 @@ it("Orthanc reports retain admin deletion but hide filesystem downloads", async 
       SERIES_ROW.seriesinstanceuid,
     ),
   );
+});
+
+it("staff can remove an SR when the server grants deletion", async () => {
+  isAdminFlag = false;
+  SERIES_ROW.storage_source = "orthanc";
+  SERIES_ROW.can_delete = true;
+  await renderSeriesLevel();
+  expect(screen.getByTitle("Delete this series")).toBeInTheDocument();
+  SERIES_ROW.can_delete = false;
+});
+
+it("unknown or mixed SR ownership does not expose staff deletion", async () => {
+  isAdminFlag = false;
+  SERIES_ROW.storage_source = "orthanc";
+  SERIES_ROW.can_delete = false;
+  await renderSeriesLevel();
+  expect(screen.queryByTitle("Delete this series")).not.toBeInTheDocument();
 });

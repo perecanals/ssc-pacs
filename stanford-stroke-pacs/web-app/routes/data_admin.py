@@ -1,4 +1,4 @@
-"""Admin-only destructive data endpoints: delete a study or series.
+"""Destructive data endpoints with role and SR ownership checks.
 
 Performs a **complete** removal across all three layers, as the web-app service
 user (which owns the storage roots — no privilege escalation needed):
@@ -26,7 +26,7 @@ import logging
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from auth import require_admin
+from auth import require_admin, require_staff
 from db import get_conn
 from deletion import (
     build_series_deletion_plan,
@@ -35,6 +35,7 @@ from deletion import (
     purge_indexer_rows,
     remove_files,
 )
+from sr_provenance import authorize_series_delete
 
 logger = logging.getLogger(__name__)
 
@@ -60,9 +61,9 @@ def _do_full_delete(conn, plan: dict, admin: str) -> dict:
     idb = delete_index_and_db(conn, plan, execute=True)
     files = remove_files(plan, execute=True)          # service user owns the roots
     idx = purge_indexer_rows(plan.get("indexer_dirs", []), execute=True)
-    label = plan.get("studyinstanceuid") or plan.get("seriesinstanceuid")
+    label = plan.get("seriesinstanceuid") or plan.get("studyinstanceuid")
     logger.info(
-        "admin deleted %s", plan["level"], extra={
+        "user deleted %s", plan["level"], extra={
             "user": admin, "entity": label,
             "annotations_discarded": idb["annotations"],
             "orthanc_deleted": idb["orthanc_deleted"],
@@ -94,9 +95,10 @@ def study_deletion_plan(studyinstanceuid: str, admin: str = Depends(require_admi
 
 
 @router.get("/api/admin/series/{seriesinstanceuid}/deletion-plan")
-def series_deletion_plan(seriesinstanceuid: str, admin: str = Depends(require_admin)):
+def series_deletion_plan(seriesinstanceuid: str, admin: str = Depends(require_staff)):
     conn = get_conn()
     try:
+        authorize_series_delete(conn, seriesinstanceuid, admin, lock=True)
         plan = build_series_deletion_plan(conn, seriesinstanceuid)
     finally:
         conn.close()
@@ -119,10 +121,11 @@ def delete_study_endpoint(studyinstanceuid: str, admin: str = Depends(require_ad
 
 
 @router.delete("/api/admin/series/{seriesinstanceuid}")
-def delete_series_endpoint(seriesinstanceuid: str, admin: str = Depends(require_admin)):
+def delete_series_endpoint(seriesinstanceuid: str, admin: str = Depends(require_staff)):
     """Completely remove a single series (parent study row is preserved)."""
     conn = get_conn()
     try:
+        authorize_series_delete(conn, seriesinstanceuid, admin, lock=True)
         plan = build_series_deletion_plan(conn, seriesinstanceuid)
         if plan is None:
             raise HTTPException(status_code=404, detail="Series not found")

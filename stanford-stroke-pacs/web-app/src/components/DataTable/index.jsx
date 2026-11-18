@@ -66,7 +66,7 @@ function DataTableInner({
 
   const [showDefModal, setShowDefModal] = useState(false);
   const [editingLabel, setEditingLabel] = useState(null);
-  // Admin-only destructive delete: { level, uid, label } or null.
+  // Authorized destructive delete: { level, uid, label } or null.
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [refreshingLabelledTables, setRefreshingLabelledTables] =
     useState(false);
@@ -631,7 +631,7 @@ function DataTableInner({
             row.storage_source !== "orthanc" &&
             row.seriesinstanceuid &&
             isAdmin && <CopyPathButtons seriesUid={row.seriesinstanceuid} />}
-          {isAdmin && (
+          {(isAdmin || (isSeries && row.can_delete)) && (
             <button
               onClick={() =>
                 requestDelete(

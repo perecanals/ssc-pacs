@@ -58,7 +58,7 @@ The safety gate for the irreversible file delete is the **path-safety guard**
 (target must sit under a configured root and be a study directory — named by its
 StudyInstanceUID, at `<slug>/<patient>/<studyUID>` or the pre-v2.2
 `<patient>/<studyUID>` — or deeper, so it can never remove a root, a dataset or a
-whole patient) plus **admin-only auth** on the
+whole patient) plus **role and ownership checks** on the
 endpoint and a **typed `yes`** on the CLI — not OS permissions.
 
 ## Option A — CLI (`scripts/admin/delete_study.py`)
@@ -139,7 +139,7 @@ patient as clean.
 
 Migration `0029_series_storage_source` distinguishes `orthanc` reports from
 `filesystem` imaging. SR metadata is catalogued after successful STOW storage;
-DICOM content stays in Orthanc. Deleting a report uses the same admin endpoints,
+DICOM content stays in Orthanc. Deleting a report uses the same series endpoints,
 removes Orthanc first, and skips filesystem and Folder Indexer operations.
 The parent study and sibling imaging remain.
 
@@ -155,3 +155,36 @@ Unknown application studies and existing filesystem series are skipped. Re-runni
 is safe. This command does not import SEG or create patients/studies. Successful
 Orthanc uploads remain successful if metadata cataloguing fails; check application
 logs and rerun the sync. Orthanc storage backups must cover these report objects.
+
+### SR ownership and staff deletion
+
+Migration `0030_sr_provenance` adds per-instance `sr_provenance` records and
+nullable `sr_saved_by` / `sr_saved_at` summaries on series and their labelled
+mirrors. **Saved by** means the authenticated account saving through the web-app
+OHIF proxy; it does not assert authorship of every measurement. Series table
+columns include Saved by, SR saved at and SR ownership (enable in the column
+selector). Ownership is confirmed, mixed or unknown.
+
+Staff may preview and delete only Orthanc-owned SR series where **every actual
+Orthanc instance** has confirmed provenance for their current account and they
+still have dataset access. Admins retain deletion access; imaging and whole-study
+deletion remain admin-only. Non-staff users can save SRs but cannot delete them.
+The backend rechecks ownership under the same parent-study lock used by uploads.
+Table buttons use the server's `can_delete` capability; the endpoint always
+rechecks independently.
+
+The proxy journals the authenticated uploader before forwarding and confirms
+only successfully stored SOP instances from the STOW response. Confirmed retries
+preserve the first save time and owner. A reused username does not inherit the
+previous account's reports. Non-admin uploads cannot overwrite unknown/another
+account's reports or append to their series. SRs cannot be replaced by SEG uploads.
+Admin uploads also undergo DICOM validation; admins retain ownership maintenance
+access without changing an existing report's original attribution.
+
+Existing reports, direct Orthanc uploads and unconfirmed saves grant no staff
+deletion permission. The sync command recovers catalogue metadata, **never
+invents authorship or confirms pending uploads**. If an upload fails or its result
+is uncertain, its pending attribution remains and an admin must inspect the
+report; resubmitting it cannot claim ownership. Application logs identify
+attribution/catalogue failures. Provenance records remain after deletion for
+audit; they contain identifiers and account metadata, not DICOM content.

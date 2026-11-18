@@ -199,22 +199,24 @@ function GrandChildTable({
                               baseClass="dt__gc-link-btn"
                             />
                           )}
-                        {gc.seriesinstanceuid && isAdmin && onRequestDelete && (
-                          <button
-                            onClick={() =>
-                              onRequestDelete(
-                                "series",
-                                gc.seriesinstanceuid,
-                                gc.seriesdescription,
-                              )
-                            }
-                            className="dt__gc-link-btn dt__gc-link-btn--danger"
-                            title="Delete this series"
-                            aria-label="Delete this series"
-                          >
-                            <TrashIcon />
-                          </button>
-                        )}
+                        {gc.seriesinstanceuid &&
+                          (isAdmin || gc.can_delete) &&
+                          onRequestDelete && (
+                            <button
+                              onClick={() =>
+                                onRequestDelete(
+                                  "series",
+                                  gc.seriesinstanceuid,
+                                  gc.seriesdescription,
+                                )
+                              }
+                              className="dt__gc-link-btn dt__gc-link-btn--danger"
+                              title="Delete this series"
+                              aria-label="Delete this series"
+                            >
+                              <TrashIcon />
+                            </button>
+                          )}
                       </div>
                     </td>
                     <td
@@ -460,7 +462,9 @@ export default function ChildRows({
                           baseClass="link-btn"
                         />
                       )}
-                    {isAdmin &&
+                    {(isAdmin ||
+                      (childConfig.idCol === "seriesinstanceuid" &&
+                        child.can_delete)) &&
                       onRequestDelete &&
                       (childConfig.idCol === "studyinstanceuid"
                         ? child.studyinstanceuid
