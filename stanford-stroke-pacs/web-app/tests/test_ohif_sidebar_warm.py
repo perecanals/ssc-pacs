@@ -16,11 +16,17 @@ PATH = f"/dicom-web/studies/{UID}/series"
 
 
 def request(path=PATH, method="GET"):
-    return Request({
-        "type": "http", "method": method, "path": path,
-        "scheme": "http", "server": ("testserver", 80),
-        "query_string": b"", "headers": [],
-    })
+    return Request(
+        {
+            "type": "http",
+            "method": method,
+            "path": path,
+            "scheme": "http",
+            "server": ("testserver", 80),
+            "query_string": b"",
+            "headers": [],
+        }
+    )
 
 
 @pytest.fixture
@@ -50,12 +56,16 @@ async def test_ready_or_in_progress_study_is_not_resubmitted(warming, state):
     warm.assert_not_awaited()
 
 
-@pytest.mark.parametrize("path,method", [
-    (PATH, "HEAD"), (PATH, "OPTIONS"),
-    ("/dicom-web/studies", "GET"),
-    (f"{PATH}/4.5/metadata", "GET"),
-    (f"{PATH}/4.5/instances/6/frames/1", "GET"),
-])
+@pytest.mark.parametrize(
+    "path,method",
+    [
+        (PATH, "HEAD"),
+        (PATH, "OPTIONS"),
+        ("/dicom-web/studies", "GET"),
+        (f"{PATH}/4.5/metadata", "GET"),
+        (f"{PATH}/4.5/instances/6/frames/1", "GET"),
+    ],
+)
 async def test_other_requests_do_not_trigger_warming(warming, path, method):
     status, warm = warming
     await proxy.queue_sidebar_study_warm(request(path, method))
@@ -142,11 +152,15 @@ async def test_authorized_listing_queues_before_forwarding_and_preserves_respons
 
 @pytest.mark.parametrize("denial", [401, 403])
 async def test_unauthenticated_or_out_of_scope_requests_never_warm(
-    sidebar_app, warming, monkeypatch, denial,
+    sidebar_app,
+    warming,
+    monkeypatch,
+    denial,
 ):
     app, forwarded = sidebar_app
     status, warm = warming
     if denial == 401:
+
         def logged_out():
             raise HTTPException(401)
 

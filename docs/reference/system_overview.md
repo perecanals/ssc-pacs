@@ -335,6 +335,15 @@ macOS Archive Utility handles the resulting zip natively.
   Bytes flow back through DICOMweb → OHIF renders in the browser
 ```
 
+When OHIF is opened through the web app, DICOMweb requests pass through its
+authenticated, dataset-scoped proxy. In cold-storage mode, expanding a
+previously unloaded sidebar study sends a QIDO series listing that queues
+decompression through the existing warm endpoint. The list returns after
+submission without waiting for extraction; subsequent series-metadata
+requests wait while their files are queued/warming. Direct Orthanc access
+bypasses the trigger, and OHIF may reuse cached metadata without sending a
+new listing. Details: [cold-storage design](../cold_storage/design.md).
+
 ---
 
 ## 7. Ingest flow (new imaging data)

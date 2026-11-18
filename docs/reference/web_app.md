@@ -367,6 +367,12 @@ proxy holding sibling metadata requests until each series is hot (so OHIF's
 side panel fills in without error popups); see
 [`../cold_storage/design.md`](../cold_storage/design.md).
 
+Expanding a previously unloaded study in the app's OHIF sidebar also starts
+decompression automatically. There is no additional OHIF progress UI. If
+OHIF reuses metadata cached before an eviction, use Decompress in the
+DataTable or reopen the viewer. This behavior requires the app's proxy;
+direct Orthanc OHIF links on port 8042 bypass it.
+
 ---
 
 ## 7. What the web app Is Not

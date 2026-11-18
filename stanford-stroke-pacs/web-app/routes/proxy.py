@@ -2,7 +2,8 @@
 
 End users authenticate to the web app via JWT cookie. The web app forwards their
 requests to Orthanc, attaching the service-account Basic auth from .env. Users
-no longer need entries in orthanc_users.json.
+no longer need entries in orthanc_users.json. In cold-storage mode, authorized
+study-series listings also queue decompression for OHIF's lazy study browser.
 """
 
 from __future__ import annotations
@@ -683,11 +684,16 @@ async def _submit_sidebar_study_warm(uid: str, request: Request) -> None:
         # Dataset access was checked by dicomweb_dataset_guard for this UID.
         await api_warm_study(uid, request, scope=None)
     except HTTPException as exc:
-        logger.warning("OHIF sidebar warm rejected (HTTP %d)", exc.status_code,
-                       extra={"studyinstanceuid": uid})
+        logger.warning(
+            "OHIF sidebar warm rejected (HTTP %d)",
+            exc.status_code,
+            extra={"studyinstanceuid": uid},
+        )
     except Exception:
-        logger.exception("OHIF sidebar warm submission failed",
-                         extra={"studyinstanceuid": uid})
+        logger.exception(
+            "OHIF sidebar warm submission failed",
+            extra={"studyinstanceuid": uid},
+        )
 
 
 # Cap on how long one metadata request is held. Normal per-study warms finish

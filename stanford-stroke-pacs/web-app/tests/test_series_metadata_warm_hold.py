@@ -120,9 +120,9 @@ class TestProxyWarmHold:
         await _run_proxy(monkeypatch, FRAME_PATH)
         assert calls == []
 
-    async def test_qido_series_list_never_checks_cache_state(self, monkeypatch):
-        # The series *list* is index-served and must stay unfiltered/unheld —
-        # it is what makes every series visible in OHIF's side panel.
+    async def test_qido_series_list_is_not_held_for_extraction(self, monkeypatch):
+        # The route queues study warming before forwarding a series listing,
+        # but the index-served list never enters the series-metadata hold.
         calls = _status_sequence(monkeypatch, ["warming"])
         await _run_proxy(monkeypatch, "/dicom-web/studies/9.9.9/series")
         assert calls == []

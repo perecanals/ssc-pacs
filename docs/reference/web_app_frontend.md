@@ -486,8 +486,17 @@ the column with the matching `introducedIn`. Adding a column *without*
   study-list route isn't served here (see architecture.md, "OHIF
   worklist-return replacement")
 
+In cold-storage mode, expanding a previously unloaded study inside OHIF
+queues decompression through its proxied QIDO series-list request. The
+backend reuses the existing study-warm endpoint; no OHIF bundle changes or
+progress/completion callbacks are involved. Expansions served entirely from
+OHIF's metadata cache send no request; after eviction, use the DataTable's
+Decompress action or reopen the viewer. See
+[`../cold_storage/design.md`](../cold_storage/design.md) for the request flow.
+
 Orthanc Explorer and OHIF links on the landing page are dynamically built from
 `window.location.hostname + ":8042"`.
+Those direct Orthanc links bypass the app's automatic decompression trigger.
 
 ### Notes field
 

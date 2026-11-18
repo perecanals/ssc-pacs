@@ -631,6 +631,7 @@ If you need to roll back:
 |------|---------|
 | `web-app/cache_manager.py` | `warm_series`/`evict_series` (per-series primitives), `warm_study`/`warm_patient`/`evict_study` (thin wrappers), `get_cache_status`, `get_series_cache_status`, `run_eviction`, `estimate_warm_disk_space` (route precheck) |
 | `web-app/routes/cold_storage.py` | study `POST /warm`/`/evict`/`/cache-status`, series `POST /series/{uid}/warm`/`/evict`/`/cache-status`, `POST /cache-status/batch`, `/storage-mode` |
+| `web-app/routes/proxy.py` | Queue study decompression on authorized QIDO series listings; hold queued/warming series metadata requests until extraction completes (bounded) |
 | `web-app/app.py` | Lifespan owns `app.state.warm_executor` (`ThreadPoolExecutor(max_workers=WARM_WORKERS)`); defensive ohif-link FS probe |
 | `web-app/src/api/warmOhif.js` | Frontend warm flow (mode-agnostic cold/warming handling) |
 | `scripts/cold_storage/archive_all_series.py` | Offline archiver — populates `dicom_archive_path` for the existing tree |
