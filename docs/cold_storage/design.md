@@ -264,6 +264,23 @@ fine. Two cooperating pieces remove this:
   and never held — every series stays visible in the panel. On cap expiry the
   request is forwarded as-is (worst case: the pre-hold behavior, one toast).
 
+Expanding another study in OHIF's sidebar also queues its decompression.
+OHIF's lazy study loader sends `GET /dicom-web/studies/{uid}/series`; after
+the authentication/dataset guard, `routes/proxy.py:queue_sidebar_study_warm`
+submits a cold/error study through the existing study-warm endpoint. This
+reuses the disk-space and offline-volume checks, persisted queue markers and
+bounded executor. Hot/queued/warming studies and concurrent duplicate
+listings do not submit another job. Legacy mode is unchanged.
+
+The series list is returned without waiting for extraction; OHIF receives no
+new progress or completion callback. Submission failures are logged without
+replacing the QIDO response. The existing metadata hold still applies. This
+trigger is request-based: any authorized series listing warms the study, and
+collapsing/re-expanding a study whose metadata OHIF already cached may send
+no request. After eviction in that same viewer session, use the DataTable's
+Decompress action or reopen the viewer if OHIF does not request it again.
+Direct Orthanc access on port 8042 bypasses this web-app behavior.
+
 ### Eviction
 
 ```

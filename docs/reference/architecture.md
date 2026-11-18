@@ -382,7 +382,13 @@ In `cold_path_cache` mode the proxy holds a
 the not-yet-extracted files (which surfaced as persistent "Something went
 wrong" toasts in OHIF). The frontend queues a background study warm on every
 series preview so cold siblings enter that held state before the viewer
-loads. Details: [`../cold_storage/design.md`](../cold_storage/design.md)
+loads. Expanding another study in OHIF issues a QIDO series listing; after
+dataset authorization the proxy queues decompression for a cold/error study
+through the existing warm endpoint, without waiting for extraction or adding
+an OHIF callback. Listings for hot/queued/warming studies skip submission.
+This applies to web-app-proxied requests, not direct Orthanc access; OHIF may
+reuse cached metadata on subsequent expansions without sending a listing.
+Details: [`../cold_storage/design.md`](../cold_storage/design.md)
 §"Series previews and the OHIF side panel".
 
 ### 5.2 Orthanc auth (service account + admins only)

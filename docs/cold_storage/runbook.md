@@ -438,6 +438,14 @@ The frontend's `warmOhif.resolveOhifViewerUrl()` consumes these and handles
 the full cold → warm → ready flow transparently. Users clicking a study in
 the DataTable never see a raw cold error.
 
+Expanding a previously unloaded study in the web-app-proxied OHIF sidebar
+also queues decompression automatically, via its QIDO series-list request.
+There is no added OHIF progress/completion UI. Failed submissions (offline
+volume, insufficient space, etc.) are logged as `OHIF sidebar warm rejected`
+or `OHIF sidebar warm submission failed`. If OHIF reuses metadata cached
+before an eviction, use Decompress in the DataTable or reopen the viewer to
+send a fresh request. Direct Orthanc OHIF on port 8042 bypasses this trigger.
+
 ---
 
 ## No images anywhere after a reboot (stale bind mount)

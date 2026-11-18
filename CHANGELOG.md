@@ -1,5 +1,10 @@
 # Changelog
 
+## v2.20 — 2026-11-17
+
+Expanding a previously unloaded study in the web-app-proxied OHIF sidebar automatically queues decompression through its series-list request, reusing the existing permissions, storage checks and warm queue.
+No database migration or frontend rebuild. Restart the web app; direct Orthanc access and expansions served entirely from OHIF's metadata cache do not trigger warming.
+
 ## v2.19 — 2026-11-17
 
 OHIF SR saves record the authenticated saver. Staff can delete fully owned SR series within their dataset grants; mixed, existing unknown and unconfirmed reports remain admin-only.

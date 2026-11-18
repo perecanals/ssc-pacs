@@ -24,8 +24,9 @@ import cache_manager
 import dataset_access
 from annotation_upload import CHUNK_BYTES, validated_upload
 from auth import get_current_user
-from config import OHIF_TRACKPAD_PX_PER_SLICE
+from config import OHIF_TRACKPAD_PX_PER_SLICE, STORAGE_MODE
 from orthanc_client import ORTHANC_PASS, ORTHANC_URL, ORTHANC_USER
+from routes.cold_storage import api_warm_study
 
 router = APIRouter()
 
@@ -641,6 +642,54 @@ _SERIES_METADATA_RE = re.compile(
     r"^/dicom-web/studies/[^/]+/series/([^/]+)/metadata$"
 )
 
+# OHIF lazy-loads a prior study's series list when its sidebar card expands.
+# Queue extraction here without changing the QIDO response or waiting for the
+# files. The existing series-metadata hold below handles in-flight extraction.
+_STUDY_SERIES_LIST_RE = re.compile(r"^/dicom-web/studies/([^/]+)/series/?$")
+_STUDY_WARM_SUBMISSIONS: dict[str, asyncio.Task] = {}
+
+
+async def queue_sidebar_study_warm(request: Request) -> None:
+    """Best-effort warm on an authorized study-series listing.
+
+    Called by the DICOMweb route only AFTER its authentication/dataset guard.
+    Reuse the warm endpoint's disk/volume checks, queue markers and bounded
+    executor. Coalesce simultaneous listings while submitting; hot or already
+    queued/warming studies need no new job. Forget submissions afterwards so
+    retrying a failed warm or reopening an evicted study can warm again.
+    """
+    if STORAGE_MODE != "cold_path_cache" or request.method != "GET":
+        return
+    match = _STUDY_SERIES_LIST_RE.fullmatch(request.url.path)
+    if not match:
+        return
+    uid = match.group(1)
+    task = _STUDY_WARM_SUBMISSIONS.get(uid)
+    if task is None:
+        task = asyncio.create_task(_submit_sidebar_study_warm(uid, request))
+        _STUDY_WARM_SUBMISSIONS[uid] = task
+        task.add_done_callback(lambda _: _STUDY_WARM_SUBMISSIONS.pop(uid, None))
+    # All callers must wait for queue markers before returning the list:
+    # otherwise a concurrent listing could launch metadata reads while cold.
+    # A disconnected caller must not cancel another caller's submission.
+    await asyncio.shield(task)
+
+
+async def _submit_sidebar_study_warm(uid: str, request: Request) -> None:
+    try:
+        statuses = await run_in_threadpool(cache_manager.get_batch_cache_status, [uid])
+        if statuses.get(uid, "cold") not in ("cold", "error"):
+            return
+        # Dataset access was checked by dicomweb_dataset_guard for this UID.
+        await api_warm_study(uid, request, scope=None)
+    except HTTPException as exc:
+        logger.warning("OHIF sidebar warm rejected (HTTP %d)", exc.status_code,
+                       extra={"studyinstanceuid": uid})
+    except Exception:
+        logger.exception("OHIF sidebar warm submission failed",
+                         extra={"studyinstanceuid": uid})
+
+
 # Cap on how long one metadata request is held. Normal per-study warms finish
 # in seconds; on expiry the request is forwarded as-is (worst case: one error
 # toast, i.e. the pre-hold behavior). Stuck 'warming'/'queued' rows are not a
@@ -959,4 +1008,5 @@ async def proxy_dicom_web_root(request: Request):
     dependencies=[Depends(dicomweb_dataset_guard)],
 )
 async def proxy_dicom_web(request: Request, path: str):
+    await queue_sidebar_study_warm(request)
     return await _proxy(request)
