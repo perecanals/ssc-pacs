@@ -3,9 +3,9 @@
 A `patient` row is an enrollment — one (dataset, patient_id) pair, keyed by
 patient_key — and enrollments of the same person share a subject_id. Each study
 (and its series) is owned by one enrollment (patient_key) and carries that
-enrollment's subject. Linking is identity only: an enrollment sees the studies
-it owns plus those it is a member of (`study_member`, Alembic 0028 — written by
-ingestion when a linked enrollment re-sends a UID another one owns). These helpers are the only sanctioned way to change a
+enrollment's subject. These identity helpers do not grant study memberships.
+Ingestion grants them for same-UID studies and the standalone linker can grant
+them for reference-owned studies. These helpers are the sanctioned way to change a
 subject or an owner after ingestion; they keep the invariants reconciliation
 checks (a series has its study's owner and subject; a study has its owner's
 subject).

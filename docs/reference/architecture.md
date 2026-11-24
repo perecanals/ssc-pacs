@@ -446,7 +446,7 @@ Scope follows the identity model (Alembic `0026`/`0028`, see
 patient id in one dataset, keyed by `patient_key` — and enrollments of the same
 person share a `subject_id` (identity only). Each study/series is owned by one
 enrollment; an enrollment sees what it owns plus the studies it is a *member*
-of (a linked enrollment that re-sent the same StudyInstanceUID) — the
+of (via same-UID ingestion or standalone sharing of reference-owned studies) — the
 `study_visibility` view. So a user sees:
 
 - patient rows (and their patient-level labels) of enrollments in their

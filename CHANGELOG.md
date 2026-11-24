@@ -1,5 +1,10 @@
 # Changelog
 
+## v2.21 — 2026-11-24
+
+Standalone patient linking shares the reference enrollment’s existing studies. Use `--identity-only` for enrollment-only links. Ingestion retains same-UID sharing.
+Administrators can copy missing patient annotations for one instrument during linking. No database migration or service restart is required.
+
 ## v2.20 — 2026-11-17
 
 Expanding a previously unloaded study in the web-app-proxied OHIF sidebar automatically queues decompression through its series-list request, reusing the existing permissions, storage checks and warm queue.

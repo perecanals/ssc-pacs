@@ -15,8 +15,7 @@ datasets are the same person. Schema: [`../reference/data_stores.md`](../referen
   are two patients, and here they are in fact two different people.
 - **Subject** — `subject_id`, shared by the enrollments of one person. An
   enrollment starts as its own subject (`subject_id = patient_key`); linking
-  makes several enrollments one subject. It records **identity only**: linking
-  does not share imaging.
+  makes several enrollments one subject. The subject records identity. Study memberships control access to imaging.
 - **Ownership** — every study/series is owned by exactly one enrollment
   (`image_study.patient_key`), the one that ingested it first, and carries its
   subject. Imaging is stored once, in the owner's tree —
@@ -32,14 +31,14 @@ datasets are the same person. Schema: [`../reference/data_stores.md`](../referen
 
 So a dataset re-exported with **new UIDs** (e.g. OUTER LIMITS copies of
 CRISP2/LVO studies) keeps its own copies: each enrollment shows only its own
-studies, and the copies are stored twice. Only exact same-UID studies are shared.
+studies, and the copies are stored twice. Ingestion shares exact same-UID studies. The standalone linker can also grant memberships directly.
 
 What linking changes — and what it does not:
 
 | | Shared between linked enrollments | Separate per enrollment |
 |---|---|---|
 | Identity (`subject_id`) | yes | |
-| Imaging (studies, series, OHIF) | only same-UID studies (membership) | yes — each sees what it owns + its memberships |
+| Imaging (studies, series, OHIF) | studies with a membership | yes — each sees what it owns + its memberships |
 | Study / series labels | yes, on a shared study (they describe the imaging) | |
 | Timepoints, episodes, series ranks (`NCCT_1`) | | yes — computed per owning enrollment; a shared study keeps its owner's |
 | Clinical timepoint anchor (CRISP2 puncture time) | yes — a fact about the person | |
@@ -72,8 +71,8 @@ Each row reads "`OUTERLIMITS/OL-0001` is the same person as the already-ingested
 
 ```bash
 python scripts/admin/manage_datasets.py add --slug outerlimits --name OUTERLIMITS   # once
-python scripts/admin/link_patients.py link outerlimits_links.csv            # dry-run: per-row plan
-python scripts/admin/link_patients.py link outerlimits_links.csv --apply
+python scripts/admin/link_patients.py link outerlimits_links.csv --identity-only            # dry-run: per-row plan
+python scripts/admin/link_patients.py link outerlimits_links.csv --identity-only --apply
 ```
 
 The same links as a JSON file — one dataset linked to one reference dataset —
@@ -95,13 +94,20 @@ ingests. The keys must be the DICOM `PatientID`s the new files carry. Details:
 At the end of the run the linked view is rebuilt, so same-UID studies the batch
 re-sent appear under the re-sending enrollment too.
 
-- The `link_*` enrollment must exist (ingested). The other is **created** when
-  missing — an enrollment with no imaging of its own, `import_label =
-  link:<file>`; it sees nothing until it ingests (its same-UID studies then
-  become memberships).
-- If it already exists, its whole subject joins the other's; each keeps the
-  imaging it owns, nothing moves on disk, and no imaging is shared by the link
-  itself.
+- The standalone linker gives the destination enrollment membership in every study
+  currently **owned by the named reference enrollment**, including when both IDs
+  are already linked. Users with destination dataset access can then view those
+  studies and their series. The reference keeps ownership and storage paths.
+  Re-run to include studies added later. Use `--identity-only` for ingestion
+  preparation or other links that should grant no additional study access.
+- The reference must already exist. A missing destination is created with
+  `import_label = link:<file>`. For an existing destination the linker merges
+  its subject with the reference subject.
+- Study and series annotations follow the shared imaging. To copy existing
+  patient values once, add `--copy-patient-instrument NAME` to the dry run and
+  apply commands. Copies have independent edit histories. Existing destination
+  values are preserved and differences reported. The admin command attributes
+  inserted values to `link:<filename>`. Unlinking keeps those patient values.
 - After `--apply` the [linked view](dataset_layout.md#linked-view) is rebuilt
   (when `[storage].linked_view_root` is set): it holds one symlink per membership.
 - The run validates every row first (registered datasets, existing target, no

@@ -242,3 +242,43 @@ def test_ranks_are_per_owner(link_module, cur):
     cur.execute("SELECT series_label FROM image_series WHERE seriesinstanceuid IN "
                 "('2.2.2.2.2.1', '6.6.6.6.6.1')")
     assert [r["series_label"] for r in cur.fetchall()] == ["NCCT_1", "NCCT_1"]
+
+
+def test_standalone_shares_reference_only_and_copies_missing_values(link_module, db_conn):
+    with db_conn.cursor() as c:
+        c.execute("INSERT INTO dataset (slug,name) VALUES ('guide','GUIDE')")
+        rows = [_row(dataset="GUIDE", patient_id="new", link_dataset="lvo", link_patient_id="P-0001")]
+        run = link_module["standalone_links"]
+        run(c, rows, "batch", identity_only=True)
+        c.execute("SELECT count(*) FROM study_visibility WHERE patient_key='guide__new'")
+        assert c.fetchone() == (0,)
+        c.execute("INSERT INTO label_definitions (name, level, datatype, instrument, created_by) "
+                  "VALUES ('copy_test','patient','text','instrument_test','pytest')")
+        c.execute("INSERT INTO annotations (level,patient_key,patient_id,label,value,created_by) "
+                  "VALUES ('patient','lvo__P-0001','P-0001','copy_test','ref','pytest')")
+        c.execute("INSERT INTO image_study (studyinstanceuid,patient_key,subject_id,patient_id) "
+                  "VALUES ('9.81','crisp2__P-0001','lvo__P-0001','P-0001')")
+        _, touched = run(c, rows, "batch", instrument="instrument_test")
+        assert touched == {"lvo__P-0001"}
+        c.execute("SELECT studyinstanceuid FROM study_visibility WHERE patient_key='guide__new'")
+        assert c.fetchall() == [("1.2.3.4.5",)]
+        c.execute("SELECT value,created_by FROM annotations WHERE patient_key='guide__new'")
+        assert c.fetchone() == ("ref", "link:batch")
+        assert run(c, rows, "batch", instrument="instrument_test")[1] == set()
+        c.execute("UPDATE annotations SET value='local' WHERE patient_key='guide__new'")
+        report, touched = run(c, rows, "batch", instrument="instrument_test")
+        assert not touched and "differing: 1" in report[-1]
+        link_module["_unlink_rows"](c, rows)
+        c.execute("SELECT count(*) FROM study_visibility WHERE patient_key='guide__new'")
+        assert c.fetchone() == (0,)
+
+
+def test_invalid_batch_rolls_back_standalone_link(link_module, client, db_conn, monkeypatch, tmp_path):
+    path = tmp_path / "invalid.json"
+    path.write_text('{"dataset":"crisp2","link_dataset":"lvo",'
+                    '"links":{"rollback-test":"P-0001","bad":"missing"}}')
+    monkeypatch.setattr(sys, "argv", ["link_patients.py", "link", str(path), "--apply"])
+    assert link_module["main"]() == 1
+    with db_conn.cursor() as c:
+        c.execute("SELECT 1 FROM patient WHERE patient_key='crisp2__rollback-test'")
+        assert c.fetchone() is None

@@ -140,6 +140,19 @@ class TestAnnotationWrites:
             cur.execute("SELECT patient_id FROM annotations WHERE label = 'ident_study'")
             assert cur.fetchone()[0] == "P-0001"
 
+    def test_shared_series_edit_is_visible_from_owner(self, client):
+        login_as(client, USER_CRISP)
+        response = client.post("/api/annotations", json={
+            "level": "series", "seriesinstanceuid": P1_SERIES, "studyinstanceuid": P1_STUDY,
+            "label": "ident_shared_series", "value": "reviewed",
+        })
+        assert response.status_code == 201
+        login_as(client, USER_LVO)
+        rows = client.get(f"/api/studies/{P1_STUDY}/series").json()
+        annotations = next(r["annotations"] for r in rows if r["seriesinstanceuid"] == P1_SERIES)
+        assert any(a["label"] == "ident_shared_series" and a["value"] == "reviewed"
+                   for a in annotations)
+
     def test_patient_annotation_unknown_key_404(self, logged_in_client):
         resp = logged_in_client.post("/api/annotations", json={
             "level": "patient", "patient_key": "lvo__P-ghost", "label": "ident_x", "value": "x",

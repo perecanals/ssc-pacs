@@ -1,10 +1,8 @@
 """The linked view: a browsable symlink tree of imaging shared across enrollments.
 
 Imaging is filed once, under the enrollment that owns it
-(``<root>/<slug>/<patient_id>/<StudyUID>``, see ``storage_layout``). A linked
-enrollment that re-sent a study another enrollment of the same person owns is a
-*member* of it (``study_member``, Alembic 0028) and sees it only through the
-database. This tree gives the same view on disk:
+(``<root>/<slug>/<patient_id>/<StudyUID>``, see ``storage_layout``). A linked enrollment can gain study membership through same-UID ingestion
+or the standalone patient linker (``study_member``, Alembic 0028). This tree gives the same view on disk:
 
     <linked_view_root>/<slug>/<patient_id>/<StudyUID>  ->  <archive volume root>/<owner's study dir>
 

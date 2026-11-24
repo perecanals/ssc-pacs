@@ -1,12 +1,9 @@
 #!/usr/bin/env python3
 """Link patients across datasets: declare that two enrollments are one person.
 
-A patient is an *enrollment* — one (dataset, patient_id) pair — and the
-enrollments of the same person share a *subject* (Alembic 0026). Linking puts a
-patient of one dataset into another's subject. The two then share imaging
-(each study stays owned by the enrollment that ingested it, and is visible from
-both) and study/series labels; patient labels stay separate per enrollment, and
-each dataset's users see only their own dataset's identifiers.
+Standalone linking also shares studies currently owned by the named reference
+enrollment. Use --identity-only for an identity link without adding memberships.
+Ingestion links retain their own same-UID study membership workflow.
 
 The input is a CSV (or Excel) table. ``link`` rows read "this patient is the same
 person as that already-ingested one":
@@ -116,6 +113,73 @@ def _unlink_rows(cur, rows) -> tuple[list[str], set[str]]:
     return report, touched
 
 
+# Resolve only the manifest's directed pairs, even on subjects with a third enrollment.
+_PAIRS = """
+WITH pairs AS (
+    SELECT dest.patient_key AS dest, dest.patient_id, dest.subject_id, ref.patient_key AS ref
+    FROM unnest(%s::text[], %s::text[], %s::text[], %s::text[]) x(ds, id, ref_ds, ref_id)
+    JOIN patient dest ON (dest.dataset, dest.patient_id) = (x.ds, x.id)
+    JOIN patient ref ON (ref.dataset, ref.patient_id) = (x.ref_ds, x.ref_id)
+)
+"""
+
+
+def standalone_links(cur, rows, filename, *, identity_only=False, instrument=None):
+    report, touched = apply_links(cur, rows, filename)
+    params = tuple([r[col] for r in rows] for col in LINK_COLUMNS)
+    if not identity_only:
+        cur.execute(_PAIRS + """
+            , added AS (
+                INSERT INTO study_member (patient_key, studyinstanceuid)
+                SELECT p.dest, st.studyinstanceuid FROM pairs p
+                JOIN image_study st ON st.patient_key = p.ref
+                ON CONFLICT DO NOTHING RETURNING patient_key, studyinstanceuid
+            )
+            SELECT p.subject_id, p.dest, count(DISTINCT a.studyinstanceuid),
+                   count(s.seriesinstanceuid)
+            FROM added a JOIN pairs p ON p.dest = a.patient_key
+            LEFT JOIN image_series s USING (studyinstanceuid)
+            GROUP BY p.subject_id, p.dest
+        """, params)
+        changes = cur.fetchall()
+        touched.update(subject for subject, _, _, _ in changes)
+        report.append(f"New study memberships: {sum(r[2] for r in changes)}; "
+                      f"series covered: {sum(r[3] for r in changes)}; "
+                      f"enrollments gaining studies: {len(changes)}")
+    if instrument:
+        cur.execute("SELECT 1 FROM label_definitions WHERE level='patient' AND instrument=%s",
+                    (instrument,))
+        if cur.fetchone() is None:
+            raise ValueError(f"no patient labels for instrument {instrument!r}")
+        cur.execute(_PAIRS + """
+            , candidates AS (
+                SELECT p.*, a.label, a.value FROM pairs p JOIN annotations a
+                ON a.patient_key = p.ref AND a.level = 'patient'
+                JOIN label_definitions d ON d.name = a.label AND d.level = a.level
+                WHERE d.instrument = %s
+            ), added AS (
+                INSERT INTO annotations (level, patient_key, patient_id, label, value, created_by)
+                SELECT 'patient', dest, patient_id, label, value, %s FROM candidates
+                ON CONFLICT (patient_key, label) WHERE level='patient' DO NOTHING
+                RETURNING patient_key, label
+            )
+            SELECT c.subject_id, c.dest, c.label, added.patient_key IS NOT NULL,
+                   existing.value IS DISTINCT FROM c.value
+            FROM candidates c LEFT JOIN added ON (added.patient_key,added.label)=(c.dest,c.label)
+            LEFT JOIN annotations existing ON existing.level='patient'
+                AND (existing.patient_key,existing.label)=(c.dest,c.label)
+        """, (*params, instrument, f"link:{filename}"))
+        values = cur.fetchall()
+        copied = sum(row[3] for row in values)
+        touched.update(subject for subject, _, _, added, _ in values if added)
+        conflicts = [(dest, label) for _, dest, label, added, differs in values
+                     if not added and differs]
+        report.extend(f"  kept differing patient label {dest}: {label}" for dest, label in conflicts)
+        report.append(f"Patient labels copied: {copied}; skipped: {len(values) - copied}; "
+                      f"differing: {len(conflicts)}")
+    return report, touched
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
@@ -124,7 +188,13 @@ def main() -> int:
     parser.add_argument("file", type=Path, help="CSV or Excel table (see the columns above)")
     parser.add_argument("--apply", action="store_true",
                         help="Write the changes (default: dry-run, roll back)")
+    parser.add_argument("--identity-only", action="store_true",
+                        help="Link identity without adding study memberships")
+    parser.add_argument("--copy-patient-instrument", metavar="NAME",
+                        help="Copy missing reference patient values from this instrument")
     args = parser.parse_args()
+    if args.command == "unlink" and (args.identity_only or args.copy_patient_instrument):
+        parser.error("study sharing and instrument options apply only to link")
 
     if not DB_CONFIG.get("user"):
         print("DB_USER not set — check .env", file=sys.stderr)
@@ -140,7 +210,10 @@ def main() -> int:
             cur.execute("SET LOCAL app.audit_user = %s", (f"link:{args.file.name}",))
             try:
                 if args.command == "link":
-                    report, touched = apply_links(cur, rows, args.file.name)
+                    report, touched = standalone_links(
+                        cur, rows, args.file.name, identity_only=args.identity_only,
+                        instrument=args.copy_patient_instrument,
+                    )
                 else:
                     report, touched = _unlink_rows(cur, rows)
             except ValueError as exc:

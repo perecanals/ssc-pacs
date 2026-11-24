@@ -95,7 +95,7 @@ python scripts/admin/manage_archive_volumes.py init|adopt <name> <root>         
 sudo "$(which python)" scripts/admin/manage_archive_volumes.py init|adopt <name> <root> --execute   # root only
 
 # Link a patient of one dataset to the same person in another (docs/operations/linking_patients.md)
-python scripts/admin/link_patients.py link links.csv [--apply]
+python scripts/admin/link_patients.py link links.csv [--identity-only] [--copy-patient-instrument NAME] [--apply]
 
 # Bulk-set label values from CSV/Excel (dry-run by default)
 python scripts/admin/bulk_set_label_values.py --file x.csv --level series \
