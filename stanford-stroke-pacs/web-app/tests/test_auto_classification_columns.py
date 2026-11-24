@@ -379,3 +379,30 @@ class TestDatasetScoping:
         assert studies.status_code == 404
         series = client.get("/api/studies/1.2.3.4.5/series?series_type=NCCT")
         assert series.status_code == 404
+
+
+def test_effective_timepoint_follows_selected_enrollment(logged_in_client, seeded_db):
+    import psycopg2
+
+    with psycopg2.connect(**seeded_db) as conn, conn.cursor() as cur:
+        cur.execute("INSERT INTO dataset_autolabel_rule VALUES ('lvo','effective_timepoint','test',1)")
+        cur.execute("""INSERT INTO dataset_autolabel_result VALUES
+            ('lvo','effective_timepoint','lvo__P-0001','1.2.3.4.5','BLO','test','{}')""")
+        conn.commit()
+        try:
+            for url, expected in (
+                ("/api/patients/lvo__P-0001/studies", "BLO"),
+                ("/api/patients/crisp2__P-0001/studies", "BL"),
+                ("/api/studies/1.2.3.4.5/series?timepoint_patient_key=crisp2__P-0001", "BL"),
+                ("/api/studies/1.2.3.4.5/series", "BLO"),
+            ):
+                response = logged_in_client.get(url)
+                assert response.status_code == 200
+                assert response.json()[0]["timepoint"] == expected
+                assert response.json()[0]["general_timepoint"] == "BL"
+            response = logged_in_client.get("/api/studies?dataset=lvo&timepoint=BLO")
+            assert response.json()["items"][0]["timepoint"] == "BLO"
+            response = logged_in_client.get("/api/studies?dataset=crisp2&timepoint=BLO")
+            assert response.json()["total"] == 0
+        finally:
+            cur.execute("DELETE FROM dataset_autolabel_rule WHERE dataset='lvo' AND rule='test'")

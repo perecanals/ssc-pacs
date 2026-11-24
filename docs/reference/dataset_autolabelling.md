@@ -1,6 +1,6 @@
 # Dataset-specific automatic study labels
 
-The ingestion pipeline computes general series types, study types, and timepoints. Each dataset can additionally enable versioned study rules. An empty registration runs no tailored rules. The admin CLI can export both the general timepoint and its dataset-specific refinement. The PACS browser displays the general timepoint.
+The ingestion pipeline computes general series types, study types, and timepoints. Each dataset can additionally enable versioned study rules. An empty registration runs no tailored rules. The admin CLI can export both the general timepoint and its dataset-specific refinement. The PACS browser’s **Auto Timepoint** column shows the effective value for the selected enrollment. Hover over a refined value to see its general timepoint. Flat study and series lists prefer the visible owner, then the first visible member by enrollment key, within the selected dataset. Disabling the effective-timepoint rule restores the general display.
 
 ## Run a rule
 

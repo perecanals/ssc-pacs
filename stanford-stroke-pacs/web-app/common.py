@@ -37,9 +37,29 @@ SERIES_AUTO_COLS = (
     "s.series_type, s.series_type_rank, s.series_label, "
     "s.series_type_rule, s.series_type_version"
 )
-STUDY_AUTO_COLS = (
-    "st.timepoint, st.timepoint_anchor_source, st.hours_to_event, st.timepoint_version"
-)
+def study_enrollment_sql(cur, scope, dataset=None):
+    """Choose the visible owner, then a deterministic member in the selected dataset."""
+    if scope is None and not dataset:
+        return "st.patient_key"
+    conditions = ["vis.studyinstanceuid = st.studyinstanceuid"]
+    if scope is not None:
+        conditions.append(f"q.dataset = ANY({scope_literal(cur, scope)})")
+    if dataset:
+        conditions.append("q.dataset = " + cur.mogrify("%s", (dataset,)).decode().replace("%", "%%"))
+    return ("(SELECT vis.patient_key FROM study_visibility vis JOIN patient q USING(patient_key) "
+            "WHERE " + " AND ".join(conditions) + " ORDER BY vis.is_owner DESC, vis.patient_key LIMIT 1)")
+
+
+def effective_timepoint_sql(enrollment):
+    return ("COALESCE((SELECT r.value FROM dataset_autolabel_result r "
+            f"WHERE r.patient_key = {enrollment} AND r.studyinstanceuid = st.studyinstanceuid "
+            "AND r.output = 'effective_timepoint'), st.timepoint)")
+
+
+def study_auto_cols(timepoint):
+    return (f"{timepoint} AS timepoint, st.timepoint AS general_timepoint, "
+            "st.timepoint_anchor_source, st.hours_to_event, st.timepoint_version")
+
 
 # The frontend column's key is `series_type`, but its useful ordering is by
 # label: series_label sorts by type first, then rank within the type.
@@ -48,7 +68,6 @@ SERIES_SORT_OVERRIDES = {"series_type": "series_label"}
 # Match the *label* so "NCCT" finds every NCCT and "NCCT_1" narrows to each
 # patient's preferred one.
 SERIES_TYPE_MATCH_EXPR = "COALESCE(s.series_label, s.series_type, '')"
-TIMEPOINT_MATCH_EXPR = "COALESCE(st.timepoint, '')"
 
 
 def auto_match_sql(expr: str, values: list[str] | None) -> tuple[str, list[str]]:

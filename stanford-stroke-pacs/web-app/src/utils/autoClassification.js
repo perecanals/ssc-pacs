@@ -44,6 +44,8 @@ export function buildAutoTooltip(sourceKey, row) {
   if (sourceKey === "timepoint") {
     if (!row.timepoint) return undefined;
     const parts = ["Machine-derived, not a human label"];
+    if (row.general_timepoint && row.general_timepoint !== row.timepoint)
+      parts.push(`general timepoint: ${row.general_timepoint}`);
     const anchor = row.timepoint_anchor_source;
     if (anchor) {
       parts.push(
@@ -56,7 +58,8 @@ export function buildAutoTooltip(sourceKey, row) {
       const h = Math.round(row.hours_to_event * 10) / 10;
       parts.push(`${h >= 0 ? "+" : ""}${h} h from anchor`);
     }
-    if (row.timepoint_version) parts.push(`version: ${row.timepoint_version}`);
+    if (row.timepoint_version)
+      parts.push(`general timepoint version: ${row.timepoint_version}`);
     return parts.join("\n");
   }
 

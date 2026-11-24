@@ -1,5 +1,10 @@
 # Changelog
 
+## v2.23 — 2026-11-24
+
+The study and series browser displays and filters dataset-specific Auto Timepoints within the visible enrollment. Hover over a refined value to see its general timepoint.
+Rebuild the frontend and restart the web app. Uses migration `0031_dataset_autolabels` from v2.22.
+
 ## v2.22 — 2026-11-24
 
 Datasets can enable versioned automatic study labels and export predictions or hospital conflicts with the admin CLI. CRISP2/LVO supports PRE, BLO and BLT refinements.

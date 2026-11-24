@@ -414,7 +414,8 @@ entirely at the patient level since patients have no direct OHIF action.
 ### The "Auto" columns (machine-derived classification)
 
 `Auto Series Type` (`image_series.series_type`) and `Auto Timepoint`
-(`image_study.timepoint`) surface what the ingestion classifier decided. They are
+(the enrollment’s effective prediction, falling back to `image_study.timepoint`)
+surface machine classifications. Study and series API rows also expose `general_timepoint`. They are
 a **separate axis** from the human annotation labels that happen to share those
 names (`series_type`, `timepoint`, both default-visible). Runtime detection never
 reads manual annotations, and automatic reclassification never overwrites them;

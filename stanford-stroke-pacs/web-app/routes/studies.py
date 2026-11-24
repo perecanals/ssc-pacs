@@ -23,19 +23,20 @@ from common import (
     SERIES_SORT_OVERRIDES,
     SERIES_SORT_WHITELIST,
     SERIES_TYPE_MATCH_EXPR,
-    STUDY_AUTO_COLS,
-    TIMEPOINT_MATCH_EXPR,
     apply_label_filters,
     attach_annotations,
     attach_enrollment_display,
     attach_inherited_annotations,
     auto_match_sql,
     build_label_filter_sql,
+    effective_timepoint_sql,
     enrollment_match_sql,
     ensure_patient_access,
     ensure_study_access,
     parse_label_filters,
     scope_literal,
+    study_auto_cols,
+    study_enrollment_sql,
     study_scope_sql,
 )
 from config import STORAGE_MODE
@@ -112,7 +113,7 @@ def list_patients(
                     f"WHERE v.patient_key = p.patient_key AND {st_sql})"
                 )
                 params.extend(st_params)
-            tp_sql, tp_params = auto_match_sql(TIMEPOINT_MATCH_EXPR, timepoint)
+            tp_sql, tp_params = auto_match_sql(effective_timepoint_sql("p.patient_key"), timepoint)
             if tp_sql:
                 conditions.append(
                     "EXISTS (SELECT 1 FROM study_visibility v "
@@ -230,7 +231,7 @@ def patient_studies(
     timepoint: list[str] | None = Query(
         None,
         description=(
-            "Machine-derived timepoint (BL / THROMBECTOMY / FU). Substring "
+            "Effective automatic timepoint for the visible enrollment. Substring "
             "match, repeatable (ORed)."
         ),
     ),
@@ -274,7 +275,9 @@ def patient_studies(
                 )
                 params.append(sil)
                 params.append(sil)
-            tp_sql, tp_params = auto_match_sql(TIMEPOINT_MATCH_EXPR, timepoint)
+            enrollment = cur.mogrify("%s::text", (patient_key,)).decode().replace("%", "%%")
+            effective = effective_timepoint_sql(enrollment)
+            tp_sql, tp_params = auto_match_sql(effective, timepoint)
             if tp_sql:
                 conditions.append(tp_sql)
                 params.extend(tp_params)
@@ -296,7 +299,7 @@ def patient_studies(
                 "st.acquisitiondatetime, st.studyinstanceuid, "
                 "st.studydescription, st.study_type, "
                 f"{STUDY_SERIES_COUNT} AS number_of_series, "
-                f"{STUDY_AUTO_COLS}, "
+                f"{study_auto_cols(effective)}, {enrollment} AS timepoint_patient_key, "
                 f"COALESCE({STUDY_MODALITY}, '') AS modality, "
                 "st.patient_id "
                 "FROM image_study st "
@@ -379,10 +382,9 @@ def list_classification_values(scope: list[str] | None = Depends(get_dataset_sco
     try:
         with conn.cursor() as cur:
             params: list = []
-            scope_s = scope_t = ""
+            scope_s = ""
             if scope is not None:
                 scope_s = f" AND {study_scope_sql('s.studyinstanceuid')}"
-                scope_t = f" AND {study_scope_sql('st.studyinstanceuid')}"
 
             cur.execute(
                 "SELECT s.series_type, COUNT(*) FROM image_series s "
@@ -394,13 +396,16 @@ def list_classification_values(scope: list[str] | None = Depends(get_dataset_sco
 
             # Clinical order (pre / during / post puncture), not alphabetical —
             # BL, FU, THROMBECTOMY would read as nonsense.
+            visible_dataset = "WHERE q.dataset=ANY(%s::text[])" if scope is not None else ""
             cur.execute(
-                "SELECT st.timepoint, COUNT(*) FROM image_study st "
-                f"WHERE st.timepoint IS NOT NULL AND st.timepoint <> ''{scope_t} "
-                "GROUP BY 1 "
-                "ORDER BY CASE st.timepoint "
-                "  WHEN 'BL' THEN 1 WHEN 'THROMBECTOMY' THEN 2 WHEN 'FU' THEN 3 "
-                "  ELSE 4 END, 1",
+                "SELECT tp, COUNT(*) FROM (SELECT DISTINCT st.studyinstanceuid, "
+                "COALESCE(r.value, st.timepoint) AS tp FROM image_study st "
+                "LEFT JOIN study_visibility v USING(studyinstanceuid) "
+                "LEFT JOIN patient q ON q.patient_key=v.patient_key "
+                "LEFT JOIN dataset_autolabel_result r ON r.patient_key=v.patient_key "
+                "AND r.studyinstanceuid=st.studyinstanceuid AND r.output='effective_timepoint' "
+                f"{visible_dataset}) candidates WHERE tp IS NOT NULL AND tp <> '' GROUP BY tp "
+                "ORDER BY array_position(ARRAY['PRE','BLO','BL','BLT','THROMBECTOMY','FU'],tp), tp",
                 params + ([scope] if scope is not None else []),
             )
             timepoints = [{"value": r[0], "count": r[1]} for r in cur.fetchall()]
@@ -433,7 +438,7 @@ def list_studies(
     timepoint: list[str] | None = Query(
         None,
         description=(
-            "Machine-derived timepoint (BL / THROMBECTOMY / FU). Substring "
+            "Effective automatic timepoint for the visible enrollment. Substring "
             "match, repeatable (ORed)."
         ),
     ),
@@ -478,6 +483,8 @@ def list_studies(
                 conditions.append("LOWER(COALESCE(st.import_label, '')) LIKE LOWER(%s)")
                 params.append(f"%{import_label}%")
             ds = (dataset or "").strip()
+            enrollment = study_enrollment_sql(cur, scope, ds)
+            effective = effective_timepoint_sql(enrollment)
             if ds:
                 conditions.append(
                     enrollment_match_sql("st.studyinstanceuid", scope_lit, "q.dataset = %s")
@@ -486,7 +493,7 @@ def list_studies(
             if study_type:
                 conditions.append("UPPER(st.study_type) = UPPER(%s)")
                 params.append(study_type)
-            tp_sql, tp_params = auto_match_sql(TIMEPOINT_MATCH_EXPR, timepoint)
+            tp_sql, tp_params = auto_match_sql(effective, timepoint)
             if tp_sql:
                 conditions.append(tp_sql)
                 params.extend(tp_params)
@@ -543,6 +550,7 @@ def list_studies(
             sort_expr = {
                 "number_of_series": STUDY_SERIES_COUNT,
                 "modality": STUDY_MODALITY,
+                "timepoint": effective,
             }.get(sort_by, f"st.{col}")
             direction = "DESC" if sort_dir.lower() == "desc" else "ASC"
 
@@ -553,7 +561,7 @@ def list_studies(
                 f"st.acquisitiondatetime, "
                 f"st.studyinstanceuid, st.studydescription, st.study_type, "
                 f"{STUDY_SERIES_COUNT} AS number_of_series, "
-                f"{STUDY_AUTO_COLS}, "
+                f"{study_auto_cols(effective)}, {enrollment} AS timepoint_patient_key, "
                 f"COALESCE({STUDY_MODALITY}, '') AS modality, "
                 f"st.patient_id "
                 f"FROM image_study st {where} "
@@ -578,6 +586,7 @@ def list_studies(
 @router.get("/api/studies/{studyinstanceuid}/series")
 def study_series(
     studyinstanceuid: str,
+    timepoint_patient_key: str | None = None,
     series_type: list[str] | None = Query(
         None,
         description=(
@@ -587,8 +596,7 @@ def study_series(
     timepoint: list[str] | None = Query(
         None,
         description=(
-            "The owning study's machine-derived timepoint (BL / THROMBECTOMY / "
-            "FU). Substring match, repeatable (ORed)."
+            "Effective study timepoint for the visible enrollment. Substring match, repeatable (ORed)."
         ),
     ),
     label_filters: str | None = Query(None),
@@ -607,11 +615,21 @@ def study_series(
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             ensure_study_access(cur, studyinstanceuid, scope)
             scope_lit = scope_literal(cur, scope)
+            if timepoint_patient_key:
+                ensure_patient_access(cur, timepoint_patient_key, scope)
+                cur.execute("SELECT 1 FROM study_visibility WHERE patient_key=%s AND studyinstanceuid=%s",
+                            (timepoint_patient_key, studyinstanceuid))
+                if not cur.fetchone():
+                    raise HTTPException(status_code=404, detail="Study not found")
+                enrollment = cur.mogrify("%s", (timepoint_patient_key,)).decode().replace("%", "%%")
+            else:
+                enrollment = study_enrollment_sql(cur, scope)
+            effective = effective_timepoint_sql(enrollment)
             conditions = ["s.studyinstanceuid = %s"]
             params: list = [studyinstanceuid]
             for expr, vals in (
                 (SERIES_TYPE_MATCH_EXPR, series_type),
-                (TIMEPOINT_MATCH_EXPR, timepoint),
+                (effective, timepoint),
             ):
                 sql, ps = auto_match_sql(expr, vals)
                 if sql:
@@ -627,7 +645,7 @@ def study_series(
                 "s.import_id, s.import_label, "
                 "s.sr_saved_by, s.sr_saved_at, s.storage_source, s.modality, s.seriesdescription, s.acquisitiondatetime, s.number_of_slices, "
                 "s.slicethickness, s.scanaxialcoverage_mm, "
-                f"{SERIES_AUTO_COLS}, {STUDY_AUTO_COLS}, "
+                f"{SERIES_AUTO_COLS}, {study_auto_cols(effective)}, "
                 "s.patient_id "
                 f"FROM {SERIES_FROM_CLAUSE} {where} "
                 "ORDER BY s.acquisitiondatetime, s.seriesdescription",
@@ -685,8 +703,7 @@ def list_series(
     timepoint: list[str] | None = Query(
         None,
         description=(
-            "The owning study's machine-derived timepoint (BL / THROMBECTOMY / "
-            "FU). Substring match, repeatable (ORed)."
+            "Effective study timepoint for the visible enrollment. Substring match, repeatable (ORed)."
         ),
     ),
     acquisitiondatetime: str | None = Query(None),
@@ -736,6 +753,8 @@ def list_series(
                 conditions.append("LOWER(COALESCE(s.import_label, '')) LIKE LOWER(%s)")
                 params.append(f"%{import_label}%")
             ds = (dataset or "").strip()
+            enrollment = study_enrollment_sql(cur, scope, ds)
+            effective = effective_timepoint_sql(enrollment)
             if ds:
                 conditions.append(
                     enrollment_match_sql("s.studyinstanceuid", scope_lit, "q.dataset = %s")
@@ -752,7 +771,7 @@ def list_series(
                 params.append(study_type)
             for expr, vals in (
                 (SERIES_TYPE_MATCH_EXPR, series_type),
-                (TIMEPOINT_MATCH_EXPR, timepoint),
+                (effective, timepoint),
             ):
                 sql, ps = auto_match_sql(expr, vals)
                 if sql:
@@ -804,7 +823,7 @@ def list_series(
                         s.slicethickness,
                         s.scanaxialcoverage_mm,
                         {SERIES_AUTO_COLS},
-                        {STUDY_AUTO_COLS},
+                        {study_auto_cols(effective)},
                         s.patient_id
                     FROM {SERIES_FROM_CLAUSE}
                     {where}
