@@ -8,8 +8,8 @@ import { compareSelectValues, labelEditability } from "../utils/table";
 import { AutoPill } from "./DataTable/BuiltinCell";
 import "./InlineEdit.css";
 
-function SelectPill({ value, onClick, className = "" }) {
-  const c = valueColor(value);
+function SelectPill({ value, labelName, onClick, className = "" }) {
+  const c = valueColor(value, labelName);
   return (
     <span
       onClick={onClick}
@@ -22,6 +22,7 @@ function SelectPill({ value, onClick, className = "" }) {
 }
 
 SelectPill.propTypes = {
+  labelName: PropTypes.string.isRequired,
   value: PropTypes.string.isRequired,
   onClick: PropTypes.func,
   className: PropTypes.string,
@@ -124,13 +125,17 @@ export default function InlineEdit({
     }
     if (datatype === "select") {
       if (!ann?.value) return null;
-      // Select values are categorical, so the hash colour is meaningful: equal
+      // Select values are categorical, so the label colour is meaningful: equal
       // values group by eye. Protected ones take AutoPill — same colour, but
       // outlined and muted so they never read as editable.
       return protection.canEdit ? (
-        <SelectPill value={ann.value} />
+        <SelectPill labelName={labelName} value={ann.value} />
       ) : (
-        <AutoPill value={ann.value} title={protection.reason} />
+        <AutoPill
+          labelName={labelName}
+          value={ann.value}
+          title={protection.reason}
+        />
       );
     }
     // text/int: plain, unformatted. A pill would be a lie here — the hash
@@ -375,7 +380,11 @@ function SelectEdit({
       title={ann?.created_by ? `Last edited by ${ann.created_by}` : undefined}
     >
       {currentValue ? (
-        <SelectPill value={currentValue} onClick={toggleOpen} />
+        <SelectPill
+          labelName={labelName}
+          value={currentValue}
+          onClick={toggleOpen}
+        />
       ) : (
         <button onClick={toggleOpen} className="select-edit__placeholder">
           Select&hellip;
@@ -419,7 +428,7 @@ function SelectEdit({
                   disabled={saving}
                   className="select-edit__option-btn"
                 >
-                  <SelectPill value={v} />
+                  <SelectPill labelName={labelName} value={v} />
                   {v === currentValue && (
                     <span className="select-edit__check-mark">&#10003;</span>
                   )}

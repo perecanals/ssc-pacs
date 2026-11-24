@@ -7,19 +7,25 @@ import {
 } from "../../utils/autoClassification";
 import "./BuiltinCell.css";
 
-// Machine-derived value. Same hash colour as the editable SelectPill so equal
+// Machine-derived value. Same label colour as the editable SelectPill so equal
 // values group by eye, but outlined and muted so it never reads as editable.
 //
 // `rank` is the per-patient preference rank (rank 1 = the series of that type to
 // open). It rides as a badge rather than being folded into the value, so the
 // colour stays keyed on the type: every NCCT looks like an NCCT.
-export function AutoPill({ value, title, rank = null, estimated = false }) {
+export function AutoPill({
+  value,
+  labelName,
+  title,
+  rank = null,
+  estimated = false,
+}) {
   if (!value) return null;
-  const c = valueColor(value);
+  const c = valueColor(value, labelName);
   return (
     <span
       className={`auto-pill${estimated ? " auto-pill--estimated" : ""}`}
-      style={{ color: c.text, borderColor: c.text }}
+      style={{ color: c.text, borderColor: c.border ?? c.text }}
       title={title}
     >
       {value}
@@ -41,6 +47,7 @@ export function AutoPill({ value, title, rank = null, estimated = false }) {
 
 AutoPill.propTypes = {
   value: PropTypes.oneOfType([PropTypes.string, PropTypes.number]),
+  labelName: PropTypes.string,
   title: PropTypes.string,
   rank: PropTypes.number,
   estimated: PropTypes.bool,
@@ -67,6 +74,7 @@ export default function BuiltinCell({ col, row }) {
     return (
       <AutoPill
         value={raw}
+        labelName={col.sourceKey}
         title={tooltip}
         rank={isSeriesType ? (row.series_type_rank ?? null) : null}
         estimated={

@@ -36,3 +36,27 @@ describe("valueColor", () => {
     expect(valueColor("x")).toEqual(valueColor("x"));
   });
 });
+
+describe("timepoint colours", () => {
+  it.each([
+    ["BL", "BL3", "#dcfce7"],
+    ["BLO", "BLO_MR", "#ecfccb"],
+    ["BLT", "BLT1", "#d1fae5"],
+    ["THROMBECTOMY", "thrombectomy", "#dbeafe"],
+    ["PRE", "PRE2", "#ffedd5"],
+    ["FU", "Fu2", "#fee2e2"],
+    ["FU", "24h_FU", "#fee2e2"],
+  ])("colours %s and %s alike", (base, variant, bg) => {
+    expect(valueColor(base, "timepoint").bg).toBe(bg);
+    expect(valueColor(variant, "timepoint")).toEqual(
+      valueColor(base, "timepoint"),
+    );
+  });
+
+  it("preserves the categorical colours for other labels and unknown timepoints", () => {
+    expect(valueColor("FU", "series_type")).toEqual(valueColor("FU"));
+    expect(valueColor("PRELIMINARY", "timepoint")).toEqual(
+      valueColor("PRELIMINARY"),
+    );
+  });
+});

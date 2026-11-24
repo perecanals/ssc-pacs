@@ -423,8 +423,9 @@ manual labels can guide offline evaluation and rule development. See `docs/refer
 
 - **Rendered by `AutoPill`** (`BuiltinCell.jsx`): an *outlined, muted,
   non-interactive* pill, deliberately unlike the filled, clickable `SelectPill`
-  that `InlineEdit` uses for the human label next to it. The hash colour comes
-  from the same `valueColor()`, so equal values still group by eye.
+  that `InlineEdit` uses for the human label next to it. Both use the same timepoint palette. BL is green, BLO is olive green,
+  BLT is emerald, thrombectomy is blue, PRE is light orange, and FU is red.
+  Numbered and qualified labels such as `BLT1` and `24h_FU` share their family colour.
 - **Preference rank**: `Auto Series Type` carries the per-patient rank
   (`series_type_rank`) as a superscript badge rather than folding it into the
   value — that keeps the colour keyed on the *type*, so every NCCT looks like an

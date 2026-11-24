@@ -115,6 +115,16 @@ describe("BuiltinCell", () => {
     expect(container.querySelector(".auto-pill--estimated")).not.toBeNull();
   });
 
+  it("uses the displayed refinement to colour a baseline study", () => {
+    render(
+      <BuiltinCell
+        col={TIMEPOINT_COL}
+        row={{ timepoint: "PRE", general_timepoint: "BL" }}
+      />,
+    );
+    expect(screen.getByText("PRE")).toHaveStyle({ borderColor: "#fbad70" });
+  });
+
   it("does not mark a timepoint anchored on a recorded puncture time", () => {
     const { container } = render(
       <BuiltinCell
