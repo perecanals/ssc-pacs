@@ -45,6 +45,7 @@ load_dotenv(STACK_ROOT / ".env")
 sys.path.insert(0, str(STACK_ROOT / "web-app"))
 sys.path.insert(0, str(STACK_ROOT / "image_ingestion_protocols"))
 
+from autolabels.runner import refresh  # noqa: E402
 from common import subject_for_patient_arg  # noqa: E402
 from series_classification import (  # noqa: E402
     ASSIGN_RANKS_SQL,
@@ -311,6 +312,7 @@ def main() -> int:
         # A window over each patient's series, so it runs after the type writes.
         cur.execute(ASSIGN_RANKS_SQL)
         cur.execute(CLEAR_RANKS_SQL)
+        refresh(cur, subjects={row["subject_id"] for row in study_rows})
     conn.commit()
     conn.close()
 

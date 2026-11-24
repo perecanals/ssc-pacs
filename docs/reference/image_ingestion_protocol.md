@@ -1,5 +1,8 @@
 # Image ingestion protocol
 
+For optional enrollment-specific study labels, see [dataset autolabelling](dataset_autolabelling.md).
+
+
 **Purpose:** How new imaging data gets into the PACS. Explains the protocol's
 inputs, steps, outputs, and how it interacts with each storage mode. For the
 cold storage design see [`../cold_storage/design.md`](../cold_storage/design.md).

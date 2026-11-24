@@ -1,5 +1,10 @@
 # Changelog
 
+## v2.22 — 2026-11-24
+
+Datasets can enable versioned automatic study labels and export predictions or hospital conflicts with the admin CLI. CRISP2/LVO supports PRE, BLO and BLT refinements.
+Includes Alembic migration `0031_dataset_autolabels` for registrations and enrollment-scoped results.
+
 ## v2.21 — 2026-11-24
 
 Standalone patient linking shares the reference enrollment’s existing studies. Use `--identity-only` for enrollment-only links. Ingestion retains same-UID sharing.

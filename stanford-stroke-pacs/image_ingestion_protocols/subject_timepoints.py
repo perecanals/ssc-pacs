@@ -20,6 +20,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 
+from autolabels.runner import refresh_after_ingest
 from series_classification import RULES_VERSION, assign_patient_timepoints
 
 CLINICAL_ANCHOR_COLUMNS = ("femoral_sheath_time", "receiving_arrival_time", "time_recognized")
@@ -118,4 +119,5 @@ def recompute_subject_timepoints(cur, subject_ids):
                 res["hours_to_event"], RULES_VERSION, suid,
             ),
         )
+    refresh_after_ingest(cur, subject_ids)
     return len(results)

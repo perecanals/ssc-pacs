@@ -1,5 +1,8 @@
 # Scripts
 
+For optional enrollment-specific study labels, see [dataset autolabelling](../../docs/reference/dataset_autolabelling.md).
+
+
 Operational and diagnostic scripts for the SSC PACS stack. Run from
 `stanford-stroke-pacs/` unless noted otherwise.
 

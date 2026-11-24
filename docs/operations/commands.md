@@ -1,5 +1,8 @@
 # Operations commands (cheat sheet)
 
+For optional enrollment-specific study labels, see [dataset autolabelling](../reference/dataset_autolabelling.md).
+
+
 **Purpose:** Day-2 commands and quick API examples. For first-time deploy see [`../guides/installation_and_deployment.md`](../guides/installation_and_deployment.md). For runtime/config context see [`../reference/runtime_and_config.md`](../reference/runtime_and_config.md).
 
 **Two "roots".** Script paths (`scripts/...`) are relative to the **stack root**

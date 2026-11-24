@@ -48,6 +48,7 @@ load_dotenv(STACK_ROOT / ".env")
 sys.path.insert(0, str(STACK_ROOT / "web-app"))
 sys.path.insert(0, str(STACK_ROOT / "image_ingestion_protocols"))
 
+from autolabels.runner import refresh  # noqa: E402
 from common import subject_for_patient_arg  # noqa: E402
 from series_classification import (  # noqa: E402
     RULES_VERSION,
@@ -266,6 +267,7 @@ def main() -> int:
             study_updates,
             page_size=500,
         )
+        refresh(cur, subjects=subject_ids)
     conn.commit()
     conn.close()
 

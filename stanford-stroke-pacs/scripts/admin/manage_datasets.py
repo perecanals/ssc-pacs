@@ -62,7 +62,10 @@ load_dotenv(REPO_ROOT / ".env")
 
 sys.path.insert(0, str(REPO_ROOT / "web-app"))
 
+sys.path.insert(0, str(REPO_ROOT / "image_ingestion_protocols"))
+
 from db import get_conn  # noqa: E402
+from subject_timepoints import recompute_subject_timepoints  # noqa: E402
 
 from labelled_table_sync import sync_labelled_rows  # noqa: E402
 
@@ -299,6 +302,18 @@ def _validation_report(cur, dataset: str, ids, dates) -> list[str]:
     return blocking
 
 
+def _refresh_enabled_timepoints(cur, dataset):
+    """A clinical edit can change both the episode anchor and its refinement."""
+    cur.execute(
+        "SELECT DISTINCT p.subject_id FROM patient p WHERE p.dataset=%s "
+        "AND EXISTS (SELECT FROM dataset_autolabel_rule g JOIN patient linked "
+        "ON linked.dataset=g.dataset WHERE linked.subject_id=p.subject_id)",
+        (dataset,),
+    )
+    subjects = [row[0] for row in cur.fetchall()]
+    recompute_subject_timepoints(cur, subjects)
+
+
 def _import_clinical(conn, args) -> int:
     from dataset_registry import resolve_or_offer_dataset  # noqa: PLC0415
 
@@ -418,6 +433,7 @@ def _import_clinical(conn, args) -> int:
             "clinical_date_column = %s, timepoint_strategy = %s WHERE name = %s",
             (table, id_col, date_col, strategy, args.dataset),
         )
+        _refresh_enabled_timepoints(cur, args.dataset)
     conn.commit()
     print(f"Committed: {table} registered for {args.dataset!r}"
           + (f"; view {LEGACY_CLINICAL_VIEW} kept for old queries" if view_grants is not None else "")
@@ -437,6 +453,8 @@ def _clear_clinical(conn, dataset: str, execute: bool) -> int:
         )
         if cur.fetchone() is None:
             sys.exit(f"Error: no dataset named {dataset!r}.")
+        if execute:
+            _refresh_enabled_timepoints(cur, dataset)
     if execute:
         conn.commit()
         print(f"Unregistered the clinical table of {dataset!r} (the table itself is kept).")
