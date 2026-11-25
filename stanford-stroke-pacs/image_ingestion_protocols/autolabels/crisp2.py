@@ -1,12 +1,14 @@
 """CRISP2 transfer timeline. All offsets are study time minus clinical time."""
 
+from dataclasses import replace
+
 from .model import Decision, Study, StudyRule
 
 RECOGNITION = ("time_recognized", "onset_time", "time_normal")
 CLOCKS = ("receiving_arrival_time", "femoral_sheath_time", "imaging_refer_bl_time", "imaging_receiv_bl_time")
 
 
-def classify(study: Study) -> Decision:
+def _classify(study: Study, *, twelve_hour_followup: bool) -> Decision:
     if study.acquired is None:
         return Decision(study.timepoint, "missing_study_time")
 
@@ -51,6 +53,10 @@ def classify(study: Study) -> Decision:
             return result("BL", "referring_match_after_arrival")
         if puncture is not None:
             return result("BLT", "after_arrival_before_puncture")
+        if twelve_hour_followup:
+            if arrival <= 12 * 60:
+                return result("BLT", "within_12h_after_arrival")
+            return result("FU", "over_12h_after_arrival_without_puncture")
         if arrival <= 1440:
             return result("BLT", "within_day_after_arrival")
         return result("BL", "late_without_puncture")
@@ -67,6 +73,15 @@ def classify(study: Study) -> Decision:
     return result("BL", "early_without_referring_match")
 
 
+def classify(study: Study) -> Decision:
+    """Version 1, retained for reproducing earlier assignments."""
+    return _classify(study, twelve_hour_followup=False)
+
+
+def classify_v2(study: Study) -> Decision:
+    return _classify(study, twelve_hour_followup=True)
+
+
 BASELINE_TIMEPOINT = StudyRule(
     name="crisp2_baseline_timepoint",
     version=1,
@@ -74,3 +89,5 @@ BASELINE_TIMEPOINT = StudyRule(
     clinical_fields=(*RECOGNITION, *CLOCKS, "was_pt_transfer"),
     evaluate=classify,
 )
+
+BASELINE_TIMEPOINT_V2 = replace(BASELINE_TIMEPOINT, version=2, evaluate=classify_v2)

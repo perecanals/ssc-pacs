@@ -2,7 +2,7 @@ from datetime import datetime, timedelta
 
 import pytest
 
-from autolabels.crisp2 import classify
+from autolabels.crisp2 import classify, classify_v2
 from autolabels.model import Study
 
 SCAN = datetime(2025, 1, 10, 12)
@@ -60,3 +60,15 @@ def test_incomplete_timeline(fields, expected):
     assert classify(Study("BL", SCAN, fields)).value == expected
     for general in ("FU", "THROMBECTOMY", None):
         assert classify(Study(general, SCAN, fields)).value == general
+
+
+@pytest.mark.parametrize("minutes,puncture,expected", [
+    (719, None, "BLT"), (720, None, "BLT"), (720.01, None, "FU"),
+    (1440, None, "FU"), (1441, None, "FU"), (721, -10, "BLT"),
+])
+def test_v2_post_arrival_cutoff(minutes, puncture, expected):
+    fields = {"receiving_arrival_time": at(minutes), "time_recognized": at(3000)}
+    if puncture is not None:
+        fields["femoral_sheath_time"] = at(puncture)
+    assert classify_v2(Study("BL", SCAN, fields)).value == expected
+    assert classify_v2(Study("FU", SCAN, fields)).value == "FU"

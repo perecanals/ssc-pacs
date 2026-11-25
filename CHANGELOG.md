@@ -1,5 +1,10 @@
 # Changelog
 
+## v2.25 — 2026-11-24
+
+CRISP2/LVO timepoint rule v2 assigns FU beyond 12 hours after recorded receiving arrival for eligible studies without a recorded puncture. Exactly 12 hours remains BLT.
+Enable version 2 with the dataset autolabelling CLI to backfill existing studies. No schema migration or service restart is required.
+
 ## v2.24 — 2026-11-24
 
 Navigator study and series rows show one patient ID and dataset for the current enrollment, including nested rows.

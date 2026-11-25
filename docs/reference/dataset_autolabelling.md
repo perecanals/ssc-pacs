@@ -8,8 +8,8 @@ Run from the stack root using the PACS Python environment. Preview takes a named
 
 ```bash
 python scripts/admin/manage_autolabels.py list --dataset CRISP2/LVO
-python scripts/admin/manage_autolabels.py preview --dataset CRISP2/LVO --rule crisp2_baseline_timepoint --version 1 --directory ../maintenance/crisp2-preview
-python scripts/admin/manage_autolabels.py enable --dataset CRISP2/LVO --rule crisp2_baseline_timepoint --version 1
+python scripts/admin/manage_autolabels.py preview --dataset CRISP2/LVO --rule crisp2_baseline_timepoint --version 2 --directory ../maintenance/crisp2-preview
+python scripts/admin/manage_autolabels.py enable --dataset CRISP2/LVO --rule crisp2_baseline_timepoint --version 2
 python scripts/admin/manage_autolabels.py run --dataset CRISP2/LVO
 python scripts/admin/manage_autolabels.py export --dataset CRISP2/LVO --file ../maintenance/effective-timepoints.csv
 python scripts/admin/manage_autolabels.py export --dataset CRISP2/LVO --conflicts --file ../maintenance/hospital-conflicts.csv
@@ -18,7 +18,7 @@ python scripts/admin/manage_autolabels.py disable --dataset CRISP2/LVO --rule cr
 
 Enable registers the version and computes all visible studies in one transaction. Run refreshes all enabled rules or just the named `--rule`. Disable removes that rule’s registration and results. Export files contain research identifiers. Use new output paths. The CLI reads the configured research database with administrator credentials.
 
-## CRISP2 baseline hospital and recognition rule, version 1
+## CRISP2 baseline hospital and recognition rule, version 2
 
 The [executable rule](../../stanford-stroke-pacs/image_ingestion_protocols/autolabels/crisp2.py) refines machine-baseline studies. All other general values pass through, including a missing timepoint. An offset is the DICOM study acquisition timestamp minus the named clinical time. Recognition uses the first parseable value of `time_recognized`, `onset_time`, then `time_normal`. The pre-existing intervention anchor determines general baseline eligibility.
 
@@ -29,7 +29,7 @@ The [executable rule](../../stanford-stroke-pacs/image_ingestion_protocols/autol
 | Study at/after recorded puncture, or puncture earlier than arrival | BL |
 | No arrival | BLT only with recognition reached, explicit direct presentation (transfer code 0), and no referring match. Otherwise BL. |
 | Both hospital imaging clocks match | BL |
-| At/after arrival | BL with a referring match. Otherwise BLT before recorded puncture, or up to 24 h after arrival inclusive when puncture is unavailable. Later studies retain BL. |
+| At/after arrival | BL with a referring match. Otherwise BLT before recorded puncture, or through 12 h after arrival inclusive when puncture is unavailable. Beyond 12 h those eligible studies receive FU. |
 | From 15 min before arrival to just before arrival | BLT with a receiving match only. Otherwise BL. |
 | From 30 min before to more than 15 min before arrival | BL |
 | More than 30 min before arrival | BL with a receiving match. Otherwise BLO through 24 h before arrival inclusive. Earlier studies require a referring match for BLO. |

@@ -293,7 +293,7 @@ but runtime detection never reads them ([`data_stores.md`](data_stores.md)).
   have their own automatic types. Those cells show a faint `—`;
   hover it for the exclusion that fired. An empty cell means not-yet-classified.
 - **Auto Timepoint** displays the effective prediction for the visible enrollment.
-  CRISP2/LVO can refine baseline to PRE, BLO, or BLT. The tooltip includes the
+  CRISP2/LVO can refine baseline to PRE, BLO, BLT, or FU under the dataset’s timing rules. The tooltip includes the
   general timepoint when a refinement applies. The general classifier uses the
   intervention anchor. See [dataset autolabelling](dataset_autolabelling.md). Where no puncture time was recorded the classifier
   falls back to a fixed offset, and those pills are drawn with a dashed border
