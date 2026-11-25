@@ -178,6 +178,9 @@ The Navigator page is decomposed into focused React components:
   Key features:
   - **Expandable rows**: Patient rows expand to show studies; study rows expand
     to show series. Expansion is triggered by clicking anywhere in the row.
+  - **Linked patients**: the Patient ID and Dataset cells on study and series rows
+    show the expanded enrollment or the selected dataset. In the all-datasets
+    view, they use the visible owner or first visible member.
   - **Nested expansion**: When viewing patients, expanded study sub-rows can
     further expand to reveal series (three-level nesting).
   - **Filter cascade into subtables**: expand fetches carry the cascadable

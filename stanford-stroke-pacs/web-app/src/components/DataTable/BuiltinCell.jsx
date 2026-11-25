@@ -56,6 +56,12 @@ AutoPill.propTypes = {
 // The single place a builtin column's cell contents are produced (main table,
 // child table, grandchild table).
 export default function BuiltinCell({ col, row }) {
+  if (col.sourceKey === "patient_id" || col.sourceKey === "dataset") {
+    return formatBuiltinValue(
+      col.sourceKey,
+      row[`display_${col.sourceKey}`] ?? row[col.sourceKey] ?? "",
+    );
+  }
   const raw = row[col.sourceKey] ?? "";
   if (col.readOnlyAuto) {
     const isSeriesType = col.sourceKey === "series_type";

@@ -25,6 +25,21 @@ describe("AutoPill", () => {
 });
 
 describe("BuiltinCell", () => {
+  it("shows the selected enrollment's identifiers on shared imaging", () => {
+    const row = {
+      patient_id: "A-01, B-99",
+      dataset: "Alpha, Beta",
+      display_patient_id: "B-99",
+      display_dataset: "Beta",
+    };
+    const { container, rerender } = render(
+      <BuiltinCell col={{ sourceKey: "patient_id" }} row={row} />,
+    );
+    expect(container.textContent).toBe("B-99");
+    rerender(<BuiltinCell col={{ sourceKey: "dataset" }} row={row} />);
+    expect(container.textContent).toBe("Beta");
+  });
+
   it("renders an Auto column as a pill carrying its provenance", () => {
     render(
       <BuiltinCell

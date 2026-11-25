@@ -1,5 +1,10 @@
 # Changelog
 
+## v2.24 — 2026-11-24
+
+Navigator study and series rows show one patient ID and dataset for the current enrollment, including nested rows.
+Rebuild the frontend and restart the web app. No schema migration.
+
 ## v2.23 — 2026-11-24
 
 The study and series browser displays and filters dataset-specific Auto Timepoints within the visible enrollment. Hover over a refined value to see its general timepoint.

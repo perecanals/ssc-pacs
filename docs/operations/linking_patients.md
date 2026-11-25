@@ -48,9 +48,10 @@ What linking changes — and what it does not:
 | Who sees what | | a user granted dataset A sees A's enrollments, A's patient labels and **the imaging A's enrollments see** — never B's identifiers, patient labels or B-only imaging |
 
 In the web app a person enrolled in two datasets you can see appears as two
-patient rows, each expanding to its own studies. A shared (same-UID) study lists
-both ids (`11-001, OL-0001`) and both datasets in the Patient ID / Dataset
-columns; patient labels shown on its rows are editable only when exactly one of
+patient rows, each expanding to its own studies. In the Patient ID and Dataset
+columns, a shared study or series shows the expanded patient's enrollment or the
+selected dataset's enrollment. With no selection the table prefers the visible
+owner, then the first visible member by patient key. The patient labels shown on its rows are editable only when exactly one of
 those enrollments is in view; otherwise the cell is read-only (hover for whose
 value is whose) — edit it from the patient row. Data exports join a patient
 table to the imaging each enrollment sees, so a shared study yields one row per

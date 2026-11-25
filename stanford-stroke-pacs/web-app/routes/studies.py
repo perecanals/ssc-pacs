@@ -312,7 +312,7 @@ def patient_studies(
                 dt = r.get("acquisitiondatetime")
                 r["acquisitiondatetime"] = dt.isoformat() if dt else None
 
-            attach_enrollment_display(cur, rows, scope)
+            attach_enrollment_display(cur, rows, scope, patient_key=patient_key)
             attach_annotations(cur, rows, "study", "studyinstanceuid")
             attach_inherited_annotations(
                 cur, rows, "study", scope=scope, context_key=patient_key
@@ -574,7 +574,7 @@ def list_studies(
                 dt = r.get("acquisitiondatetime")
                 r["acquisitiondatetime"] = dt.isoformat() if dt else None
 
-            attach_enrollment_display(cur, rows, scope)
+            attach_enrollment_display(cur, rows, scope, dataset=ds)
             attach_annotations(cur, rows, "study", "studyinstanceuid")
             attach_inherited_annotations(cur, rows, "study", scope=scope)
 
@@ -658,7 +658,7 @@ def study_series(
 
             from sr_provenance import attach_sr_permissions
             attach_sr_permissions(cur, rows, user)
-            attach_enrollment_display(cur, rows, scope)
+            attach_enrollment_display(cur, rows, scope, patient_key=timepoint_patient_key)
             attach_annotations(cur, rows, "series", "seriesinstanceuid")
             attach_inherited_annotations(cur, rows, "series", scope=scope)
 
@@ -841,7 +841,7 @@ def list_series(
 
             from sr_provenance import attach_sr_permissions
             attach_sr_permissions(cur, rows, user)
-            attach_enrollment_display(cur, rows, scope)
+            attach_enrollment_display(cur, rows, scope, dataset=ds)
             attach_annotations(cur, rows, "series", "seriesinstanceuid")
             attach_inherited_annotations(cur, rows, "series", scope=scope)
 

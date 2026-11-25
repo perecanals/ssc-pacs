@@ -218,10 +218,12 @@ def _study_enrollments(cur, study_uids, scope: list[str] | None) -> dict[str, li
     return by_study
 
 
-def attach_enrollment_display(cur, rows, scope: list[str] | None) -> None:
+def attach_enrollment_display(
+    cur, rows, scope: list[str] | None, *, patient_key: str | None = None, dataset: str | None = None,
+) -> None:
     """Set a study/series row's ``patient_id`` and ``dataset`` to the in-scope
     enrollments that see its study (owner and members), comma-joined in the
-    same order, owner first.
+    same order, owner first. The display fields identify the current enrollment.
 
     A user only ever sees identifiers from their own datasets. Rows come in
     carrying their owner's ``patient_id`` (the sort key) and ``patient_key``;
@@ -237,6 +239,16 @@ def attach_enrollment_display(cur, rows, scope: list[str] | None) -> None:
             key=lambda e: (e["patient_key"] != row.get("patient_key"), e["patient_key"]),
         )
         if enrollments:
+            # The Navigator shows one identity. Keep the full scoped fields for
+            # existing API consumers and actions that operate on the underlying row.
+            for enrollment in enrollments:
+                if patient_key and enrollment["patient_key"] != patient_key:
+                    continue
+                if dataset and enrollment["dataset"] != dataset:
+                    continue
+                row["display_patient_id"] = enrollment["patient_id"]
+                row["display_dataset"] = enrollment["dataset"]
+                break
             row["patient_id"] = ", ".join(e["patient_id"] for e in enrollments)
             row["dataset"] = ", ".join(e["dataset"] for e in enrollments)
         else:
