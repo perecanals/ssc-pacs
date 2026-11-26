@@ -112,24 +112,6 @@ def classify_study(study_description: str | None, series_types: list[str] | None
 
 # --- Timepoint (BL / THROMBECTOMY / FU) ---------------------------------------
 #
-# THE ANCHOR IS FEMORAL-SHEATH PUNCTURE, NOT STROKE ONSET. `BL` means
-# pre-thrombectomy, not post-onset. `patient.stroke_date` is a different clock and
-# is deliberately not used — mixing them would make our labels incomparable with
-# the reference implementation's.
-#
-# Anchor precedence and the +5h / +10h offsets are ported verbatim from that
-# implementation (get_metadata.py: `time_dct = {**recognized, **arrival, **evt}`,
-# where a later key wins). Only ~59% of clinical rows carry a recorded
-# `femoral_sheath_time`, so the other two are *estimates* — which is why the
-# source is recorded alongside the answer.
-
-_ANCHOR_PRECEDENCE: tuple[tuple[str, float], ...] = (
-    ("femoral_sheath_time", 0.0),        # the recorded puncture time
-    ("receiving_arrival_time", 5.0),     # estimate: arrival + 5h
-    ("time_recognized", 10.0),           # estimate: recognition + 10h
-)
-
-
 def _parse_clinical_datetime(value):
     """Parse a clinical time cell ('YYYY-MM-DD HH:MM[:SS]') -> datetime or None."""
     if value is None:
@@ -146,16 +128,13 @@ def _parse_clinical_datetime(value):
 
 
 def resolve_event_anchor(clinical_row: dict | None) -> tuple[datetime | None, str | None]:
-    """Return `(anchor_datetime, source_column)` for one patient's clinical row.
+    """Apply the registered strategy's ordered clinical offsets, in hours."""
+    from autolabels import ANCHORS
 
-    `clinical_row` maps the `clinical_data` column names to values. Returns
-    `(None, None)` when no anchor column is populated — 26% of our patients, who
-    get a NULL timepoint rather than a guess.
-    """
     if not clinical_row:
         return None, None
-
-    for column, offset_hours in _ANCHOR_PRECEDENCE:
+    strategy = clinical_row.get("_strategy")
+    for column, offset_hours in ANCHORS.get(strategy, ()):
         parsed = _parse_clinical_datetime(clinical_row.get(column))
         if parsed is not None:
             return parsed + timedelta(hours=offset_hours), column

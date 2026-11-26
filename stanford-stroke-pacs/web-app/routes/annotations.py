@@ -20,6 +20,7 @@ from common import (
 )
 from db import get_conn
 from labelled_table_sync import sync_labelled_rows
+from local_autolabels import refresh_quality
 
 logger = logging.getLogger(__name__)
 
@@ -68,7 +69,7 @@ _UPSERT_SQL = {
         "created_by = EXCLUDED.created_by, "
         "notes = COALESCE(EXCLUDED.notes, annotations.notes), "
         "created_at = now() "
-        "RETURNING id, level, label, value, created_by, created_at, notes"
+        "RETURNING id, level, label, value, created_by, created_at, notes, studyinstanceuid"
     ),
     "study": (
         "INSERT INTO annotations "
@@ -80,7 +81,7 @@ _UPSERT_SQL = {
         "created_by = EXCLUDED.created_by, "
         "notes = COALESCE(EXCLUDED.notes, annotations.notes), "
         "created_at = now() "
-        "RETURNING id, level, label, value, created_by, created_at, notes"
+        "RETURNING id, level, label, value, created_by, created_at, notes, studyinstanceuid"
     ),
     "patient": (
         "INSERT INTO annotations "
@@ -92,7 +93,7 @@ _UPSERT_SQL = {
         "created_by = EXCLUDED.created_by, "
         "notes = COALESCE(EXCLUDED.notes, annotations.notes), "
         "created_at = now() "
-        "RETURNING id, level, label, value, created_by, created_at, notes"
+        "RETURNING id, level, label, value, created_by, created_at, notes, studyinstanceuid"
     ),
 }
 
@@ -176,6 +177,7 @@ def create_annotation(
                 and label_def["datatype"] == "select"
             ):
                 record_label_value(cur, body.label, body.value, username)
+            refresh_quality(cur, body.level, body.label, row.pop("studyinstanceuid"))
         # Commit the annotation write independently; refresh the labelled mirror
         # table off the request path so it never blocks (or rolls back) the save.
         conn.commit()
@@ -219,6 +221,7 @@ def delete_annotation(
             cur.execute(
                 "DELETE FROM annotations WHERE id = %s", (annotation_id,)
             )
+            refresh_quality(cur, row["level"], row["label"], row["studyinstanceuid"])
         # Commit the delete independently; refresh the labelled mirror table off the
         # request path. entity_id/level are plain values captured from `row` above,
         # so they survive the connection close in `finally`.

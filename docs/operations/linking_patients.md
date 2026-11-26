@@ -48,9 +48,10 @@ What linking changes — and what it does not:
 | Who sees what | | a user granted dataset A sees A's enrollments, A's patient labels and **the imaging A's enrollments see** — never B's identifiers, patient labels or B-only imaging |
 
 In the web app a person enrolled in two datasets you can see appears as two
-patient rows, each expanding to its own studies. A shared (same-UID) study lists
-both ids (`11-001, OL-0001`) and both datasets in the Patient ID / Dataset
-columns; patient labels shown on its rows are editable only when exactly one of
+patient rows, each expanding to its own studies. In the Patient ID and Dataset
+columns, a shared study or series shows the expanded patient's enrollment or the
+selected dataset's enrollment. With no selection the table prefers the visible
+owner, then the first visible member by patient key. The patient labels shown on its rows are editable only when exactly one of
 those enrollments is in view; otherwise the cell is read-only (hover for whose
 value is whose) — edit it from the patient row. Data exports join a patient
 table to the imaging each enrollment sees, so a shared study yields one row per
@@ -172,11 +173,7 @@ one clinical table (`<slug with - as _>_clinical_data`, e.g.
 `precise_clinical_data`), its patient-id column, its episode-date column and an
 optional `timepoint_strategy`. A clinical row only ever matches enrollments of
 its own dataset — the patient tab's episode date and ingestion's clinical match
-never use it for a same-id patient elsewhere. The timepoint anchors (the CRISP2
-puncture columns) are read only from the dataset with `timepoint_strategy =
-crisp2_puncture` (production: `CRISP2/LVO`); a person linked to such an
-enrollment gets its anchor for all of their imaging. Other datasets anchor on
-each episode's thrombectomy study.
+never use it for a same-id patient elsewhere. Optional local strategies supply timepoint anchors through the linked subject. See [automatic study labels](../reference/dataset_autolabelling.md).
 
 ```bash
 # Upload a CSV/Excel (dry-run: validates ids, dates, coverage; then --execute)
@@ -201,7 +198,7 @@ from config.toml (they are ignored with a startup WARN) and restart the web app.
 ```bash
 python scripts/admin/manage_datasets.py import-clinical --dataset CRISP2/LVO \
     --from-table clinical_data --id-column study_id --date-column stroke_date \
-    --timepoint-strategy crisp2_puncture --execute
+    --execute
 ```
 
 `--from-table` renames the table to the convention name

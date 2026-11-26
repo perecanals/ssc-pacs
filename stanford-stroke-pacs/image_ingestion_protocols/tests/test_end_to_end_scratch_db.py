@@ -111,17 +111,21 @@ def scratch_engine():
         # punctured shortly after its imaging); 11-002 deliberately unmatched.
         conn.execute(text(
             "CREATE TABLE audit_clinical_data (study_id text PRIMARY KEY, "
-            "stroke_date text, femoral_sheath_time text, receiving_arrival_time text, "
+            "stroke_date text, procedure_time text, receiving_arrival_time text, "
             "time_recognized text)"))
         conn.execute(text(
-            "INSERT INTO audit_clinical_data (study_id, stroke_date, femoral_sheath_time) "
+            "INSERT INTO audit_clinical_data (study_id, stroke_date, procedure_time) "
             "VALUES ('11-001', '2026-01-01', '2026-01-02 12:00:00')"))
         conn.execute(text(
             "UPDATE dataset SET clinical_table = 'audit_clinical_data', "
             "clinical_id_column = 'study_id', clinical_date_column = 'stroke_date', "
-            "timepoint_strategy = 'crisp2_puncture' WHERE slug = 'audit'"))
+            "timepoint_strategy = 'audit_procedure' WHERE slug = 'audit'"))
 
-    yield engine
+    from autolabels import ANCHORS
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setitem(ANCHORS, "audit_procedure", (("procedure_time", 0),))
+        yield engine
 
     engine.dispose()
     admin = psycopg2.connect(dbname="postgres", **{k: v for k, v in creds.items()})
@@ -182,6 +186,9 @@ def _run_case(scratch, engine, patient_id, import_id=1, overwrite=False,
         cold_archive_root=str(scratch / "cold_root"), compress_workers=2,
         on_patient_mismatch=on_patient_mismatch,
     )
+    from volume_helpers import make_volumes
+
+    proto.archive_volumes = make_volumes(scratch, "cold_root")
     proto.base_dir = str(scratch / "dicom_root")
     return proto.execute_image_ingestion_protocol(overwrite_if_exists=overwrite)
 
@@ -477,14 +484,14 @@ def test_same_id_in_another_dataset_is_another_patient(roots, scratch_engine):
     assert rows == [("audit__11-001", "audit__11-001", "audit"),
                     ("other__11-001", "other__11-001", "OTHER/DS")]
     assert tuple(owner) == ("other__11-001", "other__11-001")
-    # audit's 11-001 is anchored on its puncture (crisp2_puncture strategy);
+    # audit's 11-001 is anchored on its puncture (audit_procedure strategy);
     # the other dataset's 11-001 is someone else and never sees that row.
     with scratch_engine.connect() as conn:
         anchors = dict(conn.execute(text(
             "SELECT patient_key, timepoint_anchor_source FROM image_study "
             "WHERE patient_id = '11-001'")).all())
-    assert anchors["audit__11-001"] == "femoral_sheath_time"
-    assert anchors["other__11-001"] != "femoral_sheath_time"
+    assert anchors["audit__11-001"] == "procedure_time"
+    assert anchors["other__11-001"] != "procedure_time"
 
 
 def test_uid_owned_by_another_person_is_refused_before_any_delete(roots, scratch_engine):

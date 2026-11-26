@@ -69,6 +69,21 @@ class TestStudyRowIdentity:
         assert row["dataset"] == "lvo, crisp2"
         assert row["patient_key"] == "lvo__P-0001"  # the owner
 
+    def test_linked_display_follows_dataset_and_expanded_enrollment(self, logged_in_client):
+        for dataset in ("crisp2", "lvo"):
+            key = f"{dataset}__P-0001"
+            for url, field in (
+                (f"/api/patients/{key}/studies", None),
+                (f"/api/studies/{P1_STUDY}/series?timepoint_patient_key={key}", None),
+                (f"/api/studies?dataset={dataset}", "items"),
+                (f"/api/series?dataset={dataset}", "series"),
+            ):
+                payload = logged_in_client.get(url).json()
+                row = _study(payload[field] if field else payload)
+                assert (row["display_dataset"], row["display_patient_id"]) == (dataset, "P-0001")
+                assert row["dataset"] == "lvo, crisp2"
+                assert row["patient_key"] == "lvo__P-0001"
+
     def test_scoped_user_sees_only_own_dataset_identifiers(self, client):
         row = _study(login_as(client, USER_CRISP).get("/api/studies").json()["items"])
         assert (row["patient_id"], row["dataset"]) == ("P-0001", "crisp2")

@@ -1,17 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildAutoTooltip, isEstimatedAnchor } from "../autoClassification";
-
-describe("isEstimatedAnchor", () => {
-  it("treats offset-derived anchors as estimates", () => {
-    expect(isEstimatedAnchor("receiving_arrival_time")).toBe(true);
-    expect(isEstimatedAnchor("time_recognized")).toBe(true);
-  });
-
-  it("treats a recorded puncture time as exact", () => {
-    expect(isEstimatedAnchor("femoral_sheath_time")).toBe(false);
-    expect(isEstimatedAnchor(null)).toBe(false);
-  });
-});
+import { buildAutoTooltip } from "../autoClassification";
 
 describe("buildAutoTooltip", () => {
   it("carries the rule and version for series_type", () => {
@@ -59,7 +47,8 @@ describe("buildAutoTooltip", () => {
   it("flags an estimated anchor", () => {
     const tip = buildAutoTooltip("timepoint", {
       timepoint: "FU",
-      timepoint_anchor_source: "time_recognized",
+      timepoint_anchor_source: "visit_start",
+      timepoint_estimated: true,
       hours_to_event: 26,
     });
     expect(tip).toContain("ESTIMATED");

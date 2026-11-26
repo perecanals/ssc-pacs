@@ -1,17 +1,5 @@
 // Provenance for the machine-derived "Auto ..." columns.
 
-// These anchors are fixed offsets, not recorded times (see _ANCHOR_PRECEDENCE in
-// image_ingestion_protocols/series_classification.py), so any timepoint derived
-// from one is an estimate.
-const ESTIMATED_ANCHORS = new Set([
-  "receiving_arrival_time",
-  "time_recognized",
-]);
-
-export function isEstimatedAnchor(source) {
-  return ESTIMATED_ANCHORS.has(source);
-}
-
 // Multi-line hover text for an Auto cell; undefined for any other column.
 export function buildAutoTooltip(sourceKey, row) {
   if (!row) return undefined;
@@ -42,12 +30,20 @@ export function buildAutoTooltip(sourceKey, row) {
   }
 
   if (sourceKey === "timepoint") {
+    if (row.timepoint_details) {
+      const parts = [row.timepoint || "Undetermined"];
+      if (row.general_timepoint && row.general_timepoint !== row.timepoint)
+        parts.push(`General timepoint: ${row.general_timepoint}`);
+      return [...parts, ...row.timepoint_details].join("\n");
+    }
     if (!row.timepoint) return undefined;
     const parts = ["Machine-derived, not a human label"];
+    if (row.general_timepoint && row.general_timepoint !== row.timepoint)
+      parts.push(`general timepoint: ${row.general_timepoint}`);
     const anchor = row.timepoint_anchor_source;
     if (anchor) {
       parts.push(
-        isEstimatedAnchor(anchor)
+        row.timepoint_estimated
           ? `anchor: ${anchor} — ESTIMATED (offset, not a recorded puncture time)`
           : `anchor: ${anchor}`,
       );
@@ -56,7 +52,8 @@ export function buildAutoTooltip(sourceKey, row) {
       const h = Math.round(row.hours_to_event * 10) / 10;
       parts.push(`${h >= 0 ? "+" : ""}${h} h from anchor`);
     }
-    if (row.timepoint_version) parts.push(`version: ${row.timepoint_version}`);
+    if (row.timepoint_version)
+      parts.push(`general timepoint version: ${row.timepoint_version}`);
     return parts.join("\n");
   }
 

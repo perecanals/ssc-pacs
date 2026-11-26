@@ -45,6 +45,7 @@ load_dotenv(STACK_ROOT / ".env")
 sys.path.insert(0, str(STACK_ROOT / "web-app"))
 sys.path.insert(0, str(STACK_ROOT / "image_ingestion_protocols"))
 
+from autolabels.runner import refresh  # noqa: E402
 from common import subject_for_patient_arg  # noqa: E402
 from series_classification import (  # noqa: E402
     ASSIGN_RANKS_SQL,
@@ -117,19 +118,9 @@ def _print_timepoint_report(rows: list[dict]) -> None:
     for value, count in Counter(r["timepoint"] for r in rows).most_common():
         print(f"  {count:7}  {_fmt(value)}")
 
-    # The anchor source is the honesty column: only femoral_sheath_time is a
-    # recorded puncture. The other two are +5h / +10h estimates, so a BL/FU built
-    # on them is materially weaker evidence.
-    print("\n--- anchor source (only femoral_sheath_time is a RECORDED puncture) ---")
-    notes = {
-        "femoral_sheath_time": "recorded puncture",
-        "receiving_arrival_time": "ESTIMATED (arrival + 5h)",
-        "time_recognized": "ESTIMATED (recognition + 10h)",
-        "thrombectomy_study": "episode's own thrombectomy study time (no clinical anchor)",
-        None: "no anchor at all -> timepoint is NULL",
-    }
+    print("\n--- anchor source ---")
     for source, count in Counter(r["timepoint_anchor_source"] for r in rows).most_common():
-        print(f"  {count:7}  {_fmt(source):24}  {notes.get(source, '?')}")
+        print(f"  {count:7}  {_fmt(source)}")
 
     print("\n--- rule ---")
     for rule, count in Counter(r["timepoint_rule"] for r in rows).most_common():
@@ -224,12 +215,7 @@ def main() -> int:
     # is passed for signature parity but deliberately unused, so a series-rule
     # change can never silently move a study's type.
     #
-    # timepoint is episode-aware (assign_patient_timepoints): a person's studies
-    # (a subject — possibly several dataset enrollments) are split into
-    # episodes and each anchored on its own femoral-sheath puncture from the
-    # 'crisp2_puncture' dataset's clinical table (NOT patient.stroke_date — a
-    # different clock), else its own thrombectomy study. Episodes with neither
-    # get a NULL timepoint, not a guess.
+    # Recompute episodes and apply the configured clinical anchor for each owner.
     with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
         clinical_cols, clinical_join, clinical_params = clinical_anchor_sql(cur)
         cur.execute(
@@ -311,6 +297,7 @@ def main() -> int:
         # A window over each patient's series, so it runs after the type writes.
         cur.execute(ASSIGN_RANKS_SQL)
         cur.execute(CLEAR_RANKS_SQL)
+        refresh(cur, subjects={row["subject_id"] for row in study_rows})
     conn.commit()
     conn.close()
 

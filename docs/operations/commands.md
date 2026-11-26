@@ -1,5 +1,8 @@
 # Operations commands (cheat sheet)
 
+For optional enrollment-specific study labels, see [dataset autolabelling](../reference/dataset_autolabelling.md).
+
+
 **Purpose:** Day-2 commands and quick API examples. For first-time deploy see [`../guides/installation_and_deployment.md`](../guides/installation_and_deployment.md). For runtime/config context see [`../reference/runtime_and_config.md`](../reference/runtime_and_config.md).
 
 **Two "roots".** Script paths (`scripts/...`) are relative to the **stack root**
@@ -182,7 +185,7 @@ python scripts/admin/manage_datasets.py rename crisp2-lvo 'CRISP2 LVO' --execute
 ```
 
 Register a dataset's clinical table (Alembic `0027`; patient-tab Episode Date,
-ingestion's clinical match, and — with `--timepoint-strategy crisp2_puncture` —
+ingestion's clinical match, and — with `--timepoint-strategy STRATEGY` —
 the timepoint anchors). Upload a CSV/Excel or adopt an existing table; dry-run
 validates ids, dates and coverage, `--execute` applies, `--replace` overwrites;
 see [`linking_patients.md`](linking_patients.md) §Clinical data:
@@ -191,7 +194,7 @@ see [`linking_patients.md`](linking_patients.md) §Clinical data:
 python scripts/admin/manage_datasets.py import-clinical --dataset PRECISE --file precise.csv \
     --id-column 'Patient ID' --date-column 'Stroke Date'                       # dry-run
 python scripts/admin/manage_datasets.py import-clinical --dataset CRISP2/LVO --from-table clinical_data \
-    --id-column study_id --date-column stroke_date --timepoint-strategy crisp2_puncture --execute
+    --id-column study_id --date-column stroke_date --execute
 python scripts/admin/manage_datasets.py clear-clinical --dataset PRECISE --execute    # unregister, keeps the table
 ```
 

@@ -1,6 +1,6 @@
 @reference "../../app.css";
 
-/* AutoPill — machine-derived value. Same geometry and hash colour as
+/* AutoPill — machine-derived value. Same geometry and label colour as
    .select-pill, but outlined instead of filled and never clickable, so a
    read-only Auto column cannot be mistaken for the editable label next to it. */
 .auto-pill {

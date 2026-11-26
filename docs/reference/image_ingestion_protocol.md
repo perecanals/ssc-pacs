@@ -1,5 +1,8 @@
 # Image ingestion protocol
 
+For optional enrollment-specific study labels, see [dataset autolabelling](dataset_autolabelling.md).
+
+
 **Purpose:** How new imaging data gets into the PACS. Explains the protocol's
 inputs, steps, outputs, and how it interacts with each storage mode. For the
 cold storage design see [`../cold_storage/design.md`](../cold_storage/design.md).
@@ -452,64 +455,7 @@ can open a new episode or re-anchor an earlier one (the old per-batch assignment
 could not, which left a few timepoints stale). The classifier itself is
 `series_classification.assign_patient_timepoints()`, shared with
 `scripts/admin/recompute_timepoints.py`, `reclassify_series_types.py` and the
-link/split tools so they can't diverge. The clinical anchor comes only from
-the clinical table of the dataset whose `timepoint_strategy` is
-`crisp2_puncture` (production `CRISP2/LVO`), joined to the person's (subject's)
-enrollment in that dataset — a fact about the person, so a linked enrollment's
-own copies use it too — CRISP2-specific on purpose. Every other dataset (e.g.
-PRECISE) anchors only on each episode's own thrombectomy study; a future
-per-dataset rule would be a new `timepoint_strategy` value.
-
-> **The anchor is femoral-sheath puncture, NOT stroke onset.** `BL` means
-> *pre-thrombectomy*, not *post-onset*. `patient.stroke_date` is a different clock
-> and is deliberately not used — mixing them would silently change what `BL` means.
-
-**Episodes (`image_study.episode`).** A patient's studies are first split into
-episodes: sorted by acquisition time, a gap greater than **45 days** starts a new
-1-based episode. A few patients carry distinct stroke episodes months apart, and a
-single per-patient anchor scored one episode's imaging against the *other*
-episode's puncture — a whole episode mislabelled `BL` with `hours_to_event` in the
-tens of thousands. Each episode is now anchored independently. (The `11-*`
-"multi-episode cohort" that prompted this was in fact pairs of *different people*
-sharing an id across CRISP2/LVO and PRECISE, merged into one patient before
-Alembic `0026`; they are now separate subjects, one episode each.)
-
-**Per-episode anchor precedence.** For the episode the clinical puncture falls in
-(nearest-window match), the puncture is used; any other episode falls back to its
-own thrombectomy study:
-
-| Priority | Anchor | Offset | `timepoint_anchor_source` |
-|---|---|---|---|
-| 1 | `femoral_sheath_time` (crisp2_puncture table) | none — recorded puncture | `femoral_sheath_time` |
-| 2 | `receiving_arrival_time` (crisp2_puncture table) | **+5 h** (estimate) | `receiving_arrival_time` |
-| 3 | `time_recognized` (crisp2_puncture table) | **+10 h** (estimate) | `time_recognized` |
-| 4 | the episode's own `THROMBECTOMY` study acquisition time | none | `thrombectomy_study` |
-
-Priorities 1–3 are the clinical anchor (unchanged from rules-v2). Priority 4 is
-new: it gives non-LVO patients (no clinical row) and the second episode of
-multi-episode patients a real anchor — the thrombectomy (XA) study's own
-acquisition time — instead of `NULL`.
-
-Clinical tables are **optional**. Where no dataset has `timepoint_strategy =
-'crisp2_puncture'` (or its registered table is missing), priorities 1–3 are
-simply unavailable, so every episode resolves via priority 4. Episodes with no
-`THROMBECTOMY` study then get `timepoint = NULL` — the same deliberate NULL a
-patient with no anchor already gets, not an error. `episode` is always computed
-(it is imaging-derived, gap-based) and `series_type` is never time-based, so
-neither is affected.
-
-`timepoint_anchor_source` records which supplied the anchor. This is load-bearing,
-not bookkeeping: only `femoral_sheath_time` is a *recorded* puncture, so a `BL`/`FU`
-resting on a `+10h` estimate is materially weaker evidence. Always filter on it
-before treating a timepoint as ground truth.
-
-`hours_to_event` is the signed offset from the anchor (negative before, positive
-after). A bare BL/FU flag cannot *select* a scan; this is what lets you pick, say,
-the follow-up nearest 24 h.
-
-Studies typed `THROMBECTOMY` are labelled `THROMBECTOMY` regardless of anchor
-availability — the procedure study identifies itself. An episode with neither a
-clinical anchor nor a thrombectomy study gets `NULL` rather than a guess.
+link/split tools so they can't diverge. A gap longer than 45 days starts a new episode. An optional registered clinical strategy supplies the anchor for the nearest episode. Other episodes use their earliest dated thrombectomy study. A missing anchor leaves the timepoint blank. The study stores the anchor source and signed hours from the anchor. See [automatic study labels](dataset_autolabelling.md) for local strategy registration.
 
 **Acquisition clock (`acquisitiondatetime` + `acquisitiondatetime_source`).** The
 timestamp compared against the anchor is built by
@@ -526,15 +472,6 @@ is undated.
 `ContentDate`/`SeriesDate` are deliberately *not* used: for a derived series
 (RAPID/MIP/MPR) they are the day the derivative was *computed* — often months
 after the scan — which mis-dates the study and fabricates spurious episodes.
-
-> **Re-opens the clinical table** (historically `clinical_data`, now the
-> `crisp2_puncture` dataset's table). It was previously retired as a roster
-> ("joined only to prefer its clinical `stroke_date` via COALESCE, never otherwise
-> queried"). Reading these three time columns is a deliberate reversal, scoped to
-> exactly them.
->
-> **Machine-owned**, and independent of the human `timepoint` annotation label
-> (mirrored as `label_timepoint_*`). Neither may be derived from the other.
 
 > **Machine-owned, and independent of annotations.** `series_type` / `study_type`
 > are a different axis from the human annotation labels that share those names

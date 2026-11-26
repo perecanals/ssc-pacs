@@ -83,3 +83,6 @@ stanford-stroke-pacs/image_ingestion_protocols/*_links.json
 stanford-stroke-pacs/image_ingestion_protocols/batch_configs/
 # Host-specific, temporary batch-run driver (not part of the shipped pipeline)
 stanford-stroke-pacs/image_ingestion_protocols/run_all_batches.sh
+
+# Installation-owned autolabelling packages
+/stanford-stroke-pacs/local_rules/

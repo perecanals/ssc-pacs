@@ -94,7 +94,7 @@ class TestEpisodeDate:
         for update in (
             "clinical_table = 'not_suffixed'",
             "clinical_table = 'x_clinical_data'",  # others NULL: all-or-none
-            "timepoint_strategy = 'made_up'",
+            "timepoint_strategy = 'invalid-name'",
         ):
             with pytest.raises(psycopg2.errors.CheckViolation):
                 _q(f"UPDATE dataset SET {update} WHERE name = 'crisp2'")
@@ -180,11 +180,12 @@ class TestImportClinical:
         assert "appear more than once: P-0001" in capsys.readouterr().out
         assert _q("SELECT to_regclass('crisp2_clinical_data')") == [(None,)]
 
-    def test_unknown_columns_and_strategy_requirements(self, mod, csv_file):
+    def test_unknown_columns_and_strategy_requirements(self, mod, csv_file, monkeypatch):
+        monkeypatch.setitem(mod["ANCHORS"], "visit", (("visit_time", 0),))
         with pytest.raises(SystemExit, match="no column"):
             _run(mod, file=csv_file, date_column="Missing")
-        with pytest.raises(SystemExit, match="crisp2_puncture needs"):
-            _run(mod, file=csv_file, timepoint_strategy="crisp2_puncture")
+        with pytest.raises(SystemExit, match="visit needs"):
+            _run(mod, file=csv_file, timepoint_strategy="visit")
 
     def test_adopt_leaves_a_compatibility_view(self, mod):
         """Adopting a table named clinical_data renames it and leaves a view

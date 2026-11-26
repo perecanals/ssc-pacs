@@ -5,11 +5,8 @@ the imaging its owning *enrollment* (``image_study.patient_key``) ingested — n
 over the whole person (Alembic 0028): a dataset re-exported with new UIDs
 carries copies of the same acquisitions, which must not form one series of
 episodes with the originals. A study another enrollment is only a member of
-keeps its owner's values. The clinical anchor (the CRISP2 puncture columns) is a
-fact about the person, so it still comes via the subject: the clinical table of
-the dataset whose `timepoint_strategy` is 'crisp2_puncture' (Alembic 0027),
-joined to the subject's enrollment in that dataset. That rule is CRISP2-specific on purpose;
-everyone else anchors on each episode's own thrombectomy study.
+keeps its owner's values. A registered clinical strategy optionally supplies a
+subject-level anchor from that enrollment's clinical table.
 
 Shared by ingestion (after each case's upsert), scripts/admin/recompute_timepoints.py,
 scripts/admin/reclassify_series_types.py and the patient link/split tools, so they
@@ -20,39 +17,40 @@ from __future__ import annotations
 
 from collections import defaultdict
 
+from autolabels.runner import refresh_after_ingest
 from series_classification import RULES_VERSION, assign_patient_timepoints
-
-CLINICAL_ANCHOR_COLUMNS = ("femoral_sheath_time", "receiving_arrival_time", "time_recognized")
 
 
 def clinical_anchor_sql(cur, study_alias: str = "st"):
-    """(select_columns, join, params) adding the clinical anchor columns to a
-    query over ``image_study {study_alias}``.
-
-    One clinical row per study: the first (by patient_key) enrollment of the
-    study's subject in the 'crisp2_puncture' dataset that has one. With no such
-    dataset (or table) every anchor reads NULL — the shape a patient with no
-    clinical row yields — and timepoints fall back to the thrombectomy study.
-    """
-    # Deferred: web-app/ is put on sys.path by the importing entry point.
-    from clinical_sources import crisp2_anchor_source
+    """Project the first registered clinical strategy available for this subject."""
+    from clinical_sources import clinical_sources, table_columns
     from psycopg2 import sql
 
-    source = crisp2_anchor_source(cur)
-    if source is None:
-        cols = ", ".join(f"NULL::text AS {c}" for c in CLINICAL_ANCHOR_COLUMNS)
-        return cols, "", []
-    table = sql.Identifier(source.table).as_string(cur)
-    id_column = sql.Identifier(source.id_column).as_string(cur)
-    join = (
-        "LEFT JOIN LATERAL ("
-        f"  SELECT {', '.join('c.' + c for c in CLINICAL_ANCHOR_COLUMNS)} "
-        f"  FROM patient cq JOIN {table} c ON c.{id_column}::text = cq.patient_id "
-        f"  WHERE cq.subject_id = {study_alias}.subject_id AND cq.dataset = %s "
-        "  ORDER BY cq.patient_key LIMIT 1"
-        ") ca ON TRUE"
-    )
-    return ", ".join(f"ca.{c}" for c in CLINICAL_ANCHOR_COLUMNS), join, [source.dataset]
+    from autolabels import ANCHORS
+
+    selects, params = [], []
+    for source in clinical_sources(cur):
+        if not source.strategy:
+            continue
+        if source.strategy not in ANCHORS:
+            raise RuntimeError(f"{source.dataset}: local anchor strategy {source.strategy} is unavailable")
+        fields = [key for key, _ in ANCHORS[source.strategy]]
+        if set(fields) - table_columns(cur, source.table):
+            import logging
+
+            logging.getLogger(__name__).warning("Missing clinical anchor columns in %s", source.table)
+            continue
+        pairs = [sql.SQL("{},c.{}").format(sql.Literal(key), sql.Identifier(key)) for key in fields]
+        selects.append(sql.SQL("""SELECT cq.patient_key,cq.dataset,jsonb_build_object('_strategy',%s::text,{}) AS clocks
+            FROM patient cq JOIN {} c ON c.{}::text=cq.patient_id
+            WHERE cq.subject_id={}.subject_id AND cq.dataset=%s""").format(
+            sql.SQL(",").join(pairs),sql.Identifier(source.table),sql.Identifier(source.id_column),
+            sql.Identifier(study_alias)).as_string(cur))
+        params.extend([source.strategy,source.dataset])
+    if not selects:
+        return "NULL::jsonb AS clinical_anchor", "", []
+    join = " LEFT JOIN LATERAL (" + " UNION ALL ".join(selects) + " ORDER BY dataset,patient_key LIMIT 1) ca ON TRUE"
+    return "ca.clocks AS clinical_anchor", join, params
 
 
 def resolve_subject_timepoints(study_rows, study_type=None, acquisition=None):
@@ -68,7 +66,7 @@ def resolve_subject_timepoints(study_rows, study_type=None, acquisition=None):
     for row in study_rows:
         key = row["patient_key"] or f"study:{row['studyinstanceuid']}"
         by_owner[key].append(row)
-        clinical.setdefault(key, {c: row[c] for c in CLINICAL_ANCHOR_COLUMNS})
+        clinical.setdefault(key, row["clinical_anchor"])
     results = {}
     for key, rows in by_owner.items():
         studies = [
@@ -118,4 +116,5 @@ def recompute_subject_timepoints(cur, subject_ids):
                 res["hours_to_event"], RULES_VERSION, suid,
             ),
         )
+    refresh_after_ingest(cur, subject_ids)
     return len(results)

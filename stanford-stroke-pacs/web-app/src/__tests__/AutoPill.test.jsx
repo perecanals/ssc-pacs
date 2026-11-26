@@ -25,6 +25,21 @@ describe("AutoPill", () => {
 });
 
 describe("BuiltinCell", () => {
+  it("shows the selected enrollment's identifiers on shared imaging", () => {
+    const row = {
+      patient_id: "A-01, B-99",
+      dataset: "Alpha, Beta",
+      display_patient_id: "B-99",
+      display_dataset: "Beta",
+    };
+    const { container, rerender } = render(
+      <BuiltinCell col={{ sourceKey: "patient_id" }} row={row} />,
+    );
+    expect(container.textContent).toBe("B-99");
+    rerender(<BuiltinCell col={{ sourceKey: "dataset" }} row={row} />);
+    expect(container.textContent).toBe("Beta");
+  });
+
   it("renders an Auto column as a pill carrying its provenance", () => {
     render(
       <BuiltinCell
@@ -109,10 +124,24 @@ describe("BuiltinCell", () => {
     const { container } = render(
       <BuiltinCell
         col={TIMEPOINT_COL}
-        row={{ timepoint: "FU", timepoint_anchor_source: "time_recognized" }}
+        row={{
+          timepoint: "FU",
+          timepoint_anchor_source: "visit_start",
+          timepoint_estimated: true,
+        }}
       />,
     );
     expect(container.querySelector(".auto-pill--estimated")).not.toBeNull();
+  });
+
+  it("uses the displayed refinement to colour a baseline study", () => {
+    render(
+      <BuiltinCell
+        col={TIMEPOINT_COL}
+        row={{ timepoint: "PRE", general_timepoint: "BL" }}
+      />,
+    );
+    expect(screen.getByText("PRE")).toHaveStyle({ borderColor: "#fbad70" });
   });
 
   it("does not mark a timepoint anchored on a recorded puncture time", () => {
@@ -127,6 +156,26 @@ describe("BuiltinCell", () => {
     );
     expect(container.querySelector(".auto-pill")).not.toBeNull();
     expect(container.querySelector(".auto-pill--estimated")).toBeNull();
+  });
+
+  it("shows the selected follow-up interval and clinical cutoff", () => {
+    render(
+      <BuiltinCell
+        col={TIMEPOINT_COL}
+        row={{
+          timepoint: "FU_24h",
+          timepoint_details: [
+            "26.3 h from BLT imaging",
+            "estimated visit cutoff",
+          ],
+          timepoint_estimated: true,
+        }}
+      />,
+    );
+    const pill = screen.getByText("FU_24h");
+    expect(pill.getAttribute("title")).toContain("26.3 h from BLT imaging");
+    expect(pill.getAttribute("title")).toContain("estimated visit cutoff");
+    expect(pill).toHaveClass("auto-pill--estimated");
   });
 
   it("leaves ordinary builtin columns as plain text", () => {

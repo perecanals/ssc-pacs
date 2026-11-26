@@ -1,5 +1,10 @@
 # Changelog
 
+## v2.27 — 2026-11-25
+
+Datasets can enable versioned study and enrollment rules from installation-owned Python packages. The PACS browser shows enrollment-specific timepoints and identifiers for shared imaging.
+Includes migrations `0031_dataset_autolabels` and `0032_local_anchor_strategies`. Rebuild the frontend and restart the web app.
+
 ## v2.21 — 2026-11-24
 
 Standalone patient linking shares the reference enrollment’s existing studies. Use `--identity-only` for enrollment-only links. Ingestion retains same-UID sharing.

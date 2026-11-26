@@ -16,6 +16,7 @@ One **Orthanc** container (`ssc-orthanc`), one native-host **Web App** service o
 | Web App product + UI model | [`reference/web_app.md`](reference/web_app.md) |
 | Web App React / `DataTable` detail | [`reference/web_app_frontend.md`](reference/web_app_frontend.md) |
 | Image ingestion protocol (ingesting new data) | [`reference/image_ingestion_protocol.md`](reference/image_ingestion_protocol.md) |
+| Dataset-specific automatic labels, rule authoring and CLI | [`reference/dataset_autolabelling.md`](reference/dataset_autolabelling.md) |
 | Testing, linting, CI (developer setup) | [`guides/installation_and_deployment.md` §8](guides/installation_and_deployment.md) |
 | Fresh install | [`guides/installation_and_deployment.md`](guides/installation_and_deployment.md) |
 | Deploy on macOS (Linux→Mac deltas, launchd, boot) | [`guides/deployment_on_mac.md`](guides/deployment_on_mac.md) |

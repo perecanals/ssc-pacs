@@ -292,11 +292,7 @@ but runtime detection never reads them ([`data_stores.md`](data_stores.md)).
   why no family was assigned. Bone, RAPID output and other recognized families
   have their own automatic types. Those cells show a faint `—`;
   hover it for the exclusion that fired. An empty cell means not-yet-classified.
-- **Auto Timepoint** (`BL` / `THROMBECTOMY` / `FU`) is anchored on the
-  femoral-sheath puncture. Where no puncture time was recorded the classifier
-  falls back to a fixed offset, and those pills are drawn with a dashed border
-  and a `~` — an estimate, not a measurement. Hover any Auto pill for its
-  provenance (the rule that fired, or the anchor and signed hours from it).
+- **Auto Timepoint** shows the effective prediction for the visible enrollment. Hover for the general timepoint and rule details. A dashed border and tilde mark estimates. See [dataset autolabelling](dataset_autolabelling.md).
 - Both are on by default, including for users with existing saved column
   preferences; hiding one is remembered. The exception: when series appear as
   **sub-rows** under a study or patient, Auto Timepoint is hidden by default —

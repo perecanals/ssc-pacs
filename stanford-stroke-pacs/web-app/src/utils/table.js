@@ -82,7 +82,7 @@ const LEVEL_CONFIG = {
         introducedIn: 1,
         readOnlyAuto: true,
         description:
-          "Machine-derived timepoint (BL / THROMBECTOMY / FU). Read-only; separate from the `timepoint` label.",
+          "Machine-derived timepoint including enabled dataset refinements. Read-only; separate from the `timepoint` label.",
       },
     ],
     sortDefault: "patient_id",
@@ -99,7 +99,10 @@ const LEVEL_CONFIG = {
     },
     expandable: true,
     expandEndpoint: (row) =>
-      `/api/studies/${encodeURIComponent(row.studyinstanceuid)}/series`,
+      `/api/studies/${encodeURIComponent(row.studyinstanceuid)}/series` +
+      (row.timepoint_patient_key
+        ? `?timepoint_patient_key=${encodeURIComponent(row.timepoint_patient_key)}`
+        : ""),
     childLevel: "series",
   },
   series: {
@@ -199,7 +202,7 @@ const LEVEL_CONFIG = {
         readOnlyAuto: true,
         defaultVisible: (activeLevel) => activeLevel === "series",
         description:
-          "Machine-derived timepoint (BL / THROMBECTOMY / FU) of the owning study. Read-only; separate from the `timepoint` label.",
+          "Machine-derived timepoint including enabled dataset refinements of the owning study. Read-only; separate from the `timepoint` label.",
       },
     ],
     sortDefault: "patient_id",

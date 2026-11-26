@@ -298,7 +298,7 @@ export default function LabelDefModal({
             {options.length > 0 && (
               <div className="label-modal__pills">
                 {options.map((opt, i) => {
-                  const c = valueColor(opt);
+                  const c = valueColor(opt, name);
                   return (
                     <span
                       key={i}

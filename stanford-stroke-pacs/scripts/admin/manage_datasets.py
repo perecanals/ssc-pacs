@@ -21,14 +21,14 @@ Usage:
     # adopt an existing table instead of a file (leaves a view under the old name)
     python scripts/admin/manage_datasets.py import-clinical --dataset CRISP2/LVO \
         --from-table clinical_data --id-column study_id --date-column stroke_date \
-        --timepoint-strategy crisp2_puncture --execute
+        --execute
     python scripts/admin/manage_datasets.py clear-clinical --dataset PRECISE --execute
 
 Clinical tables: each dataset may have one, ``<slug with - as _>_clinical_data``.
 Its id column holds the dataset's patient ids; its date column is the episode
 date shown on the patient tab (preferred over the imaging date, for that
-dataset's patients only). ``--timepoint-strategy crisp2_puncture`` marks the
-table that carries the CRISP2 puncture columns timepoints anchor on. The import
+dataset's patients only). ``--timepoint-strategy STRATEGY`` marks the
+registered clinical table as a source of local anchor clocks. The import
 validates first (ids present and unique, dates parseable, coverage of the
 dataset's enrolled patients, file ids that match no enrolled patient) and then,
 with ``--execute``, writes the table, a unique index on the id column, read
@@ -62,7 +62,11 @@ load_dotenv(REPO_ROOT / ".env")
 
 sys.path.insert(0, str(REPO_ROOT / "web-app"))
 
+sys.path.insert(0, str(REPO_ROOT / "image_ingestion_protocols"))
+
+from autolabels import ANCHORS
 from db import get_conn  # noqa: E402
+from subject_timepoints import recompute_subject_timepoints  # noqa: E402
 
 from labelled_table_sync import sync_labelled_rows  # noqa: E402
 
@@ -84,10 +88,6 @@ FROM dataset d ORDER BY d.name
 LEGACY_CLINICAL_VIEW = "clinical_data"
 CLINICAL_SUFFIX = "_clinical_data"
 IDENT_RE = re.compile(r"^[a-z_][a-z0-9_]*$")
-STRATEGIES = ("crisp2_puncture",)
-# Columns the 'crisp2_puncture' timepoint strategy reads (clinical_sources.py).
-CRISP2_ANCHOR_COLUMNS = ("femoral_sheath_time", "receiving_arrival_time", "time_recognized")
-
 # Each statement renames %(old)s -> %(new)s in one stored copy of the name.
 RENAME_SQL = {
     "user grants": """
@@ -299,6 +299,18 @@ def _validation_report(cur, dataset: str, ids, dates) -> list[str]:
     return blocking
 
 
+def _refresh_enabled_timepoints(cur, dataset):
+    """A clinical edit can change both the episode anchor and its refinement."""
+    cur.execute(
+        "SELECT DISTINCT p.subject_id FROM patient p WHERE p.dataset=%s "
+        "AND EXISTS (SELECT FROM dataset_autolabel_rule g JOIN patient linked "
+        "ON linked.dataset=g.dataset WHERE linked.subject_id=p.subject_id)",
+        (dataset,),
+    )
+    subjects = [row[0] for row in cur.fetchall()]
+    recompute_subject_timepoints(cur, subjects)
+
+
 def _import_clinical(conn, args) -> int:
     from dataset_registry import resolve_or_offer_dataset  # noqa: PLC0415
 
@@ -328,10 +340,12 @@ def _import_clinical(conn, args) -> int:
         missing = [c for c in (id_col, date_col) if c not in columns]
         if missing:
             sys.exit(f"Error: {source} has no column(s) {missing}; it has: {', '.join(columns)}")
-        if strategy == "crisp2_puncture":
-            lacking = [c for c in CRISP2_ANCHOR_COLUMNS if c not in columns]
+        if strategy:
+            if strategy not in ANCHORS:
+                sys.exit(f"Error: unknown local anchor strategy {strategy}")
+            lacking = [c for c, _ in ANCHORS[strategy] if c not in columns]
             if lacking:
-                sys.exit(f"Error: timepoint strategy crisp2_puncture needs column(s) {lacking}.")
+                sys.exit(f"Error: timepoint strategy {strategy} needs column(s) {lacking}.")
 
         target = _relation_exists(cur, table)
         adopting_in_place = not args.file and args.from_table == table
@@ -418,6 +432,7 @@ def _import_clinical(conn, args) -> int:
             "clinical_date_column = %s, timepoint_strategy = %s WHERE name = %s",
             (table, id_col, date_col, strategy, args.dataset),
         )
+        _refresh_enabled_timepoints(cur, args.dataset)
     conn.commit()
     print(f"Committed: {table} registered for {args.dataset!r}"
           + (f"; view {LEGACY_CLINICAL_VIEW} kept for old queries" if view_grants is not None else "")
@@ -437,6 +452,8 @@ def _clear_clinical(conn, dataset: str, execute: bool) -> int:
         )
         if cur.fetchone() is None:
             sys.exit(f"Error: no dataset named {dataset!r}.")
+        if execute:
+            _refresh_enabled_timepoints(cur, dataset)
     if execute:
         conn.commit()
         print(f"Unregistered the clinical table of {dataset!r} (the table itself is kept).")
@@ -469,7 +486,7 @@ def main() -> int:
     imp.add_argument("--sheet", default=0, help="Excel sheet name or index (default: first).")
     imp.add_argument("--id-column", required=True, help="Column with the dataset's patient ids.")
     imp.add_argument("--date-column", required=True, help="Column with the episode date.")
-    imp.add_argument("--timepoint-strategy", choices=STRATEGIES, default=None,
+    imp.add_argument("--timepoint-strategy", choices=sorted(ANCHORS), default=None,
                      help="Timepoint anchoring for this dataset (default: thrombectomy study only).")
     imp.add_argument("--replace", action="store_true", help="Overwrite an existing clinical table.")
     imp.add_argument("--execute", action="store_true", help="Apply. Default: validate and report.")

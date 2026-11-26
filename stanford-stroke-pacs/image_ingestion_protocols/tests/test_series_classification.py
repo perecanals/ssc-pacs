@@ -374,39 +374,46 @@ def test_rules_version_is_set():
 # --- Timepoint: BL / THROMBECTOMY / FU ----------------------------------------
 
 
+@pytest.fixture(autouse=True)
+def example_anchor(monkeypatch):
+    from autolabels import ANCHORS
+
+    monkeypatch.setitem(ANCHORS, "example", (("procedure_time", 0), ("arrival", 2), ("event", 3)))
+
+
 PUNCTURE = "2020-05-01 12:00:00"
 
 
 def test_anchor_precedence_prefers_the_recorded_puncture():
-    # femoral_sheath_time wins outright — no offset applied.
-    anchor, source = resolve_event_anchor({
-        "femoral_sheath_time": PUNCTURE,
-        "receiving_arrival_time": "2020-05-01 06:00:00",
-        "time_recognized": "2020-05-01 01:00:00",
+    # procedure_time wins outright — no offset applied.
+    anchor, source = resolve_event_anchor({"_strategy": "example",
+        "procedure_time": PUNCTURE,
+        "arrival": "2020-05-01 06:00:00",
+        "event": "2020-05-01 01:00:00",
     })
-    assert source == "femoral_sheath_time"
+    assert source == "procedure_time"
     assert anchor == datetime(2020, 5, 1, 12, 0)
 
 
-def test_arrival_fallback_adds_five_hours():
-    anchor, source = resolve_event_anchor({
-        "femoral_sheath_time": None,
-        "receiving_arrival_time": "2020-05-01 06:00:00",
-        "time_recognized": "2020-05-01 01:00:00",
+def test_arrival_fallback_uses_configured_offset():
+    anchor, source = resolve_event_anchor({"_strategy": "example",
+        "procedure_time": None,
+        "arrival": "2020-05-01 06:00:00",
+        "event": "2020-05-01 01:00:00",
     })
-    assert source == "receiving_arrival_time"
-    assert anchor == datetime(2020, 5, 1, 11, 0)  # 06:00 + 5h
+    assert source == "arrival"
+    assert anchor == datetime(2020, 5, 1, 8, 0)
 
 
-def test_recognized_fallback_adds_ten_hours():
-    anchor, source = resolve_event_anchor({"time_recognized": "2020-05-01 01:00:00"})
-    assert source == "time_recognized"
-    assert anchor == datetime(2020, 5, 1, 11, 0)  # 01:00 + 10h
+def test_recognized_fallback_uses_configured_offset():
+    anchor, source = resolve_event_anchor({"_strategy": "example", "event": "2020-05-01 01:00:00"})
+    assert source == "event"
+    assert anchor == datetime(2020, 5, 1, 4, 0)
 
 
 def test_no_anchor_yields_null_not_a_guess():
     # 26% of our patients have no anchor column populated at all.
-    anchor, source = resolve_event_anchor({"femoral_sheath_time": "", "time_recognized": None})
+    anchor, source = resolve_event_anchor({"_strategy": "example", "procedure_time": "", "event": None})
     assert anchor is None and source is None
 
     timepoint, hours, rule = classify_timepoint("2020-05-01 08:00:00", None, "CT_HEAD")
@@ -421,7 +428,7 @@ def test_no_anchor_yields_null_not_a_guess():
     ("2020-05-02 12:00:00", "FU", 24.0),   # next day
 ])
 def test_bl_fu_split_on_the_anchor(acq, expected, expected_hours):
-    anchor, _ = resolve_event_anchor({"femoral_sheath_time": PUNCTURE})
+    anchor, _ = resolve_event_anchor({"_strategy": "example", "procedure_time": PUNCTURE})
     timepoint, hours, _ = classify_timepoint(acq, anchor, "CT_HEAD")
     assert timepoint == expected
     assert hours == expected_hours
@@ -430,7 +437,7 @@ def test_bl_fu_split_on_the_anchor(acq, expected, expected_hours):
 def test_hours_to_event_is_signed():
     # A bare BL/FU flag cannot select "the follow-up scan nearest 24h"; the signed
     # offset is what makes that possible.
-    anchor, _ = resolve_event_anchor({"femoral_sheath_time": PUNCTURE})
+    anchor, _ = resolve_event_anchor({"_strategy": "example", "procedure_time": PUNCTURE})
     _, before, _ = classify_timepoint("2020-05-01 06:00:00", anchor, "CT_HEAD")
     _, after, _ = classify_timepoint("2020-05-01 18:00:00", anchor, "CT_HEAD")
     assert before == -6.0
@@ -447,14 +454,14 @@ def test_thrombectomy_study_is_labelled_even_without_an_anchor():
 
 def test_thrombectomy_beats_the_temporal_split():
     # Acquired after the anchor, but it IS the procedure — must not read as FU.
-    anchor, _ = resolve_event_anchor({"femoral_sheath_time": PUNCTURE})
+    anchor, _ = resolve_event_anchor({"_strategy": "example", "procedure_time": PUNCTURE})
     timepoint, hours, _ = classify_timepoint("2020-05-01 13:00:00", anchor, "THROMBECTOMY")
     assert timepoint == "THROMBECTOMY"
     assert hours == 1.0
 
 
 def test_missing_acquisition_time_yields_null():
-    anchor, _ = resolve_event_anchor({"femoral_sheath_time": PUNCTURE})
+    anchor, _ = resolve_event_anchor({"_strategy": "example", "procedure_time": PUNCTURE})
     timepoint, _, rule = classify_timepoint(None, anchor, "CT_HEAD")
     assert timepoint is None
     assert rule == "no-acquisition-time"
@@ -464,7 +471,7 @@ def test_stroke_date_is_not_the_anchor():
     # The anchor is puncture, not onset. A row carrying only a stroke/onset date
     # must NOT be treated as an anchor — otherwise BL/FU silently means something
     # different from what the reference implementation means.
-    anchor, source = resolve_event_anchor({"stroke_date": "2020-05-01 00:00:00"})
+    anchor, source = resolve_event_anchor({"_strategy": "example", "stroke_date": "2020-05-01 00:00:00"})
     assert anchor is None and source is None
 
 
@@ -562,7 +569,7 @@ def test_two_episodes_are_anchored_independently():
         _study("s2023_bl", "2023-04-27 16:00:00", "CT_HEAD"),
         _study("s2023_fu", "2023-04-27 21:00:00", "MR_BRAIN"),
     ]
-    clinical = {"femoral_sheath_time": "2023-04-27 19:10:00"}
+    clinical = {"_strategy": "example", "procedure_time": "2023-04-27 19:10:00"}
     result = assign_patient_timepoints(studies, clinical)
 
     # Episode 1 (2022) anchors on its own thrombectomy study.
@@ -577,7 +584,7 @@ def test_two_episodes_are_anchored_independently():
     # Episode 2 (2023) anchors on the clinical puncture.
     assert result["s2023_bl"]["episode"] == 2
     assert result["s2023_bl"]["timepoint"] == "BL"
-    assert result["s2023_bl"]["timepoint_anchor_source"] == "femoral_sheath_time"
+    assert result["s2023_bl"]["timepoint_anchor_source"] == "procedure_time"
     assert result["s2023_fu"]["timepoint"] == "FU"
 
 
@@ -588,10 +595,10 @@ def test_single_episode_lvo_is_unchanged_behaviour():
         _study("evt", "2020-05-01 12:30:00", "THROMBECTOMY"),
         _study("fu", "2020-05-02 12:00:00", "CT_HEAD"),
     ]
-    result = assign_patient_timepoints(studies, {"femoral_sheath_time": PUNCTURE})
+    result = assign_patient_timepoints(studies, {"_strategy": "example", "procedure_time": PUNCTURE})
     assert {s: result[s]["episode"] for s in result} == {"bl": 1, "evt": 1, "fu": 1}
     assert result["bl"]["timepoint"] == "BL"
-    assert result["bl"]["timepoint_anchor_source"] == "femoral_sheath_time"
+    assert result["bl"]["timepoint_anchor_source"] == "procedure_time"
     assert result["bl"]["hours_to_event"] == -3.0
     assert result["evt"]["timepoint"] == "THROMBECTOMY"
     assert result["fu"]["timepoint"] == "FU"
@@ -625,7 +632,7 @@ def test_episode_without_any_anchor_is_null():
 
 def test_study_without_acquisition_time_is_unplaced():
     studies = [_study("a", None, "CT_HEAD")]
-    result = assign_patient_timepoints(studies, {"femoral_sheath_time": PUNCTURE})
+    result = assign_patient_timepoints(studies, {"_strategy": "example", "procedure_time": PUNCTURE})
     assert result["a"]["episode"] is None
     assert result["a"]["timepoint"] is None
     assert result["a"]["timepoint_rule"] == "no-acquisition-time"

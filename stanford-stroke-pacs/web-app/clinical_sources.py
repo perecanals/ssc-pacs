@@ -6,10 +6,6 @@ by ``clinical_id_column`` (the dataset's patient id), with the episode date in
 ``clinical_date_column``. A clinical row only ever matches enrollments *of that
 dataset* — a same-id patient elsewhere is someone else.
 
-``timepoint_strategy = 'crisp2_puncture'`` marks the dataset whose clinical
-table carries the CRISP2 puncture columns that anchor timepoints. That rule is
-CRISP2-specific on purpose; other datasets anchor on their thrombectomy study.
-
 Table and column names come from the database, so they are CHECK-constrained
 there and always quoted here (psycopg2.sql.Identifier). A registered table or
 column that has gone missing is skipped with a warning, never an error.
@@ -23,9 +19,6 @@ from dataclasses import dataclass
 from psycopg2 import sql
 
 logger = logging.getLogger(__name__)
-
-# The CRISP2 REDCap columns the 'crisp2_puncture' strategy reads.
-CRISP2_ANCHOR_COLUMNS = ("femoral_sheath_time", "receiving_arrival_time", "time_recognized")
 
 _warned: set[tuple] = set()
 
@@ -118,24 +111,6 @@ def episode_date_sql(cur, patient_alias: str = "p") -> tuple[str, str]:
         dates.append(f"{date}::date::text" if source.date_is_temporal else f"{date}::text")
     dates.append(f"{patient_alias}.stroke_date::date::text")
     return " ".join(joins), f"COALESCE({', '.join(dates)})"
-
-
-def crisp2_anchor_source(cur) -> ClinicalSource | None:
-    """The clinical table that anchors timepoints on the CRISP2 puncture, if any."""
-    for source in clinical_sources(cur):
-        if source.strategy != "crisp2_puncture":
-            continue
-        missing = set(CRISP2_ANCHOR_COLUMNS) - table_columns(cur, source.table)
-        if missing:
-            _warn_once(
-                ("anchor", source.table),
-                "Dataset %r uses timepoint_strategy 'crisp2_puncture' but %r lacks %s; "
-                "timepoints fall back to the thrombectomy study.",
-                source.dataset, source.table, ", ".join(sorted(missing)),
-            )
-            return None
-        return source
-    return None
 
 
 def clinical_source_for(cur, dataset: str) -> ClinicalSource | None:

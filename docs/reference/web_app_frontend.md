@@ -178,6 +178,9 @@ The Navigator page is decomposed into focused React components:
   Key features:
   - **Expandable rows**: Patient rows expand to show studies; study rows expand
     to show series. Expansion is triggered by clicking anywhere in the row.
+  - **Linked patients**: the Patient ID and Dataset cells on study and series rows
+    show the expanded enrollment or the selected dataset. In the all-datasets
+    view, they use the visible owner or first visible member.
   - **Nested expansion**: When viewing patients, expanded study sub-rows can
     further expand to reveal series (three-level nesting).
   - **Filter cascade into subtables**: expand fetches carry the cascadable
@@ -414,7 +417,8 @@ entirely at the patient level since patients have no direct OHIF action.
 ### The "Auto" columns (machine-derived classification)
 
 `Auto Series Type` (`image_series.series_type`) and `Auto Timepoint`
-(`image_study.timepoint`) surface what the ingestion classifier decided. They are
+(the enrollment’s effective prediction, falling back to `image_study.timepoint`)
+surface machine classifications. Study and series API rows also expose `general_timepoint`. They are
 a **separate axis** from the human annotation labels that happen to share those
 names (`series_type`, `timepoint`, both default-visible). Runtime detection never
 reads manual annotations, and automatic reclassification never overwrites them;
@@ -422,8 +426,9 @@ manual labels can guide offline evaluation and rule development. See `docs/refer
 
 - **Rendered by `AutoPill`** (`BuiltinCell.jsx`): an *outlined, muted,
   non-interactive* pill, deliberately unlike the filled, clickable `SelectPill`
-  that `InlineEdit` uses for the human label next to it. The hash colour comes
-  from the same `valueColor()`, so equal values still group by eye.
+  that `InlineEdit` uses for the human label next to it. Both use the same timepoint palette. BL is green, BLO is olive green,
+  BLT is emerald, thrombectomy is blue, PRE is light orange, and FU is red.
+  Numbered and qualified labels such as `BLT1` and `24h_FU` share their family colour.
 - **Preference rank**: `Auto Series Type` carries the per-patient rank
   (`series_type_rank`) as a superscript badge rather than folding it into the
   value — that keeps the colour keyed on the *type*, so every NCCT looks like an
@@ -437,13 +442,7 @@ manual labels can guide offline evaluation and rule development. See `docs/refer
   `—` whose tooltip names the rule, rather than an empty cell that would read as
   "the classifier had nothing to say". A row with neither a type nor a rule (not
   yet classified) is genuinely blank.
-- **Estimated timepoints**: an `Auto Timepoint` whose `timepoint_anchor_source`
-  is `receiving_arrival_time` or `time_recognized` was derived from a fixed
-  offset, not a recorded puncture time. Those pills get a dashed border and a
-  `~`, so the estimate is visible without hovering.
-- **Provenance on hover** (`utils/autoClassification.js` → native `title`): the
-  rule that fired and the rules version for a series type; the anchor, signed
-  hours from it, and the version for a timepoint.
+- The API supplies `timepoint_estimated` and optional `timepoint_details` for the selected enrollment. Estimated values have a dashed border and a tilde. The tooltip shows the general timepoint and the local rule’s display lines.
 - `Auto Timepoint` is declared at the *series* level as well as the study level
   (the `patient_id` pattern), but defaults **on only in the flat series table**.
   As sub-rows, series sit beneath a study row that already shows its own Auto
